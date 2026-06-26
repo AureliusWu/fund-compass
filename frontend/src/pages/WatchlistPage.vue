@@ -30,6 +30,12 @@ const editShow = ref(false)
 const editCode = ref('')
 const editShares = ref('')
 const editCost = ref('')
+const editAccount = ref('')
+const ACCOUNT_PRESETS = ['支付宝', '天天基金', '微信理财通', '蛋卷', '券商', '银行']
+const accountChips = computed(() => {
+  const s = new Set<string>([...watch.accounts, ...ACCOUNT_PRESETS])
+  return [...s]
+})
 
 async function loadOne(code: string, name: string | null) {
   rows[code] = { name: name || code, type: null, nav: null, ret1y: null, signal: '', star: null }
@@ -100,11 +106,18 @@ function openEdit(code: string) {
   editCode.value = code
   editShares.value = e?.shares ? String(e.shares) : ''
   editCost.value = e?.cost ? String(e.cost) : ''
+  editAccount.value = e?.account || ''
   editShow.value = true
 }
 function saveHolding() {
-  watch.setHolding(editCode.value, Number(editShares.value) || 0, Number(editCost.value) || 0, rows[editCode.value]?.name)
+  watch.setHolding(
+    editCode.value, Number(editShares.value) || 0, Number(editCost.value) || 0,
+    rows[editCode.value]?.name, editAccount.value.trim() || undefined,
+  )
   showToast('已保存持仓')
+}
+function accountOf(code: string) {
+  return watch.entries.find((x) => x.code === code)?.account || ''
 }
 
 async function remove(code: string) {
@@ -163,7 +176,7 @@ onMounted(refresh)
         <van-cell
           v-for="it in watch.items" :key="it.code"
           :title="rows[it.code]?.name || it.name || it.code"
-          :label="it.code + (sharesOf(it.code) ? ' · ' + sharesOf(it.code)!.shares + '份' : '')"
+          :label="it.code + (sharesOf(it.code) ? ' · ' + sharesOf(it.code)!.shares + '份' : '') + (accountOf(it.code) ? ' · ' + accountOf(it.code) : '')"
           @click="router.push('/fund/' + it.code)"
         >
           <template #value>
@@ -190,6 +203,12 @@ onMounted(refresh)
       <div style="padding:8px 4px">
         <van-field v-model="editShares" type="number" label="份额" placeholder="0（0=仅关注）" />
         <van-field v-model="editCost" type="number" label="成本净值" placeholder="0.000" />
+        <van-field v-model="editAccount" label="账户" placeholder="如 支付宝（可留空）" />
+        <div class="acc-chips">
+          <span v-for="a in accountChips" :key="a"
+            :class="['chip', { on: editAccount === a }]"
+            @click="editAccount = editAccount === a ? '' : a">{{ a }}</span>
+        </div>
       </div>
     </van-dialog>
 
@@ -232,4 +251,7 @@ onMounted(refresh)
 .sync-status { font-size: 12px; color: #646566; margin: 10px 2px; }
 .sync-btns { display: flex; gap: 8px; }
 .sync-btns .van-button { flex: 1; }
+.acc-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 16px 4px; }
+.acc-chips .chip { font-size: 12px; color: #646566; background: #f2f3f5; border-radius: 12px; padding: 3px 10px; }
+.acc-chips .chip.on { color: #fff; background: #0f9d75; }
 </style>

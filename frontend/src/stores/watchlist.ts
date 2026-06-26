@@ -113,21 +113,31 @@ export const useWatchlistStore = defineStore('watchlist', () => {
   const remove = (code: string) => upsert(code, undefined, true)
   const toggle = (code: string, name?: string) => (has(code) ? remove(code) : add(code, name))
 
-  function setHolding(code: string, shares: number, cost: number, name?: string) {
+  function setHolding(code: string, shares: number, cost: number, name?: string, account?: string) {
     const e = entries.value.find((x) => x.code === code)
     if (e) {
       e.shares = shares
       e.cost = cost
+      e.account = account
       e.deleted = false
       e.updated_at = nowISO()
       if (name) e.name = name
     } else {
-      entries.value.push({ code, name, shares, cost, updated_at: nowISO() })
+      entries.value.push({ code, name, shares, cost, account, updated_at: nowISO() })
     }
     entries.value = [...entries.value]
     persist()
     schedulePush()
   }
+
+  // 已知账户名（持仓里出现过的，供选择器快捷选用）
+  const accounts = computed(() => {
+    const set = new Set<string>()
+    for (const e of entries.value) {
+      if (!e.deleted && e.account && e.account.trim()) set.add(e.account.trim())
+    }
+    return [...set]
+  })
 
   // 云同步配置（设置 UI 用）
   function setToken(t: string) {
@@ -143,7 +153,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
   }
 
   return {
-    items, entries, loaded, syncing, lastSync, hasToken,
+    items, entries, accounts, loaded, syncing, lastSync, hasToken,
     load, has, add, remove, toggle, setHolding,
     setToken, manualUpload, manualDownload, clearCloud, push, pull,
   }

@@ -11,6 +11,7 @@ export interface WatchEntry {
   name?: string
   shares?: number   // 持有份额（0/未设 = 仅关注）
   cost?: number     // 成本净值
+  account?: string  // 所属账户（支付宝/天天基金/券商…，空=未分组）
   updated_at: string
   deleted?: boolean
 }

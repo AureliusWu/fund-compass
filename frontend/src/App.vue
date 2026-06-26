@@ -7,6 +7,7 @@
       <van-tabbar-item to="/" icon="wap-home-o">首页</van-tabbar-item>
       <van-tabbar-item to="/screen" icon="search">选基</van-tabbar-item>
       <van-tabbar-item to="/watch" icon="star-o">自选</van-tabbar-item>
+      <van-tabbar-item to="/assets" icon="balance-o">资产</van-tabbar-item>
       <van-tabbar-item to="/compare" icon="exchange">对比</van-tabbar-item>
     </van-tabbar>
   </div>
