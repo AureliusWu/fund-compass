@@ -6,7 +6,7 @@ from service.eastmoney import fetch_detail, fetch_universe
 
 CST = timezone(timedelta(hours=8))
 DETAIL_TTL = timedelta(hours=12)
-HIST_KEEP = 500   # 入库保留的净值条数
+HIST_KEEP = 800   # 入库保留的净值条数（≈3年，供 MA120 / 估值分位）
 
 
 def _now():

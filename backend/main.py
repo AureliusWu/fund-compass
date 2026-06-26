@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from database.db import init_db
 from service import repo
 from strategy.scoring import score_fund
+from strategy.timing import timing_signal
 
 
 @asynccontextmanager
@@ -83,6 +84,16 @@ def fund_score(code: str) -> dict:
     except Exception as e:
         raise HTTPException(status_code=404, detail=str(e))
     return {"code": code, "name": d.get("name"), "type": d.get("type"), **score_fund(d)}
+
+
+@app.get("/api/fund/{code}/signal")
+def fund_signal(code: str) -> dict:
+    """择时信号：估值 / 趋势 / 情绪 三层合成 买入·定投·持有·减仓，附每层依据。"""
+    try:
+        d = repo.get_detail(code)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {"code": code, "name": d.get("name"), "type": d.get("type"), **timing_signal(d)}
 
 
 @app.post("/api/admin/refresh-universe")
