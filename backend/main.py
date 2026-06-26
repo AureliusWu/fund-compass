@@ -18,6 +18,7 @@ from database.db import init_db
 from service import repo
 from strategy.scoring import score_fund
 from strategy.timing import timing_signal
+from strategy.backtest import backtest
 
 
 @asynccontextmanager
@@ -95,6 +96,16 @@ def fund_signal(code: str) -> dict:
     except Exception as e:
         raise HTTPException(status_code=404, detail=str(e))
     return {"code": code, "name": d.get("name"), "type": d.get("type"), **timing_signal(d)}
+
+
+@app.get("/api/fund/{code}/backtest")
+def fund_backtest(code: str) -> dict:
+    """择时回测：按月用三层信号调仓 vs 一直持有，给收益/回撤/胜率/净值曲线。"""
+    try:
+        d = repo.get_detail(code)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {"code": code, "name": d.get("name"), **backtest(d)}
 
 
 @app.get("/api/watchlist")

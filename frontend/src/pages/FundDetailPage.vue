@@ -8,7 +8,7 @@ import { pct, num, colorOf, signalColor } from '@/utils/format'
 import StarRating from '@/components/StarRating.vue'
 import Chart from '@/components/Chart.vue'
 import DcaCalc from '@/components/DcaCalc.vue'
-import type { FundDetail, ScoreResp, SignalResp } from '@/api/client'
+import type { FundDetail, ScoreResp, SignalResp, BacktestResp } from '@/api/client'
 
 const route = useRoute()
 const router = useRouter()
@@ -19,6 +19,7 @@ const code = route.params.code as string
 const detail = ref<FundDetail | null>(null)
 const score = ref<ScoreResp | null>(null)
 const signal = ref<SignalResp | null>(null)
+const bt = ref<BacktestResp | null>(null)
 const loading = ref(true)
 const error = ref('')
 
@@ -34,6 +35,23 @@ onMounted(async () => {
     error.value = '加载失败，后端是否已启动？'
   } finally {
     loading.value = false
+  }
+  try { bt.value = await funds.backtest(code) } catch { /* 回测可选 */ }
+})
+
+const btOption = computed(() => {
+  const s = bt.value?.strategy?.curve || []
+  const b = bt.value?.benchmark?.curve || []
+  return {
+    grid: { left: 36, right: 12, top: 30, bottom: 20 },
+    tooltip: { trigger: 'axis' as const },
+    legend: { top: 0, data: ['择时策略', '一直持有'], textStyle: { fontSize: 11 } },
+    xAxis: { type: 'category' as const, data: s.map((p) => p.date), boundaryGap: false, axisLabel: { show: false } },
+    yAxis: { type: 'value' as const, scale: true },
+    series: [
+      { name: '择时策略', type: 'line' as const, showSymbol: false, data: s.map((p) => p.v), lineStyle: { color: '#0f9d75' } },
+      { name: '一直持有', type: 'line' as const, showSymbol: false, data: b.map((p) => p.v), lineStyle: { color: '#969799' } },
+    ],
   }
 })
 
@@ -118,6 +136,20 @@ async function toggleWatch() {
           </div>
         </template>
 
+        <template v-if="bt">
+          <div class="sec">策略回测</div>
+          <div class="card" v-if="bt.available && bt.strategy && bt.benchmark">
+            <div class="bt-row">
+              <div><div class="k">择时策略</div><div class="v" :style="{ color: colorOf(bt.strategy.total_return) }">{{ pct(bt.strategy.total_return) }}</div><div class="kk">回撤 {{ bt.strategy.max_drawdown }}%</div></div>
+              <div><div class="k">一直持有</div><div class="v" :style="{ color: colorOf(bt.benchmark.total_return) }">{{ pct(bt.benchmark.total_return) }}</div><div class="kk">回撤 {{ bt.benchmark.max_drawdown }}%</div></div>
+              <div><div class="k">超额/胜率</div><div class="v" :style="{ color: colorOf(bt.outperform ?? 0) }">{{ pct(bt.outperform ?? 0) }}</div><div class="kk">胜率 {{ bt.win_rate }}%</div></div>
+            </div>
+            <Chart :option="btOption" height="200px" />
+            <div class="bt-note">{{ bt.start }} ~ {{ bt.end }} · 月度调仓 {{ bt.rebalances }} 次。简化回测、不计费用，仅供参考。</div>
+          </div>
+          <div class="card" v-else><van-empty :description="bt.reason || '无法回测'" image-size="60" /></div>
+        </template>
+
         <template v-if="signal">
           <div class="sec">当前信号</div>
           <div class="card">
@@ -152,6 +184,11 @@ async function toggleWatch() {
 .comp .cn { width: 64px; color: #646566; }
 .comp .cn em { color: #c8c9cc; font-style: normal; font-size: 10px; }
 .comp .cv { width: 34px; text-align: right; color: #323233; }
+.bt-row { display: grid; grid-template-columns: repeat(3, 1fr); margin-bottom: 8px; }
+.bt-row .k { font-size: 11px; color: #969799; }
+.bt-row .v { font-size: 17px; font-weight: 600; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.bt-row .kk { font-size: 10px; color: #c8c9cc; margin-top: 1px; }
+.bt-note { font-size: 11px; color: #c8c9cc; margin-top: 6px; line-height: 1.5; }
 .sighead { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
 .sigbig { font-size: 22px; font-weight: 600; }
 .advice { font-size: 12px; color: #969799; }

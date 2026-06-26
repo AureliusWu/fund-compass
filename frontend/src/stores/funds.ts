@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import {
-  getFundDetail, getScore, getSignal,
-  type FundDetail, type ScoreResp, type SignalResp,
+  getFundDetail, getScore, getSignal, getBacktest,
+  type FundDetail, type ScoreResp, type SignalResp, type BacktestResp,
 } from '@/api/client'
 import { cacheGet, cacheSet } from '@/utils/cache'
 
@@ -12,6 +12,7 @@ export const useFundsStore = defineStore('funds', () => {
   const detailMem = new Map<string, FundDetail>()
   const scoreMem = new Map<string, ScoreResp>()
   const signalMem = new Map<string, SignalResp>()
+  const btMem = new Map<string, BacktestResp>()
 
   async function detail(code: string): Promise<FundDetail> {
     if (detailMem.has(code)) return detailMem.get(code)!
@@ -40,5 +41,14 @@ export const useFundsStore = defineStore('funds', () => {
     return s
   }
 
-  return { detail, score, signal }
+  async function backtest(code: string): Promise<BacktestResp> {
+    if (btMem.has(code)) return btMem.get(code)!
+    const cached = cacheGet<BacktestResp>('bt_' + code, TTL)
+    if (cached) { btMem.set(code, cached); return cached }
+    const b = await getBacktest(code)
+    btMem.set(code, b); cacheSet('bt_' + code, b)
+    return b
+  }
+
+  return { detail, score, signal, backtest }
 })

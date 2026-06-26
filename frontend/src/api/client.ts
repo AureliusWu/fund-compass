@@ -55,6 +55,16 @@ export const getFundDetail = (code: string) => req<FundDetail>(`/fund/${code}`)
 export const getScore = (code: string) => req<ScoreResp>(`/fund/${code}/score`)
 export const getSignal = (code: string) => req<SignalResp>(`/fund/${code}/signal`)
 
+export interface BtSeries { total_return: number; max_drawdown: number; curve: { date: string; v: number }[] }
+export interface BacktestResp {
+  code: string; name: string; available: boolean; reason?: string
+  start?: string; end?: string; rebalances?: number
+  strategy?: BtSeries; benchmark?: BtSeries
+  outperform?: number; win_rate?: number | null
+  actions?: { date: string; signal: string; weight: number }[]
+}
+export const getBacktest = (code: string) => req<BacktestResp>(`/fund/${code}/backtest`)
+
 export const getWatchlist = () => req<{ items: WatchItem[] }>('/watchlist')
 export const addWatch = (code: string) =>
   req<{ ok: boolean }>('/watchlist', {
