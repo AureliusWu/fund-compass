@@ -5,6 +5,7 @@ import { getHealth } from '@/api/client'
 import { useWatchlistStore } from '@/stores/watchlist'
 import { useFundsStore } from '@/stores/funds'
 import { signalColor } from '@/utils/format'
+import IndexBar from '@/components/IndexBar.vue'
 
 const router = useRouter()
 const watch = useWatchlistStore()
@@ -45,6 +46,7 @@ const dist = computed(() => {
 <template>
   <div class="page">
     <van-nav-bar title="司南基金" />
+    <IndexBar />
     <div class="page-body">
       <van-cell-group inset>
         <van-cell title="后端" :value="health" />
