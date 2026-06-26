@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from database.db import init_db
 from service import repo
+from strategy.scoring import score_fund
 
 
 @asynccontextmanager
@@ -72,6 +73,16 @@ def fund_detail(code: str) -> dict:
         raise HTTPException(status_code=404, detail=str(e))
     d["nav_history"] = (d.get("nav_history") or [])[-250:]
     return d
+
+
+@app.get("/api/fund/{code}/score")
+def fund_score(code: str) -> dict:
+    """基金综合评分：0–100 + 五星 + 收益/风险/管理/成本 四维明细。"""
+    try:
+        d = repo.get_detail(code)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {"code": code, "name": d.get("name"), "type": d.get("type"), **score_fund(d)}
 
 
 @app.post("/api/admin/refresh-universe")
