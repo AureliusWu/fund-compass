@@ -1,0 +1,30 @@
+name: signal-notify
+
+# 司南基金 · 信号推送 + 后端保活
+# 交易时段每 10 分钟：从 Gist 读自选 → 查信号 → 变化推 Server酱 → 顺带 ping 后端免冷启动。
+# 仅在配置了 GIST_TOKEN / SC_SENDKEY 两个 Secret 后才真正生效。
+on:
+  schedule:
+    - cron: '*/10 1-7 * * 1-5' # UTC 01:00–07:59 周一~五 ≈ CST 09:00–15:59（脚本内再按交易时段精确门控）
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 忽略交易时段强制运行（并发一条推送测试）
+        type: boolean
+        default: false
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 信号检查 & 推送 & 保活
+        env:
+          API_BASE: ${{ vars.VITE_API_BASE || 'https://fund-compass-api.onrender.com/api' }}
+          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+          SC_SENDKEY: ${{ secrets.SC_SENDKEY }}
+          FORCE: ${{ inputs.force }}
+        run: python tools/notify.py
