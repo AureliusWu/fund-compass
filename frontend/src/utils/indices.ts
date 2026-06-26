@@ -63,11 +63,18 @@ function fetchIndices(codes: string[]): Promise<Record<string, { price: number; 
   })
 }
 
-// 黄金 AU9999（东方财富 push2，多 secid 兜底）
+// 黄金 AU9999（东方财富 push2，多 secid 兜底）。
+// 关键：fetch 必须带超时（AbortController），否则请求卡住会让页面网络永不空闲。
 async function fetchGold(): Promise<{ price: number; changePct: number } | null> {
   for (const secid of ['118.AU9999', '113.AU9999', '114.AU9999']) {
+    const ctrl = new AbortController()
+    const t = setTimeout(() => ctrl.abort(), TIMEOUT)
     try {
-      const r = await fetch(`https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&fields=f43,f57,f60,f170&fltt=2&_=${Date.now()}`)
+      const r = await fetch(
+        `https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&fields=f43,f57,f60,f170&fltt=2&_=${Date.now()}`,
+        { signal: ctrl.signal },
+      )
+      clearTimeout(t)
       if (!r.ok) continue
       const j = await r.json()
       const d = j?.data
@@ -79,7 +86,7 @@ async function fetchGold(): Promise<{ price: number; changePct: number } | null>
       let chg = num(d.f170)
       if (!Number.isFinite(chg)) { const pc = num(d.f60); chg = pc > 0 ? ((price - pc) / pc) * 100 : NaN }
       return { price, changePct: Number.isFinite(chg) ? chg : NaN }
-    } catch { /* 下一个 secid */ }
+    } catch { clearTimeout(t) /* 超时/网络错误 → 下一个 secid */ }
   }
   return null
 }
