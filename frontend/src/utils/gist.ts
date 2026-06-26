@@ -9,6 +9,8 @@ const TIMEOUT = 15000
 export interface WatchEntry {
   code: string
   name?: string
+  shares?: number   // 持有份额（0/未设 = 仅关注）
+  cost?: number     // 成本净值
   updated_at: string
   deleted?: boolean
 }

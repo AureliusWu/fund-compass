@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref, onMounted } from 'vue'
+import { reactive, ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { showToast } from 'vant'
 import { getToken } from '@/utils/gist'
@@ -7,9 +7,10 @@ import { useWatchlistStore } from '@/stores/watchlist'
 import { useFundsStore } from '@/stores/funds'
 import { pct, num, colorOf, signalColor } from '@/utils/format'
 import StarRating from '@/components/StarRating.vue'
+import Chart from '@/components/Chart.vue'
 
 interface Row {
-  name: string; nav: number | null; ret1y: number | null
+  name: string; type: string | null; nav: number | null; ret1y: number | null
   signal: string; star: number | null
 }
 
@@ -19,16 +20,21 @@ const funds = useFundsStore()
 const rows = reactive<Record<string, Row>>({})
 const loading = ref(true)
 
-// 云同步设置
 const showSync = ref(false)
 const token = ref(getToken())
 
+// 持仓编辑
+const editShow = ref(false)
+const editCode = ref('')
+const editShares = ref('')
+const editCost = ref('')
+
 async function loadOne(code: string, name: string | null) {
-  rows[code] = { name: name || code, nav: null, ret1y: null, signal: '', star: null }
+  rows[code] = { name: name || code, type: null, nav: null, ret1y: null, signal: '', star: null }
   try {
     const [d, s, sig] = await Promise.all([funds.detail(code), funds.score(code), funds.signal(code)])
-    rows[code] = { name: d.name || code, nav: d.latest_nav, ret1y: d.ret_1y, star: s.star, signal: sig.signal }
-  } catch { /* 保留占位 */ }
+    rows[code] = { name: d.name || code, type: d.type, nav: d.latest_nav, ret1y: d.ret_1y, star: s.star, signal: sig.signal }
+  } catch { /* 占位 */ }
 }
 
 async function refresh() {
@@ -38,81 +44,139 @@ async function refresh() {
   loading.value = false
 }
 
+// 组合（仅 shares>0 的持仓）
+const portfolio = computed(() => {
+  let value = 0, cost = 0
+  const byType: Record<string, number> = {}
+  let count = 0
+  for (const e of watch.entries) {
+    if (e.deleted || !(e.shares && e.shares > 0)) continue
+    const nav = rows[e.code]?.nav
+    if (nav == null) continue
+    const v = e.shares * nav
+    value += v
+    cost += e.shares * (e.cost ?? 0)
+    const t = rows[e.code]?.type || '其他'
+    byType[t] = (byType[t] || 0) + v
+    count++
+  }
+  const profit = value - cost
+  return { value, cost, profit, rate: cost > 0 ? (profit / cost) * 100 : null, byType, count }
+})
+
+const allocOption = computed(() => ({
+  tooltip: { trigger: 'item', formatter: '{b}: {d}%' },
+  legend: { bottom: 0, type: 'scroll', textStyle: { fontSize: 11 } },
+  series: [{
+    type: 'pie', radius: ['42%', '64%'], center: ['50%', '42%'], label: { show: false },
+    data: Object.entries(portfolio.value.byType).map(([name, v]) => ({ name, value: +v.toFixed(2) })),
+  }],
+}))
+
+function sharesOf(code: string) {
+  const e = watch.entries.find((x) => x.code === code)
+  return e?.shares && e.shares > 0 ? e : null
+}
+
+function openEdit(code: string) {
+  const e = watch.entries.find((x) => x.code === code)
+  editCode.value = code
+  editShares.value = e?.shares ? String(e.shares) : ''
+  editCost.value = e?.cost ? String(e.cost) : ''
+  editShow.value = true
+}
+function saveHolding() {
+  watch.setHolding(editCode.value, Number(editShares.value) || 0, Number(editCost.value) || 0, rows[editCode.value]?.name)
+  showToast('已保存持仓')
+}
+
 async function remove(code: string) {
   await watch.remove(code)
   delete rows[code]
   showToast('已移除')
 }
 
-async function saveToken() {
-  watch.setToken(token.value)
-  showToast(token.value ? '已保存 Token' : '已清空 Token')
-}
+async function saveToken() { watch.setToken(token.value); showToast(token.value ? '已保存 Token' : '已清空') }
 async function upload() {
   if (!watch.hasToken) { showToast('请先填 Token'); return }
   await watch.manualUpload()
-  showToast(watch.lastSync ? '已上传到云端' : '上传失败，检查 Token')
+  showToast(watch.lastSync ? '已上传' : '上传失败，检查 Token')
 }
 async function download() {
   if (!watch.hasToken) { showToast('请先填 Token'); return }
-  await watch.manualDownload()
-  await refresh()
-  showToast('已从云端同步')
+  await watch.manualDownload(); await refresh(); showToast('已同步')
 }
-function clearCloud() {
-  watch.clearCloud()
-  token.value = ''
-  showToast('已清除云同步配置')
-}
+function clearCloud() { watch.clearCloud(); token.value = ''; showToast('已清除云同步') }
 
 onMounted(refresh)
 </script>
 
 <template>
   <div class="page">
-    <van-nav-bar title="自选">
-      <template #right>
-        <van-icon name="cloud-o" size="20" @click="showSync = true" />
-      </template>
+    <van-nav-bar title="自选 · 持仓">
+      <template #right><van-icon name="cloud-o" size="20" @click="showSync = true" /></template>
     </van-nav-bar>
     <div class="page-body">
+      <!-- 组合概览 -->
+      <template v-if="portfolio.count > 0">
+        <div class="port card">
+          <div class="port-top">
+            <div>
+              <div class="k">持仓市值</div>
+              <div class="big">{{ num(portfolio.value, 2) }}</div>
+            </div>
+            <div style="text-align:right">
+              <div class="k">累计收益</div>
+              <div class="big" :style="{ color: colorOf(portfolio.profit) }">{{ num(portfolio.profit, 2) }}</div>
+              <div class="r" :style="{ color: colorOf(portfolio.rate) }">{{ pct(portfolio.rate) }}</div>
+            </div>
+          </div>
+          <Chart :option="allocOption" height="180px" />
+          <div class="port-cap">{{ portfolio.count }} 只持仓 · 按类型配置</div>
+        </div>
+      </template>
+
       <van-loading v-if="loading" style="text-align:center;padding:40px" />
       <van-empty v-else-if="watch.items.length === 0" description="还没有自选，去选基页添加" />
       <van-cell-group v-else inset>
         <van-cell
           v-for="it in watch.items" :key="it.code"
-          :title="rows[it.code]?.name || it.name || it.code" :label="it.code"
+          :title="rows[it.code]?.name || it.name || it.code"
+          :label="it.code + (sharesOf(it.code) ? ' · ' + sharesOf(it.code)!.shares + '份' : '')"
           @click="router.push('/fund/' + it.code)"
         >
           <template #value>
             <div class="wl-val">
-              <span class="sig" :style="{ color: signalColor(rows[it.code]?.signal || '') }">
-                {{ rows[it.code]?.signal || '…' }}
-              </span>
+              <span class="sig" :style="{ color: signalColor(rows[it.code]?.signal || '') }">{{ rows[it.code]?.signal || '…' }}</span>
               <StarRating :star="rows[it.code]?.star ?? null" />
-              <span class="nav">
-                {{ num(rows[it.code]?.nav) }}
-                <em :style="{ color: colorOf(rows[it.code]?.ret1y) }">{{ pct(rows[it.code]?.ret1y) }}</em>
+              <span v-if="sharesOf(it.code) && rows[it.code]?.nav != null" class="nav">
+                市值 {{ num(sharesOf(it.code)!.shares! * rows[it.code]!.nav!, 2) }}
               </span>
+              <span v-else class="nav">{{ num(rows[it.code]?.nav) }} <em :style="{ color: colorOf(rows[it.code]?.ret1y) }">{{ pct(rows[it.code]?.ret1y) }}</em></span>
             </div>
           </template>
           <template #right-icon>
-            <van-icon name="cross" color="#c8c9cc" size="18" style="margin-left:8px" @click.stop="remove(it.code)" />
+            <van-icon name="edit" color="#0f9d75" size="17" style="margin-left:10px" @click.stop="openEdit(it.code)" />
+            <van-icon name="cross" color="#c8c9cc" size="17" style="margin-left:8px" @click.stop="remove(it.code)" />
           </template>
         </van-cell>
       </van-cell-group>
     </div>
 
+    <!-- 持仓编辑 -->
+    <van-dialog v-model:show="editShow" title="编辑持仓" show-cancel-button @confirm="saveHolding">
+      <div style="padding:8px 4px">
+        <van-field v-model="editShares" type="number" label="份额" placeholder="0（0=仅关注）" />
+        <van-field v-model="editCost" type="number" label="成本净值" placeholder="0.000" />
+      </div>
+    </van-dialog>
+
+    <!-- 云同步 -->
     <van-popup v-model:show="showSync" position="bottom" round :style="{ padding: '16px' }">
       <div class="sync-title">云同步（GitHub Gist）</div>
-      <div class="sync-sub">
-        自选存在本机，配置 Token 后可备份到私有 Gist、多设备同步。
-        需 <code>gist</code> 权限，<a href="https://github.com/settings/tokens" target="_blank" rel="noopener">创建 Token</a>。
-      </div>
+      <div class="sync-sub">自选/持仓存在本机，配 Token 后可备份到私有 Gist、多设备同步。需 <code>gist</code> 权限，<a href="https://github.com/settings/tokens" target="_blank" rel="noopener">创建 Token</a>。</div>
       <van-field v-model="token" type="password" label="Token" placeholder="ghp_xxx" />
-      <div class="sync-status">
-        {{ watch.syncing ? '同步中…' : watch.lastSync ? '上次同步：' + new Date(watch.lastSync).toLocaleString() : '未同步' }}
-      </div>
+      <div class="sync-status">{{ watch.syncing ? '同步中…' : watch.lastSync ? '上次同步：' + new Date(watch.lastSync).toLocaleString() : '未同步' }}</div>
       <div class="sync-btns">
         <van-button size="small" @click="saveToken">保存 Token</van-button>
         <van-button size="small" type="primary" @click="upload">上传</van-button>
@@ -124,6 +188,13 @@ onMounted(refresh)
 </template>
 
 <style scoped>
+.card { background: #fff; border-radius: 10px; padding: 14px; }
+.port { margin-bottom: 12px; }
+.port-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px; }
+.port .k { font-size: 11px; color: #969799; }
+.port .big { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.port .r { font-size: 12px; }
+.port-cap { font-size: 11px; color: #c8c9cc; text-align: center; }
 .wl-val { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
 .sig { font-size: 14px; font-weight: 500; }
 .nav { font-size: 12px; color: #646566; }

@@ -113,6 +113,22 @@ export const useWatchlistStore = defineStore('watchlist', () => {
   const remove = (code: string) => upsert(code, undefined, true)
   const toggle = (code: string, name?: string) => (has(code) ? remove(code) : add(code, name))
 
+  function setHolding(code: string, shares: number, cost: number, name?: string) {
+    const e = entries.value.find((x) => x.code === code)
+    if (e) {
+      e.shares = shares
+      e.cost = cost
+      e.deleted = false
+      e.updated_at = nowISO()
+      if (name) e.name = name
+    } else {
+      entries.value.push({ code, name, shares, cost, updated_at: nowISO() })
+    }
+    entries.value = [...entries.value]
+    persist()
+    schedulePush()
+  }
+
   // 云同步配置（设置 UI 用）
   function setToken(t: string) {
     gist.setToken(t.trim())
@@ -128,7 +144,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
 
   return {
     items, entries, loaded, syncing, lastSync, hasToken,
-    load, has, add, remove, toggle,
+    load, has, add, remove, toggle, setHolding,
     setToken, manualUpload, manualDownload, clearCloud, push, pull,
   }
 })
