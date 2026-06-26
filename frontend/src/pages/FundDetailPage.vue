@@ -139,6 +139,9 @@ async function toggleWatch() {
           <van-loading v-else size="18" style="padding:6px 0" />
         </div>
 
+        <van-button class="report-btn" block plain icon="description" size="small"
+          @click="router.push('/report/' + code)">生成体检报告</van-button>
+
         <div class="sec">智能解读</div>
         <div class="card interp" v-if="interp">
           <div class="verdict" :class="interp.tone">{{ interp.verdict }}</div>
@@ -261,6 +264,7 @@ async function toggleWatch() {
 .est-side b { color: #323233; font-weight: 600; }
 .est-side em { font-style: normal; color: #c8c9cc; }
 .est-empty { font-size: 12px; color: #969799; margin-top: 6px; line-height: 1.5; }
+.report-btn { margin-top: 10px; }
 .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); background: #fff; border-radius: 10px; padding: 12px 0; }
 .grid4 .k { font-size: 11px; color: #969799; text-align: center; }
 .grid4 .v { font-size: 14px; font-weight: 500; text-align: center; margin-top: 4px; }

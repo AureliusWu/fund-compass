@@ -10,7 +10,8 @@ const router = createRouter({
     { path: '/watch', name: 'watch', component: () => import('@/pages/WatchlistPage.vue'), meta: { title: '自选' } },
     { path: '/compare', name: 'compare', component: () => import('@/pages/ComparePage.vue'), meta: { title: '对比' } },
     { path: '/assets', name: 'assets', component: () => import('@/pages/AssetsPage.vue'), meta: { title: '资产' } },
-    { path: '/fund/:code', name: 'fund', component: () => import('@/pages/FundDetailPage.vue'), meta: { title: '基金详情' } }
+    { path: '/fund/:code', name: 'fund', component: () => import('@/pages/FundDetailPage.vue'), meta: { title: '基金详情' } },
+    { path: '/report/:code', name: 'report', component: () => import('@/pages/ReportPage.vue'), meta: { title: '体检报告' } }
   ]
 })
 
