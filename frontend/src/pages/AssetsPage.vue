@@ -135,6 +135,9 @@ onMounted(refresh)
           </div>
         </div>
 
+        <van-button class="lt-btn" block plain icon="cluster-o" size="small"
+          @click="router.push('/lookthrough')">持仓穿透 · 看底层个股/行业</van-button>
+
         <!-- 资产分布（账户 / 类型 切换） -->
         <div class="card">
           <div class="dim-head">
@@ -169,6 +172,7 @@ onMounted(refresh)
 
 <style scoped>
 .card { background: #fff; border-radius: 10px; padding: 14px; margin-bottom: 12px; }
+.lt-btn { margin-bottom: 12px; }
 .hero .k { font-size: 12px; color: #969799; }
 .hero .big { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; margin: 2px 0 10px; color: #323233; }
 .hero-row { display: flex; justify-content: space-between; align-items: flex-end; }
