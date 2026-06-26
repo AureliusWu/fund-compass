@@ -9,6 +9,7 @@ import StarRating from '@/components/StarRating.vue'
 import Chart from '@/components/Chart.vue'
 import DcaCalc from '@/components/DcaCalc.vue'
 import { fetchEstimate, type Estimate } from '@/utils/estimate'
+import { getHoldings, type Holding } from '@/utils/holdings'
 import { templateInterpret, llmInterpret, getAiKey, setAiKey } from '@/utils/interpret'
 import type { FundDetail, ScoreResp, SignalResp, BacktestResp } from '@/api/client'
 
@@ -24,8 +25,12 @@ const signal = ref<SignalResp | null>(null)
 const bt = ref<BacktestResp | null>(null)
 const est = ref<Estimate | null>(null)
 const estDone = ref(false)
+const holdings = ref<Holding[]>([])
+const holdingsDone = ref(false)
 const loading = ref(true)
 const error = ref('')
+
+const holdMax = computed(() => Math.max(1, ...holdings.value.map((s) => s.ratio)))
 
 const COMP_NAMES: Record<string, string> = { return: '收益', risk: '风险', management: '管理', cost: '成本' }
 
@@ -59,6 +64,7 @@ onMounted(async () => {
   watch.load().catch(() => {})
   // 盘中估值独立于后端，立即并发抓取（不阻塞详情）
   fetchEstimate(code).then((e) => { est.value = e }).finally(() => { estDone.value = true })
+  getHoldings(code).then((h) => { holdings.value = h }).finally(() => { holdingsDone.value = true })
   try {
     detail.value = await funds.detail(code)
     score.value = await funds.score(code)
@@ -185,6 +191,20 @@ async function toggleWatch() {
         <div class="sec">净值走势</div>
         <div class="card"><Chart :option="navOption" height="220px" /></div>
 
+        <div class="sec">十大重仓股</div>
+        <div class="card" v-if="holdings.length">
+          <div class="hd" v-for="(s, i) in holdings" :key="s.code + i">
+            <span class="hd-rk">{{ i + 1 }}</span>
+            <span class="hd-nm">{{ s.name }}<em>{{ s.code }}</em></span>
+            <span class="hd-bar"><i :style="{ width: (s.ratio / holdMax * 100) + '%' }"></i></span>
+            <span class="hd-rt">{{ s.ratio.toFixed(2) }}%</span>
+            <span class="hd-ch" :style="{ color: colorOf(s.change) }">{{ s.change != null ? pct(s.change) : '--' }}</span>
+          </div>
+          <div class="hd-note">条形为占净值比例，右侧为个股当日涨跌。重仓股季度披露，数据来源天天基金。</div>
+        </div>
+        <div class="card" v-else-if="holdingsDone"><van-empty description="暂无重仓股（QDII/债基/货基常无）" image-size="60" /></div>
+        <van-loading v-else size="18" style="display:block;text-align:center;padding:14px" />
+
         <div class="sec">定投测算</div>
         <div class="card">
           <DcaCalc :nav-history="detail.nav_history" :latest-nav="detail.latest_nav" />
@@ -265,6 +285,15 @@ async function toggleWatch() {
 .est-side em { font-style: normal; color: #c8c9cc; }
 .est-empty { font-size: 12px; color: #969799; margin-top: 6px; line-height: 1.5; }
 .report-btn { margin-top: 10px; }
+.hd { display: flex; align-items: center; font-size: 12px; margin: 9px 0; }
+.hd-rk { width: 18px; color: #c8c9cc; font-variant-numeric: tabular-nums; }
+.hd-nm { width: 96px; color: #323233; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hd-nm em { font-style: normal; color: #c8c9cc; font-size: 10px; margin-left: 4px; }
+.hd-bar { flex: 1; height: 6px; background: #eef0f2; border-radius: 3px; margin: 0 8px; overflow: hidden; }
+.hd-bar i { display: block; height: 100%; background: #0f9d75; border-radius: 3px; }
+.hd-rt { width: 44px; text-align: right; color: #646566; font-variant-numeric: tabular-nums; }
+.hd-ch { width: 56px; text-align: right; font-variant-numeric: tabular-nums; }
+.hd-note { font-size: 11px; color: #c8c9cc; margin-top: 8px; line-height: 1.5; }
 .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); background: #fff; border-radius: 10px; padding: 12px 0; }
 .grid4 .k { font-size: 11px; color: #969799; text-align: center; }
 .grid4 .v { font-size: 14px; font-weight: 500; text-align: center; margin-top: 4px; }
