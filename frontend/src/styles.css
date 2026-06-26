@@ -1,0 +1,27 @@
+:root {
+  --teal: #0f9d75;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #app {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: #f7f8fa;
+  color: #323233;
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.page {
+  min-height: 100%;
+}
+
+/* 给底部 Tabbar（固定 50px）留出空间 */
+.page-body {
+  padding: 16px;
+  padding-bottom: 66px;
+}
