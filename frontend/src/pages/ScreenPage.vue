@@ -48,10 +48,10 @@ function pick(t: string) {
   reset()
 }
 
-async function toggleWatch(code: string) {
+async function toggleWatch(it: FundListItem) {
   try {
-    await watch.toggle(code)
-    showToast(watch.has(code) ? '已加入自选' : '已移出自选')
+    await watch.toggle(it.code, it.name)
+    showToast(watch.has(it.code) ? '已加入自选' : '已移出自选')
   } catch {
     showToast('操作失败')
   }
@@ -84,7 +84,7 @@ onMounted(() => {
             <van-icon
               :name="watch.has(it.code) ? 'star' : 'star-o'"
               :color="watch.has(it.code) ? '#ffb400' : '#c8c9cc'"
-              size="20" @click.stop="toggleWatch(it.code)"
+              size="20" @click.stop="toggleWatch(it)"
             />
           </template>
         </van-cell>

@@ -52,7 +52,7 @@ const navOption = computed(() => {
 
 async function toggleWatch() {
   try {
-    await watch.toggle(code)
+    await watch.toggle(code, detail.value?.name)
     showToast(watch.has(code) ? '已加入自选' : '已移出自选')
   } catch {
     showToast('操作失败')

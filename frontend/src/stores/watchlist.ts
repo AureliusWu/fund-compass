@@ -1,36 +1,134 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
-import { addWatch, getWatchlist, removeWatch, type WatchItem } from '@/api/client'
+import { ref, computed } from 'vue'
+import * as gist from '@/utils/gist'
+import type { WatchEntry } from '@/utils/gist'
+
+const LS = 'sinan_watchlist_v1'
+const PUSH_DELAY = 4000
+const TOMB_DAYS = 30
+
+const nowISO = () => new Date().toISOString()
+
+function loadLS(): WatchEntry[] {
+  try {
+    const a = JSON.parse(localStorage.getItem(LS) || '[]')
+    return Array.isArray(a) ? a : []
+  } catch {
+    return []
+  }
+}
+function saveLS(e: WatchEntry[]) {
+  localStorage.setItem(LS, JSON.stringify(e))
+}
 
 export const useWatchlistStore = defineStore('watchlist', () => {
-  const items = ref<WatchItem[]>([])
+  const entries = ref<WatchEntry[]>(loadLS())
   const loaded = ref(false)
+  const syncing = ref(false)
+  const lastSync = ref(gist.getSyncTime())
+  const hasToken = ref(gist.hasConfig())
+  let pushTimer: ReturnType<typeof setTimeout> | null = null
+
+  // 对外仍是 {code,name,type,added_at} 形状，页面无需改
+  const items = computed(() =>
+    entries.value
+      .filter((e) => !e.deleted)
+      .map((e) => ({ code: e.code, name: e.name ?? null, type: null as string | null, added_at: e.updated_at })),
+  )
+
+  const persist = () => saveLS(entries.value)
+
+  function prune() {
+    const cutoff = new Date(Date.now() - TOMB_DAYS * 864e5).toISOString()
+    const before = entries.value.length
+    entries.value = entries.value.filter((e) => !e.deleted || e.updated_at > cutoff)
+    if (entries.value.length !== before) persist()
+  }
+
+  function merge(cloud: WatchEntry[]) {
+    const map = new Map(entries.value.map((e) => [e.code, e]))
+    for (const c of cloud) {
+      const local = map.get(c.code)
+      if (!local || (c.updated_at || '') > (local.updated_at || '')) map.set(c.code, { ...local, ...c })
+    }
+    entries.value = [...map.values()]
+    persist()
+  }
+
+  async function pull() {
+    if (!gist.hasConfig()) return
+    syncing.value = true
+    try {
+      const cloud = await gist.pullEntries()
+      if (cloud) merge(cloud)
+      lastSync.value = gist.getSyncTime()
+    } catch { /* 静默 */ } finally {
+      syncing.value = false
+    }
+  }
+
+  async function push() {
+    if (!gist.hasConfig()) return
+    syncing.value = true
+    try {
+      if (await gist.pushEntries(entries.value)) lastSync.value = gist.getSyncTime()
+    } catch { /* 静默 */ } finally {
+      syncing.value = false
+    }
+  }
+
+  function schedulePush() {
+    if (!gist.hasConfig()) return
+    if (pushTimer) clearTimeout(pushTimer)
+    pushTimer = setTimeout(push, PUSH_DELAY)
+  }
 
   async function load(force = false) {
     if (loaded.value && !force) return
-    const r = await getWatchlist()
-    items.value = r.items
+    prune()
+    await pull()
     loaded.value = true
   }
 
   function has(code: string) {
-    return items.value.some((i) => i.code === code)
+    const e = entries.value.find((x) => x.code === code)
+    return !!e && !e.deleted
   }
 
-  async function add(code: string) {
-    await addWatch(code)
-    await load(true)
+  function upsert(code: string, name: string | undefined, deleted: boolean) {
+    const e = entries.value.find((x) => x.code === code)
+    if (e) {
+      e.deleted = deleted
+      e.updated_at = nowISO()
+      if (name) e.name = name
+    } else {
+      entries.value.push({ code, name, updated_at: nowISO(), deleted })
+    }
+    entries.value = [...entries.value]
+    persist()
+    schedulePush()
   }
 
-  async function remove(code: string) {
-    await removeWatch(code)
-    items.value = items.value.filter((i) => i.code !== code)
+  const add = (code: string, name?: string) => upsert(code, name, false)
+  const remove = (code: string) => upsert(code, undefined, true)
+  const toggle = (code: string, name?: string) => (has(code) ? remove(code) : add(code, name))
+
+  // 云同步配置（设置 UI 用）
+  function setToken(t: string) {
+    gist.setToken(t.trim())
+    hasToken.value = gist.hasConfig()
+  }
+  const manualUpload = () => push()
+  const manualDownload = () => pull()
+  function clearCloud() {
+    gist.clearConfig()
+    hasToken.value = false
+    lastSync.value = ''
   }
 
-  async function toggle(code: string) {
-    if (has(code)) await remove(code)
-    else await add(code)
+  return {
+    items, entries, loaded, syncing, lastSync, hasToken,
+    load, has, add, remove, toggle,
+    setToken, manualUpload, manualDownload, clearCloud, push, pull,
   }
-
-  return { items, loaded, load, has, add, remove, toggle }
 })
