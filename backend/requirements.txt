@@ -1,2 +1,4 @@
 fastapi>=0.115
 uvicorn[standard]>=0.32
+requests>=2.32
+# 备源（后续接入，依赖较重）：akshare

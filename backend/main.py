@@ -1,15 +1,34 @@
 """司南基金 后端入口（FastAPI）。
 
-本地启动：
+本地启动（建议 Python 3.12）：
     cd backend
     python -m venv .venv && .venv\\Scripts\\activate   # Windows
     pip install -r requirements.txt
     uvicorn main:app --reload --port 8000
+
+首次启动会自动抓取全量基金列表入库（约 2.7 万只，几秒）。
 """
-from fastapi import FastAPI
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI(title="司南基金 API", version="0.1.0")
+from database.db import init_db
+from service import repo
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    if repo.universe_count() == 0:
+        try:
+            repo.import_universe()
+        except Exception:
+            pass  # 离线/接口异常时不阻塞启动，可后续调用 /api/admin/refresh-universe
+    yield
+
+
+app = FastAPI(title="司南基金 API", version="0.2.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -25,4 +44,41 @@ app.add_middleware(
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"status": "ok", "service": "fund-compass", "version": app.version}
+    return {
+        "status": "ok",
+        "service": "fund-compass",
+        "version": app.version,
+        "universe": repo.universe_count(),
+    }
+
+
+@app.get("/api/funds")
+def list_funds(
+    q: str | None = None,
+    type: str | None = None,
+    page: int = 1,
+    page_size: int = Query(20, ge=1, le=100),
+) -> dict:
+    """基金列表：按类型 / 关键词（代码·名称·拼音）筛选，分页。"""
+    return repo.query_funds(q=q, type=type, page=page, page_size=page_size)
+
+
+@app.get("/api/fund/{code}")
+def fund_detail(code: str) -> dict:
+    """基金详情：费率 / 收益 / 经理 / 规模 / 同类排名 / 最新净值 + 近 250 日净值。"""
+    try:
+        d = repo.get_detail(code)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    d["nav_history"] = (d.get("nav_history") or [])[-250:]
+    return d
+
+
+@app.post("/api/admin/refresh-universe")
+def refresh_universe() -> dict:
+    """手动刷新全量基金列表。"""
+    try:
+        n = repo.import_universe()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return {"imported": n}

@@ -12,6 +12,7 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+*.db
 
 # local env
 *.local
