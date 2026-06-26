@@ -9,6 +9,7 @@ import StarRating from '@/components/StarRating.vue'
 import Chart from '@/components/Chart.vue'
 import DcaCalc from '@/components/DcaCalc.vue'
 import { fetchEstimate, type Estimate } from '@/utils/estimate'
+import { templateInterpret, llmInterpret, getAiKey, setAiKey } from '@/utils/interpret'
 import type { FundDetail, ScoreResp, SignalResp, BacktestResp } from '@/api/client'
 
 const route = useRoute()
@@ -27,6 +28,32 @@ const loading = ref(true)
 const error = ref('')
 
 const COMP_NAMES: Record<string, string> = { return: '收益', risk: '风险', management: '管理', cost: '成本' }
+
+// 智能解读：B 规则版即时计算（随数据到达响应式更新），A LLM 版按需触发
+const interp = computed(() =>
+  detail.value ? templateInterpret(detail.value, score.value, signal.value, bt.value) : null,
+)
+const aiKey = ref(getAiKey())
+const aiText = ref('')
+const aiLoading = ref(false)
+const aiErr = ref('')
+const keyShow = ref(false)
+
+async function runAi() {
+  if (!detail.value) return
+  aiErr.value = ''; aiText.value = ''; aiLoading.value = true
+  try {
+    aiText.value = await llmInterpret(detail.value, score.value, signal.value, bt.value)
+  } catch (e) {
+    aiErr.value = e instanceof Error ? e.message : 'AI 解读失败'
+  } finally {
+    aiLoading.value = false
+  }
+}
+function saveKey() {
+  setAiKey(aiKey.value.trim())
+  showToast(aiKey.value.trim() ? '已保存 key' : '已清空')
+}
 
 onMounted(async () => {
   watch.load().catch(() => {})
@@ -112,6 +139,28 @@ async function toggleWatch() {
           <van-loading v-else size="18" style="padding:6px 0" />
         </div>
 
+        <div class="sec">智能解读</div>
+        <div class="card interp" v-if="interp">
+          <div class="verdict" :class="interp.tone">{{ interp.verdict }}</div>
+          <div v-if="aiText" class="ai-box">
+            <div class="ai-tag">Claude 解读</div>
+            <div class="ai-text">{{ aiText }}</div>
+          </div>
+          <div class="isec" v-for="(x, i) in interp.sections" :key="i">
+            <span class="ih">{{ x.h }}</span><span class="it">{{ x.t }}</span>
+          </div>
+          <div v-if="aiErr" class="ai-err">{{ aiErr }}</div>
+          <div class="ai-bar">
+            <van-button size="mini" plain type="primary" :loading="aiLoading"
+              @click="aiKey ? runAi() : (keyShow = true)">
+              {{ aiKey ? (aiText ? '用 Claude 重写' : '用 Claude 生成') : '配置 Claude key' }}
+            </van-button>
+            <van-icon v-if="aiKey" name="setting-o" size="17" color="#c8c9cc" @click="keyShow = true" />
+          </div>
+          <div class="ai-hint">上为规则解读，免费离线。配置自带 Anthropic key 可让 Claude 生成更自然的点评（按量计费）。</div>
+          <div v-if="!aiText" class="disc">以上为数据解读，仅供个人参考，不构成投资建议。</div>
+        </div>
+
         <van-cell-group inset>
           <van-cell title="代码" :value="detail.code" />
           <van-cell title="类型" :value="detail.type || '--'" />
@@ -189,6 +238,13 @@ async function toggleWatch() {
         </template>
       </template>
     </div>
+
+    <van-dialog v-model:show="keyShow" title="Anthropic API Key" show-cancel-button @confirm="saveKey">
+      <div style="padding:10px 14px">
+        <van-field v-model="aiKey" type="password" placeholder="sk-ant-..." />
+        <div class="kd-hint">key 仅存于本机浏览器，调用时浏览器直连 Anthropic，按量计费（Pro 会员不含 API 额度）。<a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">获取 key</a></div>
+      </div>
+    </van-dialog>
   </div>
 </template>
 
@@ -223,4 +279,19 @@ async function toggleWatch() {
 .sighead { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
 .sigbig { font-size: 22px; font-weight: 600; }
 .advice { font-size: 12px; color: #969799; }
+.interp .verdict { font-size: 14px; font-weight: 600; line-height: 1.5; margin-bottom: 10px; }
+.interp .verdict.good { color: #ee0a24; }
+.interp .verdict.weak { color: #07c160; }
+.interp .verdict.mid { color: #323233; }
+.ai-box { background: #f0faf6; border: 1px solid #d6efe4; border-radius: 8px; padding: 10px; margin-bottom: 10px; }
+.ai-tag { font-size: 11px; color: #0f9d75; font-weight: 600; margin-bottom: 4px; }
+.ai-text { font-size: 13px; color: #323233; line-height: 1.7; white-space: pre-wrap; }
+.isec { font-size: 12.5px; line-height: 1.7; margin: 6px 0; color: #646566; }
+.isec .ih { display: inline-block; color: #0f9d75; font-weight: 600; margin-right: 6px; }
+.ai-err { font-size: 12px; color: #ee0a24; margin: 8px 0 0; }
+.ai-bar { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+.ai-hint { font-size: 11px; color: #c8c9cc; line-height: 1.5; margin-top: 6px; }
+.disc { font-size: 11px; color: #c8c9cc; margin-top: 8px; }
+.kd-hint { font-size: 11px; color: #969799; line-height: 1.6; margin-top: 8px; }
+.kd-hint a { color: #0f9d75; }
 </style>
