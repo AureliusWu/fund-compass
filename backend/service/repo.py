@@ -114,3 +114,38 @@ def get_detail(code: str, force=False) -> dict:
         return detail
     finally:
         conn.close()
+
+
+# ── 自选 ──────────────────────────────────────────────
+def list_watchlist() -> list:
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT w.code, f.name, f.type, w.added_at "
+            "FROM watchlist w LEFT JOIN funds f ON f.code = w.code "
+            "ORDER BY w.added_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def add_watchlist(code: str) -> None:
+    conn = get_conn()
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO watchlist(code, added_at) VALUES (?, ?)",
+            (code, _now().isoformat(timespec="seconds")),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def remove_watchlist(code: str) -> None:
+    conn = get_conn()
+    try:
+        conn.execute("DELETE FROM watchlist WHERE code = ?", (code,))
+        conn.commit()
+    finally:
+        conn.close()

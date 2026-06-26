@@ -1,19 +1,66 @@
 // 后端基址：开发走 Vite 代理 /api → localhost:8000；
-// 生产可用环境变量 VITE_API_BASE 指向已部署的后端（Railway/Render）。
+// 生产用环境变量 VITE_API_BASE 指向已部署后端（Railway/Render）。
 const BASE = (import.meta.env.VITE_API_BASE as string) || '/api'
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(BASE + path, init)
   if (!res.ok) throw new Error('HTTP ' + res.status)
   return res.json() as Promise<T>
 }
 
-export interface Health {
-  status: string
-  service: string
-  version: string
+export interface Health { status: string; service: string; version: string; universe: number }
+export interface FundListItem { code: string; name: string; type: string }
+export interface FundsResp { total: number; page: number; page_size: number; items: FundListItem[] }
+export interface NavPoint { date: string; nav: number; ac_return: number | null }
+
+export interface FundDetail {
+  code: string; name: string; type: string | null
+  scale: number | null; buy_rate: number | null; source_rate: number | null
+  ret_1m: number | null; ret_6m: number | null; ret_1y: number | null; ret_3y: number | null
+  rank_in_type: number | null; rank_total: number | null
+  manager: string | null; manager_worktime: string | null
+  latest_nav: number | null; latest_nav_date: string | null
+  nav_history: NavPoint[]
 }
 
-export function getHealth() {
-  return request<Health>('/health')
+export interface Component { weight: number; score: number | null; detail: Record<string, unknown> }
+export interface ScoreResp {
+  code: string; name: string; type: string | null
+  score: number | null; star: number | null
+  rank_in_type: number | null; rank_total: number | null
+  components: { return: Component; risk: Component; management: Component; cost: Component }
 }
+
+export interface Layer { label: string; value: number; [k: string]: unknown }
+export interface SignalResp {
+  code: string; name: string; type: string | null
+  signal: string; advice: string; composite: number
+  layers: { valuation: Layer; trend: Layer; sentiment: Layer }
+}
+
+export interface WatchItem { code: string; name: string | null; type: string | null; added_at: string }
+
+export const getHealth = () => req<Health>('/health')
+
+export function getFunds(p: { q?: string; type?: string; page?: number; page_size?: number }) {
+  const u = new URLSearchParams()
+  if (p.q) u.set('q', p.q)
+  if (p.type) u.set('type', p.type)
+  u.set('page', String(p.page ?? 1))
+  u.set('page_size', String(p.page_size ?? 20))
+  return req<FundsResp>('/funds?' + u.toString())
+}
+
+export const getFundDetail = (code: string) => req<FundDetail>(`/fund/${code}`)
+export const getScore = (code: string) => req<ScoreResp>(`/fund/${code}/score`)
+export const getSignal = (code: string) => req<SignalResp>(`/fund/${code}/signal`)
+
+export const getWatchlist = () => req<{ items: WatchItem[] }>('/watchlist')
+export const addWatch = (code: string) =>
+  req<{ ok: boolean }>('/watchlist', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code }),
+  })
+export const removeWatch = (code: string) =>
+  req<{ ok: boolean }>(`/watchlist/${code}`, { method: 'DELETE' })

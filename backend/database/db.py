@@ -44,6 +44,11 @@ CREATE TABLE IF NOT EXISTS nav_history (
   ac_return REAL,
   PRIMARY KEY (code, date)
 );
+
+CREATE TABLE IF NOT EXISTS watchlist (
+  code     TEXT PRIMARY KEY,
+  added_at TEXT
+);
 """
 
 

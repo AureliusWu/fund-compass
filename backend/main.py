@@ -8,6 +8,7 @@
 
 首次启动会自动抓取全量基金列表入库（约 2.7 万只，几秒）。
 """
+import re
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query
@@ -94,6 +95,26 @@ def fund_signal(code: str) -> dict:
     except Exception as e:
         raise HTTPException(status_code=404, detail=str(e))
     return {"code": code, "name": d.get("name"), "type": d.get("type"), **timing_signal(d)}
+
+
+@app.get("/api/watchlist")
+def get_watchlist() -> dict:
+    return {"items": repo.list_watchlist()}
+
+
+@app.post("/api/watchlist")
+def post_watchlist(payload: dict) -> dict:
+    code = str(payload.get("code", "")).strip()
+    if not re.fullmatch(r"\d{6}", code):
+        raise HTTPException(status_code=400, detail="需要 6 位基金代码")
+    repo.add_watchlist(code)
+    return {"ok": True, "code": code}
+
+
+@app.delete("/api/watchlist/{code}")
+def delete_watchlist(code: str) -> dict:
+    repo.remove_watchlist(code)
+    return {"ok": True, "code": code}
 
 
 @app.post("/api/admin/refresh-universe")
