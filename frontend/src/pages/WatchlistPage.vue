@@ -6,6 +6,7 @@ import { getToken } from '@/utils/gist'
 import { useWatchlistStore } from '@/stores/watchlist'
 import { useFundsStore } from '@/stores/funds'
 import { pct, num, colorOf, signalColor } from '@/utils/format'
+import { fetchEstimates, type Estimate } from '@/utils/estimate'
 import StarRating from '@/components/StarRating.vue'
 import Chart from '@/components/Chart.vue'
 
@@ -18,6 +19,7 @@ const router = useRouter()
 const watch = useWatchlistStore()
 const funds = useFundsStore()
 const rows = reactive<Record<string, Row>>({})
+const est = reactive<Record<string, Estimate | null>>({})
 const loading = ref(true)
 
 const showSync = ref(false)
@@ -40,9 +42,24 @@ async function loadOne(code: string, name: string | null) {
 async function refresh() {
   loading.value = true
   await watch.load(true)
+  // 盘中估值并发抓取（纯前端，不阻塞列表渲染）
+  fetchEstimates(watch.items.map((i) => i.code)).then((m) => m.forEach((v, k) => { est[k] = v }))
   await Promise.all(watch.items.map((i) => loadOne(i.code, i.name)))
   loading.value = false
 }
+
+// 今日估算盈亏：Σ 份额 × 昨净值 × 估算涨跌%（仅有盘中估值的持仓计入）
+const todayEst = computed(() => {
+  let amt = 0, has = false
+  for (const e of watch.entries) {
+    if (e.deleted || !(e.shares && e.shares > 0)) continue
+    const es = est[e.code]
+    if (!es || es.estChange == null || es.lastNav == null) continue
+    amt += e.shares * es.lastNav * es.estChange / 100
+    has = true
+  }
+  return has ? amt : null
+})
 
 // 组合（仅 shares>0 的持仓）
 const portfolio = computed(() => {
@@ -131,6 +148,10 @@ onMounted(refresh)
               <div class="r" :style="{ color: colorOf(portfolio.rate) }">{{ pct(portfolio.rate) }}</div>
             </div>
           </div>
+          <div class="port-today" v-if="todayEst != null">
+            今日估算 <b :style="{ color: colorOf(todayEst) }">{{ (todayEst >= 0 ? '+' : '') + num(todayEst, 2) }}</b>
+            <span class="port-today-cap">盘中估值 · 收盘前为估算值</span>
+          </div>
           <Chart :option="allocOption" height="180px" />
           <div class="port-cap">{{ portfolio.count }} 只持仓 · 按类型配置</div>
         </div>
@@ -147,6 +168,7 @@ onMounted(refresh)
         >
           <template #value>
             <div class="wl-val">
+              <span v-if="est[it.code]?.estChange != null" class="est-chg" :style="{ color: colorOf(est[it.code]!.estChange) }">估 {{ pct(est[it.code]!.estChange) }}</span>
               <span class="sig" :style="{ color: signalColor(rows[it.code]?.signal || '') }">{{ rows[it.code]?.signal || '…' }}</span>
               <StarRating :star="rows[it.code]?.star ?? null" />
               <span v-if="sharesOf(it.code) && rows[it.code]?.nav != null" class="nav">
@@ -194,8 +216,12 @@ onMounted(refresh)
 .port .k { font-size: 11px; color: #969799; }
 .port .big { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .port .r { font-size: 12px; }
+.port-today { font-size: 13px; color: #646566; margin: 2px 0 10px; }
+.port-today b { font-variant-numeric: tabular-nums; font-weight: 600; }
+.port-today-cap { font-size: 11px; color: #c8c9cc; margin-left: 8px; }
 .port-cap { font-size: 11px; color: #c8c9cc; text-align: center; }
 .wl-val { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.est-chg { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .sig { font-size: 14px; font-weight: 500; }
 .nav { font-size: 12px; color: #646566; }
 .nav em { font-style: normal; margin-left: 4px; }

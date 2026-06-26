@@ -8,6 +8,7 @@ import { pct, num, colorOf, signalColor } from '@/utils/format'
 import StarRating from '@/components/StarRating.vue'
 import Chart from '@/components/Chart.vue'
 import DcaCalc from '@/components/DcaCalc.vue'
+import { fetchEstimate, type Estimate } from '@/utils/estimate'
 import type { FundDetail, ScoreResp, SignalResp, BacktestResp } from '@/api/client'
 
 const route = useRoute()
@@ -20,6 +21,8 @@ const detail = ref<FundDetail | null>(null)
 const score = ref<ScoreResp | null>(null)
 const signal = ref<SignalResp | null>(null)
 const bt = ref<BacktestResp | null>(null)
+const est = ref<Estimate | null>(null)
+const estDone = ref(false)
 const loading = ref(true)
 const error = ref('')
 
@@ -27,6 +30,8 @@ const COMP_NAMES: Record<string, string> = { return: '收益', risk: '风险', m
 
 onMounted(async () => {
   watch.load().catch(() => {})
+  // 盘中估值独立于后端，立即并发抓取（不阻塞详情）
+  fetchEstimate(code).then((e) => { est.value = e }).finally(() => { estDone.value = true })
   try {
     detail.value = await funds.detail(code)
     score.value = await funds.score(code)
@@ -91,6 +96,22 @@ async function toggleWatch() {
       <van-loading v-if="loading" style="text-align:center;padding:40px" />
       <van-empty v-else-if="error" :description="error" />
       <template v-else-if="detail">
+        <div class="est card">
+          <div class="est-head">
+            <span class="est-label">盘中估值</span>
+            <span class="est-time">{{ est?.estTime || (estDone ? '' : '加载中…') }}</span>
+          </div>
+          <div class="est-main" v-if="est && est.estChange != null">
+            <div class="est-chg" :style="{ color: colorOf(est.estChange) }">{{ pct(est.estChange) }}</div>
+            <div class="est-side">
+              <div>估算净值 <b>{{ num(est.estNav) }}</b></div>
+              <div>昨净值 <b>{{ num(est.lastNav) }}</b><em v-if="est.navDate"> @{{ est.navDate }}</em></div>
+            </div>
+          </div>
+          <div class="est-empty" v-else-if="estDone">暂无盘中估值（QDII/货币基金或非交易时段），以最新净值为准。</div>
+          <van-loading v-else size="18" style="padding:6px 0" />
+        </div>
+
         <van-cell-group inset>
           <van-cell title="代码" :value="detail.code" />
           <van-cell title="类型" :value="detail.type || '--'" />
@@ -174,6 +195,16 @@ async function toggleWatch() {
 <style scoped>
 .sec { font-size: 13px; color: #969799; margin: 18px 4px 8px; }
 .card { background: #fff; border-radius: 10px; padding: 12px; }
+.est { margin: 0 0 4px; }
+.est-head { display: flex; justify-content: space-between; align-items: center; }
+.est-label { font-size: 13px; color: #646566; font-weight: 500; }
+.est-time { font-size: 11px; color: #c8c9cc; }
+.est-main { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
+.est-chg { font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.est-side { text-align: right; font-size: 12px; color: #969799; line-height: 1.7; }
+.est-side b { color: #323233; font-weight: 600; }
+.est-side em { font-style: normal; color: #c8c9cc; }
+.est-empty { font-size: 12px; color: #969799; margin-top: 6px; line-height: 1.5; }
 .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); background: #fff; border-radius: 10px; padding: 12px 0; }
 .grid4 .k { font-size: 11px; color: #969799; text-align: center; }
 .grid4 .v { font-size: 14px; font-weight: 500; text-align: center; margin-top: 4px; }
