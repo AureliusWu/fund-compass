@@ -60,8 +60,10 @@ fund-compass/
 ## 部署
 
 - 前端：GitHub Pages（GitHub Actions 自动部署）
-- 后端：Railway / Render
+- 后端：Render / Railway（含 `render.yaml`、`backend/Dockerfile`、`Procfile`）
 - 数据库：SQLite（无需额外服务器）
+
+完整步骤（部署后端 + 配置 `VITE_API_BASE` 让线上接通）见 [docs/DEPLOY.md](./docs/DEPLOY.md)。
 
 ## 开发进度
 

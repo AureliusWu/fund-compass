@@ -30,6 +30,10 @@ jobs:
           node-version: 20
       - run: npm install
       - run: npm run build
+        env:
+          # 在仓库 Settings → Actions → Variables 里设 VITE_API_BASE 为后端公网地址；
+          # 未设时为空，前端回退 /api（GitHub Pages 上无后端会显示未连接，属正常）。
+          VITE_API_BASE: ${{ vars.VITE_API_BASE }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: frontend/dist

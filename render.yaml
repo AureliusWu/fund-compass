@@ -1,0 +1,12 @@
+# Render Blueprint：一键部署后端。在 Render 新建 Blueprint 指向本仓库即可。
+services:
+  - type: web
+    name: fund-compass-api
+    runtime: python
+    rootDir: backend
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
