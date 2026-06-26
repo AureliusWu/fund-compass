@@ -73,7 +73,7 @@ def fund_detail(code: str) -> dict:
         d = repo.get_detail(code)
     except Exception as e:
         raise HTTPException(status_code=404, detail=str(e))
-    d["nav_history"] = (d.get("nav_history") or [])[-250:]
+    d["nav_history"] = (d.get("nav_history") or [])[-800:]  # ≈3年，供走势图/定投回放
     return d
 
 

@@ -7,6 +7,7 @@ import { useWatchlistStore } from '@/stores/watchlist'
 import { pct, num, colorOf, signalColor } from '@/utils/format'
 import StarRating from '@/components/StarRating.vue'
 import Chart from '@/components/Chart.vue'
+import DcaCalc from '@/components/DcaCalc.vue'
 import type { FundDetail, ScoreResp, SignalResp } from '@/api/client'
 
 const route = useRoute()
@@ -92,6 +93,11 @@ async function toggleWatch() {
 
         <div class="sec">净值走势</div>
         <div class="card"><Chart :option="navOption" height="220px" /></div>
+
+        <div class="sec">定投测算</div>
+        <div class="card">
+          <DcaCalc :nav-history="detail.nav_history" :latest-nav="detail.latest_nav" />
+        </div>
 
         <template v-if="score">
           <div class="sec">综合评分</div>
