@@ -14,6 +14,7 @@ permissions:
 jobs:
   enrich:
     runs-on: ubuntu-latest
+    timeout-minutes: 20 # akshare 抓取若卡住，最多 20 分钟自动终止，不空耗
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -24,6 +25,7 @@ jobs:
       - name: 富集
         env:
           GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+          PYTHONUNBUFFERED: '1' # 日志实时输出，能看到「抓取 X …」进度
         run: python tools/enrich.py
       - name: 提交数据
         run: |

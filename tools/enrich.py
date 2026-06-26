@@ -115,8 +115,10 @@ def main():
     if not codes:
         print("无待富集基金"); return
     os.makedirs(OUT_DIR, exist_ok=True)
+    print(f"待富集 {len(codes)} 只：{codes}")
     index = []
-    for code in codes:
+    for i, code in enumerate(codes, 1):
+        print(f"[{i}/{len(codes)}] 抓取 {code} …")
         try:
             data = enrich_one(ak, code)
         except Exception as e:
