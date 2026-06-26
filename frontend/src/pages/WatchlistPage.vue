@@ -131,7 +131,7 @@ onMounted(refresh)
 <template>
   <div class="page">
     <van-nav-bar title="自选 · 持仓">
-      <template #right><van-icon name="cloud-o" size="20" @click="showSync = true" /></template>
+      <template #right><van-icon name="replay" size="20" @click="showSync = true" /></template>
     </van-nav-bar>
     <div class="page-body">
       <!-- 组合概览 -->
