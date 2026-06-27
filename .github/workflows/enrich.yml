@@ -31,6 +31,10 @@ jobs:
         env:
           PYTHONUNBUFFERED: '1'
         run: python tools/screener.py
+      - name: 富集基金经理（东财经理，requests）
+        env:
+          PYTHONUNBUFFERED: '1'
+        run: python tools/managers.py
       - name: 提交数据
         run: |
           if [[ -n "$(git status --porcelain frontend/public/data)" ]]; then

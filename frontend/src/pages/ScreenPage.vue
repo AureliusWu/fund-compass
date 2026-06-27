@@ -5,11 +5,12 @@ import { showToast } from 'vant'
 import { getFunds, type FundListItem } from '@/api/client'
 import { useWatchlistStore } from '@/stores/watchlist'
 import { loadScreener, type ScreenFund } from '@/utils/screener'
+import { loadManagers, type Manager } from '@/utils/managers'
 import { pct, colorOf } from '@/utils/format'
 
 const router = useRouter()
 const watch = useWatchlistStore()
-const mode = ref<'rank' | 'basic'>('rank') // 默认排行（自带数据、不依赖后端）
+const mode = ref<'rank' | 'basic' | 'manager'>('rank') // 默认排行（自带数据、不依赖后端）
 const q = ref('')
 const type = ref('')
 
@@ -94,9 +95,28 @@ const ranked = computed(() => {
 const rankedTop = computed(() => ranked.value.slice(0, 200))
 function metric(f: ScreenFund): number | null { return f[sortKey.value] }
 
-function switchMode(m: 'rank' | 'basic') {
+// ── 基金经理模式 ──
+const managersAll = ref<Manager[]>([])
+const mgrLoading = ref(false)
+const mgrErr = ref('')
+const expanded = ref('')
+async function ensureManagers() {
+  if (managersAll.value.length || mgrLoading.value) return
+  mgrLoading.value = true; mgrErr.value = ''
+  try { managersAll.value = await loadManagers() }
+  catch { mgrErr.value = '暂无基金经理数据（待富集任务生成后可用）' }
+  finally { mgrLoading.value = false }
+}
+const managerResults = computed(() => {
+  const k = q.value.trim()
+  if (!k || !managersAll.value.length) return []
+  return managersAll.value.filter((m) => m.name.includes(k) || m.company.includes(k)).slice(0, 30)
+})
+
+function switchMode(m: 'rank' | 'basic' | 'manager') {
   mode.value = m
   if (m === 'rank') ensureRank()
+  else if (m === 'manager') ensureManagers()
   else if (!items.value.length) resetBasic()
 }
 function pick(t: string) {
@@ -122,10 +142,12 @@ onMounted(() => {
     <div class="modebar">
       <span :class="{ on: mode === 'rank' }" @click="switchMode('rank')">排行筛选</span>
       <span :class="{ on: mode === 'basic' }" @click="switchMode('basic')">全部 / 搜索</span>
+      <span :class="{ on: mode === 'manager' }" @click="switchMode('manager')">基金经理</span>
     </div>
-    <van-search v-model="q" :placeholder="mode === 'rank' ? '在排行里搜代码/名称' : '代码 / 名称 / 拼音'"
+    <van-search v-model="q"
+      :placeholder="mode === 'manager' ? '输入基金经理姓名（如 张坤）' : mode === 'rank' ? '在排行里搜代码/名称' : '代码 / 名称 / 拼音'"
       @search="mode === 'basic' && resetBasic()" @clear="mode === 'basic' && resetBasic()" />
-    <div class="chips">
+    <div class="chips" v-if="mode !== 'manager'">
       <span v-for="t in (mode === 'rank' ? RANK_TYPES : TYPES)" :key="t" class="chip" :class="{ on: type === t }" @click="pick(t)">
         {{ t || '全部' }}
       </span>
@@ -163,6 +185,28 @@ onMounted(() => {
       </div>
     </template>
 
+    <!-- 基金经理模式 -->
+    <template v-else-if="mode === 'manager'">
+      <div class="page-body" style="padding-top:8px">
+        <van-loading v-if="mgrLoading" style="text-align:center;padding:40px" />
+        <van-empty v-else-if="mgrErr" :description="mgrErr" />
+        <van-empty v-else-if="!q.trim()" description="输入基金经理姓名搜索（如 张坤、葛兰）" />
+        <van-empty v-else-if="!managerResults.length" description="未找到该基金经理" />
+        <van-cell-group v-else inset>
+          <template v-for="m in managerResults" :key="m.id">
+            <van-cell :title="m.name"
+              :label="m.company + ' · 现任 ' + m.codes.length + ' 只 · 任职回报 ' + m.ret + ' · ' + m.scale"
+              is-link @click="expanded = expanded === m.id ? '' : m.id" />
+            <div v-if="expanded === m.id" class="mgr-funds">
+              <div class="mgr-fund" v-for="(c, i) in m.codes" :key="c" @click="router.push('/fund/' + c)">
+                <span class="mf-nm">{{ m.names[i] || c }}</span><span class="mf-code">{{ c }}</span>
+              </div>
+            </div>
+          </template>
+        </van-cell-group>
+      </div>
+    </template>
+
     <!-- 基础模式（后端全量） -->
     <div v-else class="page-body" style="padding-top:8px">
       <div class="hint">共 {{ total }} 只</div>
@@ -195,4 +239,9 @@ onMounted(() => {
 .rk-val { display: flex; flex-direction: column; align-items: flex-end; }
 .rk-m { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .rk-sub { font-size: 11px; color: #c8c9cc; }
+.mgr-funds { background: #f7f8fa; padding: 4px 16px; }
+.mgr-fund { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; font-size: 13px; border-bottom: 0.5px solid #ebedf0; }
+.mgr-fund:last-child { border-bottom: none; }
+.mf-nm { color: #323233; }
+.mf-code { color: #969799; font-variant-numeric: tabular-nums; }
 </style>
