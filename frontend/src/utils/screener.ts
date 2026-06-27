@@ -19,3 +19,22 @@ export async function loadScreener(): Promise<{ funds: ScreenFund[]; updated: st
   cache = { funds: d.funds || [], updated: d.updated || '' }
   return cache
 }
+
+// 详情页类型（可能较细，如「混合型-偏股」）归一到排行的大类
+const CATS = ['指数型', '股票型', '混合型', '债券型', 'QDII', 'FOF']
+export function catOf(t: string | null): string | null {
+  if (!t) return null
+  for (const c of CATS) if (t.includes(c)) return c
+  return null
+}
+
+// 同类更优（V3-7）：同大类、近1年优于当前的基金，按近1年降序取前 n。
+export async function findSimilar(type: string | null, selfCode: string, baseR1y: number | null, n = 6): Promise<ScreenFund[]> {
+  const cat = catOf(type)
+  if (!cat) return []
+  const { funds } = await loadScreener()
+  let arr = funds.filter((f) => f.t === cat && f.c !== selfCode && f.r1y != null)
+  if (baseR1y != null) arr = arr.filter((f) => (f.r1y as number) > baseR1y)
+  arr.sort((a, b) => (b.r1y as number) - (a.r1y as number))
+  return arr.slice(0, n)
+}

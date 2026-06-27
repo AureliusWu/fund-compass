@@ -12,6 +12,7 @@ import { fetchEstimate, type Estimate } from '@/utils/estimate'
 import { getHoldings, type Holding } from '@/utils/holdings'
 import { templateInterpret, llmInterpret } from '@/utils/interpret'
 import { getAiConfig, setAiConfig, hasAiKey, providerDef, PROVIDERS, type AiConfig } from '@/utils/ai'
+import { findSimilar, type ScreenFund } from '@/utils/screener'
 import type { FundDetail, ScoreResp, SignalResp, BacktestResp } from '@/api/client'
 
 const route = useRoute()
@@ -63,6 +64,20 @@ function saveCfg() {
   setAiConfig(aiCfg.value)
   aiReady.value = hasAiKey()
   showToast(aiReady.value ? '已保存 AI 配置' : '已清空')
+}
+
+// 同类更优（V3-7）：按需加载排行数据，避免详情页自动拉大文件
+const similar = ref<ScreenFund[]>([])
+const simLoading = ref(false)
+const simDone = ref(false)
+async function loadSimilar() {
+  if (simDone.value || simLoading.value || !detail.value) return
+  simLoading.value = true
+  try {
+    similar.value = await findSimilar(detail.value.type, code, detail.value.ret_1y)
+  } catch { /* 无排行数据 */ } finally {
+    simLoading.value = false; simDone.value = true
+  }
 }
 
 onMounted(async () => {
@@ -235,6 +250,21 @@ async function toggleWatch() {
           </div>
         </template>
 
+        <div class="sec">同类更优</div>
+        <div class="card">
+          <van-button v-if="!simDone" size="small" block plain icon="bar-chart-o" :loading="simLoading"
+            @click="loadSimilar">查看同类近1年更优的基金</van-button>
+          <template v-else-if="similar.length">
+            <div class="sim" v-for="f in similar" :key="f.c" @click="router.push('/fund/' + f.c)">
+              <span class="sim-nm">{{ f.n }}<em>{{ f.c }}</em></span>
+              <span class="sim-r" :style="{ color: colorOf(f.r1y) }">{{ pct(f.r1y) }}</span>
+              <span class="sim-fee">费 {{ f.fee != null ? f.fee + '%' : '--' }}</span>
+            </div>
+            <div class="sim-note">同类型中近1年收益高于本基金者（数据来自选基排行）。</div>
+          </template>
+          <van-empty v-else description="本基金已属同类前列，或暂无排行数据" image-size="50" />
+        </div>
+
         <template v-if="bt">
           <div class="sec">策略回测</div>
           <div class="card" v-if="bt.available && bt.strategy && bt.benchmark">
@@ -343,4 +373,11 @@ async function toggleWatch() {
 .prov-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .prov-chips .pchip { font-size: 12px; color: #646566; background: #f2f3f5; border-radius: 12px; padding: 3px 10px; }
 .prov-chips .pchip.on { color: #fff; background: #0f9d75; }
+.sim { display: flex; align-items: center; font-size: 12px; padding: 8px 0; border-bottom: 0.5px solid #f2f3f5; }
+.sim:last-of-type { border-bottom: none; }
+.sim-nm { flex: 1; color: #323233; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sim-nm em { font-style: normal; color: #c8c9cc; font-size: 10px; margin-left: 4px; }
+.sim-r { width: 70px; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+.sim-fee { width: 64px; text-align: right; color: #969799; }
+.sim-note { font-size: 11px; color: #c8c9cc; margin-top: 8px; line-height: 1.5; }
 </style>
