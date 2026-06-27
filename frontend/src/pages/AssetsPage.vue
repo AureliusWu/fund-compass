@@ -10,6 +10,7 @@ import { computeAttribution } from '@/utils/attribution'
 import { exportHoldingsCSV } from '@/utils/export'
 import { loadSnapshots, takeSnapshot, buildSnapChart } from '@/utils/snapshots'
 import { computeAssetClass, REFERENCE_ALLOCATION, CLASS_COLORS, type AssetClass } from '@/utils/assetclass'
+import { stressTest, computeStyleBox, rebalancePlan, computeCorrelation, type StyleBoxItem, type StressResult, type RebalanceAction, type CorrMatrix } from '@/utils/diagnostics'
 
 const router = useRouter()
 const watch = useWatchlistStore()
@@ -113,6 +114,50 @@ const classBars = computed(() => {
   const order: AssetClass[] = ['权益', '固收', '混合', '海外', '现金']
   return order.map((cls) => ({ cls, actual: map.get(cls) || 0, ref: REFERENCE_ALLOCATION[cls] }))
 })
+
+// V4-3 组合诊断
+const diagLoading = ref(false)
+const styleBox = ref<StyleBoxItem[]>([])
+const stressRes = ref<StressResult[]>([])
+const rebalance = ref<RebalanceAction[]>([])
+const corrMatrix = ref<CorrMatrix | null>(null)
+const diagErr = ref('')
+
+async function runDiagnostics() {
+  if (diagLoading.value) return
+  diagLoading.value = true; diagErr.value = ''
+  try {
+    // 风格箱（同步，不需要额外数据）
+    styleBox.value = computeStyleBox(
+      holdings.value.map((h) => ({ code: h.code, name: h.name, type: h.type, value: h.value })),
+    )
+
+    // 压力测试
+    const cls = assetClass.value.classes
+    const eq = cls.find((c) => c.cls === '权益')?.pct || 0
+    const bd = cls.find((c) => c.cls === '固收')?.pct || 0
+    const ca = cls.find((c) => c.cls === '现金')?.pct || 0
+    const ov = cls.find((c) => c.cls === '海外')?.pct || 0
+    stressRes.value = stressTest({
+      equityPct: eq, bondPct: bd, cashPct: ca, overseasPct: ov,
+      totalValue: total.value.value,
+    })
+
+    // 再平衡
+    rebalance.value = rebalancePlan(
+      assetClass.value.classes.map((c) => ({ cls: c.cls, pct: c.pct, value: c.value })),
+      REFERENCE_ALLOCATION as unknown as Record<string, number>,
+      total.value.value,
+    )
+
+    // 相关性（异步，需拉净值）
+    corrMatrix.value = await computeCorrelation(
+      holdings.value.map((h) => ({ code: h.code, name: h.name })),
+    )
+  } catch (e) {
+    diagErr.value = e instanceof Error ? e.message : '诊断失败'
+  } finally { diagLoading.value = false }
+}
 
 // 按账户聚合
 interface Group { key: string; value: number; cost: number; profit: number; count: number; today: number | null }
@@ -229,6 +274,80 @@ onMounted(refresh)
             <div class="class-tip" v-if="assetClass.tip">{{ assetClass.tip }}</div>
           </div>
         </template>
+
+        <!-- V4-3 组合诊断 -->
+        <div class="sec">组合诊断</div>
+        <div class="card">
+          <van-button plain icon="gem-o" size="small" :loading="diagLoading" @click="runDiagnostics" block>
+            运行诊断（风格箱 · 压力测试 · 再平衡 · 相关性）
+          </van-button>
+          <div class="diag-err" v-if="diagErr">{{ diagErr }}</div>
+
+          <!-- 风格箱 -->
+          <template v-if="styleBox.length">
+            <div class="diag-sub">风格箱</div>
+            <div class="style-grid">
+              <div class="style-box" v-for="s in styleBox" :key="s.code">
+                <span class="sb-name">{{ s.name }}</span>
+                <span class="sb-style">{{ s.style }}</span>
+                <span class="sb-pct">{{ s.pct.toFixed(1) }}%</span>
+              </div>
+            </div>
+          </template>
+
+          <!-- 压力测试 -->
+          <template v-if="stressRes.length">
+            <div class="diag-sub">压力测试</div>
+            <div class="stress-grid">
+              <div class="st-card" v-for="s in stressRes" :key="s.name">
+                <div class="st-name">{{ s.name }}</div>
+                <div class="st-desc">{{ s.desc }}</div>
+                <div class="st-pnl" :style="{ color: s.pnl <= 0 ? '#07c160' : '#ee0a24' }">
+                  {{ s.pnl >= 0 ? '+' : '' }}{{ s.pnl.toLocaleString('zh-CN', { maximumFractionDigits: 0 }) }}
+                </div>
+                <div class="st-pct" :style="{ color: s.pnlPct <= 0 ? '#07c160' : '#ee0a24' }">
+                  {{ s.pnlPct >= 0 ? '+' : '' }}{{ s.pnlPct.toFixed(2) }}%
+                </div>
+              </div>
+            </div>
+            <div class="diag-note">基于大类资产配置的历史场景模拟，不代表未来。</div>
+          </template>
+
+          <!-- 再平衡路线图 -->
+          <template v-if="rebalance.length">
+            <div class="diag-sub">再平衡路线图</div>
+            <div class="rb-row" v-for="r in rebalance" :key="r.cls">
+              <span class="rb-cls">{{ r.cls }}</span>
+              <span class="rb-cur">{{ r.current.toFixed(1) }}%</span>
+              <span class="rb-arr">→</span>
+              <span class="rb-tgt">{{ r.target }}%</span>
+              <span class="rb-act" :style="{
+                color: r.action === '加仓' ? '#ee0a24' : r.action === '减仓' ? '#07c160' : '#969799',
+              }">{{ r.action }}</span>
+              <span class="rb-detail">{{ r.detail }}</span>
+            </div>
+          </template>
+
+          <!-- 相关性矩阵 -->
+          <template v-if="corrMatrix && corrMatrix.pairs.length">
+            <div class="diag-sub">相关性矩阵</div>
+            <div class="corr-pairs">
+              <div class="corr-pair" v-for="p in corrMatrix.pairs.sort((a, b) => b.corr - a.corr).slice(0, 10)" :key="p.a + p.b">
+                <span class="cp-names">{{ p.aName }} ↔ {{ p.bName }}</span>
+                <van-progress :percentage="((p.corr + 1) / 2) * 100" :show-pivot="false"
+                  :color="p.corr > 0.7 ? '#ee0a24' : p.corr > 0.4 ? '#ff976a' : '#0f9d75'"
+                  track-color="var(--border)" style="flex:1;margin:0 8px" />
+                <span class="cp-val" :style="{
+                  color: p.corr > 0.7 ? '#ee0a24' : p.corr > 0.4 ? '#ff976a' : '#0f9d75',
+                }">{{ p.corr.toFixed(2) }}</span>
+              </div>
+            </div>
+            <div class="corr-note" v-if="corrMatrix.pairs.some((p) => p.corr > 0.8)">
+              ⚠ 部分持仓相关性 &gt; 0.8，组合分散化效果较弱
+            </div>
+            <div class="corr-note" v-else>组合内基金相关性在合理范围。</div>
+          </template>
+        </div>
 
         <!-- 账户明细 -->
         <div class="sec">账户明细</div>
@@ -351,4 +470,30 @@ onMounted(refresh)
 .cb-pct { width: 42px; text-align: right; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
 .class-ref { font-size: 11px; color: var(--text-hint); margin-top: 6px; }
 .class-tip { font-size: 12px; color: #e6a23c; margin-top: 4px; }
+/* ── V4-3 组合诊断 ── */
+.diag-err { font-size: 12px; color: #ee0a24; margin-top: 6px; }
+.diag-sub { font-size: 14px; font-weight: 600; color: var(--text); margin: 16px 0 8px; }
+.diag-note { font-size: 11px; color: var(--text-hint); margin-top: 4px; }
+.style-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.style-box { background: var(--chip-bg); border-radius: 8px; padding: 8px; text-align: center; }
+.sb-name { display: block; font-size: 12px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sb-style { display: block; font-size: 10px; color: var(--text-muted); }
+.sb-pct { display: block; font-size: 14px; font-weight: 700; color: var(--teal); }
+.stress-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.st-card { background: var(--chip-bg); border-radius: 8px; padding: 8px; text-align: center; }
+.st-name { font-size: 12px; font-weight: 600; color: var(--text); }
+.st-desc { font-size: 10px; color: var(--text-hint); margin: 2px 0; }
+.st-pnl { font-size: 15px; font-weight: 700; }
+.st-pct { font-size: 11px; font-weight: 600; }
+.rb-row { font-size: 12px; display: flex; align-items: center; gap: 6px; padding: 4px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.rb-cls { width: 36px; font-weight: 600; color: var(--text); }
+.rb-cur, .rb-tgt { width: 38px; text-align: right; font-variant-numeric: tabular-nums; }
+.rb-arr { color: var(--text-hint); }
+.rb-act { width: 32px; font-weight: 600; }
+.rb-detail { flex: 1; min-width: 140px; color: var(--text-muted); }
+.corr-pairs { display: flex; flex-direction: column; gap: 4px; }
+.corr-pair { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+.cp-names { width: 100px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-secondary); }
+.cp-val { width: 32px; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+.corr-note { font-size: 11px; color: #e6a23c; margin-top: 4px; }
 </style>

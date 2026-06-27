@@ -12,7 +12,9 @@ const router = createRouter({
     { path: '/assets', name: 'assets', component: () => import('@/pages/AssetsPage.vue'), meta: { title: '资产' } },
     { path: '/lookthrough', name: 'lookthrough', component: () => import('@/pages/LookthroughPage.vue'), meta: { title: '持仓穿透' } },
     { path: '/fund/:code', name: 'fund', component: () => import('@/pages/FundDetailPage.vue'), meta: { title: '基金详情' } },
-    { path: '/report/:code', name: 'report', component: () => import('@/pages/ReportPage.vue'), meta: { title: '体检报告' } }
+    { path: '/report/:code', name: 'report', component: () => import('@/pages/ReportPage.vue'), meta: { title: '体检报告' } },
+    { path: '/backtest', name: 'backtest', component: () => import('@/pages/BacktestPage.vue'), meta: { title: '回测实验室' } },
+    { path: '/story', name: 'story', component: () => import('@/pages/StoryPage.vue'), meta: { title: '数据故事' } }
   ]
 })
 
