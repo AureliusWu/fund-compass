@@ -10,7 +10,8 @@ import Chart from '@/components/Chart.vue'
 import DcaCalc from '@/components/DcaCalc.vue'
 import { fetchEstimate, type Estimate } from '@/utils/estimate'
 import { getHoldings, type Holding } from '@/utils/holdings'
-import { templateInterpret, llmInterpret, getAiKey, setAiKey } from '@/utils/interpret'
+import { templateInterpret, llmInterpret } from '@/utils/interpret'
+import { getAiConfig, setAiConfig, hasAiKey, providerDef, PROVIDERS, type AiConfig } from '@/utils/ai'
 import type { FundDetail, ScoreResp, SignalResp, BacktestResp } from '@/api/client'
 
 const route = useRoute()
@@ -38,11 +39,13 @@ const COMP_NAMES: Record<string, string> = { return: '收益', risk: '风险', m
 const interp = computed(() =>
   detail.value ? templateInterpret(detail.value, score.value, signal.value, bt.value) : null,
 )
-const aiKey = ref(getAiKey())
+const aiCfg = ref<AiConfig>(getAiConfig())
+const aiReady = ref(hasAiKey())
 const aiText = ref('')
 const aiLoading = ref(false)
 const aiErr = ref('')
-const keyShow = ref(false)
+const cfgShow = ref(false)
+const curDef = computed(() => providerDef(aiCfg.value.provider))
 
 async function runAi() {
   if (!detail.value) return
@@ -55,9 +58,11 @@ async function runAi() {
     aiLoading.value = false
   }
 }
-function saveKey() {
-  setAiKey(aiKey.value.trim())
-  showToast(aiKey.value.trim() ? '已保存 key' : '已清空')
+function saveCfg() {
+  aiCfg.value.apiKey = aiCfg.value.apiKey.trim()
+  setAiConfig(aiCfg.value)
+  aiReady.value = hasAiKey()
+  showToast(aiReady.value ? '已保存 AI 配置' : '已清空')
 }
 
 onMounted(async () => {
@@ -152,7 +157,7 @@ async function toggleWatch() {
         <div class="card interp" v-if="interp">
           <div class="verdict" :class="interp.tone">{{ interp.verdict }}</div>
           <div v-if="aiText" class="ai-box">
-            <div class="ai-tag">Claude 解读</div>
+            <div class="ai-tag">AI 解读 · {{ curDef.label }}</div>
             <div class="ai-text">{{ aiText }}</div>
           </div>
           <div class="isec" v-for="(x, i) in interp.sections" :key="i">
@@ -161,12 +166,13 @@ async function toggleWatch() {
           <div v-if="aiErr" class="ai-err">{{ aiErr }}</div>
           <div class="ai-bar">
             <van-button size="mini" plain type="primary" :loading="aiLoading"
-              @click="aiKey ? runAi() : (keyShow = true)">
-              {{ aiKey ? (aiText ? '用 Claude 重写' : '用 Claude 生成') : '配置 Claude key' }}
+              @click="aiReady ? runAi() : (cfgShow = true)">
+              {{ aiReady ? (aiText ? '重新生成' : 'AI 生成解读') : '配置 AI' }}
             </van-button>
-            <van-icon v-if="aiKey" name="setting-o" size="17" color="#c8c9cc" @click="keyShow = true" />
+            <van-icon v-if="aiReady" name="setting-o" size="17" color="#c8c9cc" @click="cfgShow = true" />
+            <span v-if="aiReady" class="ai-prov">{{ curDef.label }}</span>
           </div>
-          <div class="ai-hint">上为规则解读，免费离线。配置自带 Anthropic key 可让 Claude 生成更自然的点评（按量计费）。</div>
+          <div class="ai-hint">上为规则解读，免费离线。配置 AI（DeepSeek / 通义 / OpenAI / Claude… 自带 Key）可生成更自然的点评（按量计费）。</div>
           <div v-if="!aiText" class="disc">以上为数据解读，仅供个人参考，不构成投资建议。</div>
         </div>
 
@@ -262,10 +268,16 @@ async function toggleWatch() {
       </template>
     </div>
 
-    <van-dialog v-model:show="keyShow" title="Anthropic API Key" show-cancel-button @confirm="saveKey">
+    <van-dialog v-model:show="cfgShow" title="AI 配置" show-cancel-button @confirm="saveCfg">
       <div style="padding:10px 14px">
-        <van-field v-model="aiKey" type="password" placeholder="sk-ant-..." />
-        <div class="kd-hint">key 仅存于本机浏览器，调用时浏览器直连 Anthropic，按量计费（Pro 会员不含 API 额度）。<a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">获取 key</a></div>
+        <div class="prov-chips">
+          <span v-for="p in PROVIDERS" :key="p.id" :class="['pchip', { on: aiCfg.provider === p.id }]"
+            @click="aiCfg.provider = p.id">{{ p.label }}</span>
+        </div>
+        <van-field v-model="aiCfg.apiKey" type="password" label="Key" :placeholder="curDef.keyHint" />
+        <van-field v-model="aiCfg.baseUrl" label="Base URL" :placeholder="curDef.baseUrl || '必填'" />
+        <van-field v-model="aiCfg.model" label="模型" :placeholder="curDef.model || '必填'" />
+        <div class="kd-hint">Key 仅存本机浏览器，浏览器直连该服务商按量计费。Base URL / 模型留空用默认值。<a v-if="curDef.getKeyUrl" :href="curDef.getKeyUrl" target="_blank" rel="noopener">获取 {{ curDef.label }} Key</a></div>
       </div>
     </van-dialog>
   </div>
@@ -327,4 +339,8 @@ async function toggleWatch() {
 .disc { font-size: 11px; color: #c8c9cc; margin-top: 8px; }
 .kd-hint { font-size: 11px; color: #969799; line-height: 1.6; margin-top: 8px; }
 .kd-hint a { color: #0f9d75; }
+.ai-prov { font-size: 11px; color: #969799; }
+.prov-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.prov-chips .pchip { font-size: 12px; color: #646566; background: #f2f3f5; border-radius: 12px; padding: 3px 10px; }
+.prov-chips .pchip.on { color: #fff; background: #0f9d75; }
 </style>

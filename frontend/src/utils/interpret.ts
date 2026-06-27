@@ -2,13 +2,10 @@
 // B 规则模板：把评分四维 / 三层信号 / 回测合成中文点评，纯前端、免费、离线、稳定。
 // A LLM：用用户自带 Anthropic key（存本机），浏览器直连 api.anthropic.com，措辞更自然。
 import type { FundDetail, ScoreResp, SignalResp, BacktestResp } from '@/api/client'
+import { chat } from './ai'
 
 export interface InterpSection { h: string; t: string }
 export interface Interpretation { verdict: string; tone: 'good' | 'mid' | 'weak'; sections: InterpSection[] }
-
-const KEY = 'sinan_ai_key'
-export const getAiKey = (): string => { try { return localStorage.getItem(KEY) || '' } catch { return '' } }
-export const setAiKey = (v: string): void => { try { v ? localStorage.setItem(KEY, v) : localStorage.removeItem(KEY) } catch { /* ignore */ } }
 
 function pctStr(n: number | null | undefined): string {
   if (n == null || Number.isNaN(n)) return '—'
@@ -93,15 +90,10 @@ export function templateInterpret(
   return { verdict, tone, sections }
 }
 
-// ── A：LLM 解读（用户自带 Anthropic key，浏览器直连）──────
-interface AnthropicResp { content?: { type: string; text?: string }[]; error?: { message?: string } }
-
+// ── A：LLM 解读（用户自带 Key，浏览器直连，Provider 见 utils/ai）──────
 export async function llmInterpret(
   detail: FundDetail, score: ScoreResp | null, signal: SignalResp | null, bt: BacktestResp | null,
 ): Promise<string> {
-  const key = getAiKey()
-  if (!key) throw new Error('未配置 Anthropic API key')
-
   const comp = score?.components
   const facts = {
     名称: detail.name, 类型: detail.type, 规模亿: detail.scale,
@@ -121,24 +113,5 @@ export async function llmInterpret(
     '口吻客观克制，不夸大、不做收益承诺，不构成投资建议。不要罗列原始字段，要像分析师口吻自然成段。' +
     '结尾另起一行加：「以上为数据解读，仅供个人参考，不构成投资建议。」'
 
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': key,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-    },
-    body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 700,
-      system,
-      messages: [{ role: 'user', content: '基金数据：\n' + JSON.stringify(facts) }],
-    }),
-  })
-  const json = (await res.json().catch(() => ({}))) as AnthropicResp
-  if (!res.ok) throw new Error(`API ${res.status}：${json.error?.message || '调用失败，检查 key / 余额 / 网络'}`)
-  const text = (json.content || []).filter((b) => b.type === 'text').map((b) => b.text || '').join('').trim()
-  if (!text) throw new Error('返回为空')
-  return text
+  return chat(system, '基金数据：\n' + JSON.stringify(facts))
 }
