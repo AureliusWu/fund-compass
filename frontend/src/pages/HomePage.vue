@@ -13,19 +13,17 @@ const funds = useFundsStore()
 const health = ref('检查中…')
 const sigs = reactive<Record<string, string>>({})
 
-onMounted(async () => {
-  try {
-    const r = await getHealth()
-    health.value = `正常 · 收录 ${r.universe} 只`
-  } catch {
-    health.value = '未连接（请启动后端）'
-  }
-  try {
-    await watch.load(true)
-    await Promise.all(watch.items.map(async (it) => {
+onMounted(() => {
+  // 后端健康检查非阻塞：Render 冷启动时也不卡住自选信号加载
+  getHealth()
+    .then((r) => { health.value = `正常 · 收录 ${r.universe} 只` })
+    .catch(() => { health.value = '未连接（请启动后端）' })
+  // 自选信号与健康检查并行；首屏（指数条 + 温度骨架）立即可见
+  watch.load(true)
+    .then(() => Promise.all(watch.items.map(async (it) => {
       try { sigs[it.code] = (await funds.signal(it.code)).signal } catch { /* skip */ }
-    }))
-  } catch { /* skip */ }
+    })))
+    .catch(() => { /* skip */ })
 })
 
 const SIG_WEIGHT: Record<string, number> = { 买入: 100, 定投: 70, 持有: 45, 减仓: 15 }

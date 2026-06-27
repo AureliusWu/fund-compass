@@ -1,6 +1,8 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { VitePWA } from 'vite-plugin-pwa'
+import Components from 'unplugin-vue-components/vite'
+import { VantResolver } from '@vant/auto-import-resolver'
 import { fileURLToPath, URL } from 'node:url'
 
 // 部署在 GitHub Pages 子路径下：https://aureliuswu.github.io/fund-compass/
@@ -8,6 +10,8 @@ export default defineConfig({
   base: '/fund-compass/',
   plugins: [
     vue(),
+    // Vant 组件按需自动引入；importStyle:false → 复用 main.ts 的全量 CSS，避免缺样式
+    Components({ resolvers: [VantResolver({ importStyle: false })] }),
     VitePWA({
       registerType: 'autoUpdate',
       workbox: {
