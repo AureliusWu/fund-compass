@@ -269,7 +269,7 @@ onMounted(refresh)
     </van-popup>
 
     <!-- V5-0 导入基金 -->
-    <van-popup v-model:show="importShow" position="bottom" round :style="{ padding: '16px', maxHeight: '70vh' }">
+    <van-popup v-model:show="importShow" position="bottom" round :safe-area-inset-bottom="true" :style="{ padding: '16px', paddingBottom: '66px', maxHeight: '70vh' }">
       <div class="sync-title">导入基金</div>
       <div class="sync-sub">输入代码或名称模糊搜索，点击添加到自选。</div>
       <van-field v-model="importQuery" placeholder="例如：沪深300 或 000300" @update:model-value="onImportInput" clearable>

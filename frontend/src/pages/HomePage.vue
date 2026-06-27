@@ -86,7 +86,14 @@ const gaugeAngle = computed(() => {
 
 <template>
   <div class="page">
-    <van-nav-bar title="司南基金" />
+    <van-nav-bar>
+      <template #title>
+        <div style="text-align:center">
+          <div style="font-size:16px;font-weight:600;line-height:1.2">司南基金</div>
+          <div style="font-size:10px;color:var(--text-hint);font-weight:400;line-height:1.2">v5.0.0</div>
+        </div>
+      </template>
+    </van-nav-bar>
     <IndexBar />
 
     <div class="page-body">

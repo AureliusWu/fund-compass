@@ -48,11 +48,31 @@ const aiErr = ref('')
 const cfgShow = ref(false)
 const curDef = computed(() => providerDef(aiCfg.value.provider))
 
+// 持久化 AI 解读（按基金代码缓存，离开页面不丢失）
+const AI_CACHE_KEY = 'sinan_ai_text'
+function loadAiCache(c: string) {
+  try {
+    const m = JSON.parse(localStorage.getItem(AI_CACHE_KEY) || '{}')
+    return m[c] || ''
+  } catch { return '' }
+}
+function saveAiCache(c: string, t: string) {
+  try {
+    const m = JSON.parse(localStorage.getItem(AI_CACHE_KEY) || '{}')
+    m[c] = t
+    localStorage.setItem(AI_CACHE_KEY, JSON.stringify(m))
+  } catch { /* quota */ }
+}
+// 挂载时恢复缓存
+aiText.value = loadAiCache(code)
+
 async function runAi() {
   if (!detail.value) return
   aiErr.value = ''; aiText.value = ''; aiLoading.value = true
   try {
-    aiText.value = await llmInterpret(detail.value, score.value, signal.value, bt.value)
+    const text = await llmInterpret(detail.value, score.value, signal.value, bt.value)
+    aiText.value = text
+    saveAiCache(code, text)
   } catch (e) {
     aiErr.value = e instanceof Error ? e.message : 'AI 解读失败'
   } finally {
