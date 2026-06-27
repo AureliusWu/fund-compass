@@ -7,6 +7,7 @@
 - 情绪层：RSI(14)。
 RSI/MA 用纯 Python 计算（单序列足够），pandas-ta 留待更复杂指标。
 """
+import math
 
 
 def _navs(nav_history, n=None):
@@ -53,12 +54,28 @@ def _rsi(vals, period=14):
     return round(100 - 100 / (1 + rs), 1)
 
 
-def valuation_layer(nav_history, window=756):
-    vals = _navs(nav_history, window)
-    if len(vals) < 60:
-        return {"label": "数据不足", "value": 0, "percentile": None,
-                "note": "净值历史不足，无法估值"}
-    pct = _percentile(vals, vals[-1])
+def valuation_layer(nav_history, window=504):
+    """去趋势净值分位估值（对数线性回归残差）。
+
+    旧法用「当前净值在历史中的绝对分位」，对长牛基金恒为高分位 → 永远误判高估。
+    新法：把复权净值拟合到指数趋势线（对 log 做最小二乘），取当前点相对趋势线的「残差」
+    在历史残差中的分位。稳步贴着趋势涨 → 残差≈0 → 合理；显著偏离趋势上方/下方 → 高估/低估。
+    （真·指数 PE/PB 分位需付费/鉴权数据源，暂以此去趋势代理替代，语义更稳。）
+    """
+    vals = _series(nav_history, window)  # 分红复权，取近 window
+    n = len(vals)
+    if n < 120 or any(v <= 0 for v in vals):
+        return {"label": "数据不足", "value": 0, "percentile": None, "note": "净值历史不足，无法估值"}
+    ys = [math.log(v) for v in vals]
+    xs = list(range(n))
+    mx = (n - 1) / 2.0
+    my = sum(ys) / n
+    sxx = sum((x - mx) ** 2 for x in xs)
+    sxy = sum((xs[i] - mx) * (ys[i] - my) for i in range(n))
+    b = sxy / sxx if sxx else 0.0
+    a = my - b * mx
+    resid = [ys[i] - (a + b * xs[i]) for i in range(n)]
+    pct = _percentile(resid, resid[-1])
     if pct < 30:
         label, value = "低估", 1
     elif pct > 70:
@@ -66,7 +83,7 @@ def valuation_layer(nav_history, window=756):
     else:
         label, value = "合理", 0
     return {"label": label, "value": value, "percentile": pct,
-            "note": f"当前净值处于可用历史 {pct}% 分位（净值分位代理，非 PE/PB）"}
+            "note": f"去趋势分位 {pct}%（当前净值相对自身指数趋势的偏离，在历史中的位置；非真·PE/PB）"}
 
 
 def trend_layer(nav_history):
