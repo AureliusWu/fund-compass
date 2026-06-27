@@ -1,5 +1,38 @@
-:root {
+:root,
+[data-theme="light"] {
   --teal: #0f9d75;
+  --bg: #f7f8fa;
+  --card-bg: #ffffff;
+  --text: #323233;
+  --text-secondary: #646566;
+  --text-muted: #969799;
+  --text-hint: #c8c9cc;
+  --border: #ebedf0;
+  --chip-bg: #f2f3f5;
+  --mgr-bg: #f7f8fa;
+  --ai-box-bg: #f0faf6;
+  --ai-box-border: #d6efe4;
+  --nl-tag-bg: #e8f7f1;
+  --nl-tag-warn-bg: #fff3e0;
+  --shadow: none;
+}
+
+[data-theme="dark"] {
+  --teal: #2dd4a8;
+  --bg: #0f0f1a;
+  --card-bg: #1a1a2e;
+  --text: #e8e8ec;
+  --text-secondary: #a0a0b0;
+  --text-muted: #6a6a7a;
+  --text-hint: #4a4a5a;
+  --border: #2a2a3e;
+  --chip-bg: #252540;
+  --mgr-bg: #1e1e32;
+  --ai-box-bg: #0f2a22;
+  --ai-box-border: #1a4a3a;
+  --nl-tag-bg: #1a3a2e;
+  --nl-tag-warn-bg: #3a2a10;
+  --shadow: 0 1px 3px rgba(0,0,0,0.3);
 }
 
 * { box-sizing: border-box; }
@@ -10,10 +43,63 @@ html, body, #app {
 }
 
 body {
-  background: #f7f8fa;
-  color: #323233;
+  background: var(--bg);
+  color: var(--text);
   font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
+}
+
+/* Vant 组件暗黑适配：van-cell / van-nav-bar / van-tabbar 等通过 CSS 变量覆盖 */
+[data-theme="dark"] {
+  --van-background: var(--bg);
+  --van-background-2: var(--card-bg);
+  --van-text-color: var(--text);
+  --van-text-color-2: var(--text-muted);
+  --van-border-color: var(--border);
+  --van-gray-1: #1a1a2e;
+  --van-gray-2: #252540;
+  --van-gray-3: #2a2a3e;
+  --van-nav-bar-background: var(--card-bg);
+  --van-nav-bar-text-color: var(--text);
+  --van-tabbar-background: var(--card-bg);
+  --van-tabbar-item-text-color: var(--text-muted);
+  --van-tabbar-item-active-color: var(--teal);
+  --van-cell-background: var(--card-bg);
+  --van-cell-text-color: var(--text);
+  --van-cell-group-background: transparent;
+  --van-search-background: var(--card-bg);
+  --van-dialog-background: var(--card-bg);
+  --van-dialog-text-color: var(--text);
+  --van-field-input-text-color: var(--text);
+  --van-field-label-color: var(--text-secondary);
+  --van-button-default-background: var(--chip-bg);
+  --van-button-default-border-color: var(--border);
+  --van-loading-text-color: var(--text-muted);
+  --van-overlay-background: rgba(0,0,0,0.6);
+  --van-empty-description-color: var(--text-muted);
+  --van-toast-background: var(--card-bg);
+  --van-toast-text-color: var(--text);
+}
+
+/* 通用调整 */
+[data-theme="dark"] .card {
+  box-shadow: var(--shadow);
+}
+
+[data-theme="dark"] input,
+[data-theme="dark"] textarea {
+  background: var(--chip-bg);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+[data-theme="dark"] .nl-box textarea {
+  background: var(--chip-bg);
+  color: var(--text);
+}
+
+[data-theme="dark"] .van-search__content {
+  background: var(--chip-bg);
 }
 
 .page {

@@ -7,10 +7,13 @@ import { useWatchlistStore } from '@/stores/watchlist'
 import { loadScreener, type ScreenFund } from '@/utils/screener'
 import { loadManagers, type Manager } from '@/utils/managers'
 import { pct, colorOf } from '@/utils/format'
+import { parseQuery, applySpec, specSummary } from '@/utils/nlselect'
+import type { FilterSpec } from '@/utils/nlselect'
+import { exportRankCSV } from '@/utils/export'
 
 const router = useRouter()
 const watch = useWatchlistStore()
-const mode = ref<'rank' | 'basic' | 'manager'>('rank') // 默认排行（自带数据、不依赖后端）
+const mode = ref<'rank' | 'basic' | 'manager' | 'nl'>('rank') // 默认排行（自带数据、不依赖后端）
 const q = ref('')
 const type = ref('')
 
@@ -113,10 +116,38 @@ const managerResults = computed(() => {
   return managersAll.value.filter((m) => m.name.includes(k) || m.company.includes(k)).slice(0, 30)
 })
 
-function switchMode(m: 'rank' | 'basic' | 'manager') {
+// ── 自然语言模式（V3-6：用户一句话 → LLM 解析 → 套用排行筛选）──
+const nlQuery = ref('')
+const nlSpec = ref<FilterSpec | null>(null)
+const nlLoading = ref(false)
+const nlErr = ref('')
+const nlDone = ref(false)
+const nlFiltered = ref<ScreenFund[]>([])
+const nlTop = computed(() => nlFiltered.value.slice(0, 200))
+
+async function runNlSearch() {
+  const q = nlQuery.value.trim()
+  if (!q) return
+  nlErr.value = ''; nlSpec.value = null; nlFiltered.value = []; nlDone.value = false
+  nlLoading.value = true
+  try {
+    // 并行：解析 NL + 加载排行数据
+    const [spec, { funds }] = await Promise.all([parseQuery(q), loadScreener()])
+    nlSpec.value = spec
+    nlFiltered.value = applySpec(funds, spec)
+  } catch (e) {
+    nlErr.value = e instanceof Error ? e.message : '解析失败'
+  } finally {
+    nlLoading.value = false; nlDone.value = true
+    if (!rankAll.value.length) rankAll.value = (await loadScreener().catch(() => ({ funds: [], updated: '' }))).funds
+  }
+}
+
+function switchMode(m: 'rank' | 'basic' | 'manager' | 'nl') {
   mode.value = m
   if (m === 'rank') ensureRank()
   else if (m === 'manager') ensureManagers()
+  else if (m === 'nl') ensureRank() // NL 依赖排行数据，静默预加载
   else if (!items.value.length) resetBasic()
 }
 function pick(t: string) {
@@ -141,13 +172,14 @@ onMounted(() => {
     <van-nav-bar title="选基" />
     <div class="modebar">
       <span :class="{ on: mode === 'rank' }" @click="switchMode('rank')">排行筛选</span>
+      <span :class="{ on: mode === 'nl' }" @click="switchMode('nl')">AI 选基</span>
       <span :class="{ on: mode === 'basic' }" @click="switchMode('basic')">全部 / 搜索</span>
       <span :class="{ on: mode === 'manager' }" @click="switchMode('manager')">基金经理</span>
     </div>
-    <van-search v-model="q"
+    <van-search v-if="mode !== 'nl'" v-model="q"
       :placeholder="mode === 'manager' ? '输入基金经理姓名（如 张坤）' : mode === 'rank' ? '在排行里搜代码/名称' : '代码 / 名称 / 拼音'"
       @search="mode === 'basic' && resetBasic()" @clear="mode === 'basic' && resetBasic()" />
-    <div class="chips" v-if="mode !== 'manager'">
+    <div class="chips" v-if="mode !== 'manager' && mode !== 'nl'">
       <span v-for="t in (mode === 'rank' ? RANK_TYPES : TYPES)" :key="t" class="chip" :class="{ on: type === t }" @click="pick(t)">
         {{ t || '全部' }}
       </span>
@@ -166,7 +198,7 @@ onMounted(() => {
         <van-loading v-if="rankLoading" style="text-align:center;padding:40px" />
         <van-empty v-else-if="rankErr" :description="rankErr" />
         <template v-else>
-          <div class="hint">命中 {{ ranked.length }} 只{{ ranked.length > 200 ? '（显示前 200，缩小筛选看更多）' : '' }} · 数据 {{ rankUpdated }}</div>
+          <div class="hint">命中 {{ ranked.length }} 只{{ ranked.length > 200 ? '（显示前 200，缩小筛选看更多）' : '' }} · 数据 {{ rankUpdated }}<span class="exp-link" @click="exportRankCSV(rankedTop)">导出 CSV</span></div>
           <van-cell v-for="f in rankedTop" :key="f.c" :title="f.n" :label="f.c + ' · ' + f.t" @click="router.push('/fund/' + f.c)">
             <template #value>
               <div class="rk-val">
@@ -207,6 +239,45 @@ onMounted(() => {
       </div>
     </template>
 
+    <!-- 自然语言模式（V3-6） -->
+    <template v-else-if="mode === 'nl'">
+      <div class="nl-box card">
+        <textarea v-model="nlQuery" placeholder="用中文描述你想找的基金，例如：近3年收益超50%的混合型基金，按近3年排序"
+          rows="3" @keydown.ctrl.enter="runNlSearch" @keydown.meta.enter="runNlSearch"></textarea>
+        <van-button class="nl-btn" size="small" type="primary" :loading="nlLoading"
+          @click="runNlSearch" :disabled="!nlQuery.trim()">AI 筛选</van-button>
+        <span class="nl-hint">Ctrl+Enter 发送。需先配置 AI（在基金详情页）。</span>
+      </div>
+      <div class="page-body" style="padding-top:8px">
+        <van-loading v-if="nlLoading" style="text-align:center;padding:40px" />
+        <van-empty v-else-if="nlErr" :description="nlErr" />
+        <template v-else-if="nlDone">
+          <div class="nl-tags" v-if="nlSpec">
+            <span class="nl-tag" v-for="t in specSummary(nlSpec)" :key="t">{{ t }}</span>
+            <span class="nl-tag warn" v-for="u in (nlSpec.unsupported || [])" :key="u">不支持：{{ u }}</span>
+          </div>
+          <van-empty v-if="!nlFiltered.length" description="没有匹配的基金，试试放宽条件" image-size="50" />
+          <template v-else>
+            <div class="hint">命中 {{ nlFiltered.length }} 只{{ nlFiltered.length > 200 ? '（显示前 200）' : '' }}</div>
+            <van-cell v-for="f in nlTop" :key="f.c" :title="f.n" :label="f.c + ' · ' + f.t"
+              @click="router.push('/fund/' + f.c)">
+              <template #value>
+                <div class="rk-val">
+                  <span class="rk-m" :style="{ color: colorOf(f.r1y) }">{{ pct(f.r1y) }}</span>
+                  <span class="rk-sub">近3年 {{ pct(f.r3y) }} · 费 {{ f.fee != null ? f.fee + '%' : '--' }}</span>
+                </div>
+              </template>
+              <template #right-icon>
+                <van-icon :name="watch.has(f.c) ? 'star' : 'star-o'" :color="watch.has(f.c) ? '#ffb400' : '#c8c9cc'"
+                  size="20" style="margin-left:8px" @click.stop="toggleWatch(f.c, f.n)" />
+              </template>
+            </van-cell>
+          </template>
+        </template>
+        <van-empty v-else description="输入筛选条件后点击「AI 筛选」" image-size="60" />
+      </div>
+    </template>
+
     <!-- 基础模式（后端全量） -->
     <div v-else class="page-body" style="padding-top:8px">
       <div class="hint">共 {{ total }} 只</div>
@@ -224,24 +295,33 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.modebar { display: flex; background: #fff; padding: 8px 16px 0; gap: 18px; }
-.modebar span { font-size: 14px; color: #969799; padding-bottom: 8px; border-bottom: 2px solid transparent; }
-.modebar span.on { color: #0f9d75; font-weight: 600; border-bottom-color: #0f9d75; }
-.chips { display: flex; gap: 8px; overflow-x: auto; padding: 8px 16px; background: #fff; }
+.modebar { display: flex; background: var(--card-bg); padding: 8px 16px 0; gap: 18px; }
+.modebar span { font-size: 14px; color: var(--text-muted); padding-bottom: 8px; border-bottom: 2px solid transparent; }
+.modebar span.on { color: var(--teal); font-weight: 600; border-bottom-color: var(--teal); }
+.chips { display: flex; gap: 8px; overflow-x: auto; padding: 8px 16px; background: var(--card-bg); }
 .chips.sorts { padding-top: 0; }
-.chip { flex: none; font-size: 13px; padding: 4px 12px; border-radius: 14px; background: #f2f3f5; color: #646566; white-space: nowrap; }
+.chip { flex: none; font-size: 13px; padding: 4px 12px; border-radius: 14px; background: var(--chip-bg); color: var(--text-secondary); white-space: nowrap; }
 .chip.sm { font-size: 12px; padding: 3px 10px; }
-.chip.on { background: #0f9d75; color: #fff; }
-.filters { display: flex; gap: 12px; padding: 4px 16px 8px; background: #fff; }
-.filters label { font-size: 12px; color: #646566; display: flex; align-items: center; gap: 4px; }
-.filters input { width: 64px; height: 28px; border: 1px solid #ebedf0; border-radius: 6px; padding: 0 8px; font-size: 13px; }
-.hint { font-size: 12px; color: #969799; margin-bottom: 8px; }
+.chip.on { background: var(--teal); color: #fff; }
+.filters { display: flex; gap: 12px; padding: 4px 16px 8px; background: var(--card-bg); }
+.filters label { font-size: 12px; color: var(--text-secondary); display: flex; align-items: center; gap: 4px; }
+.filters input { width: 64px; height: 28px; border: 1px solid var(--border); border-radius: 6px; padding: 0 8px; font-size: 13px; background: var(--card-bg); color: var(--text); }
+.hint { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+.exp-link { color: var(--teal); font-weight: 500; }
 .rk-val { display: flex; flex-direction: column; align-items: flex-end; }
 .rk-m { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.rk-sub { font-size: 11px; color: #c8c9cc; }
-.mgr-funds { background: #f7f8fa; padding: 4px 16px; }
-.mgr-fund { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; font-size: 13px; border-bottom: 0.5px solid #ebedf0; }
+.rk-sub { font-size: 11px; color: var(--text-hint); }
+.mgr-funds { background: var(--mgr-bg); padding: 4px 16px; }
+.mgr-fund { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; font-size: 13px; border-bottom: 0.5px solid var(--border); }
 .mgr-fund:last-child { border-bottom: none; }
-.mf-nm { color: #323233; }
-.mf-code { color: #969799; font-variant-numeric: tabular-nums; }
+.mf-nm { color: var(--text); }
+.mf-code { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+/* ── NL 模式 ── */
+.nl-box { margin: 8px 16px; display: flex; flex-direction: column; gap: 8px; background: var(--card-bg); }
+.nl-box textarea { width: 100%; border: 1px solid var(--border); border-radius: 8px; padding: 10px; font-size: 14px; resize: vertical; font-family: inherit; background: var(--card-bg); color: var(--text); }
+.nl-box .nl-btn { align-self: flex-start; }
+.nl-hint { font-size: 11px; color: var(--text-hint); }
+.nl-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.nl-tag { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: var(--nl-tag-bg); color: var(--teal); }
+.nl-tag.warn { background: var(--nl-tag-warn-bg); color: #e6a23c; }
 </style>

@@ -14,6 +14,23 @@ export interface WatchEntry {
   account?: string  // 所属账户（支付宝/天天基金/券商…，空=未分组）
   updated_at: string
   deleted?: boolean
+  // V3-12 复合键：同一基金在不同账户可分别持有。id = code::account（account 为空时用 ''）。
+  // 迁移旧数据时自动补全；新条目由 setHolding 生成。
+  id?: string
+}
+
+/** 生成/取得复合 ID */
+export function entryId(code: string, account?: string): string {
+  return `${code}::${account || ''}`
+}
+
+/** 迁移：为缺少 id 的旧条目补全 */
+export function migrateEntries(entries: WatchEntry[]): WatchEntry[] {
+  let changed = false
+  for (const e of entries) {
+    if (!e.id) { e.id = entryId(e.code, e.account); changed = true }
+  }
+  return changed ? [...entries] : entries
 }
 
 export const getToken = () => localStorage.getItem(TOKEN_KEY) || ''

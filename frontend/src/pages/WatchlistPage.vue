@@ -9,6 +9,7 @@ import { pct, num, colorOf, signalColor } from '@/utils/format'
 import { fetchEstimates, type Estimate } from '@/utils/estimate'
 import StarRating from '@/components/StarRating.vue'
 import Chart from '@/components/Chart.vue'
+import { exportWatchlistCSV } from '@/utils/export'
 
 interface Row {
   name: string; type: string | null; nav: number | null; ret1y: number | null
@@ -144,7 +145,10 @@ onMounted(refresh)
 <template>
   <div class="page">
     <van-nav-bar title="自选 · 持仓">
-      <template #right><van-icon name="replay" size="20" @click="showSync = true" /></template>
+      <template #right>
+        <van-icon name="down" size="18" style="margin-right:14px" @click="exportWatchlistCSV(watch.items)" />
+        <van-icon name="replay" size="20" @click="showSync = true" />
+      </template>
     </van-nav-bar>
     <div class="page-body">
       <!-- 组合概览 -->
@@ -229,29 +233,29 @@ onMounted(refresh)
 </template>
 
 <style scoped>
-.card { background: #fff; border-radius: 10px; padding: 14px; }
+.card { background: var(--card-bg); border-radius: 10px; padding: 14px; }
 .port { margin-bottom: 12px; }
 .port-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px; }
-.port .k { font-size: 11px; color: #969799; }
+.port .k { font-size: 11px; color: var(--text-muted); }
 .port .big { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .port .r { font-size: 12px; }
-.port-today { font-size: 13px; color: #646566; margin: 2px 0 10px; }
+.port-today { font-size: 13px; color: var(--text-secondary); margin: 2px 0 10px; }
 .port-today b { font-variant-numeric: tabular-nums; font-weight: 600; }
-.port-today-cap { font-size: 11px; color: #c8c9cc; margin-left: 8px; }
-.port-cap { font-size: 11px; color: #c8c9cc; text-align: center; }
+.port-today-cap { font-size: 11px; color: var(--text-hint); margin-left: 8px; }
+.port-cap { font-size: 11px; color: var(--text-hint); text-align: center; }
 .wl-val { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
 .est-chg { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .sig { font-size: 14px; font-weight: 500; }
-.nav { font-size: 12px; color: #646566; }
+.nav { font-size: 12px; color: var(--text-secondary); }
 .nav em { font-style: normal; margin-left: 4px; }
 .sync-title { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
-.sync-sub { font-size: 12px; color: #969799; line-height: 1.6; margin-bottom: 10px; }
-.sync-sub code { background: #f2f3f5; padding: 1px 4px; border-radius: 3px; }
-.sync-sub a { color: #0f9d75; }
-.sync-status { font-size: 12px; color: #646566; margin: 10px 2px; }
+.sync-sub { font-size: 12px; color: var(--text-muted); line-height: 1.6; margin-bottom: 10px; }
+.sync-sub code { background: var(--chip-bg); padding: 1px 4px; border-radius: 3px; }
+.sync-sub a { color: var(--teal); }
+.sync-status { font-size: 12px; color: var(--text-secondary); margin: 10px 2px; }
 .sync-btns { display: flex; gap: 8px; }
 .sync-btns .van-button { flex: 1; }
 .acc-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 16px 4px; }
-.acc-chips .chip { font-size: 12px; color: #646566; background: #f2f3f5; border-radius: 12px; padding: 3px 10px; }
-.acc-chips .chip.on { color: #fff; background: #0f9d75; }
+.acc-chips .chip { font-size: 12px; color: var(--text-secondary); background: var(--chip-bg); border-radius: 12px; padding: 3px 10px; }
+.acc-chips .chip.on { color: #fff; background: var(--teal); }
 </style>

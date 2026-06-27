@@ -2,8 +2,9 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import * as gist from '@/utils/gist'
 import type { WatchEntry } from '@/utils/gist'
+import { entryId, migrateEntries } from '@/utils/gist'
 
-const LS = 'sinan_watchlist_v1'
+const LS = 'sinan_watchlist_v2' // V3-12: 升级到 v2（复合键）
 const PUSH_DELAY = 4000
 const TOMB_DAYS = 30
 
@@ -12,9 +13,16 @@ const nowISO = () => new Date().toISOString()
 function loadLS(): WatchEntry[] {
   try {
     const a = JSON.parse(localStorage.getItem(LS) || '[]')
-    return Array.isArray(a) ? a : []
+    if (!Array.isArray(a)) return []
+    // 迁移 v1 → v2
+    return migrateEntries(a)
   } catch {
-    return []
+    // 尝试迁移旧版 v1 key
+    try {
+      const old = JSON.parse(localStorage.getItem('sinan_watchlist_v1') || '[]')
+      if (!Array.isArray(old) || !old.length) return []
+      return migrateEntries(old)
+    } catch { return [] }
   }
 }
 function saveLS(e: WatchEntry[]) {
@@ -29,12 +37,17 @@ export const useWatchlistStore = defineStore('watchlist', () => {
   const hasToken = ref(gist.hasConfig())
   let pushTimer: ReturnType<typeof setTimeout> | null = null
 
-  // 对外仍是 {code,name,type,added_at} 形状，页面无需改
-  const items = computed(() =>
-    entries.value
-      .filter((e) => !e.deleted)
-      .map((e) => ({ code: e.code, name: e.name ?? null, type: null as string | null, added_at: e.updated_at })),
-  )
+  // V3-12：对外仍是 {code,name,type,added_at}，按 code 去重（优先有持仓的）
+  const items = computed(() => {
+    const seen = new Map<string, WatchEntry>()
+    for (const e of entries.value) {
+      if (e.deleted) continue
+      const cur = seen.get(e.code)
+      // 优先保留有持仓的条目
+      if (!cur || (!cur.shares && e.shares && e.shares > 0)) seen.set(e.code, e)
+    }
+    return [...seen.values()].map((e) => ({ code: e.code, name: e.name ?? null, type: null as string | null, added_at: e.updated_at }))
+  })
 
   const persist = () => saveLS(entries.value)
 
@@ -46,10 +59,11 @@ export const useWatchlistStore = defineStore('watchlist', () => {
   }
 
   function merge(cloud: WatchEntry[]) {
-    const map = new Map(entries.value.map((e) => [e.code, e]))
+    const map = new Map(entries.value.map((e) => [e.id || entryId(e.code, e.account), e]))
     for (const c of cloud) {
-      const local = map.get(c.code)
-      if (!local || (c.updated_at || '') > (local.updated_at || '')) map.set(c.code, { ...local, ...c })
+      const id = c.id || entryId(c.code, c.account)
+      const local = map.get(id)
+      if (!local || (c.updated_at || '') > (local.updated_at || '')) map.set(id, { ...local, ...c, id })
     }
     entries.value = [...map.values()]
     persist()
@@ -90,19 +104,24 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     loaded.value = true
   }
 
-  function has(code: string) {
-    const e = entries.value.find((x) => x.code === code)
-    return !!e && !e.deleted
+  function has(code: string, account?: string) {
+    if (account) {
+      const id = entryId(code, account)
+      return entries.value.some((x) => x.id === id && !x.deleted)
+    }
+    return entries.value.some((x) => x.code === code && !x.deleted)
   }
 
-  function upsert(code: string, name: string | undefined, deleted: boolean) {
-    const e = entries.value.find((x) => x.code === code)
+  function upsert(code: string, name: string | undefined, deleted: boolean, account?: string) {
+    const id = entryId(code, account)
+    const e = entries.value.find((x) => (x.id || entryId(x.code, x.account)) === id)
     if (e) {
       e.deleted = deleted
       e.updated_at = nowISO()
       if (name) e.name = name
+      if (!e.id) e.id = id
     } else {
-      entries.value.push({ code, name, updated_at: nowISO(), deleted })
+      entries.value.push({ id, code, name, account, updated_at: nowISO(), deleted })
     }
     entries.value = [...entries.value]
     persist()
@@ -114,20 +133,27 @@ export const useWatchlistStore = defineStore('watchlist', () => {
   const toggle = (code: string, name?: string) => (has(code) ? remove(code) : add(code, name))
 
   function setHolding(code: string, shares: number, cost: number, name?: string, account?: string) {
-    const e = entries.value.find((x) => x.code === code)
+    const id = entryId(code, account)
+    const e = entries.value.find((x) => (x.id || entryId(x.code, x.account)) === id)
     if (e) {
       e.shares = shares
       e.cost = cost
       e.account = account
       e.deleted = false
       e.updated_at = nowISO()
+      e.id = id
       if (name) e.name = name
     } else {
-      entries.value.push({ code, name, shares, cost, account, updated_at: nowISO() })
+      entries.value.push({ id, code, name, shares, cost, account, updated_at: nowISO() })
     }
     entries.value = [...entries.value]
     persist()
     schedulePush()
+  }
+
+  // V3-12：列出某基金在所有账户下的持仓（跨账户视图）
+  function holdingsFor(code: string): WatchEntry[] {
+    return entries.value.filter((e) => e.code === code && !e.deleted && e.shares && e.shares > 0)
   }
 
   // 已知账户名（持仓里出现过的，供选择器快捷选用）
@@ -138,6 +164,11 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     }
     return [...set]
   })
+
+  // V3-12：所有有效持仓（复合键，含跨账户重复），供资产页直接消费
+  const activeHoldings = computed(() =>
+    entries.value.filter((e) => !e.deleted),
+  )
 
   // 云同步配置（设置 UI 用）
   function setToken(t: string) {
@@ -153,8 +184,8 @@ export const useWatchlistStore = defineStore('watchlist', () => {
   }
 
   return {
-    items, entries, accounts, loaded, syncing, lastSync, hasToken,
-    load, has, add, remove, toggle, setHolding,
+    items, entries, activeHoldings, accounts, loaded, syncing, lastSync, hasToken,
+    load, has, add, remove, toggle, setHolding, holdingsFor,
     setToken, manualUpload, manualDownload, clearCloud, push, pull,
   }
 })

@@ -6,18 +6,25 @@ import { useWatchlistStore } from '@/stores/watchlist'
 import { useFundsStore } from '@/stores/funds'
 import { signalColor } from '@/utils/format'
 import IndexBar from '@/components/IndexBar.vue'
+import { checkBackend, getSourceSummary, type SourceStatus } from '@/utils/resilience'
 
 const router = useRouter()
 const watch = useWatchlistStore()
 const funds = useFundsStore()
 const health = ref('检查中…')
+const sources = ref<SourceStatus[]>([])
 const sigs = reactive<Record<string, string>>({})
 
 onMounted(() => {
-  // 后端健康检查非阻塞：Render 冷启动时也不卡住自选信号加载
-  getHealth()
-    .then((r) => { health.value = `正常 · 收录 ${r.universe} 只` })
-    .catch(() => { health.value = '未连接（请启动后端）' })
+  // V3-9 多源容灾：后端健康检查 + 状态追踪
+  checkBackend().then((ok) => {
+    sources.value = getSourceSummary()
+    if (ok) {
+      getHealth().then((r) => { health.value = `正常 · 收录 ${r.universe} 只` }).catch(() => {})
+    } else {
+      health.value = '未连接（请启动后端）'
+    }
+  })
   // 自选信号与健康检查并行；首屏（指数条 + 温度骨架）立即可见
   watch.load(true)
     .then(() => Promise.all(watch.items.map(async (it) => {
@@ -48,6 +55,13 @@ const dist = computed(() => {
     <div class="page-body">
       <van-cell-group inset>
         <van-cell title="后端" :value="health" />
+        <van-cell v-if="sources.length > 0" title="多源状态">
+          <template #value>
+            <span class="src-dot" v-for="s in sources" :key="s.id"
+              :class="{ ok: s.ok, err: !s.ok }"
+              :title="s.label + (s.ok ? ' 正常' : s.consecutive + '次失败')">●</span>
+          </template>
+        </van-cell>
       </van-cell-group>
 
       <div class="sec">自选温度</div>
@@ -85,5 +99,9 @@ const dist = computed(() => {
 .temp .t { font-size: 40px; font-weight: 600; color: #0f9d75; }
 .temp .t small { font-size: 14px; color: #c8c9cc; font-weight: 400; }
 .temp .d { display: flex; gap: 14px; font-size: 13px; margin-top: 6px; }
-.temp .note { font-size: 11px; color: #c8c9cc; margin-top: 8px; }
+.temp .note { font-size: 11px; color: var(--text-hint); margin-top: 8px; }
+/* ── 源状态指示 ── */
+.src-dot { font-size: 10px; margin-left: 4px; }
+.src-dot.ok { color: #07c160; }
+.src-dot.err { color: #ee0a24; }
 </style>
