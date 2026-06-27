@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { reactive, ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { showToast } from 'vant'
+import { showToast, showLoadingToast, closeToast } from 'vant'
 import { getToken } from '@/utils/gist'
 import { useWatchlistStore } from '@/stores/watchlist'
 import { useFundsStore } from '@/stores/funds'
+import { getFunds, type FundListItem } from '@/api/client'
 import { pct, num, colorOf, signalColor } from '@/utils/format'
 import { fetchEstimates, type Estimate } from '@/utils/estimate'
 import StarRating from '@/components/StarRating.vue'
 import Chart from '@/components/Chart.vue'
 import { exportWatchlistCSV } from '@/utils/export'
+import Icon from '@/components/Icon.vue'
 
 interface Row {
   name: string; type: string | null; nav: number | null; ret1y: number | null
@@ -139,6 +141,35 @@ async function download() {
 }
 function clearCloud() { watch.clearCloud(); token.value = ''; showToast('已清除云同步') }
 
+// V5-0 导入：模糊搜索代码/名称添加到自选
+const importShow = ref(false)
+const importQuery = ref('')
+const importResults = ref<FundListItem[]>([])
+const importLoading = ref(false)
+let importTimer: ReturnType<typeof setTimeout> | null = null
+
+function onImportInput() {
+  if (importTimer) clearTimeout(importTimer)
+  const q = importQuery.value.trim()
+  if (q.length < 1) { importResults.value = []; return }
+  importTimer = setTimeout(async () => {
+    importLoading.value = true
+    try {
+      const resp = await getFunds({ q, page_size: 20 })
+      importResults.value = (resp.items || []).filter((f) => !watch.has(f.code))
+    } catch { importResults.value = [] }
+    finally { importLoading.value = false }
+  }, 350)
+}
+
+async function doImport(code: string, name: string) {
+  watch.add(code, name)
+  await loadOne(code, name)
+  // 从结果中移除已添加
+  importResults.value = importResults.value.filter((f) => f.code !== code)
+  showToast('已添加')
+}
+
 onMounted(refresh)
 </script>
 
@@ -146,8 +177,15 @@ onMounted(refresh)
   <div class="page">
     <van-nav-bar title="自选 · 持仓">
       <template #right>
-        <van-icon name="down" size="18" style="margin-right:14px" @click="exportWatchlistCSV(watch.items)" />
-        <van-icon name="replay" size="20" @click="showSync = true" />
+        <span style="margin-right:12px;cursor:pointer;color:var(--teal)" @click="importShow = true">
+          <Icon name="plus" :size="18" />
+        </span>
+        <span style="margin-right:12px;cursor:pointer;color:var(--text-muted)" @click="exportWatchlistCSV(watch.items)">
+          <Icon name="export" :size="17" />
+        </span>
+        <span style="cursor:pointer;color:var(--text-muted)" @click="showSync = true">
+          <Icon name="refresh" :size="18" />
+        </span>
       </template>
     </van-nav-bar>
     <div class="page-body">
@@ -227,7 +265,31 @@ onMounted(refresh)
         <van-button size="small" type="primary" @click="upload">上传</van-button>
         <van-button size="small" type="primary" plain @click="download">下载</van-button>
       </div>
-      <van-button size="small" block plain @click="clearCloud" style="margin-top:8px;color:#ee0a24">清除云同步配置</van-button>
+      <van-button size="small" block plain @click="clearCloud" style="margin-top:8px;color:var(--danger)">清除云同步配置</van-button>
+    </van-popup>
+
+    <!-- V5-0 导入基金 -->
+    <van-popup v-model:show="importShow" position="bottom" round :style="{ padding: '16px', maxHeight: '70vh' }">
+      <div class="sync-title">导入基金</div>
+      <div class="sync-sub">输入代码或名称模糊搜索，点击添加到自选。</div>
+      <van-field v-model="importQuery" placeholder="例如：沪深300 或 000300" @update:model-value="onImportInput" clearable>
+        <template #left-icon>
+          <Icon name="mirror" :size="16" color="var(--teal)" />
+        </template>
+      </van-field>
+      <div style="max-height:40vh;overflow-y:auto;margin-top:8px">
+        <van-loading v-if="importLoading" style="text-align:center;padding:12px" />
+        <div v-else-if="importQuery && importResults.length === 0" style="text-align:center;padding:20px;color:var(--text-hint);font-size:13px">
+          {{ importQuery.length < 2 ? '输入至少 2 个字符' : '无匹配结果（或已在自选中）' }}
+        </div>
+        <van-cell v-for="f in importResults" :key="f.code"
+          :title="f.name" :label="f.code + ' · ' + (f.type || '')"
+          is-link @click="doImport(f.code, f.name)">
+          <template #icon>
+            <Icon name="plus" :size="16" color="var(--teal)" style="margin-right:6px" />
+          </template>
+        </van-cell>
+      </div>
     </van-popup>
   </div>
 </template>

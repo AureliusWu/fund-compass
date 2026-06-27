@@ -24,7 +24,7 @@ export function applyTheme(t: Theme): void {
   document.documentElement.setAttribute('data-theme', t)
   // 更新 meta theme-color（浏览器地址栏/状态栏颜色）
   const meta = document.querySelector('meta[name="theme-color"]')
-  if (meta) meta.setAttribute('content', t === 'dark' ? '#1a1a2e' : '#0f9d75')
+  if (meta) meta.setAttribute('content', t === 'dark' ? '#151C18' : '#4C7E67')
 }
 
 export function toggleTheme(): Theme {

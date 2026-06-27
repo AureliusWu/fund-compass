@@ -13,6 +13,7 @@ declare module 'vue' {
   export interface GlobalComponents {
     Chart: typeof import('./src/components/Chart.vue')['default']
     DcaCalc: typeof import('./src/components/DcaCalc.vue')['default']
+    Icon: typeof import('./src/components/Icon.vue')['default']
     IndexBar: typeof import('./src/components/IndexBar.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
