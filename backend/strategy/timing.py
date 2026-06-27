@@ -14,6 +14,17 @@ def _navs(nav_history, n=None):
     return vs[-n:] if n else vs
 
 
+def _series(nav_history, n=None):
+    """趋势/情绪指标用的价格序列：优先「分红复权」（累计收益重构），
+    避免基金分红导致单位净值下跌而被误判为下跌/超卖；缺累计收益时退回单位净值。"""
+    hs = [h for h in (nav_history or []) if h.get("nav")]
+    if hs and all(h.get("ac_return") is not None for h in hs):
+        vals = [1.0 + h["ac_return"] / 100.0 for h in hs]  # 累计收益率 → 复权净值（比例即可，指标对量纲不敏感）
+    else:
+        vals = [h["nav"] for h in hs]
+    return vals[-n:] if n else vals
+
+
 def _ma(vals, period):
     return sum(vals[-period:]) / period if len(vals) >= period else None
 
@@ -37,7 +48,7 @@ def _rsi(vals, period=14):
         avg_gain = (avg_gain * (period - 1) + gains[i]) / period
         avg_loss = (avg_loss * (period - 1) + losses[i]) / period
     if avg_loss == 0:
-        return 100.0
+        return 50.0 if avg_gain == 0 else 100.0  # 无任何波动 → 中性，而非误判超买
     rs = avg_gain / avg_loss
     return round(100 - 100 / (1 + rs), 1)
 
@@ -59,7 +70,7 @@ def valuation_layer(nav_history, window=756):
 
 
 def trend_layer(nav_history):
-    vals = _navs(nav_history)
+    vals = _series(nav_history)  # 分红复权，避免分红假跌
     cur = vals[-1] if vals else None
     ma20, ma60, ma120 = _ma(vals, 20), _ma(vals, 60), _ma(vals, 120)
     if None in (cur, ma20, ma60, ma120):
@@ -78,7 +89,7 @@ def trend_layer(nav_history):
 
 
 def sentiment_layer(nav_history):
-    rsi = _rsi(_navs(nav_history, 250))
+    rsi = _rsi(_series(nav_history, 250))  # 分红复权，避免分红假超卖
     if rsi is None:
         return {"label": "数据不足", "value": 0, "rsi": None}
     if rsi < 30:
