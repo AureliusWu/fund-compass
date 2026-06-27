@@ -11,7 +11,8 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       workbox: {
-        // 接口响应 NetworkFirst 缓存：离线时回退上次数据（含跨域后端）
+        // 大的富集/排行数据不进安装期预缓存，改运行时按需缓存
+        globIgnores: ['**/data/**'],
         runtimeCaching: [
           {
             urlPattern: ({ url }) => url.pathname.startsWith('/api'),
@@ -20,6 +21,16 @@ export default defineConfig({
               cacheName: 'fc-api',
               networkTimeoutSeconds: 8,
               expiration: { maxEntries: 200, maxAgeSeconds: 60 * 60 * 24 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
+            // 排行/富集静态数据：StaleWhileRevalidate，首次后秒开 + 离线可用 + 后台更新
+            urlPattern: ({ url }) => url.pathname.includes('/data/'),
+            handler: 'StaleWhileRevalidate',
+            options: {
+              cacheName: 'fc-data',
+              expiration: { maxEntries: 60, maxAgeSeconds: 60 * 60 * 24 * 7 },
               cacheableResponse: { statuses: [0, 200] },
             },
           },

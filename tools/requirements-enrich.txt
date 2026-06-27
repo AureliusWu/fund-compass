@@ -1,2 +1,3 @@
-# AKShare 离线富集任务依赖（仅 CI 安装；本机 py3.14 不装）
+# 离线富集任务依赖（仅 CI 安装；本机 py3.14 不装 akshare）
 akshare>=1.14
+requests>=2.31
