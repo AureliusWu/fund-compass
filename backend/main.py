@@ -11,14 +11,14 @@
 import re
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from database.db import init_db
 from service import repo
-from strategy.scoring import score_fund
-from strategy.timing import timing_signal
-from strategy.backtest import backtest
+from strategy import analyze_fund, backtest, score_fund, timing_signal
+
+NAV_TAIL = 800  # 返回给前端的净值条数（≈3年，供走势图 / 定投回放 / 指标计算）
 
 
 @asynccontextmanager
@@ -32,7 +32,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="司南基金 API", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="司南基金 API", version="0.3.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -44,6 +44,22 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def fund_detail_dep(code: str) -> dict:
+    """统一的详情取数依赖：命中缓存或抓取，失败转 404。
+
+    四个基金端点此前各自重复一遍 try/except，收口到这里后端点只声明
+    `detail: dict = Depends(fund_detail_dep)` 即可，详情逻辑只有一处。
+    """
+    try:
+        return repo.get_detail(code)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+def _meta(d: dict) -> dict:
+    return {"code": d["code"], "name": d.get("name"), "type": d.get("type")}
 
 
 @app.get("/api/health")
@@ -68,44 +84,46 @@ def list_funds(
 
 
 @app.get("/api/fund/{code}")
-def fund_detail(code: str) -> dict:
-    """基金详情：费率 / 收益 / 经理 / 规模 / 同类排名 / 最新净值 + 近 250 日净值。"""
-    try:
-        d = repo.get_detail(code)
-    except Exception as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    d["nav_history"] = (d.get("nav_history") or [])[-800:]  # ≈3年，供走势图/定投回放
-    return d
+def fund_detail(detail: dict = Depends(fund_detail_dep)) -> dict:
+    """基金详情：费率 / 收益 / 经理 / 规模 / 同类排名 / 最新净值 + 近 800 日净值。"""
+    detail["nav_history"] = (detail.get("nav_history") or [])[-NAV_TAIL:]
+    return detail
 
 
 @app.get("/api/fund/{code}/score")
-def fund_score(code: str) -> dict:
+def fund_score(detail: dict = Depends(fund_detail_dep)) -> dict:
     """基金综合评分：0–100 + 五星 + 收益/风险/管理/成本 四维明细。"""
-    try:
-        d = repo.get_detail(code)
-    except Exception as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    return {"code": code, "name": d.get("name"), "type": d.get("type"), **score_fund(d)}
+    return {**_meta(detail), **score_fund(detail)}
 
 
 @app.get("/api/fund/{code}/signal")
-def fund_signal(code: str) -> dict:
+def fund_signal(detail: dict = Depends(fund_detail_dep)) -> dict:
     """择时信号：估值 / 趋势 / 情绪 三层合成 买入·定投·持有·减仓，附每层依据。"""
-    try:
-        d = repo.get_detail(code)
-    except Exception as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    return {"code": code, "name": d.get("name"), "type": d.get("type"), **timing_signal(d)}
+    return {**_meta(detail), **timing_signal(detail)}
 
 
 @app.get("/api/fund/{code}/backtest")
-def fund_backtest(code: str) -> dict:
+def fund_backtest(detail: dict = Depends(fund_detail_dep)) -> dict:
     """择时回测：按月用三层信号调仓 vs 一直持有，给收益/回撤/胜率/净值曲线。"""
-    try:
-        d = repo.get_detail(code)
-    except Exception as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    return {"code": code, "name": d.get("name"), **backtest(d)}
+    return {"code": detail["code"], "name": detail.get("name"), **backtest(detail)}
+
+
+@app.get("/api/fund/{code}/analyze")
+def fund_analyze(detail: dict = Depends(fund_detail_dep)) -> dict:
+    """一次性聚合：详情 + 评分 + 信号 + 回测，单次往返取齐详情页所需全部数据。
+
+    详情取一次、净值历史解析一次，三块算法共享同份数据；前端详情页由原先四次串行
+    请求收敛为一次。各子对象保留 code/name/type，与独立端点的响应结构一致，便于复用类型。
+    """
+    meta = _meta(detail)
+    nav = (detail.get("nav_history") or [])[-NAV_TAIL:]
+    return {
+        **meta,
+        "detail": {**detail, "nav_history": nav},
+        "score": {**meta, **score_fund(detail)},
+        "signal": {**meta, **timing_signal(detail)},
+        "backtest": {"code": meta["code"], "name": meta["name"], **backtest(detail)},
+    }
 
 
 @app.get("/api/watchlist")

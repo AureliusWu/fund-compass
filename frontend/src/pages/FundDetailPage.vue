@@ -106,15 +106,16 @@ onMounted(async () => {
   fetchEstimate(code).then((e) => { est.value = e }).finally(() => { estDone.value = true })
   getHoldings(code).then((h) => { holdings.value = h }).finally(() => { holdingsDone.value = true })
   try {
-    detail.value = await funds.detail(code)
-    score.value = await funds.score(code)
-    signal.value = await funds.signal(code)
+    const a = await funds.analyze(code)
+    detail.value = a.detail
+    score.value = a.score
+    signal.value = a.signal
+    bt.value = a.backtest
   } catch {
     error.value = '加载失败，后端是否已启动？'
   } finally {
     loading.value = false
   }
-  try { bt.value = await funds.backtest(code) } catch { /* 回测可选 */ }
 })
 
 const btOption = computed(() => {

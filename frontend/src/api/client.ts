@@ -65,6 +65,16 @@ export interface BacktestResp {
 }
 export const getBacktest = (code: string) => req<BacktestResp>(`/fund/${code}/backtest`)
 
+// 聚合分析：一次往返取齐详情 + 评分 + 信号 + 回测，详情页据此把四次请求收敛为一次。
+export interface AnalyzeResp {
+  code: string; name: string; type: string | null
+  detail: FundDetail
+  score: ScoreResp
+  signal: SignalResp
+  backtest: BacktestResp
+}
+export const getAnalyze = (code: string) => req<AnalyzeResp>(`/fund/${code}/analyze`)
+
 export const getWatchlist = () => req<{ items: WatchItem[] }>('/watchlist')
 export const addWatch = (code: string) =>
   req<{ ok: boolean }>('/watchlist', {
