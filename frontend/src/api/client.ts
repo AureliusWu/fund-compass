@@ -34,7 +34,7 @@ export interface ScoreResp {
 export interface Layer { label: string; value: number; [k: string]: unknown }
 export interface SignalResp {
   code: string; name: string; type: string | null
-  signal: string; advice: string; composite: number
+  signal: string; advice: string; composite: number; disclaimer?: string
   layers: { valuation: Layer; trend: Layer; sentiment: Layer }
 }
 

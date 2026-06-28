@@ -126,17 +126,20 @@ def timing_signal(detail):
     tr = trend_layer(nh)
     se = sentiment_layer(nh)
     composite = round(0.4 * val["value"] + 0.35 * tr["value"] + 0.25 * se["value"], 3)
+    # 措辞如实化：择时是「风险/时机参考」，不是买卖指令。回测显示对多数基金长期持有/定投
+    # 优于择时（见详情页「策略回测」），故避免「卖出/落袋」这类指令式表述。
     if composite >= 0.5:
-        signal, advice = "买入", "信号偏多，适合分批建仓"
+        signal, advice = "买入", "偏多 · 可作分批建仓 / 定投的时机参考"
     elif composite >= 0.15:
-        signal, advice = "定投", "温和偏多，适合持续定投"
+        signal, advice = "定投", "温和偏多 · 适合持续定投"
     elif composite > -0.15:
-        signal, advice = "持有", "信号中性，继续观察"
+        signal, advice = "持有", "中性 · 维持原计划，优质基金长期持有通常更优"
     else:
-        signal, advice = "减仓", "信号偏空，可逐步落袋"
+        signal, advice = "减仓", "偏空 · 注意短期回撤风险；但择时常跑输持有，优质基金不建议轻易卖出"
     return {
         "signal": signal,
         "advice": advice,
         "composite": composite,
+        "disclaimer": "择时信号仅为风险 / 时机参考，非买卖指令。回测显示对多数基金，长期持有 / 定投优于择时。",
         "layers": {"valuation": val, "trend": tr, "sentiment": se},
     }

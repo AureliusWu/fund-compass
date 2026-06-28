@@ -314,6 +314,14 @@ async function toggleWatch() {
               <van-cell title="情绪"
                 :value="signal.layers.sentiment.label + (signal.layers.sentiment.rsi != null ? ' · RSI ' + signal.layers.sentiment.rsi : '')" />
             </van-cell-group>
+            <div class="sig-disc">
+              {{ signal.disclaimer || '择时信号仅为风险 / 时机参考，非买卖指令。' }}
+              <template v-if="bt && bt.available && bt.strategy && bt.benchmark">
+                本基金回测：择时 {{ pct(bt.strategy.total_return) }} vs 一直持有 {{ pct(bt.benchmark.total_return) }}
+                <em :style="{ color: colorOf((bt.outperform ?? 0)) }">（{{ (bt.outperform ?? 0) >= 0 ? '择时跑赢' : '择时跑输' }} {{ Math.abs(bt.outperform ?? 0).toFixed(2) }}%）</em>。
+                优质基金长期持有 / 定投通常更优，勿据此轻易卖出。
+              </template>
+            </div>
           </div>
         </template>
       </template>
@@ -375,6 +383,8 @@ async function toggleWatch() {
 .sighead { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
 .sigbig { font-size: 22px; font-weight: 600; }
 .advice { font-size: 12px; color: #969799; }
+.sig-disc { font-size: 11px; color: #969799; line-height: 1.6; margin-top: 10px; padding: 8px 10px; background: var(--bg-soft, #f7f8fa); border-radius: 8px; }
+.sig-disc em { font-style: normal; }
 .interp .verdict { font-size: 14px; font-weight: 600; line-height: 1.5; margin-bottom: 10px; }
 .interp .verdict.good { color: #ee0a24; }
 .interp .verdict.weak { color: #07c160; }
