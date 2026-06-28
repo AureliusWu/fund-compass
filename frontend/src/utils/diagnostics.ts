@@ -1,7 +1,7 @@
 // V4-3 组合诊断报告。相关性矩阵、压力测试、风格箱、再平衡路线图。
 // 依赖持仓基金的净值序列（从缓存 FundDetail.nav_history 取）。
 
-import { getFundDetail, type FundDetail, type NavPoint } from '@/api/client'
+import { getFundDetail, type NavPoint } from '@/api/client'
 
 // ── 相关性矩阵 ─────────────────────────────────────────
 export interface CorrItem { a: string; b: string; aName: string; bName: string; corr: number }

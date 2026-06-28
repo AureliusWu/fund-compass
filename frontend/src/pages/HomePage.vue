@@ -78,10 +78,6 @@ const levelColor = (l: string) => ({ info: '#1989fa', warn: '#ff976a', danger: '
 const levelIcon = (l: string) => ({ info: 'ℹ', warn: '⚠', danger: '🛑' }[l] || '·')
 
 // 温度计角度：0 → 左 -90deg, 100 → 右 90deg
-const gaugeAngle = computed(() => {
-  const s = app.marketTemp?.score ?? 50
-  return -90 + (s / 100) * 180
-})
 </script>
 
 <template>

@@ -1,7 +1,7 @@
 // V4-2 策略回测实验室。增强回测分析：年度收益拆解、滚动指标、DCA 对比、参数灵敏度。
 // 后端提供原始回测曲线（strategy / benchmark），前端做进一步计算与可视化。
 
-import type { BacktestResp, NavPoint, BtSeries } from '@/api/client'
+import type { BacktestResp, NavPoint } from '@/api/client'
 
 // ── 年度收益拆解 ──────────────────────────────────────
 export interface AnnualReturn { year: number; strategy: number | null; benchmark: number | null; excess: number | null }

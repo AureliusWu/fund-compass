@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from database.db import init_db
 from service import repo
-from strategy import analyze_fund, backtest, score_fund, timing_signal
+from strategy import backtest, score_fund, timing_signal
 
 NAV_TAIL = 800  # 返回给前端的净值条数（≈3年，供走势图 / 定投回放 / 指标计算）
 

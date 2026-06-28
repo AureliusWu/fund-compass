@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useWatchlistStore } from '@/stores/watchlist'
 import { useFundsStore } from '@/stores/funds'
 import { fetchEstimates, type Estimate } from '@/utils/estimate'
-import { pct, colorOf } from '@/utils/format'
+import { colorOf } from '@/utils/format'
 import Chart from '@/components/Chart.vue'
 import { compileStoryData, generateStorySummary, type StoryData } from '@/utils/story'
 
@@ -55,7 +55,6 @@ onMounted(async () => {
       const m = meta.value[e.code]
       const nav = m?.nav ?? null
       const value = nav != null ? e.shares! * nav : 0
-      const cost = e.shares! * (e.cost ?? 0)
       const es = est.value[e.code]
       const today = es && es.estChange != null && es.lastNav != null
         ? e.shares! * es.lastNav * es.estChange / 100 : null

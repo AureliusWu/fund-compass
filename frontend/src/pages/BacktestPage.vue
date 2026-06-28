@@ -1,14 +1,13 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed } from 'vue'
 import { useWatchlistStore } from '@/stores/watchlist'
 import { useFundsStore } from '@/stores/funds'
-import { pct, colorOf } from '@/utils/format'
+import { colorOf } from '@/utils/format'
 import Chart from '@/components/Chart.vue'
 import {
-  annualReturns, rollingMetrics, simulateDCA, sweepMAPeriod, computeSummary,
-  type AnnualReturn, type RollingPoint, type BacktestSummary,
+  annualReturns, rollingMetrics, sweepMAPeriod, computeSummary,
 } from '@/utils/backtest'
-import type { BacktestResp, FundDetail, NavPoint } from '@/api/client'
+import type { BacktestResp, FundDetail } from '@/api/client'
 
 const watchStore = useWatchlistStore()
 const fundsStore = useFundsStore()
@@ -19,7 +18,6 @@ const loading = ref(false)
 const err = ref('')
 const detail = ref<FundDetail | null>(null)
 const dcaAmount = ref(1000)
-const maPeriod = ref(60)
 
 // 基金列表（有持仓的优先）
 const fundOpts = computed(() => {
@@ -53,8 +51,6 @@ const sm = computed(() => bt.value ? computeSummary(bt.value) : null)
 const comparisonOption = computed(() => {
   if (!bt.value?.strategy?.curve || !bt.value?.benchmark?.curve) return null
   const sc = bt.value.strategy.curve, bc = bt.value.benchmark.curve
-  // DCA 虚拟线
-  const dca = simulateDCA(sc, dcaAmount.value)
   const dc: number[] = []
   let accUnits = 0, accAmt = 0
   const byMonth = new Map<string, number>()

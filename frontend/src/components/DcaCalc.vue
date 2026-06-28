@@ -3,7 +3,6 @@ import { ref, computed } from 'vue'
 import type { NavPoint } from '@/api/client'
 import {
   simulateRegularDCA, simulateValueDCA, simulateTakeProfit, simulateTargetDate,
-  type DcaResult, type ValDcaResult, type TakeProfitResult, type TargetDateResult,
 } from '@/utils/dca'
 
 const props = defineProps<{ navHistory: NavPoint[]; latestNav: number | null }>()

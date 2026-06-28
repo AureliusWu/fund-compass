@@ -92,7 +92,6 @@ export async function withSWR<T>(
   maxAgeMs = 300_000, // 默认 5 分钟
 ): Promise<T> {
   const cached = swrGet<{ data: T; ts: number }>(key + '_v2')
-  const isFresh = cached && Date.now() - cached.ts < maxAgeMs
 
   try {
     const fresh = await fetcher()

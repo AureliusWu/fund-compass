@@ -2,7 +2,6 @@
 // 从持仓数据、信号、估值等维度生成结构化故事卡片。
 
 import { chat } from './ai'
-import type { FundDetail, ScoreResp, SignalResp, NavPoint } from '@/api/client'
 import { pct as formatPct } from './format'
 
 export interface StoryHolding {
