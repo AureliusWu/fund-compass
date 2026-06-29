@@ -59,6 +59,20 @@ export default defineConfig({
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) }
   },
+  build: {
+    // echarts（含 PieChart）按需引入后约 533KB 已是合理下限，提高阈值消除噪音告警
+    chunkSizeWarningLimit: 600,
+    rollupOptions: {
+      output: {
+        // echarts + 其渲染内核 zrender 多页共用，单独成块：浏览器可长期缓存，不重复打进各页 chunk
+        manualChunks(id) {
+          if (id.includes('node_modules/echarts') || id.includes('node_modules/zrender')) {
+            return 'echarts'
+          }
+        },
+      },
+    },
+  },
   server: {
     port: 5173,
     // 开发时把 /api 代理到本地 FastAPI，绕开跨域

@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS fund_detail (
   manager_worktime TEXT,   -- 任职时长文本，如「14年又199天」
   latest_nav       REAL,
   latest_nav_date  TEXT,
+  source           TEXT,   -- 取数来源：primary（pingzhong）/ fallback（f10 lsjz）
   updated_at       TEXT
 );
 
@@ -58,10 +59,18 @@ def get_conn() -> sqlite3.Connection:
     return conn
 
 
+def _migrate(conn) -> None:
+    """轻量迁移：给已存在的旧库补齐后加的列（CREATE TABLE IF NOT EXISTS 不会改老表）。"""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(fund_detail)")}
+    if "source" not in cols:
+        conn.execute("ALTER TABLE fund_detail ADD COLUMN source TEXT")
+
+
 def init_db() -> None:
     conn = get_conn()
     try:
         conn.executescript(SCHEMA)
+        _migrate(conn)
         conn.commit()
     finally:
         conn.close()
