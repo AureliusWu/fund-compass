@@ -19,12 +19,13 @@
 
 ### P0 · 工程地基与技术债（先做，给后续改动兜底）
 
-- [ ] **前端单测**：引入 vitest，覆盖纯函数 utils（`format` / `dca` / `estimate` / `screener` / `attribution` / `lookthrough` 等），接入 CI。
+- [~] **前端单测**：引入 vitest，接入 CI。首批已覆盖 `format` + `dca`（28 用例，✅ 2026-06-29）；剩余 `estimate` / `screener` / `attribution` / `lookthrough` 等留后续补齐。
   - 价值高·工作量中。验收：关键计算函数有测试，CI 跑前端单测。
-- [ ] **可观测性**：把 `backend/service/eastmoney.py`、`backend/main.py` 里 `except Exception: pass` 的静默吞错改为结构化日志。
+- [x] **可观测性**（✅ 2026-06-29）：eastmoney/repo/main 的静默吞错改结构化 `logging`——主源降级、退陈旧缓存、启动导入失败均可见，字段级容错保持静默不刷屏。
   - 价值中·工作量小。验收：数据源异常/降级在日志可见，便于线上定位。
-- [ ] **数据源健壮性**：`pingzhongdata` 靠正则解析 JS 文本，天天基金改格式会静默降级到备源。加主源解析的健康监测（解析失败计数/告警）。
+- [x] **数据源健壮性**（✅ 2026-06-29）：`eastmoney.source_health()` 进程内统计主源成功/失败/失败率/最近错误/疑似降级（degraded），经 `/api/health` 暴露。
   - 价值中·工作量中。验收：主源解析异常能被发现，不再「无声失准」。
+  - 注：进程内计数（重启清零、多 worker 各自独立），单实例部署够用；要跨实例/历史趋势需外部监控。
 
 ### P1 · 核心算法准确度
 
@@ -60,3 +61,6 @@
   - 优化：`vite.config.ts` 用函数式 `manualChunks` 把 echarts+zrender 拆为独立 vendor chunk，`chunkSizeWarningLimit` 提至 600，消除构建告警。
   - 地基：新增后端 pytest 套件（`backend/tests/`，33 用例，覆盖 scoring/timing/backtest/eastmoney 解析/repo 迁移）+ GitHub Actions CI（`.github/workflows/ci.yml`：后端 pytest + 前端 type-check/build）。
   - 文档：新建 `CLAUDE.md`（AI 方向锚点）与本计划文件。
+  - 地基(前端)：引入 vitest，新增 `format` / `dca` 单测（28 用例），接入 CI（`ci.yml` 前端 job 加 `npm run test`）。推进 P0「前端单测」首批落地。
+  - 地基(后端)：可观测性——`eastmoney`/`repo`/`main` 静默吞错改结构化 `logging`（主源降级 / 退陈旧缓存 / 启动导入失败可见），加降级日志测试（pytest 34 用例）。完成 P0「可观测性」。
+  - 地基(后端)：数据源健壮性——`eastmoney.source_health()` 统计主源成功/失败/失败率/最近错误/degraded，经 `/api/health` 暴露，加 source_health 测试（pytest 35 用例）。完成 P0「数据源健壮性」。**P0 三项全部完成。**

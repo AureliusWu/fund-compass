@@ -6,10 +6,13 @@
 AKShare 作为备源（M1 暂未接入，后续在此模块加 fallback）。
 """
 import json
+import logging
 import re
 from datetime import datetime, timedelta, timezone
 
 import requests
+
+log = logging.getLogger(__name__)
 
 CST = timezone(timedelta(hours=8))
 _HEADERS = {"User-Agent": "Mozilla/5.0", "Referer": "http://fund.eastmoney.com/"}
@@ -133,6 +136,7 @@ def _fallback_name(code: str) -> str | None:
         m = re.search(r"jsonpgz\((.*)\)", txt)
         return json.loads(m.group(1)).get("name") if m else None
     except Exception:
+        log.debug("备源取名失败 code=%s", code, exc_info=True)
         return None
 
 
@@ -177,12 +181,50 @@ def _fetch_detail_fallback(code: str) -> dict:
     }
 
 
+# ── 主源健康统计（进程内、单实例视角；重启清零、多 worker 各自独立）──────────
+# 主源 pingzhongdata 靠正则解析 JS 文本，天天基金改版会让解析失败而静默降级备源。
+# 这里累计主源成功/失败，经 /api/health 暴露，让「主源悄悄失准」可被人工发现。
+_stats = {"primary_ok": 0, "primary_fail": 0, "fallback_used": 0, "last_primary_error": None}
+
+
+def _record_primary_ok() -> None:
+    _stats["primary_ok"] += 1
+
+
+def _record_primary_fail(code: str, reason: str) -> None:
+    _stats["primary_fail"] += 1
+    _stats["fallback_used"] += 1
+    _stats["last_primary_error"] = {
+        "code": code, "reason": reason,
+        "at": datetime.now(CST).isoformat(timespec="seconds"),
+    }
+
+
+def source_health() -> dict:
+    """主源健康快照：成功/失败计数、失败率、最近一次失败、是否疑似降级。"""
+    total = _stats["primary_ok"] + _stats["primary_fail"]
+    fail_rate = round(_stats["primary_fail"] / total * 100, 1) if total else 0.0
+    return {
+        "primary_ok": _stats["primary_ok"],
+        "primary_fail": _stats["primary_fail"],
+        "fallback_used": _stats["fallback_used"],
+        "primary_fail_rate": fail_rate,
+        "last_primary_error": _stats["last_primary_error"],
+        # 有一定样本且失败率过半 → 主源可能挂了/改了格式，值得人工介入
+        "degraded": total >= 5 and fail_rate >= 50,
+    }
+
+
 def fetch_detail(code: str) -> dict:
     """单只基金详情 + 净值历史。主源 pingzhongdata；失败或无净值时降级到备源 f10 lsjz。"""
     try:
         d = _fetch_detail_pingzhong(code)
         if d.get("nav_history"):
+            _record_primary_ok()
             return d
-    except Exception:
-        pass  # 主源异常 → 走备源
+        log.warning("主源 pingzhongdata 无净值，降级备源 f10 code=%s", code)
+        _record_primary_fail(code, "主源无净值")
+    except Exception as e:
+        log.warning("主源 pingzhongdata 解析失败，降级备源 f10 code=%s", code, exc_info=True)
+        _record_primary_fail(code, f"{type(e).__name__}: {e}")
     return _fetch_detail_fallback(code)

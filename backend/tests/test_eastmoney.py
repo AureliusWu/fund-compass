@@ -34,3 +34,28 @@ def test_num():
     assert _num("abc") is None
     assert _num(None) is None
     assert _num("") is None
+
+
+def test_source_health_tracks_primary(monkeypatch):
+    """主源成功/失败计数与最近错误记录（用基线增量，规避模块级计数器跨用例污染）。"""
+    from service import eastmoney as em
+    base = em.source_health()
+
+    # 主源成功 → primary_ok +1
+    monkeypatch.setattr(em, "_fetch_detail_pingzhong",
+                        lambda code: {"code": code, "nav_history": [{"date": "2024-01-01", "nav": 1.0}]})
+    em.fetch_detail("000001")
+    assert em.source_health()["primary_ok"] == base["primary_ok"] + 1
+
+    # 主源抛异常 → 降级备源；primary_fail +1 且记录 last_primary_error
+    def _boom(code):
+        raise RuntimeError("格式变了")
+    monkeypatch.setattr(em, "_fetch_detail_pingzhong", _boom)
+    monkeypatch.setattr(em, "_fetch_detail_fallback",
+                        lambda code: {"code": code, "source": "fallback", "nav_history": []})
+    em.fetch_detail("000002")
+    h = em.source_health()
+    assert h["primary_fail"] == base["primary_fail"] + 1
+    assert h["fallback_used"] >= base["fallback_used"] + 1
+    assert h["last_primary_error"]["code"] == "000002"
+    assert 0 <= h["primary_fail_rate"] <= 100

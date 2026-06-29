@@ -8,6 +8,7 @@
 
 首次启动会自动抓取全量基金列表入库（约 2.7 万只，几秒）。
 """
+import logging
 import re
 from contextlib import asynccontextmanager
 
@@ -15,8 +16,14 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from database.db import init_db
-from service import repo
+from service import eastmoney, repo
 from strategy import backtest, score_fund, timing_signal
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s | %(message)s",
+)
+log = logging.getLogger(__name__)
 
 NAV_TAIL = 800  # 返回给前端的净值条数（≈3年，供走势图 / 定投回放 / 指标计算）
 
@@ -26,9 +33,10 @@ async def lifespan(app: FastAPI):
     init_db()
     if repo.universe_count() == 0:
         try:
-            repo.import_universe()
+            n = repo.import_universe()
+            log.info("启动期导入基金全集：%d 只", n)
         except Exception:
-            pass  # 离线/接口异常时不阻塞启动，可后续调用 /api/admin/refresh-universe
+            log.warning("启动期基金全集导入失败，不阻塞启动；可稍后 POST /api/admin/refresh-universe 重试", exc_info=True)
     yield
 
 
@@ -69,6 +77,7 @@ def health() -> dict:
         "service": "fund-compass",
         "version": app.version,
         "universe": repo.universe_count(),
+        "source": eastmoney.source_health(),
     }
 
 

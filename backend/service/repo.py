@@ -1,8 +1,11 @@
 """数据仓储：universe 导入、列表查询、详情缓存（SQLite）。"""
+import logging
 from datetime import datetime, timedelta, timezone
 
 from database.db import get_conn
 from service.eastmoney import fetch_detail, fetch_universe
+
+log = logging.getLogger(__name__)
 
 CST = timezone(timedelta(hours=8))
 DETAIL_TTL = timedelta(hours=12)
@@ -110,11 +113,13 @@ def get_detail(code: str, force=False) -> dict:
         except Exception:
             # 容灾末层：主源+备源都失败时，退回 DB 里上次成功缓存的陈旧数据，避免整页 404
             if row:
+                log.warning("主源+备源均失败，退回陈旧缓存 code=%s", code, exc_info=True)
                 d = dict(row)
                 d["nav_history"] = _load_history(conn, code)
                 d["cached"] = True
                 d["stale"] = True
                 return d
+            log.error("主源+备源均失败且无缓存，详情不可用 code=%s", code, exc_info=True)
             raise
         ftype = conn.execute("SELECT type FROM funds WHERE code=?", (code,)).fetchone()
         detail["type"] = ftype["type"] if ftype else None

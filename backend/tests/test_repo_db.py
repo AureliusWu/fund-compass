@@ -66,3 +66,27 @@ def test_get_detail_persists_and_reads_source(temp_db, monkeypatch):
     d2 = repo.get_detail("000001")                # 缓存命中，从 DB 读回（修复前这里会丢失 source）
     assert d2["source"] == "primary"
     assert d2["cached"] is True
+
+
+def test_get_detail_falls_back_to_stale_cache_with_log(temp_db, monkeypatch, caplog):
+    """主源+备源都失败时退回陈旧缓存，并记 warning 日志（可观测性）。"""
+    import logging
+
+    from service import repo
+    good = {
+        "code": "000002", "name": "缓存基金", "source": "primary",
+        "latest_nav": 2.0, "latest_nav_date": "2024-01-01",
+        "nav_history": [{"date": "2024-01-01", "nav": 2.0, "ac_return": 100.0}],
+    }
+    monkeypatch.setattr(repo, "fetch_detail", lambda code: dict(good, code=code))
+    repo.get_detail("000002", force=True)          # 先成功入库一份
+
+    def boom(code):
+        raise RuntimeError("数据源全挂")
+    monkeypatch.setattr(repo, "fetch_detail", boom)
+
+    with caplog.at_level(logging.WARNING):
+        d = repo.get_detail("000002", force=True)  # 抓取失败 → 退回陈旧缓存
+    assert d["cached"] is True
+    assert d["stale"] is True
+    assert any("退回陈旧缓存" in r.getMessage() for r in caplog.records)
