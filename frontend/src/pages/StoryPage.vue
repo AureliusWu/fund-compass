@@ -100,7 +100,7 @@ const barOption = computed(() => {
     yAxis: { type: 'category', data: sorted.map((h) => h.name).reverse(), axisLabel: { fontSize: 10, width: 80, overflow: 'truncate' }, inverse: true },
     series: [{
       type: 'bar', data: sorted.map((h) => +h.rate.toFixed(2)).reverse(),
-      itemStyle: { color: (p: any) => p.value >= 0 ? '#ee0a24' : '#07c160' },
+      itemStyle: { color: (p: any) => p.value >= 0 ? '#C44536' : '#3D8B63' },
     }],
   }
 })
@@ -179,7 +179,7 @@ const fn = (n: number) => n.toLocaleString('zh-CN', { maximumFractionDigits: 2 }
             <div class="sc-sec-title">信号分布</div>
             <div class="sc-chips">
               <span v-for="(cnt, sig) in story.signalDist" :key="sig" class="sc-chip"
-                :style="{ background: { '买入': '#fee0e0', '定投': '#fff0e0', '持有': '#f0f0f0', '减仓': '#e0f5e8' }[sig] || '#f2f3f5' }">
+                :style="{ background: { '买入': '#F6E3E0', '定投': '#FAF3E2', '持有': '#ECEFE9', '减仓': '#E6F0E9' }[sig] || '#F2F3EF' }">
                 {{ sig }} {{ cnt }}
               </span>
             </div>
@@ -252,5 +252,5 @@ const fn = (n: number) => n.toLocaleString('zh-CN', { maximumFractionDigits: 2 }
 .sc-summary { font-size: 13px; line-height: 1.8; color: var(--text-secondary); white-space: pre-line; }
 .sc-disclaimer { font-size: 10px; color: var(--text-hint); margin-top: 12px; line-height: 1.5; text-align: center; }
 .act-row { margin-bottom: 12px; }
-.export-err { font-size: 12px; color: #ee0a24; text-align: center; }
+.export-err { font-size: 12px; color: #C44536; text-align: center; }
 </style>

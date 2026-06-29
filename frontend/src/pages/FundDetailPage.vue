@@ -128,8 +128,8 @@ const btOption = computed(() => {
     xAxis: { type: 'category' as const, data: s.map((p) => p.date), boundaryGap: false, axisLabel: { show: false } },
     yAxis: { type: 'value' as const, scale: true },
     series: [
-      { name: '择时策略', type: 'line' as const, showSymbol: false, data: s.map((p) => p.v), lineStyle: { color: '#0f9d75' } },
-      { name: '一直持有', type: 'line' as const, showSymbol: false, data: b.map((p) => p.v), lineStyle: { color: '#969799' } },
+      { name: '择时策略', type: 'line' as const, showSymbol: false, data: s.map((p) => p.v), lineStyle: { color: '#4C7E67' } },
+      { name: '一直持有', type: 'line' as const, showSymbol: false, data: b.map((p) => p.v), lineStyle: { color: '#5A6A60' } },
     ],
   }
 })
@@ -143,7 +143,7 @@ const navOption = computed(() => {
     yAxis: { type: 'value' as const, scale: true },
     series: [{
       type: 'line' as const, data: h.map((p) => p.nav), showSymbol: false,
-      lineStyle: { color: '#0f9d75' }, areaStyle: { color: 'rgba(15,157,117,0.08)' },
+      lineStyle: { color: '#4C7E67' }, areaStyle: { color: 'rgba(76,126,103,0.08)' },
     }],
   }
 })
@@ -163,7 +163,7 @@ async function toggleWatch() {
     <van-nav-bar :title="detail?.name || '基金详情'" left-arrow @click-left="router.back()">
       <template #right>
         <van-icon :name="watch.has(code) ? 'star' : 'star-o'"
-          :color="watch.has(code) ? '#ffb400' : ''" size="20" @click="toggleWatch" />
+          :color="watch.has(code) ? '#C8A75B' : ''" size="20" @click="toggleWatch" />
       </template>
     </van-nav-bar>
     <div class="page-body">
@@ -205,7 +205,7 @@ async function toggleWatch() {
               @click="aiReady ? runAi() : (cfgShow = true)">
               {{ aiReady ? (aiText ? '重新生成' : 'AI 生成解读') : '配置 AI' }}
             </van-button>
-            <van-icon v-if="aiReady" name="setting-o" size="17" color="#c8c9cc" @click="cfgShow = true" />
+            <van-icon v-if="aiReady" name="setting-o" size="17" color="#A8B2A8" @click="cfgShow = true" />
             <span v-if="aiReady" class="ai-prov">{{ curDef.label }}</span>
           </div>
           <div class="ai-hint">上为规则解读，免费离线。配置 AI（DeepSeek / 通义 / OpenAI / Claude… 自带 Key）可生成更自然的点评（按量计费）。</div>
@@ -265,7 +265,7 @@ async function toggleWatch() {
             <div class="comp" v-for="(c, k) in score.components" :key="k">
               <span class="cn">{{ COMP_NAMES[k] }} <em>{{ c.weight * 100 }}%</em></span>
               <van-progress :percentage="Math.round(c.score ?? 0)" :show-pivot="false"
-                color="#0f9d75" track-color="#eef0f2" style="flex:1;margin:0 10px" />
+                color="#4C7E67" track-color="#EEF1EC" style="flex:1;margin:0 10px" />
               <span class="cv">{{ c.score ?? '--' }}</span>
             </div>
           </div>
@@ -343,72 +343,72 @@ async function toggleWatch() {
 </template>
 
 <style scoped>
-.sec { font-size: 13px; color: #969799; margin: 18px 4px 8px; }
+.sec { font-size: 13px; color: #5A6A60; margin: 18px 4px 8px; }
 .card { background: #fff; border-radius: 10px; padding: 12px; }
 .est { margin: 0 0 4px; }
 .est-head { display: flex; justify-content: space-between; align-items: center; }
-.est-label { font-size: 13px; color: #646566; font-weight: 500; }
-.est-time { font-size: 11px; color: #c8c9cc; }
+.est-label { font-size: 13px; color: #5A6A60; font-weight: 500; }
+.est-time { font-size: 11px; color: #A8B2A8; }
 .est-main { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
 .est-chg { font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
-.est-side { text-align: right; font-size: 12px; color: #969799; line-height: 1.7; }
-.est-side b { color: #323233; font-weight: 600; }
-.est-side em { font-style: normal; color: #c8c9cc; }
-.est-empty { font-size: 12px; color: #969799; margin-top: 6px; line-height: 1.5; }
+.est-side { text-align: right; font-size: 12px; color: #5A6A60; line-height: 1.7; }
+.est-side b { color: #1F2C24; font-weight: 600; }
+.est-side em { font-style: normal; color: #A8B2A8; }
+.est-empty { font-size: 12px; color: #5A6A60; margin-top: 6px; line-height: 1.5; }
 .report-btn { margin-top: 10px; }
 .hd { display: flex; align-items: center; font-size: 12px; margin: 9px 0; }
-.hd-rk { width: 18px; color: #c8c9cc; font-variant-numeric: tabular-nums; }
-.hd-nm { width: 96px; color: #323233; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.hd-nm em { font-style: normal; color: #c8c9cc; font-size: 10px; margin-left: 4px; }
-.hd-bar { flex: 1; height: 6px; background: #eef0f2; border-radius: 3px; margin: 0 8px; overflow: hidden; }
-.hd-bar i { display: block; height: 100%; background: #0f9d75; border-radius: 3px; }
-.hd-rt { width: 44px; text-align: right; color: #646566; font-variant-numeric: tabular-nums; }
+.hd-rk { width: 18px; color: #A8B2A8; font-variant-numeric: tabular-nums; }
+.hd-nm { width: 96px; color: #1F2C24; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hd-nm em { font-style: normal; color: #A8B2A8; font-size: 10px; margin-left: 4px; }
+.hd-bar { flex: 1; height: 6px; background: #EEF1EC; border-radius: 3px; margin: 0 8px; overflow: hidden; }
+.hd-bar i { display: block; height: 100%; background: #4C7E67; border-radius: 3px; }
+.hd-rt { width: 44px; text-align: right; color: #5A6A60; font-variant-numeric: tabular-nums; }
 .hd-ch { width: 56px; text-align: right; font-variant-numeric: tabular-nums; }
-.hd-note { font-size: 11px; color: #c8c9cc; margin-top: 8px; line-height: 1.5; }
+.hd-note { font-size: 11px; color: #A8B2A8; margin-top: 8px; line-height: 1.5; }
 .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); background: #fff; border-radius: 10px; padding: 12px 0; }
-.grid4 .k { font-size: 11px; color: #969799; text-align: center; }
+.grid4 .k { font-size: 11px; color: #5A6A60; text-align: center; }
 .grid4 .v { font-size: 14px; font-weight: 500; text-align: center; margin-top: 4px; }
 .scorehead { display: flex; align-items: center; gap: 16px; margin-bottom: 12px; }
-.bigscore { font-size: 34px; font-weight: 600; color: #0f9d75; }
-.rank { font-size: 11px; color: #969799; margin-top: 2px; }
+.bigscore { font-size: 34px; font-weight: 600; color: #4C7E67; }
+.rank { font-size: 11px; color: #5A6A60; margin-top: 2px; }
 .comp { display: flex; align-items: center; font-size: 12px; margin: 8px 0; }
-.comp .cn { width: 64px; color: #646566; }
-.comp .cn em { color: #c8c9cc; font-style: normal; font-size: 10px; }
-.comp .cv { width: 34px; text-align: right; color: #323233; }
+.comp .cn { width: 64px; color: #5A6A60; }
+.comp .cn em { color: #A8B2A8; font-style: normal; font-size: 10px; }
+.comp .cv { width: 34px; text-align: right; color: #1F2C24; }
 .bt-row { display: grid; grid-template-columns: repeat(3, 1fr); margin-bottom: 8px; }
-.bt-row .k { font-size: 11px; color: #969799; }
+.bt-row .k { font-size: 11px; color: #5A6A60; }
 .bt-row .v { font-size: 17px; font-weight: 600; margin-top: 2px; font-variant-numeric: tabular-nums; }
-.bt-row .kk { font-size: 10px; color: #c8c9cc; margin-top: 1px; }
-.bt-note { font-size: 11px; color: #c8c9cc; margin-top: 6px; line-height: 1.5; }
+.bt-row .kk { font-size: 10px; color: #A8B2A8; margin-top: 1px; }
+.bt-note { font-size: 11px; color: #A8B2A8; margin-top: 6px; line-height: 1.5; }
 .sighead { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
 .sigbig { font-size: 22px; font-weight: 600; }
-.advice { font-size: 12px; color: #969799; }
-.sig-disc { font-size: 11px; color: #969799; line-height: 1.6; margin-top: 10px; padding: 8px 10px; background: var(--bg-soft, #f7f8fa); border-radius: 8px; }
+.advice { font-size: 12px; color: #5A6A60; }
+.sig-disc { font-size: 11px; color: #5A6A60; line-height: 1.6; margin-top: 10px; padding: 8px 10px; background: var(--bg-soft, #F2F6F1); border-radius: 8px; }
 .sig-disc em { font-style: normal; }
 .interp .verdict { font-size: 14px; font-weight: 600; line-height: 1.5; margin-bottom: 10px; }
-.interp .verdict.good { color: #ee0a24; }
-.interp .verdict.weak { color: #07c160; }
-.interp .verdict.mid { color: #323233; }
-.ai-box { background: #f0faf6; border: 1px solid #d6efe4; border-radius: 8px; padding: 10px; margin-bottom: 10px; }
-.ai-tag { font-size: 11px; color: #0f9d75; font-weight: 600; margin-bottom: 4px; }
-.ai-text { font-size: 13px; color: #323233; line-height: 1.7; white-space: pre-wrap; }
-.isec { font-size: 12.5px; line-height: 1.7; margin: 6px 0; color: #646566; }
-.isec .ih { display: inline-block; color: #0f9d75; font-weight: 600; margin-right: 6px; }
-.ai-err { font-size: 12px; color: #ee0a24; margin: 8px 0 0; }
+.interp .verdict.good { color: #C44536; }
+.interp .verdict.weak { color: #3D8B63; }
+.interp .verdict.mid { color: #1F2C24; }
+.ai-box { background: #F0F5F2; border: 1px solid #D9E7DE; border-radius: 8px; padding: 10px; margin-bottom: 10px; }
+.ai-tag { font-size: 11px; color: #4C7E67; font-weight: 600; margin-bottom: 4px; }
+.ai-text { font-size: 13px; color: #1F2C24; line-height: 1.7; white-space: pre-wrap; }
+.isec { font-size: 12.5px; line-height: 1.7; margin: 6px 0; color: #5A6A60; }
+.isec .ih { display: inline-block; color: #4C7E67; font-weight: 600; margin-right: 6px; }
+.ai-err { font-size: 12px; color: #C44536; margin: 8px 0 0; }
 .ai-bar { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
-.ai-hint { font-size: 11px; color: #c8c9cc; line-height: 1.5; margin-top: 6px; }
-.disc { font-size: 11px; color: #c8c9cc; margin-top: 8px; }
-.kd-hint { font-size: 11px; color: #969799; line-height: 1.6; margin-top: 8px; }
-.kd-hint a { color: #0f9d75; }
-.ai-prov { font-size: 11px; color: #969799; }
+.ai-hint { font-size: 11px; color: #A8B2A8; line-height: 1.5; margin-top: 6px; }
+.disc { font-size: 11px; color: #A8B2A8; margin-top: 8px; }
+.kd-hint { font-size: 11px; color: #5A6A60; line-height: 1.6; margin-top: 8px; }
+.kd-hint a { color: #4C7E67; }
+.ai-prov { font-size: 11px; color: #5A6A60; }
 .prov-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
-.prov-chips .pchip { font-size: 12px; color: #646566; background: #f2f3f5; border-radius: 12px; padding: 3px 10px; }
-.prov-chips .pchip.on { color: #fff; background: #0f9d75; }
-.sim { display: flex; align-items: center; font-size: 12px; padding: 8px 0; border-bottom: 0.5px solid #f2f3f5; }
+.prov-chips .pchip { font-size: 12px; color: #5A6A60; background: #F2F3EF; border-radius: 12px; padding: 3px 10px; }
+.prov-chips .pchip.on { color: #fff; background: #4C7E67; }
+.sim { display: flex; align-items: center; font-size: 12px; padding: 8px 0; border-bottom: 0.5px solid #F2F3EF; }
 .sim:last-of-type { border-bottom: none; }
-.sim-nm { flex: 1; color: #323233; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sim-nm em { font-style: normal; color: #c8c9cc; font-size: 10px; margin-left: 4px; }
+.sim-nm { flex: 1; color: #1F2C24; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sim-nm em { font-style: normal; color: #A8B2A8; font-size: 10px; margin-left: 4px; }
 .sim-r { width: 70px; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
-.sim-fee { width: 64px; text-align: right; color: #969799; }
-.sim-note { font-size: 11px; color: #c8c9cc; margin-top: 8px; line-height: 1.5; }
+.sim-fee { width: 64px; text-align: right; color: #5A6A60; }
+.sim-note { font-size: 11px; color: #A8B2A8; margin-top: 8px; line-height: 1.5; }
 </style>

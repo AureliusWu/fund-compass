@@ -10,17 +10,17 @@ export function num(n: number | null | undefined, digits = 4): string {
 }
 
 export function colorOf(n: number | null | undefined): string {
-  if (n === null || n === undefined || Number.isNaN(n)) return 'var(--van-text-color-2)'
-  // 红涨绿跌
-  return n > 0 ? '#ee0a24' : n < 0 ? '#07c160' : 'var(--van-text-color-2)'
+  if (n === null || n === undefined || Number.isNaN(n)) return 'var(--text-muted)'
+  // 红涨绿跌：朱砂 / 松绿（走 CSS 变量，自动适配暗色主题）
+  return n > 0 ? 'var(--danger)' : n < 0 ? 'var(--success)' : 'var(--text-muted)'
 }
 
-// 信号 → 颜色（买入/定投偏红，持有中性，减仓绿）
+// 信号 → 颜色（买入=朱砂，定投=琥珀，持有=墨，减仓=松绿）
 export function signalColor(sig: string): string {
-  if (sig === '买入') return '#ee0a24'
-  if (sig === '定投') return '#ff976a'
-  if (sig === '减仓') return '#07c160'
-  return '#969799'
+  if (sig === '买入') return 'var(--danger)'
+  if (sig === '定投') return 'var(--warn)'
+  if (sig === '减仓') return 'var(--success)'
+  return 'var(--text-muted)'
 }
 
 export function stars(star: number | null | undefined): string {

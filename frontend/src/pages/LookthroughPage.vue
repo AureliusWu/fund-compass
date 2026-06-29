@@ -99,19 +99,19 @@ onMounted(refresh)
 
 <style scoped>
 .card { background: #fff; border-radius: 10px; padding: 14px; margin-bottom: 12px; }
-.sec { font-size: 13px; color: #969799; margin: 4px 4px 8px; }
+.sec { font-size: 13px; color: #5A6A60; margin: 4px 4px 8px; }
 .sum-row { display: grid; grid-template-columns: repeat(3, 1fr); }
-.sum-row .k { font-size: 11px; color: #969799; }
-.sum-row .v { font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 2px; color: #0f9d75; }
-.src { font-size: 11px; color: #c8c9cc; margin-top: 8px; }
+.sum-row .k { font-size: 11px; color: #5A6A60; }
+.sum-row .v { font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 2px; color: #4C7E67; }
+.src { font-size: 11px; color: #A8B2A8; margin-top: 8px; }
 .st { display: flex; align-items: center; font-size: 12px; margin: 9px 0; }
-.st-rk { width: 18px; color: #c8c9cc; font-variant-numeric: tabular-nums; }
-.st-nm { width: 110px; color: #323233; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.st-nm em { font-style: normal; color: #c8c9cc; font-size: 10px; margin-left: 4px; }
-.st-nm em i { font-style: normal; color: #0f9d75; }
-.st-bar { flex: 1; height: 6px; background: #eef0f2; border-radius: 3px; margin: 0 8px; overflow: hidden; }
-.st-bar i { display: block; height: 100%; background: #0f9d75; border-radius: 3px; }
-.st-pct { width: 46px; text-align: right; color: #323233; font-variant-numeric: tabular-nums; }
-.st-val { width: 60px; text-align: right; color: #969799; font-variant-numeric: tabular-nums; }
-.note { font-size: 11px; color: #c8c9cc; margin-top: 8px; line-height: 1.5; }
+.st-rk { width: 18px; color: #A8B2A8; font-variant-numeric: tabular-nums; }
+.st-nm { width: 110px; color: #1F2C24; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.st-nm em { font-style: normal; color: #A8B2A8; font-size: 10px; margin-left: 4px; }
+.st-nm em i { font-style: normal; color: #4C7E67; }
+.st-bar { flex: 1; height: 6px; background: #EEF1EC; border-radius: 3px; margin: 0 8px; overflow: hidden; }
+.st-bar i { display: block; height: 100%; background: #4C7E67; border-radius: 3px; }
+.st-pct { width: 46px; text-align: right; color: #1F2C24; font-variant-numeric: tabular-nums; }
+.st-val { width: 60px; text-align: right; color: #5A6A60; font-variant-numeric: tabular-nums; }
+.note { font-size: 11px; color: #A8B2A8; margin-top: 8px; line-height: 1.5; }
 </style>

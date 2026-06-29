@@ -45,12 +45,13 @@ export default defineConfig({
         name: '司南基金',
         short_name: '司南基金',
         description: '个人基金选基与择时辅助工具',
-        theme_color: '#0f9d75',
-        background_color: '#ffffff',
+        theme_color: '#4C7E67',
+        background_color: '#F8F8F3',
         display: 'standalone',
         icons: [
           { src: 'pwa-192x192.png', sizes: '192x192', type: 'image/png' },
           { src: 'pwa-512x512.png', sizes: '512x512', type: 'image/png' },
+          { src: 'pwa-192x192.png', sizes: '192x192', type: 'image/png', purpose: 'maskable' },
           { src: 'pwa-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }
         ]
       }

@@ -106,13 +106,13 @@ const navOption = computed(() => {
 </template>
 
 <style scoped>
-.sec { font-size: 13px; color: #969799; margin: 16px 4px 8px; }
+.sec { font-size: 13px; color: #5A6A60; margin: 16px 4px 8px; }
 .picks { display: flex; flex-wrap: wrap; gap: 8px; }
-.pick { font-size: 13px; padding: 6px 12px; border-radius: 14px; background: #f2f3f5; color: #646566; }
-.pick.on { background: #0f9d75; color: #fff; }
+.pick { font-size: 13px; padding: 6px 12px; border-radius: 14px; background: #F2F3EF; color: #5A6A60; }
+.pick.on { background: #4C7E67; color: #fff; }
 .card { background: #fff; border-radius: 10px; padding: 12px; }
 .cmp { overflow-x: auto; }
 .cmp table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.cmp th, .cmp td { padding: 8px 6px; text-align: right; border-bottom: 1px solid #f0f0f0; white-space: nowrap; }
-.cmp th:first-child, .cmp .rl { text-align: left; color: #969799; }
+.cmp th, .cmp td { padding: 8px 6px; text-align: right; border-bottom: 1px solid #ECEFE9; white-space: nowrap; }
+.cmp th:first-child, .cmp .rl { text-align: left; color: #5A6A60; }
 </style>

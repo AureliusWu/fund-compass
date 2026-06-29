@@ -74,7 +74,7 @@ function onMarkAllRead() { markAllRead(); alerts.value = loadAlerts(); unread.va
 function onDismiss(id: string) { dismissAlert(id); alerts.value = loadAlerts(); unread.value = unreadCount() }
 function onMarkOne(id: string) { markRead(id); alerts.value = loadAlerts(); unread.value = unreadCount() }
 
-const levelColor = (l: string) => ({ info: '#1989fa', warn: '#ff976a', danger: '#ee0a24' }[l] || '#969799')
+const levelColor = (l: string) => ({ info: '#C8A75B', warn: '#C8963E', danger: '#C44536' }[l] || '#5A6A60')
 const levelIcon = (l: string) => ({ info: 'ℹ', warn: '⚠', danger: '🛑' }[l] || '·')
 
 // 温度计角度：0 → 左 -90deg, 100 → 右 90deg
@@ -98,7 +98,7 @@ const levelIcon = (l: string) => ({ info: 'ℹ', warn: '⚠', danger: '🛑' }[l
       <div class="sec">市场温度</div>
       <div class="card temp-card" @click="app.loadMarketTemp()">
         <div class="temp-header">
-          <span class="temp-score" :style="{ color: app.marketTemp?.color || '#969799' }">
+          <span class="temp-score" :style="{ color: app.marketTemp?.color || '#5A6A60' }">
             {{ app.marketTemp?.score ?? '…' }}
           </span>
           <span v-if="app.marketTemp" class="temp-label" :style="{ color: app.marketTemp.color }">
@@ -111,7 +111,7 @@ const levelIcon = (l: string) => ({ info: 'ℹ', warn: '⚠', danger: '🛑' }[l
         <div class="gauge-track">
           <div class="gauge-fill" :style="{
             width: (app.marketTemp?.score ?? 50) + '%',
-            background: app.marketTemp?.color || '#969799',
+            background: app.marketTemp?.color || '#5A6A60',
           }" />
         </div>
 
@@ -167,15 +167,15 @@ const levelIcon = (l: string) => ({ info: 'ℹ', warn: '⚠', danger: '🛑' }[l
       <div class="sec">自选温度</div>
       <div class="card watch-temp-card" v-if="watchTemp != null">
         <div class="wt-score" :style="{
-          color: watchTemp >= 70 ? '#ee0a24' : watchTemp >= 50 ? '#ff976a' : watchTemp >= 30 ? '#969799' : '#0f9d75'
+          color: watchTemp >= 70 ? '#C44536' : watchTemp >= 50 ? '#C8963E' : watchTemp >= 30 ? '#5A6A60' : '#4C7E67'
         }">
           {{ watchTemp }}<small>/100</small>
         </div>
         <div class="wt-dist">
-          <span style="color:#ee0a24">买入 {{ dist['买入'] }}</span>
-          <span style="color:#ff976a">定投 {{ dist['定投'] }}</span>
-          <span style="color:#969799">持有 {{ dist['持有'] }}</span>
-          <span style="color:#07c160">减仓 {{ dist['减仓'] }}</span>
+          <span style="color:#C44536">买入 {{ dist['买入'] }}</span>
+          <span style="color:#C8963E">定投 {{ dist['定投'] }}</span>
+          <span style="color:#5A6A60">持有 {{ dist['持有'] }}</span>
+          <span style="color:#3D8B63">减仓 {{ dist['减仓'] }}</span>
         </div>
         <div class="wt-note">基于自选基金择时信号的简易温度（非全市场）</div>
       </div>
@@ -200,7 +200,7 @@ const levelIcon = (l: string) => ({ info: 'ℹ', warn: '⚠', danger: '🛑' }[l
 </template>
 
 <style scoped>
-.sec { font-size: 13px; color: var(--text-muted, #969799); margin: 18px 4px 8px; }
+.sec { font-size: 13px; color: var(--text-muted, #5A6A60); margin: 18px 4px 8px; }
 
 /* ── 市场温度 ── */
 .temp-card {
@@ -217,7 +217,7 @@ const levelIcon = (l: string) => ({ info: 'ℹ', warn: '⚠', danger: '🛑' }[l
 .gauge-track {
   height: 8px;
   border-radius: 4px;
-  background: var(--chip-bg, #f2f3f5);
+  background: var(--chip-bg, #F2F3EF);
   overflow: hidden;
   margin-bottom: 14px;
 }
@@ -232,15 +232,15 @@ const levelIcon = (l: string) => ({ info: 'ℹ', warn: '⚠', danger: '🛑' }[l
 .temp-sources { display: flex; flex-direction: column; gap: 6px; }
 .ts-row { display: flex; align-items: center; gap: 6px; font-size: 12px; }
 .ts-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
-.ts-label { color: var(--text-secondary, #646566); width: 80px; flex-shrink: 0; }
+.ts-label { color: var(--text-secondary, #5A6A60); width: 80px; flex-shrink: 0; }
 .ts-val { font-weight: 700; width: 24px; text-align: right; flex-shrink: 0; }
-.ts-detail { color: var(--text-muted, #969799); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.temp-updated { font-size: 11px; color: var(--text-hint, #c8c9cc); margin-top: 10px; }
+.ts-detail { color: var(--text-muted, #5A6A60); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.temp-updated { font-size: 11px; color: var(--text-hint, #A8B2A8); margin-top: 10px; }
 
 /* ── 系统状态 ── */
 .src-dot { font-size: 10px; margin-left: 4px; }
-.src-dot.ok { color: #07c160; }
-.src-dot.err { color: #ee0a24; }
+.src-dot.ok { color: #3D8B63; }
+.src-dot.err { color: #C44536; }
 
 /* ── 自选温度 ── */
 .watch-temp-card {
@@ -249,17 +249,17 @@ const levelIcon = (l: string) => ({ info: 'ℹ', warn: '⚠', danger: '🛑' }[l
   padding: 16px;
 }
 .wt-score { font-size: 40px; font-weight: 600; }
-.wt-score small { font-size: 14px; color: var(--text-hint, #c8c9cc); font-weight: 400; }
+.wt-score small { font-size: 14px; color: var(--text-hint, #A8B2A8); font-weight: 400; }
 .wt-dist { display: flex; gap: 14px; font-size: 13px; margin-top: 6px; }
-.wt-note { font-size: 11px; color: var(--text-hint, #c8c9cc); margin-top: 8px; }
+.wt-note { font-size: 11px; color: var(--text-hint, #A8B2A8); margin-top: 8px; }
 /* ── V4-5 提醒 ── */
 .alert-sec { display: flex; align-items: center; gap: 8px; }
-.alert-badge { background: #ee0a24; color: #fff; font-size: 10px; min-width: 16px; height: 16px; border-radius: 8px; display: flex; align-items: center; justify-content: center; padding: 0 4px; }
+.alert-badge { background: #C44536; color: #fff; font-size: 10px; min-width: 16px; height: 16px; border-radius: 8px; display: flex; align-items: center; justify-content: center; padding: 0 4px; }
 .alert-allread { font-size: 11px; color: var(--teal); cursor: pointer; }
 .alert-card { background: var(--card-bg, #fff); border-radius: 10px; padding: 4px 12px; }
-.alert-item { display: flex; align-items: flex-start; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--border, #f0f0f0); cursor: pointer; }
+.alert-item { display: flex; align-items: flex-start; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--border, #ECEFE9); cursor: pointer; }
 .alert-item:last-child { border-bottom: none; }
-.alert-item.unread { background: rgba(15,157,117,0.03); margin: 0 -12px; padding-left: 12px; padding-right: 12px; }
+.alert-item.unread { background: rgba(76,126,103,0.05); margin: 0 -12px; padding-left: 12px; padding-right: 12px; }
 .al-icon { font-size: 14px; width: 20px; text-align: center; flex-shrink: 0; }
 .al-body { flex: 1; min-width: 0; }
 .al-title { font-size: 13px; font-weight: 600; color: var(--text); }

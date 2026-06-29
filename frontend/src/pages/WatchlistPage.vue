@@ -233,8 +233,8 @@ onMounted(refresh)
             </div>
           </template>
           <template #right-icon>
-            <van-icon name="edit" color="#0f9d75" size="17" style="margin-left:10px" @click.stop="openEdit(it.code)" />
-            <van-icon name="cross" color="#c8c9cc" size="17" style="margin-left:8px" @click.stop="remove(it.code)" />
+            <van-icon name="edit" color="#4C7E67" size="17" style="margin-left:10px" @click.stop="openEdit(it.code)" />
+            <van-icon name="cross" color="#A8B2A8" size="17" style="margin-left:8px" @click.stop="remove(it.code)" />
           </template>
         </van-cell>
       </van-cell-group>

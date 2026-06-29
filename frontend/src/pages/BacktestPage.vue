@@ -78,9 +78,9 @@ const comparisonOption = computed(() => {
     xAxis: { type: 'category', data: sc.map((p) => p.date.slice(0, 10)), boundaryGap: false, axisLabel: { fontSize: 9 } },
     yAxis: { type: 'value', scale: true, axisLabel: { fontSize: 10, formatter: '{value}' } },
     series: [
-      { name: '择时策略', type: 'line', showSymbol: false, data: sc.map((p) => +(p.v * 100 / base).toFixed(2)), lineStyle: { color: '#ee0a24' } },
-      { name: '买入持有', type: 'line', showSymbol: false, data: bc.map((p) => +(p.v * 100 / base).toFixed(2)), lineStyle: { color: '#0f9d75' } },
-      { name: '定投', type: 'line', showSymbol: false, data: dc.map((v) => +(v * 100 / (dc[0] || 1)).toFixed(2)), lineStyle: { color: '#1989fa' } },
+      { name: '择时策略', type: 'line', showSymbol: false, data: sc.map((p) => +(p.v * 100 / base).toFixed(2)), lineStyle: { color: '#C44536' } },
+      { name: '买入持有', type: 'line', showSymbol: false, data: bc.map((p) => +(p.v * 100 / base).toFixed(2)), lineStyle: { color: '#4C7E67' } },
+      { name: '定投', type: 'line', showSymbol: false, data: dc.map((v) => +(v * 100 / (dc[0] || 1)).toFixed(2)), lineStyle: { color: '#C8A75B' } },
     ],
   }
 })
@@ -96,8 +96,8 @@ const heatOption = computed(() => {
     xAxis: { type: 'category', data: years, axisLabel: { fontSize: 10, rotate: 30 } },
     yAxis: { type: 'value', axisLabel: { fontSize: 10, formatter: '{value}%' } },
     series: [
-      { name: '策略', type: 'bar', data: a.map((x) => x.strategy != null ? +x.strategy.toFixed(2) : null), itemStyle: { color: '#ee0a24' } },
-      { name: '基准', type: 'bar', data: a.map((x) => x.benchmark != null ? +x.benchmark.toFixed(2) : null), itemStyle: { color: '#0f9d75' } },
+      { name: '策略', type: 'bar', data: a.map((x) => x.strategy != null ? +x.strategy.toFixed(2) : null), itemStyle: { color: '#C44536' } },
+      { name: '基准', type: 'bar', data: a.map((x) => x.benchmark != null ? +x.benchmark.toFixed(2) : null), itemStyle: { color: '#4C7E67' } },
     ],
   }
 })
@@ -114,8 +114,8 @@ const rollingOption = computed(() => {
     xAxis: { type: 'category', data: r.map((p) => p.date), boundaryGap: false, axisLabel: { fontSize: 9 } },
     yAxis: { type: 'value', scale: true, axisLabel: { fontSize: 10 } },
     series: [
-      { name: '滚动年化', type: 'line', showSymbol: false, data: r.map((p) => p.ret != null ? +p.ret.toFixed(2) : null), lineStyle: { color: '#ee0a24' } },
-      { name: '滚动夏普', type: 'line', showSymbol: false, data: r.map((p) => p.sharpe != null ? +p.sharpe.toFixed(2) : null), lineStyle: { color: '#1989fa' } },
+      { name: '滚动年化', type: 'line', showSymbol: false, data: r.map((p) => p.ret != null ? +p.ret.toFixed(2) : null), lineStyle: { color: '#C44536' } },
+      { name: '滚动夏普', type: 'line', showSymbol: false, data: r.map((p) => p.sharpe != null ? +p.sharpe.toFixed(2) : null), lineStyle: { color: '#C8A75B' } },
     ],
   }
 })
@@ -166,7 +166,7 @@ const fp = (n: number | null | undefined, d = 2) => n != null ? (n >= 0 ? '+' : 
           </div>
           <div class="sc">
             <div class="sc-label">最大回撤</div>
-            <div class="sc-val" style="color:#07c160">{{ sm.strategyDD != null ? sm.strategyDD.toFixed(2) + '%' : '--' }}</div>
+            <div class="sc-val" style="color:#3D8B63">{{ sm.strategyDD != null ? sm.strategyDD.toFixed(2) + '%' : '--' }}</div>
           </div>
           <div class="sc">
             <div class="sc-label">夏普比率</div>
@@ -221,7 +221,7 @@ const fp = (n: number | null | undefined, d = 2) => n != null ? (n >= 0 ? '+' : 
                 <td>{{ s.period }} 日</td>
                 <td :style="{ color: colorOf(s.ret) }">{{ fp(s.ret) }}</td>
                 <td>{{ s.sharpe.toFixed(2) }}</td>
-                <td style="color:#07c160">{{ s.drawdown.toFixed(2) }}%</td>
+                <td style="color:#3D8B63">{{ s.drawdown.toFixed(2) }}%</td>
               </tr>
             </tbody>
           </table>
@@ -243,26 +243,26 @@ const fp = (n: number | null | undefined, d = 2) => n != null ? (n >= 0 ? '+' : 
 
 <style scoped>
 .chip-row { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 16px; }
-.chip { padding: 4px 10px; border-radius: 12px; background: var(--chip-bg, #f2f3f5); color: var(--text-secondary, #646566); font-size: 12px; cursor: pointer; }
-.chip.on { background: #0f9d75; color: #fff; }
+.chip { padding: 4px 10px; border-radius: 12px; background: var(--chip-bg, #F2F3EF); color: var(--text-secondary, #5A6A60); font-size: 12px; cursor: pointer; }
+.chip.on { background: #4C7E67; color: #fff; }
 .btn-row { padding: 8px 16px; }
 
-.sec { font-size: 13px; color: var(--text-muted, #969799); margin: 18px 4px 8px; }
+.sec { font-size: 13px; color: var(--text-muted, #5A6A60); margin: 18px 4px 8px; }
 .card { background: var(--card-bg, #fff); border-radius: 10px; padding: 14px; margin-bottom: 4px; }
 .row { display: flex; align-items: center; gap: 10px; }
 .mb { margin-bottom: 10px; }
 
 .summary-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .sc { background: var(--card-bg, #fff); border-radius: 8px; padding: 10px 8px; text-align: center; }
-.sc-label { font-size: 11px; color: var(--text-muted, #969799); }
+.sc-label { font-size: 11px; color: var(--text-muted, #5A6A60); }
 .sc-val { font-size: 18px; font-weight: 700; margin-top: 2px; font-variant-numeric: tabular-nums; }
 
 .ann-tbl { width: 100%; border-collapse: collapse; margin-top: 8px; font-variant-numeric: tabular-nums; }
-.ann-tbl th, .ann-tbl td { padding: 5px 6px; text-align: right; border-bottom: 1px solid var(--border, #f0f0f0); font-size: 12px; }
-.ann-tbl th { color: var(--text-muted, #969799); font-weight: 500; }
+.ann-tbl th, .ann-tbl td { padding: 5px 6px; text-align: right; border-bottom: 1px solid var(--border, #ECEFE9); font-size: 12px; }
+.ann-tbl th { color: var(--text-muted, #5A6A60); font-weight: 500; }
 .ann-tbl td:first-child, .ann-tbl th:first-child { text-align: left; }
 
-.note { font-size: 11px; color: var(--text-hint, #c8c9cc); margin-top: 8px; }
-:deep(.red) { color: #ee0a24 !important; }
-:deep(.green) { color: #07c160 !important; }
+.note { font-size: 11px; color: var(--text-hint, #A8B2A8); margin-top: 8px; }
+:deep(.red) { color: #C44536 !important; }
+:deep(.green) { color: #3D8B63 !important; }
 </style>

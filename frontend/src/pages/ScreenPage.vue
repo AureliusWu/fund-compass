@@ -202,14 +202,14 @@ onMounted(() => {
           <van-cell v-for="f in rankedTop" :key="f.c" :title="f.n" :label="f.c + ' · ' + f.t" @click="router.push('/fund/' + f.c)">
             <template #value>
               <div class="rk-val">
-                <span class="rk-m" :style="{ color: sortKey === 'fee' ? '#646566' : colorOf(metric(f)) }">
+                <span class="rk-m" :style="{ color: sortKey === 'fee' ? '#5A6A60' : colorOf(metric(f)) }">
                   {{ sortKey === 'fee' ? (f.fee != null ? f.fee + '%' : '--') : pct(metric(f)) }}
                 </span>
                 <span class="rk-sub">近1年 {{ pct(f.r1y) }} · 费 {{ f.fee != null ? f.fee + '%' : '--' }}</span>
               </div>
             </template>
             <template #right-icon>
-              <van-icon :name="watch.has(f.c) ? 'star' : 'star-o'" :color="watch.has(f.c) ? '#ffb400' : '#c8c9cc'"
+              <van-icon :name="watch.has(f.c) ? 'star' : 'star-o'" :color="watch.has(f.c) ? '#C8A75B' : '#A8B2A8'"
                 size="20" style="margin-left:8px" @click.stop="toggleWatch(f.c, f.n)" />
             </template>
           </van-cell>
@@ -268,7 +268,7 @@ onMounted(() => {
                 </div>
               </template>
               <template #right-icon>
-                <van-icon :name="watch.has(f.c) ? 'star' : 'star-o'" :color="watch.has(f.c) ? '#ffb400' : '#c8c9cc'"
+                <van-icon :name="watch.has(f.c) ? 'star' : 'star-o'" :color="watch.has(f.c) ? '#C8A75B' : '#A8B2A8'"
                   size="20" style="margin-left:8px" @click.stop="toggleWatch(f.c, f.n)" />
               </template>
             </van-cell>
@@ -285,7 +285,7 @@ onMounted(() => {
         <van-cell v-for="it in items" :key="it.code" :title="it.name" :label="it.code + ' · ' + it.type"
           @click="router.push('/fund/' + it.code)">
           <template #right-icon>
-            <van-icon :name="watch.has(it.code) ? 'star' : 'star-o'" :color="watch.has(it.code) ? '#ffb400' : '#c8c9cc'"
+            <van-icon :name="watch.has(it.code) ? 'star' : 'star-o'" :color="watch.has(it.code) ? '#C8A75B' : '#A8B2A8'"
               size="20" @click.stop="toggleWatch(it.code, it.name)" />
           </template>
         </van-cell>
@@ -323,5 +323,5 @@ onMounted(() => {
 .nl-hint { font-size: 11px; color: var(--text-hint); }
 .nl-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
 .nl-tag { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: var(--nl-tag-bg); color: var(--teal); }
-.nl-tag.warn { background: var(--nl-tag-warn-bg); color: #e6a23c; }
+.nl-tag.warn { background: var(--nl-tag-warn-bg); color: #C8963E; }
 </style>

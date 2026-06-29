@@ -182,32 +182,32 @@ async function share() {
 
 <style scoped>
 .report { background: #fff; border-radius: 12px; padding: 18px 16px; }
-.r-head { display: flex; align-items: baseline; justify-content: space-between; border-bottom: 2px solid #0f9d75; padding-bottom: 8px; }
-.brand { font-size: 17px; font-weight: 700; color: #0f9d75; letter-spacing: 1px; }
-.r-title { font-size: 12px; color: #969799; }
-.r-name { font-size: 19px; font-weight: 600; color: #323233; margin-top: 12px; }
-.r-meta { font-size: 12px; color: #969799; margin-top: 4px; line-height: 1.5; }
+.r-head { display: flex; align-items: baseline; justify-content: space-between; border-bottom: 2px solid #C8A75B; padding-bottom: 8px; }
+.brand { font-size: 17px; font-weight: 700; color: #4C7E67; letter-spacing: 1px; }
+.r-title { font-size: 12px; color: #5A6A60; }
+.r-name { font-size: 19px; font-weight: 600; color: #1F2C24; margin-top: 12px; }
+.r-meta { font-size: 12px; color: #5A6A60; margin-top: 4px; line-height: 1.5; }
 .r-hero { display: flex; justify-content: space-between; margin: 14px 0 4px; }
-.hb .hk { font-size: 11px; color: #969799; }
+.hb .hk { font-size: 11px; color: #5A6A60; }
 .hv { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; }
-.hv.green { color: #0f9d75; }
-.hv small { font-size: 13px; color: #c8c9cc; font-weight: 400; }
-.hs { font-size: 13px; color: #ffb400; letter-spacing: 1px; }
-.hr { font-size: 11px; color: #c8c9cc; margin-top: 1px; }
-.r-sec { font-size: 12px; color: #646566; font-weight: 600; margin: 16px 0 8px; }
+.hv.green { color: #4C7E67; }
+.hv small { font-size: 13px; color: #A8B2A8; font-weight: 400; }
+.hs { font-size: 13px; color: #C8A75B; letter-spacing: 1px; }
+.hr { font-size: 11px; color: #A8B2A8; margin-top: 1px; }
+.r-sec { font-size: 12px; color: #5A6A60; font-weight: 600; margin: 16px 0 8px; }
 .r-comp { display: flex; align-items: center; font-size: 12px; margin: 7px 0; }
-.r-comp .cn { width: 36px; color: #646566; }
-.r-comp .bar { flex: 1; height: 7px; background: #eef0f2; border-radius: 4px; margin: 0 10px; overflow: hidden; }
-.r-comp .bar i { display: block; height: 100%; background: #0f9d75; border-radius: 4px; }
-.r-comp .cv { width: 28px; text-align: right; color: #323233; }
+.r-comp .cn { width: 36px; color: #5A6A60; }
+.r-comp .bar { flex: 1; height: 7px; background: #EEF1EC; border-radius: 4px; margin: 0 10px; overflow: hidden; }
+.r-comp .bar i { display: block; height: 100%; background: #4C7E67; border-radius: 4px; }
+.r-comp .cv { width: 28px; text-align: right; color: #1F2C24; }
 .r-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
-.r-grid > div { display: flex; flex-direction: column; align-items: center; background: #f7f8fa; border-radius: 8px; padding: 8px 0; }
-.gk { font-size: 11px; color: #969799; }
+.r-grid > div { display: flex; flex-direction: column; align-items: center; background: #F2F6F1; border-radius: 8px; padding: 8px 0; }
+.gk { font-size: 11px; color: #5A6A60; }
 .gv { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 3px; }
-.r-sig { display: flex; align-items: baseline; gap: 10px; background: #f7f8fa; border-radius: 8px; padding: 10px 12px; }
+.r-sig { display: flex; align-items: baseline; gap: 10px; background: #F2F6F1; border-radius: 8px; padding: 10px 12px; }
 .r-sig .sg { font-size: 18px; font-weight: 700; }
-.r-sig .sl { font-size: 11px; color: #646566; line-height: 1.5; }
-.r-verdict { font-size: 13px; color: #323233; line-height: 1.6; background: #f0faf6; border-radius: 8px; padding: 12px; margin-top: 16px; }
-.r-foot { font-size: 10px; color: #c8c9cc; line-height: 1.6; margin-top: 14px; text-align: center; }
+.r-sig .sl { font-size: 11px; color: #5A6A60; line-height: 1.5; }
+.r-verdict { font-size: 13px; color: #1F2C24; line-height: 1.6; background: #F0F5F2; border-radius: 8px; padding: 12px; margin-top: 16px; }
+.r-foot { font-size: 10px; color: #A8B2A8; line-height: 1.6; margin-top: 14px; text-align: center; }
 .acts { display: flex; gap: 12px; margin-top: 16px; }
 </style>

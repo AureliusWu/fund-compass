@@ -302,10 +302,10 @@ onMounted(refresh)
               <div class="st-card" v-for="s in stressRes" :key="s.name">
                 <div class="st-name">{{ s.name }}</div>
                 <div class="st-desc">{{ s.desc }}</div>
-                <div class="st-pnl" :style="{ color: s.pnl <= 0 ? '#07c160' : '#ee0a24' }">
+                <div class="st-pnl" :style="{ color: s.pnl <= 0 ? '#3D8B63' : '#C44536' }">
                   {{ s.pnl >= 0 ? '+' : '' }}{{ s.pnl.toLocaleString('zh-CN', { maximumFractionDigits: 0 }) }}
                 </div>
-                <div class="st-pct" :style="{ color: s.pnlPct <= 0 ? '#07c160' : '#ee0a24' }">
+                <div class="st-pct" :style="{ color: s.pnlPct <= 0 ? '#3D8B63' : '#C44536' }">
                   {{ s.pnlPct >= 0 ? '+' : '' }}{{ s.pnlPct.toFixed(2) }}%
                 </div>
               </div>
@@ -322,7 +322,7 @@ onMounted(refresh)
               <span class="rb-arr">→</span>
               <span class="rb-tgt">{{ r.target }}%</span>
               <span class="rb-act" :style="{
-                color: r.action === '加仓' ? '#ee0a24' : r.action === '减仓' ? '#07c160' : '#969799',
+                color: r.action === '加仓' ? '#C44536' : r.action === '减仓' ? '#3D8B63' : '#5A6A60',
               }">{{ r.action }}</span>
               <span class="rb-detail">{{ r.detail }}</span>
             </div>
@@ -335,10 +335,10 @@ onMounted(refresh)
               <div class="corr-pair" v-for="p in corrMatrix.pairs.sort((a, b) => b.corr - a.corr).slice(0, 10)" :key="p.a + p.b">
                 <span class="cp-names">{{ p.aName }} ↔ {{ p.bName }}</span>
                 <van-progress :percentage="((p.corr + 1) / 2) * 100" :show-pivot="false"
-                  :color="p.corr > 0.7 ? '#ee0a24' : p.corr > 0.4 ? '#ff976a' : '#0f9d75'"
+                  :color="p.corr > 0.7 ? '#C44536' : p.corr > 0.4 ? '#C8963E' : '#4C7E67'"
                   track-color="var(--border)" style="flex:1;margin:0 8px" />
                 <span class="cp-val" :style="{
-                  color: p.corr > 0.7 ? '#ee0a24' : p.corr > 0.4 ? '#ff976a' : '#0f9d75',
+                  color: p.corr > 0.7 ? '#C44536' : p.corr > 0.4 ? '#C8963E' : '#4C7E67',
                 }">{{ p.corr.toFixed(2) }}</span>
               </div>
             </div>
@@ -379,7 +379,7 @@ onMounted(refresh)
                 <span class="atr-nm">{{ g.account }}</span>
                 <span class="atr-w">{{ g.weight.toFixed(1) }}%</span>
                 <van-progress :percentage="Math.min(g.weight, 100)" :show-pivot="false"
-                  color="#0f9d75" track-color="#eef0f2" style="flex:1;margin:0 8px" />
+                  color="#4C7E67" track-color="#EEF1EC" style="flex:1;margin:0 8px" />
                 <span class="atr-d" :style="{ color: colorOf(g.dayContrib) }">{{ g.dayContrib != null ? (g.dayContrib >= 0 ? '+' : '') + g.dayContrib.toFixed(2) + 'bp' : '--' }}</span>
               </div>
             </template>
@@ -388,7 +388,7 @@ onMounted(refresh)
                 <span class="atr-nm">{{ g.type }}</span>
                 <span class="atr-w">{{ g.weight.toFixed(1) }}%</span>
                 <van-progress :percentage="Math.min(g.weight, 100)" :show-pivot="false"
-                  color="#0f9d75" track-color="#eef0f2" style="flex:1;margin:0 8px" />
+                  color="#4C7E67" track-color="#EEF1EC" style="flex:1;margin:0 8px" />
                 <span class="atr-d" :style="{ color: colorOf(g.dayContrib) }">{{ g.dayContrib != null ? (g.dayContrib >= 0 ? '+' : '') + g.dayContrib.toFixed(2) + 'bp' : '--' }}</span>
               </div>
             </template>
@@ -460,7 +460,7 @@ onMounted(refresh)
 .conc div { text-align: center; }
 .conc div span { display: block; font-size: 11px; color: var(--text-muted); }
 .conc div b { font-size: 18px; color: var(--text); }
-.conc-warn { font-size: 12px; color: #e6a23c; margin-top: 6px; }
+.conc-warn { font-size: 12px; color: #C8963E; margin-top: 6px; }
 /* ── 快照 ── */
 .snap-hint { font-size: 11px; color: var(--text-hint); text-align: center; margin-top: 6px; line-height: 1.5; }
 /* ── V3-13 大类资产 ── */
@@ -469,9 +469,9 @@ onMounted(refresh)
 .cb-lbl { width: 36px; color: var(--text-secondary); }
 .cb-pct { width: 42px; text-align: right; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
 .class-ref { font-size: 11px; color: var(--text-hint); margin-top: 6px; }
-.class-tip { font-size: 12px; color: #e6a23c; margin-top: 4px; }
+.class-tip { font-size: 12px; color: #C8963E; margin-top: 4px; }
 /* ── V4-3 组合诊断 ── */
-.diag-err { font-size: 12px; color: #ee0a24; margin-top: 6px; }
+.diag-err { font-size: 12px; color: #C44536; margin-top: 6px; }
 .diag-sub { font-size: 14px; font-weight: 600; color: var(--text); margin: 16px 0 8px; }
 .diag-note { font-size: 11px; color: var(--text-hint); margin-top: 4px; }
 .style-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
@@ -495,5 +495,5 @@ onMounted(refresh)
 .corr-pair { display: flex; align-items: center; gap: 6px; font-size: 11px; }
 .cp-names { width: 100px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-secondary); }
 .cp-val { width: 32px; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
-.corr-note { font-size: 11px; color: #e6a23c; margin-top: 4px; }
+.corr-note { font-size: 11px; color: #C8963E; margin-top: 4px; }
 </style>
