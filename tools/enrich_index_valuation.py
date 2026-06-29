@@ -60,11 +60,15 @@ def fetch_index_valuation(ak) -> list[dict]:
 
 def main():
     import akshare as ak  # 仅 CI 有
+    print("[diag] akshare version:", getattr(ak, "__version__", "?"))
+    cand = sorted(a for a in dir(ak)
+                  if any(k in a.lower() for k in ("value", "funddb", "valuation", "index_pe", "index_pb", "pe_lg", "pb_lg")))
+    print("[diag] 候选指数估值接口:", cand)
 
     try:
         data = fetch_index_valuation(ak)
     except Exception as e:
-        print("指数估值富集失败（接口可能改名，见上方 [diag]）:", e)
+        print("指数估值富集失败（接口可能改名，见上方 [diag] 候选）:", e)
         return 1
     if not data:
         print("无指数估值数据（接口列名可能变化，见上方 [diag]）")
