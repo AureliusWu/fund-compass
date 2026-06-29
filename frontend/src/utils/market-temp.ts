@@ -76,14 +76,21 @@ function volScore(ratio: number): number {
   if (ratio > 0.7) return 35
   return 20
 }
+// 山峦色阶：深松→青绿→墨→琥珀→朱砂（对应《千里江山图》色系，Canvas 必须用 hex）
 function toLabel(score: number): { label: string; color: string } {
-  if (score <= 20) return { label: '极寒', color: '#1989fa' }
-  if (score <= 40) return { label: '偏冷', color: '#0f9d75' }
-  if (score <= 60) return { label: '适中', color: '#969799' }
-  if (score <= 80) return { label: '偏热', color: '#ff976a' }
-  return { label: '过热', color: '#ee0a24' }
+  if (score <= 20) return { label: '极寒', color: '#315A46' }
+  if (score <= 40) return { label: '偏冷', color: '#4C7E67' }
+  if (score <= 60) return { label: '适中', color: '#5A6A60' }
+  if (score <= 80) return { label: '偏热', color: '#C8963E' }
+  return { label: '过热', color: '#C44536' }
 }
-const heatColor = (s: number) => (s <= 40 ? '#0f9d75' : s >= 60 ? '#ee0a24' : '#969799')
+const heatColor = (s: number) => {
+  if (s <= 20) return '#315A46'
+  if (s <= 40) return '#4C7E67'
+  if (s <= 60) return '#5A6A60'
+  if (s <= 80) return '#C8963E'
+  return '#C44536'
+}
 
 export async function fetchMarketTemp(): Promise<MarketTemp> {
   try {

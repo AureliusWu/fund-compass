@@ -304,7 +304,9 @@ async function toggleWatch() {
           <div class="sec">当前信号</div>
           <div class="card">
             <div class="sighead">
-              <span class="sigbig" :style="{ color: signalColor(signal.signal) }">{{ signal.signal }}</span>
+              <span class="stamp sig-stamp"
+                :class="signal.signal === '买入' ? 'stamp-buy' : signal.signal === '减仓' ? 'stamp-sell' : 'stamp-hold'"
+                :style="{ color: signalColor(signal.signal) }">{{ signal.signal }}</span>
               <span class="advice">{{ signal.advice }}</span>
             </div>
             <van-cell-group>
@@ -343,8 +345,8 @@ async function toggleWatch() {
 </template>
 
 <style scoped>
-.sec { font-size: 13px; color: #5A6A60; margin: 18px 4px 8px; }
-.card { background: #fff; border-radius: 10px; padding: 12px; }
+.sec { font-size: 13px; color: var(--text-muted); margin: 18px 4px 8px; }
+.card { background: var(--card-bg); border-radius: var(--radius-lg); padding: 12px; border: 1px solid var(--border); box-shadow: var(--shadow-sm); }
 .est { margin: 0 0 4px; }
 .est-head { display: flex; justify-content: space-between; align-items: center; }
 .est-label { font-size: 13px; color: #5A6A60; font-weight: 500; }
@@ -380,8 +382,15 @@ async function toggleWatch() {
 .bt-row .v { font-size: 17px; font-weight: 600; margin-top: 2px; font-variant-numeric: tabular-nums; }
 .bt-row .kk { font-size: 10px; color: #A8B2A8; margin-top: 1px; }
 .bt-note { font-size: 11px; color: #A8B2A8; margin-top: 6px; line-height: 1.5; }
-.sighead { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
-.sigbig { font-size: 22px; font-weight: 600; }
+.sighead { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+/* 信号印章 */
+.sig-stamp {
+  width: 56px; height: 56px;
+  font-size: 16px;
+  letter-spacing: 1px;
+  font-family: 'Noto Serif SC', 'PingFang SC', serif;
+  flex-shrink: 0;
+}
 .advice { font-size: 12px; color: #5A6A60; }
 .sig-disc { font-size: 11px; color: #5A6A60; line-height: 1.6; margin-top: 10px; padding: 8px 10px; background: var(--bg-soft, #F2F6F1); border-radius: 8px; }
 .sig-disc em { font-style: normal; }

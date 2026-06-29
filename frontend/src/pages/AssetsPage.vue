@@ -205,23 +205,30 @@ onMounted(refresh)
       <template v-else>
         <!-- 总资产 -->
         <div class="hero card">
-          <div class="k">总资产（估算市值）</div>
-          <div class="big">{{ num(total.value, 2) }}</div>
-          <div class="hero-row">
-            <div>
-              <span class="kk">累计收益</span>
-              <span class="vv" :style="{ color: colorOf(total.profit) }">
-                {{ (total.profit >= 0 ? '+' : '') + num(total.profit, 2) }}
-                <em :style="{ color: colorOf(total.rate) }">{{ pct(total.rate) }}</em>
-              </span>
-            </div>
-            <div v-if="total.today != null" style="text-align:right">
-              <span class="kk">今日估算</span>
-              <span class="vv" :style="{ color: colorOf(total.today) }">
-                {{ (total.today >= 0 ? '+' : '') + num(total.today, 2) }}
-              </span>
+          <div class="hero-inner">
+            <div class="k">总资产（估算市值）</div>
+            <div class="big">{{ num(total.value, 2) }}</div>
+            <div class="hero-row">
+              <div>
+                <span class="kk">累计收益</span>
+                <span class="vv" :style="{ color: colorOf(total.profit) }">
+                  {{ (total.profit >= 0 ? '+' : '') + num(total.profit, 2) }}
+                  <em :style="{ color: colorOf(total.rate) }">{{ pct(total.rate) }}</em>
+                </span>
+              </div>
+              <div v-if="total.today != null" style="text-align:right">
+                <span class="kk">今日估算</span>
+                <span class="vv" :style="{ color: colorOf(total.today) }">
+                  {{ (total.today >= 0 ? '+' : '') + num(total.today, 2) }}
+                </span>
+              </div>
             </div>
           </div>
+          <!-- 金脊远山 -->
+          <svg class="hero-ridge" viewBox="0 0 400 28" preserveAspectRatio="none">
+            <path d="M0 28 L0 14 Q60 6 120 14 Q180 22 240 8 Q300 -4 360 14 Q380 18 400 10 L400 28Z" fill="#C8A75B" opacity="0.08" />
+            <path d="M0 16 Q60 8 120 16 Q180 24 240 10 Q300 -2 360 16 Q380 20 400 12" fill="none" stroke="#C8A75B" stroke-opacity="0.12" stroke-width="1.5" />
+          </svg>
         </div>
 
         <!-- V3-10 组合历史曲线 -->
@@ -427,11 +434,15 @@ onMounted(refresh)
 </template>
 
 <style scoped>
-.card { background: var(--card-bg); border-radius: 10px; padding: 14px; margin-bottom: 12px; }
+.card { background: var(--card-bg); border-radius: var(--radius-lg); padding: 14px; margin-bottom: 12px; border: 1px solid var(--border); box-shadow: var(--shadow-sm); }
 .act-row { display: flex; gap: 8px; margin-bottom: 12px; }
 .act-row .lt-btn { flex: 1; margin-bottom: 0; }
+.hero { position: relative; overflow: hidden; padding: 0; }
+.hero-inner { padding: 14px 14px 8px; }
 .hero .k { font-size: 12px; color: var(--text-muted); }
 .hero .big { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; margin: 2px 0 10px; color: var(--text); }
+.hero-ridge { display: block; width: 100%; height: 28px; }
+.hero-row { padding-bottom: 4px; }
 .hero-row { display: flex; justify-content: space-between; align-items: flex-end; }
 .kk { font-size: 11px; color: var(--text-muted); display: block; }
 .vv { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }

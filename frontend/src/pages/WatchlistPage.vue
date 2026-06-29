@@ -209,6 +209,11 @@ onMounted(refresh)
           </div>
           <Chart :option="allocOption" height="180px" />
           <div class="port-cap">{{ portfolio.count }} 只持仓 · 按类型配置</div>
+          <!-- 金脊远山 -->
+          <svg class="port-ridge" viewBox="0 0 400 24" preserveAspectRatio="none">
+            <path d="M0 24 L0 12 Q60 4 120 12 Q180 20 240 8 Q300 -2 360 12 Q380 16 400 8 L400 24Z" fill="#C8A75B" opacity="0.08" />
+            <path d="M0 14 Q60 6 120 14 Q180 22 240 10 Q300 0 360 14 Q380 18 400 10" fill="none" stroke="#C8A75B" stroke-opacity="0.12" stroke-width="1.5" />
+          </svg>
         </div>
       </template>
 
@@ -295,8 +300,9 @@ onMounted(refresh)
 </template>
 
 <style scoped>
-.card { background: var(--card-bg); border-radius: 10px; padding: 14px; }
-.port { margin-bottom: 12px; }
+.card { background: var(--card-bg); border-radius: var(--radius-lg); padding: 14px; border: 1px solid var(--border); box-shadow: var(--shadow-sm); }
+.port { margin-bottom: 12px; overflow: hidden; }
+.port-ridge { display: block; width: 100%; height: 24px; margin-top: 8px; }
 .port-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px; }
 .port .k { font-size: 11px; color: var(--text-muted); }
 .port .big { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }

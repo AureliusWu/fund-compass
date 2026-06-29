@@ -77,7 +77,14 @@ function onMarkOne(id: string) { markRead(id); alerts.value = loadAlerts(); unre
 const levelColor = (l: string) => ({ info: '#C8A75B', warn: '#C8963E', danger: '#C44536' }[l] || '#5A6A60')
 const levelIcon = (l: string) => ({ info: 'ℹ', warn: '⚠', danger: '🛑' }[l] || '·')
 
-// 温度计角度：0 → 左 -90deg, 100 → 右 90deg
+// 温度评分 → 印章变体
+const tempStampClass = computed(() => {
+  const s = app.marketTemp?.score
+  if (s == null) return 'stamp-hold'
+  if (s <= 40) return 'stamp-buy'
+  if (s <= 60) return 'stamp-hold'
+  return 'stamp-sell'
+})
 </script>
 
 <template>
@@ -98,20 +105,22 @@ const levelIcon = (l: string) => ({ info: 'ℹ', warn: '⚠', danger: '🛑' }[l
       <div class="sec">市场温度</div>
       <div class="card temp-card" @click="app.loadMarketTemp()">
         <div class="temp-header">
-          <span class="temp-score" :style="{ color: app.marketTemp?.color || '#5A6A60' }">
+          <span class="stamp temp-stamp" :class="tempStampClass"
+            :style="{ color: app.marketTemp?.color || 'var(--text-muted)' }">
             {{ app.marketTemp?.score ?? '…' }}
           </span>
-          <span v-if="app.marketTemp" class="temp-label" :style="{ color: app.marketTemp.color }">
-            {{ app.marketTemp.label }}
-          </span>
-          <van-loading v-if="app.tempLoading" size="16" style="margin-left:6px" />
+          <div class="temp-label-group">
+            <span v-if="app.marketTemp" class="temp-label" :style="{ color: app.marketTemp.color }">
+              {{ app.marketTemp.label }}
+            </span>
+            <van-loading v-if="app.tempLoading" size="16" style="margin-left:6px" />
+          </div>
         </div>
 
-        <!-- 温度计柱状条 -->
+        <!-- 温度计柱状条 · 山峦渐变 -->
         <div class="gauge-track">
           <div class="gauge-fill" :style="{
             width: (app.marketTemp?.score ?? 50) + '%',
-            background: app.marketTemp?.color || '#5A6A60',
           }" />
         </div>
 
@@ -167,15 +176,15 @@ const levelIcon = (l: string) => ({ info: 'ℹ', warn: '⚠', danger: '🛑' }[l
       <div class="sec">自选温度</div>
       <div class="card watch-temp-card" v-if="watchTemp != null">
         <div class="wt-score" :style="{
-          color: watchTemp >= 70 ? '#C44536' : watchTemp >= 50 ? '#C8963E' : watchTemp >= 30 ? '#5A6A60' : '#4C7E67'
+          color: watchTemp >= 70 ? 'var(--danger)' : watchTemp >= 50 ? 'var(--warn)' : watchTemp >= 30 ? 'var(--text-muted)' : 'var(--teal)'
         }">
           {{ watchTemp }}<small>/100</small>
         </div>
         <div class="wt-dist">
-          <span style="color:#C44536">买入 {{ dist['买入'] }}</span>
-          <span style="color:#C8963E">定投 {{ dist['定投'] }}</span>
-          <span style="color:#5A6A60">持有 {{ dist['持有'] }}</span>
-          <span style="color:#3D8B63">减仓 {{ dist['减仓'] }}</span>
+          <span style="color:var(--danger)">买入 {{ dist['买入'] }}</span>
+          <span style="color:var(--warn)">定投 {{ dist['定投'] }}</span>
+          <span style="color:var(--text-muted)">持有 {{ dist['持有'] }}</span>
+          <span style="color:var(--success)">减仓 {{ dist['减仓'] }}</span>
         </div>
         <div class="wt-note">基于自选基金择时信号的简易温度（非全市场）</div>
       </div>
@@ -205,12 +214,24 @@ const levelIcon = (l: string) => ({ info: 'ℹ', warn: '⚠', danger: '🛑' }[l
 /* ── 市场温度 ── */
 .temp-card {
   background: var(--card-bg, #fff);
-  border-radius: 10px;
+  border-radius: var(--radius-lg, 18px);
   padding: 18px 16px;
   cursor: pointer;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
 }
-.temp-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
-.temp-score { font-size: 48px; font-weight: 700; line-height: 1; }
+.temp-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+/* 温度印章：放大版 stamp */
+.temp-stamp {
+  width: 56px; height: 56px;
+  border-radius: 6px;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: 0;
+  font-family: 'JetBrains Mono', 'SF Mono', monospace;
+  flex-shrink: 0;
+}
+.temp-label-group { display: flex; flex-direction: column; }
 .temp-label { font-size: 18px; font-weight: 600; }
 
 /* 温度计轨 */
@@ -226,6 +247,8 @@ const levelIcon = (l: string) => ({ info: 'ℹ', warn: '⚠', danger: '🛑' }[l
   border-radius: 4px;
   transition: width 0.6s ease;
   min-width: 4px;
+  /* 山峦渐变：深松→青绿→浅松→琥珀 */
+  background: linear-gradient(90deg, var(--teal-deep, #315A46), var(--teal, #4C7E67), var(--teal-light, #8FAE91), var(--warn, #C8963E));
 }
 
 /* 分维度 */
@@ -245,8 +268,10 @@ const levelIcon = (l: string) => ({ info: 'ℹ', warn: '⚠', danger: '🛑' }[l
 /* ── 自选温度 ── */
 .watch-temp-card {
   background: var(--card-bg, #fff);
-  border-radius: 10px;
+  border-radius: var(--radius-lg, 18px);
   padding: 16px;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
 }
 .wt-score { font-size: 40px; font-weight: 600; }
 .wt-score small { font-size: 14px; color: var(--text-hint, #A8B2A8); font-weight: 400; }
@@ -256,7 +281,7 @@ const levelIcon = (l: string) => ({ info: 'ℹ', warn: '⚠', danger: '🛑' }[l
 .alert-sec { display: flex; align-items: center; gap: 8px; }
 .alert-badge { background: #C44536; color: #fff; font-size: 10px; min-width: 16px; height: 16px; border-radius: 8px; display: flex; align-items: center; justify-content: center; padding: 0 4px; }
 .alert-allread { font-size: 11px; color: var(--teal); cursor: pointer; }
-.alert-card { background: var(--card-bg, #fff); border-radius: 10px; padding: 4px 12px; }
+.alert-card { background: var(--card-bg, #fff); border-radius: var(--radius-lg, 18px); padding: 4px 12px; border: 1px solid var(--border); box-shadow: var(--shadow-sm); }
 .alert-item { display: flex; align-items: flex-start; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--border, #ECEFE9); cursor: pointer; }
 .alert-item:last-child { border-bottom: none; }
 .alert-item.unread { background: rgba(76,126,103,0.05); margin: 0 -12px; padding-left: 12px; padding-right: 12px; }
