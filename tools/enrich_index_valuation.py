@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """司南基金 · 指数估值富集（akshare，CI 跑）。V3-5「真实 PE/PB 估值」数据管线第一步。
 
-取各主流指数的 PE/PB 当前值与历史分位 → frontend/public/data/index-valuation.json，
-供后续把择时估值层从「净值分位代理」升级为真实指数 PE/PB 分位（步骤 2 接入 timing）。
+取各主流宽基指数的历史 PE/PB，算「当前值在历史中的百分位」作为估值分位，
+→ frontend/public/data/index-valuation.json，供步骤2接入 timing 估值层。
 
-akshare 接口随版本变动，且本机（py3.14）装不了 akshare、只能在 CI（3.12）验证，
-故本脚本做防御性取值 + **诊断打印**：首次 CI 跑时据 [diag] 输出校准列名/接口。
+数据源（akshare 1.18.64 实测：funddb 系列已被移除）：
+  stock_index_pe_lg / stock_index_pb_lg —— 乐咕乐股，按指数中文名取历史 PE/PB。
+分位自算（当前值在历史序列中的百分位），不依赖接口的分位字段，最稳。
 
 环境：仅 CI 安装 akshare（见 requirements-enrich.txt）。后端运行时不依赖本脚本与 akshare。
+本机（py3.14）装不了 akshare，只能在 CI（3.12）验证；故带 [diag]/[warn] 诊断，据此校准 symbol/列名。
 """
 import datetime
 import json
@@ -17,71 +19,92 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "frontend", "public", "data", "index-valuation.json")
 
-
-def _num(x):
-    """转 float；非数/NaN → None。"""
-    try:
-        v = float(x)
-        return v if v == v else None  # NaN != NaN
-    except (TypeError, ValueError):
-        return None
+# 乐咕乐股宽基 symbol（中文名）。失败的自动跳过并打 [warn]，据日志下轮调整。
+LG_SYMBOLS = ["上证", "深证", "沪深300", "上证50", "中证500", "中证1000", "创业板", "科创版"]
 
 
-def _pick(row: dict, *names):
-    """按候选列名取第一个非空值（列名随 akshare 版本变动，多给几个别名兜底）。"""
-    for n in names:
-        if n in row and row[n] is not None and str(row[n]).strip() != "":
-            return row[n]
+def _pct(series):
+    """当前值（序列末位）在历史中的百分位（%）；样本不足返回 (None, None)。"""
+    vals = []
+    for v in series:
+        try:
+            f = float(v)
+            if f == f:  # 排除 NaN
+                vals.append(f)
+        except (TypeError, ValueError):
+            pass
+    if len(vals) < 30:
+        return None, None
+    cur = vals[-1]
+    below = sum(1 for v in vals if v <= cur)
+    return round(cur, 2), round(below / len(vals) * 100, 1)
+
+
+def _value_col(df, keywords):
+    """按 keywords 优先级挑一列；都不中则取首个非「日期/指数」列兜底。"""
+    for k in keywords:
+        for c in df.columns:
+            if k in str(c):
+                return c
+    for c in df.columns:
+        if c not in ("日期", "指数"):
+            return c
     return None
 
 
-def fetch_index_valuation(ak) -> list[dict]:
-    """funddb 指数估值名录：一次返回各指数当前 PE/PB 及其历史分位。"""
-    df = ak.index_value_name_funddb()
-    # ── 诊断：首次 CI 跑据此校准下方列名映射 ──
-    print("[diag] columns:", list(df.columns))
-    print("[diag] sample:\n", df.head(3).to_string())
+def _series_from(ak, fn_name, sym, keywords, diag):
+    fn = getattr(ak, fn_name, None)
+    if fn is None:
+        print(f"[warn] akshare 无接口 {fn_name}")
+        return None, None, None
+    try:
+        df = fn(symbol=sym)
+    except Exception as e:
+        print(f"[warn] {fn_name}('{sym}') 失败: {e}")
+        return None, None, None
+    if df is None or not len(df):
+        return None, None, None
+    if diag:
+        print(f"[diag] {fn_name}('{sym}') columns:", list(df.columns))
+        print(df.tail(2).to_string())
+    col = _value_col(df, keywords)
+    cur, pct = _pct(df[col].tolist()) if col else (None, None)
+    date = str(df["日期"].iloc[-1]) if "日期" in df.columns else None
+    return cur, pct, date
 
+
+def fetch_index_valuation(ak) -> list[dict]:
     out = []
-    for r in df.to_dict("records"):
-        name = _pick(r, "指数名称", "指数", "名称")
-        if not name:
+    first = True
+    for sym in LG_SYMBOLS:
+        pe, pe_pct, d1 = _series_from(ak, "stock_index_pe_lg", sym, ("滚动市盈率", "市盈率"), first)
+        pb, pb_pct, d2 = _series_from(ak, "stock_index_pb_lg", sym, ("市净率",), False)
+        first = False
+        if pe is None and pb is None:
             continue
-        out.append({
-            "name": str(name).strip(),
-            "pe": _num(_pick(r, "最新PE", "PE", "市盈率")),
-            "pe_pct": _num(_pick(r, "PE分位", "PE百分位", "市盈率百分位", "PE历史百分位")),
-            "pb": _num(_pick(r, "最新PB", "PB", "市净率")),
-            "pb_pct": _num(_pick(r, "PB分位", "PB百分位", "市净率百分位", "PB历史百分位")),
-            "date": str(_pick(r, "更新时间", "日期", "更新日期") or datetime.date.today().isoformat()),
-        })
+        out.append({"name": sym, "pe": pe, "pe_pct": pe_pct, "pb": pb, "pb_pct": pb_pct,
+                    "date": d1 or d2 or datetime.date.today().isoformat()})
     return out
 
 
 def main():
     import akshare as ak  # 仅 CI 有
     print("[diag] akshare version:", getattr(ak, "__version__", "?"))
-    cand = sorted(a for a in dir(ak)
-                  if any(k in a.lower() for k in ("value", "funddb", "valuation", "index_pe", "index_pb", "pe_lg", "pb_lg")))
-    print("[diag] 候选指数估值接口:", cand)
-
     try:
         data = fetch_index_valuation(ak)
     except Exception as e:
-        print("指数估值富集失败（接口可能改名，见上方 [diag] 候选）:", e)
+        print("指数估值富集失败:", e)
         return 1
     if not data:
-        print("无指数估值数据（接口列名可能变化，见上方 [diag]）")
+        print("无指数估值数据（symbol/列名需据 [diag]/[warn] 调整）")
         return 1
 
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
-    payload = {"updated": datetime.date.today().isoformat(), "indices": data}
+    payload = {"updated": datetime.date.today().isoformat(), "source": "legulegu", "indices": data}
     with open(OUT, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
-    # 抽样回显，确认分位字段确实有值
-    sample = [d for d in data if d["pe_pct"] is not None][:5]
     print(f"done: {len(data)} indices → {OUT}")
-    print("[sample with pe_pct]", json.dumps(sample, ensure_ascii=False))
+    print("[result]", json.dumps(data, ensure_ascii=False))
     return 0
 
 
