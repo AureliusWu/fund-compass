@@ -13,6 +13,7 @@ __pycache__/
 .venv/
 venv/
 *.db
+.pytest_cache/
 
 # local env
 *.local
