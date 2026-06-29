@@ -22,16 +22,16 @@ jobs:
           python-version: '3.12'
       - name: 安装 akshare
         run: pip install -r tools/requirements-enrich.txt
-      - name: 富集指数估值（akshare）· V3-5 数据管线（调试中：暂置顶加速 diag 验证，校准后移回并去掉 continue-on-error）
-        continue-on-error: true
-        env:
-          PYTHONUNBUFFERED: '1'
-        run: python tools/enrich_index_valuation.py
       - name: 富集持仓（akshare）
         env:
           GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
           PYTHONUNBUFFERED: '1' # 日志实时输出，能看到「抓取 X …」进度
         run: python tools/enrich.py
+      - name: 富集指数估值（akshare · 乐咕乐股）· V3-5
+        continue-on-error: true # 第三方源，失败不阻断持仓/排行/经理富集
+        env:
+          PYTHONUNBUFFERED: '1'
+        run: python tools/enrich_index_valuation.py
       - name: 富集排行（东财排行，requests）
         env:
           PYTHONUNBUFFERED: '1'

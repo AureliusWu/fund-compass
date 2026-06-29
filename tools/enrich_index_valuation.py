@@ -20,9 +20,11 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "frontend", "public", "data", "index-valuation.json")
 
-# 乐咕乐股 symbol（中文全称，简称会 KeyError）。失败的自动跳过并打 [warn]。
-LG_SYMBOLS = ["上证指数", "深证成指", "沪深300", "上证50", "上证180", "中证100",
-              "中证500", "中证1000", "创业板指", "科创50"]
+# 乐咕乐股 symbol（中文全称，简称会 KeyError）。以下为 CI 实测可用的主流宽基。
+# TODO 步骤2：创业板/科创/行业(白酒等)/海外指数乐咕乐股 symbol 名不一致
+#   （"上证指数/深证成指/创业板指/科创50" 均 KeyError），待查确切 symbol，
+#   或改用 stock_zh_index_value_csindex（中证官方，按指数代码覆盖更全）。
+LG_SYMBOLS = ["沪深300", "上证50", "上证180", "中证100", "中证500", "中证1000"]
 
 
 def _pct(series):

@@ -30,7 +30,7 @@
 ### P1 · 核心算法准确度
 
 - [~] **V3-5 真实 PE/PB 估值（命门）**：建「基金 ↔ 跟踪指数」映射表，取指数真实 PE/PB 历史分位替换择时估值层现有的「去趋势净值分位」代理；非指数基金优雅降级到代理。**分两步推进：**
-  - [~] 步骤1 数据管线（2026-06-29）：`tools/enrich_index_valuation.py`（akshare 取指数 PE/PB → `frontend/public/data/index-valuation.json`）+ `tools/fund_index_map.json` 种子映射 + 接入 `enrich.yml`（首轮 continue-on-error 容错）。**待 CI 跑后据 `[diag]` 日志校准列名/接口，再去掉容错。**
+  - [x] 步骤1 数据管线（✅ 2026-06-29，经 4 轮 CI 验证）：`tools/enrich_index_valuation.py` 用乐咕乐股 `stock_index_pe_lg`/`pb_lg`（akshare 1.18.64 已移除 funddb 系列）取 6 个主流宽基（沪深300/上证50/上证180/中证100/中证500/中证1000）市值加权 PE/PB + 自算历史分位 → `index-valuation.json`；`fund_index_map.json` 种子映射；接入 `enrich.yml`（continue-on-error，第三方源不阻断其他富集）。**数据源已验证可用、数值合理。**
   - [ ] 步骤2 接入：后端按 Pages URL 加载指数估值 JSON，`timing.valuation_layer` 对指数基金用真实分位、非指数降级；前端详情页展示真实分位。
   - 价值高·工作量高（难在免登录的指数估值数据源）。验收：指数基金估值层用真实分位，强趋势长牛被误判高估的问题缓解；回测踏空改善；非指数基金不报错。
 
@@ -66,4 +66,4 @@
   - 地基(前端)：引入 vitest，新增 `format` / `dca` 单测（28 用例），接入 CI（`ci.yml` 前端 job 加 `npm run test`）。推进 P0「前端单测」首批落地。
   - 地基(后端)：可观测性——`eastmoney`/`repo`/`main` 静默吞错改结构化 `logging`（主源降级 / 退陈旧缓存 / 启动导入失败可见），加降级日志测试（pytest 34 用例）。完成 P0「可观测性」。
   - 地基(后端)：数据源健壮性——`eastmoney.source_health()` 统计主源成功/失败/失败率/最近错误/degraded，经 `/api/health` 暴露，加 source_health 测试（pytest 35 用例）。完成 P0「数据源健壮性」。**P0 三项全部完成。**
-  - 功能(P1/V3-5 步骤1)：指数估值数据管线——新增 `tools/enrich_index_valuation.py`（akshare 取指数 PE/PB 分位）+ `tools/fund_index_map.json` 种子映射 + 接入 `enrich.yml`（首轮容错+诊断打印）。待 CI 验证数据源、校准列名后，步骤2再接入估值层。
+  - 功能(P1/V3-5 步骤1)：指数估值数据管线打通——`enrich_index_valuation.py`（乐咕乐股 `stock_index_pe_lg`/`pb_lg`，funddb 已废）+ `fund_index_map.json` + `enrich.yml`。经 4 轮 CI 校准（接口名→symbol 全称→市值加权列），产出 6 个主流宽基真实 PE/PB+历史分位、数值合理。步骤2：后端按 Pages URL 加载、接入 timing 估值层 + 补创业板/科创/海外指数源。
