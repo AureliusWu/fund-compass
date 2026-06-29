@@ -105,7 +105,17 @@ def get_detail(code: str, force=False) -> dict:
                 d["cached"] = True
                 return d
 
-        detail = fetch_detail(code)
+        try:
+            detail = fetch_detail(code)  # 内部已含主源→备源(f10 lsjz)降级
+        except Exception:
+            # 容灾末层：主源+备源都失败时，退回 DB 里上次成功缓存的陈旧数据，避免整页 404
+            if row:
+                d = dict(row)
+                d["nav_history"] = _load_history(conn, code)
+                d["cached"] = True
+                d["stale"] = True
+                return d
+            raise
         ftype = conn.execute("SELECT type FROM funds WHERE code=?", (code,)).fetchone()
         detail["type"] = ftype["type"] if ftype else None
         _save_detail(conn, detail)

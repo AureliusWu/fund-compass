@@ -61,8 +61,8 @@ def _num(s):
         return None
 
 
-def fetch_detail(code: str) -> dict:
-    """单只基金详情 + 净值历史（来自 pingzhongdata）。"""
+def _fetch_detail_pingzhong(code: str) -> dict:
+    """主源：单只基金详情 + 净值历史（pingzhongdata，字段最全）。"""
     txt = _get(f"http://fund.eastmoney.com/pingzhongdata/{code}.js")
     name = _str_var(txt, "fS_name")
     if not name:
@@ -122,4 +122,67 @@ def fetch_detail(code: str) -> dict:
         "rank_in_type": rank_in_type, "rank_total": rank_total,
         "latest_nav": latest_nav, "latest_nav_date": latest_nav_date,
         "nav_history": nav_history,
+        "source": "primary",
     }
+
+
+def _fallback_name(code: str) -> str | None:
+    """备源辅助：从天天基金估值接口（另一主机）取基金名。"""
+    try:
+        txt = _get(f"https://fundgz.1234567.com.cn/js/{code}.js?rt={int(datetime.now().timestamp() * 1000)}")
+        m = re.search(r"jsonpgz\((.*)\)", txt)
+        return json.loads(m.group(1)).get("name") if m else None
+    except Exception:
+        return None
+
+
+def _fetch_detail_fallback(code: str) -> dict:
+    """备源：f10 历史净值（api.fund.eastmoney.com，与主源不同主机/接口）。
+
+    主源 pingzhongdata 挂掉/被改时兜底。只保证核心：净值历史（单位净值 + 累计净值=天然复权）
+    + 名称 + 最新净值，足够支撑评分/择时/回测；经理/规模/排名/费率等富字段降级为空。
+    """
+    r = requests.get(
+        "https://api.fund.eastmoney.com/f10/lsjz",
+        params={"fundCode": code, "pageIndex": 1, "pageSize": 1200,
+                "_": int(datetime.now().timestamp() * 1000)},
+        headers={"User-Agent": "Mozilla/5.0", "Referer": "http://fundf10.eastmoney.com/"},
+        timeout=_TIMEOUT,
+    )
+    r.raise_for_status()
+    lst = ((r.json() or {}).get("Data") or {}).get("LSJZList") or []
+    nav_history = []
+    for it in reversed(lst):  # 接口按日期倒序，反转为时间正序
+        d = it.get("FSRQ")
+        dwjz = _num(it.get("DWJZ"))
+        ljjz = _num(it.get("LJJZ"))
+        if not d or dwjz is None:
+            continue
+        # 累计净值起点≈1.0 → (LJJZ-1)*100 近似累计收益率，供 _series 复权用
+        acr = (ljjz - 1) * 100 if ljjz is not None else None
+        nav_history.append({"date": d, "nav": dwjz, "ac_return": acr})
+    if not nav_history:
+        raise ValueError(f"备源亦无净值数据：{code}")
+    return {
+        "code": code,
+        "name": _fallback_name(code) or code,
+        "buy_rate": None, "source_rate": None,
+        "ret_1m": None, "ret_6m": None, "ret_1y": None, "ret_3y": None,
+        "manager": None, "manager_worktime": None,
+        "scale": None,
+        "rank_in_type": None, "rank_total": None,
+        "latest_nav": nav_history[-1]["nav"], "latest_nav_date": nav_history[-1]["date"],
+        "nav_history": nav_history,
+        "source": "fallback",
+    }
+
+
+def fetch_detail(code: str) -> dict:
+    """单只基金详情 + 净值历史。主源 pingzhongdata；失败或无净值时降级到备源 f10 lsjz。"""
+    try:
+        d = _fetch_detail_pingzhong(code)
+        if d.get("nav_history"):
+            return d
+    except Exception:
+        pass  # 主源异常 → 走备源
+    return _fetch_detail_fallback(code)
