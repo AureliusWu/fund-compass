@@ -21,19 +21,19 @@ describe('num', () => {
 })
 
 describe('colorOf', () => {
-  it('涨为红', () => expect(colorOf(1)).toBe('#ee0a24'))
-  it('跌为绿', () => expect(colorOf(-1)).toBe('#07c160'))
-  it('零/空为中性变量', () => {
-    expect(colorOf(0)).toContain('var(')
-    expect(colorOf(null)).toContain('var(')
+  it('涨走 --danger', () => expect(colorOf(1)).toBe('var(--danger)'))
+  it('跌走 --success', () => expect(colorOf(-1)).toBe('var(--success)'))
+  it('零/空走 --text-muted', () => {
+    expect(colorOf(0)).toBe('var(--text-muted)')
+    expect(colorOf(null)).toBe('var(--text-muted)')
   })
 })
 
 describe('signalColor', () => {
-  it('买入红', () => expect(signalColor('买入')).toBe('#ee0a24'))
-  it('定投橙', () => expect(signalColor('定投')).toBe('#ff976a'))
-  it('减仓绿', () => expect(signalColor('减仓')).toBe('#07c160'))
-  it('其他（持有等）灰', () => expect(signalColor('持有')).toBe('#969799'))
+  it('买入走 --danger', () => expect(signalColor('买入')).toBe('var(--danger)'))
+  it('定投走 --warn', () => expect(signalColor('定投')).toBe('var(--warn)'))
+  it('减仓走 --success', () => expect(signalColor('减仓')).toBe('var(--success)'))
+  it('持有走 --text-muted', () => expect(signalColor('持有')).toBe('var(--text-muted)'))
 })
 
 describe('stars', () => {
