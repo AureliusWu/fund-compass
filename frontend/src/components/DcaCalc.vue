@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import type { NavPoint } from '@/api/client'
+import { colorOf } from '@/utils/format'
 import {
   simulateRegularDCA, simulateValueDCA, simulateTakeProfit, simulateTargetDate,
 } from '@/utils/dca'
@@ -24,7 +25,6 @@ const targetResult = computed(() => simulateTargetDate(props.navHistory, amount.
 // ── 格式化 ──
 const f = (n: number) => n.toLocaleString('zh-CN', { maximumFractionDigits: 2 })
 const fp = (n: number) => (n >= 0 ? '+' : '') + n.toFixed(2) + '%'
-const col = (n: number) => (n > 0 ? '#ee0a24' : n < 0 ? '#07c160' : '#646566')
 </script>
 
 <template>
@@ -60,11 +60,11 @@ const col = (n: number) => (n > 0 ? '#ee0a24' : n < 0 ? '#07c160' : '#646566')
             <tr><td class="rl">累计投入</td><td>{{ f(regularResult.invested) }}</td><td>{{ f(regularResult.invested) }}</td></tr>
             <tr><td class="rl">当前市值</td><td>{{ f(regularResult.value) }}</td><td>{{ f((regularResult.invested / (navHistory.slice(-months)[0]?.nav || 1)) * (latestNav || 0)) }}</td></tr>
             <tr><td class="rl">收益</td>
-              <td :style="{ color: col(regularResult.profit) }">{{ f(regularResult.profit) }}</td>
-              <td :style="{ color: col((regularResult.invested / (props.navHistory.slice(-months)[0]?.nav || 1)) * (props.latestNav || 0) - regularResult.invested) }">{{ f((regularResult.invested / (props.navHistory.slice(-months)[0]?.nav || 1)) * (props.latestNav || 0) - regularResult.invested) }}</td></tr>
+              <td :style="{ color: colorOf(regularResult.profit) }">{{ f(regularResult.profit) }}</td>
+              <td :style="{ color: colorOf((regularResult.invested / (props.navHistory.slice(-months)[0]?.nav || 1)) * (props.latestNav || 0) - regularResult.invested) }">{{ f((regularResult.invested / (props.navHistory.slice(-months)[0]?.nav || 1)) * (props.latestNav || 0) - regularResult.invested) }}</td></tr>
             <tr><td class="rl">收益率</td>
-              <td :style="{ color: col(regularResult.rate) }">{{ fp(regularResult.rate) }}</td>
-              <td :style="{ color: col(((regularResult.invested / (props.navHistory.slice(-months)[0]?.nav || 1)) * (props.latestNav || 0) - regularResult.invested) / regularResult.invested * 100) }">--</td></tr>
+              <td :style="{ color: colorOf(regularResult.rate) }">{{ fp(regularResult.rate) }}</td>
+              <td :style="{ color: colorOf(((regularResult.invested / (props.navHistory.slice(-months)[0]?.nav || 1)) * (props.latestNav || 0) - regularResult.invested) / regularResult.invested * 100) }">--</td></tr>
           </tbody>
         </table>
       </template>
@@ -93,11 +93,11 @@ const col = (n: number) => (n > 0 ? '#ee0a24' : n < 0 ? '#07c160' : '#646566')
             <tr><td class="rl">累计投入</td><td>{{ f(valueResult.invested) }}</td><td>{{ f(regularResult?.invested ?? 0) }}</td></tr>
             <tr><td class="rl">当前市值</td><td>{{ f(valueResult.value) }}</td><td>{{ f(regularResult?.value ?? 0) }}</td></tr>
             <tr><td class="rl">收益</td>
-              <td :style="{ color: col(valueResult.profit) }">{{ f(valueResult.profit) }}</td>
-              <td :style="{ color: col(regularResult?.profit ?? 0) }">{{ f(regularResult?.profit ?? 0) }}</td></tr>
+              <td :style="{ color: colorOf(valueResult.profit) }">{{ f(valueResult.profit) }}</td>
+              <td :style="{ color: colorOf(regularResult?.profit ?? 0) }">{{ f(regularResult?.profit ?? 0) }}</td></tr>
             <tr><td class="rl">收益率</td>
-              <td :style="{ color: col(valueResult.rate) }">{{ fp(valueResult.rate) }}</td>
-              <td :style="{ color: col(regularResult?.rate ?? 0) }">{{ fp(regularResult?.rate ?? 0) }}</td></tr>
+              <td :style="{ color: colorOf(valueResult.rate) }">{{ fp(valueResult.rate) }}</td>
+              <td :style="{ color: colorOf(regularResult?.rate ?? 0) }">{{ fp(regularResult?.rate ?? 0) }}</td></tr>
           </tbody>
         </table>
         <div class="note">
@@ -127,11 +127,11 @@ const col = (n: number) => (n > 0 ? '#ee0a24' : n < 0 ? '#07c160' : '#646566')
           <tbody>
             <tr><td class="rl">累计投入</td><td>{{ f(tpResult.dcaWithoutTP.invested) }}</td><td>{{ f(tpResult.withTP.invested) }}</td></tr>
             <tr><td class="rl">总收益</td>
-              <td :style="{ color: col(tpResult.dcaWithoutTP.profit) }">{{ f(tpResult.dcaWithoutTP.profit) }}</td>
-              <td :style="{ color: col(tpResult.withTP.totalProfit) }">{{ f(tpResult.withTP.totalProfit) }}</td></tr>
+              <td :style="{ color: colorOf(tpResult.dcaWithoutTP.profit) }">{{ f(tpResult.dcaWithoutTP.profit) }}</td>
+              <td :style="{ color: colorOf(tpResult.withTP.totalProfit) }">{{ f(tpResult.withTP.totalProfit) }}</td></tr>
             <tr><td class="rl">收益率</td>
-              <td :style="{ color: col(tpResult.dcaWithoutTP.rate) }">{{ fp(tpResult.dcaWithoutTP.rate) }}</td>
-              <td :style="{ color: col(tpResult.withTP.totalRate) }">{{ fp(tpResult.withTP.totalRate) }}</td></tr>
+              <td :style="{ color: colorOf(tpResult.dcaWithoutTP.rate) }">{{ fp(tpResult.dcaWithoutTP.rate) }}</td>
+              <td :style="{ color: colorOf(tpResult.withTP.totalRate) }">{{ fp(tpResult.withTP.totalRate) }}</td></tr>
             <tr><td class="rl">止盈次数</td><td>—</td><td>{{ tpResult.withTP.cycles }}</td></tr>
           </tbody>
         </table>
@@ -139,7 +139,7 @@ const col = (n: number) => (n > 0 ? '#ee0a24' : n < 0 ? '#07c160' : '#646566')
           <div class="sub">止盈周期</div>
           <div class="cyc-row" v-for="(c, i) in tpResult.cycles" :key="i">
             <span>{{ c.start }} ~ {{ c.end }}</span>
-            <span :style="{ color: col(c.profit) }">{{ fp(c.rate) }}</span>
+            <span :style="{ color: colorOf(c.profit) }">{{ fp(c.rate) }}</span>
           </div>
         </div>
         <div class="note">每次定投资金独立追踪，达到止盈线清仓落袋，下一笔重新开始。未计赎回费。</div>
@@ -160,7 +160,7 @@ const col = (n: number) => (n > 0 ? '#ee0a24' : n < 0 ? '#07c160' : '#646566')
         <div class="target-grid">
           <div class="tg">
             <span class="tg-l">最佳</span>
-            <span class="tg-v" style="color:#ee0a24">{{ fp(targetResult.best.rate) }}</span>
+            <span class="tg-v" style="color:#C44536">{{ fp(targetResult.best.rate) }}</span>
             <span class="tg-d">{{ targetResult.best.start }}</span>
           </div>
           <div class="tg">
@@ -169,12 +169,12 @@ const col = (n: number) => (n > 0 ? '#ee0a24' : n < 0 ? '#07c160' : '#646566')
           </div>
           <div class="tg">
             <span class="tg-l">最差</span>
-            <span class="tg-v" style="color:#07c160">{{ fp(targetResult.worst.rate) }}</span>
+            <span class="tg-v" style="color:#3D8B63">{{ fp(targetResult.worst.rate) }}</span>
             <span class="tg-d">{{ targetResult.worst.start }}</span>
           </div>
           <div class="tg">
             <span class="tg-l">胜率</span>
-            <span class="tg-v" :style="{ color: targetResult.winRate >= 80 ? '#0f9d75' : '#ff976a' }">{{ targetResult.winRate.toFixed(0) }}%</span>
+            <span class="tg-v" :style="{ color: targetResult.winRate >= 80 ? '#4C7E67' : '#C8963E' }">{{ targetResult.winRate.toFixed(0) }}%</span>
           </div>
         </div>
         <div class="note">
@@ -192,26 +192,26 @@ const col = (n: number) => (n > 0 ? '#ee0a24' : n < 0 ? '#07c160' : '#646566')
 <style scoped>
 .dca { font-size: 13px; }
 .mode-bar { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
-.mode-bar span { padding: 4px 10px; border-radius: 12px; background: var(--chip-bg, #f2f3f5); color: var(--text-secondary, #646566); font-size: 12px; cursor: pointer; }
-.mode-bar span.on { background: #0f9d75; color: #fff; }
+.mode-bar span { padding: 4px 10px; border-radius: 12px; background: var(--chip-bg, #F2F3EF); color: var(--text-secondary, #5A6A60); font-size: 12px; cursor: pointer; }
+.mode-bar span.on { background: #4C7E67; color: #fff; }
 .row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
-.lbl { width: 64px; color: var(--text-secondary, #646566); }
-.unit { color: var(--text-muted, #969799); }
+.lbl { width: 64px; color: var(--text-secondary, #5A6A60); }
+.unit { color: var(--text-muted, #5A6A60); }
 .segs { display: flex; gap: 6px; }
-.seg { padding: 4px 10px; border-radius: 12px; background: var(--chip-bg, #f2f3f5); color: var(--text-secondary, #646566); cursor: pointer; }
-.seg.on { background: #0f9d75; color: #fff; }
-.sub { font-size: 12px; color: var(--text-muted, #969799); margin: 4px 0 8px; }
+.seg { padding: 4px 10px; border-radius: 12px; background: var(--chip-bg, #F2F3EF); color: var(--text-secondary, #5A6A60); cursor: pointer; }
+.seg.on { background: #4C7E67; color: #fff; }
+.sub { font-size: 12px; color: var(--text-muted, #5A6A60); margin: 4px 0 8px; }
 table { width: 100%; border-collapse: collapse; }
-th, td { padding: 7px 6px; text-align: right; border-bottom: 1px solid var(--border, #f0f0f0); font-variant-numeric: tabular-nums; }
-th { color: var(--text-muted, #969799); font-weight: 500; }
-.rl { text-align: left; color: var(--text-secondary, #646566); }
-.note { font-size: 11px; color: var(--text-hint, #c8c9cc); margin-top: 8px; line-height: 1.5; }
+th, td { padding: 7px 6px; text-align: right; border-bottom: 1px solid var(--border, #ECEFE9); font-variant-numeric: tabular-nums; }
+th { color: var(--text-muted, #5A6A60); font-weight: 500; }
+.rl { text-align: left; color: var(--text-secondary, #5A6A60); }
+.note { font-size: 11px; color: var(--text-hint, #A8B2A8); margin-top: 8px; line-height: 1.5; }
 .disclaimer { margin-top: 12px; }
 .cycles { margin-top: 8px; }
-.cyc-row { display: flex; justify-content: space-between; font-size: 11px; padding: 3px 0; border-bottom: 1px solid var(--border, #f0f0f0); }
+.cyc-row { display: flex; justify-content: space-between; font-size: 11px; padding: 3px 0; border-bottom: 1px solid var(--border, #ECEFE9); }
 .target-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 8px 0; }
-.tg { background: var(--chip-bg, #f2f3f5); border-radius: 8px; padding: 10px; text-align: center; }
-.tg-l { display: block; font-size: 11px; color: var(--text-muted, #969799); }
+.tg { background: var(--chip-bg, #F2F3EF); border-radius: 8px; padding: 10px; text-align: center; }
+.tg-l { display: block; font-size: 11px; color: var(--text-muted, #5A6A60); }
 .tg-v { display: block; font-size: 22px; font-weight: 700; }
-.tg-d { display: block; font-size: 10px; color: var(--text-hint, #c8c9cc); }
+.tg-d { display: block; font-size: 10px; color: var(--text-hint, #A8B2A8); }
 </style>

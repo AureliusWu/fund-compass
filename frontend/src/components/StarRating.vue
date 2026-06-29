@@ -10,6 +10,6 @@ defineProps<{ star: number | null }>()
 
 <style scoped>
 .stars { font-size: 13px; letter-spacing: 1px; }
-.on { color: #ffb400; }
-.off { color: #dcdee0; }
+.on { color: #C8A75B; }
+.off { color: #A8B2A8; }
 </style>
