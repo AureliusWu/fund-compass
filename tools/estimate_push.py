@@ -4,7 +4,11 @@
 读 Gist 自选 → 抓天天基金盘中估值（涨跌%）→ 仅当日有估值（=交易日，自动避开周末/节假日）
 才推送 Server酱。与 V2-6 的 notify.py 互不影响（独立脚本与工作流，复用同名 Secret）。
 
-环境变量：GIST_TOKEN、SC_SENDKEY（与 V2-6 同源）、FORCE（忽略交易日判断强制发，用于测试）。
+定时可靠性：GitHub 免费定时任务"尽力而为"，一天一次的 cron 常被延迟/直接丢弃。
+故工作流在短窗口内多次触发（见 estimate-push.yml），脚本用 Gist 状态文件
+sinan-estimate-state.json 记「当天已推」做去重，保证一天最多推一条。
+
+环境变量：GIST_TOKEN、SC_SENDKEY（与 V2-6 同源）、FORCE（忽略交易日/去重强制发，用于测试）。
 纯 stdlib，无需 pip。
 """
 import datetime
@@ -18,6 +22,7 @@ GIST_TOKEN = os.environ.get("GIST_TOKEN", "").strip()
 SC_SENDKEY = os.environ.get("SC_SENDKEY", "").strip()
 FORCE = os.environ.get("FORCE", "").lower() in ("1", "true", "yes")
 WATCH_FILE = "sinan-watchlist.json"
+STATE_FILE = "sinan-estimate-state.json"
 GH = "https://api.github.com"
 CST = datetime.timezone(datetime.timedelta(hours=8))
 
@@ -31,27 +36,52 @@ def _req(url, data=None, headers=None, method=None, timeout=30):
         return r.read().decode("utf-8")
 
 
-def _gh(url):
-    return _req(url, headers={"Authorization": f"token {GIST_TOKEN}", "Accept": "application/vnd.github+json"})
+def _gh(url, data=None, method=None):
+    return _req(url, data=data, method=method, headers={
+        "Authorization": f"token {GIST_TOKEN}",
+        "Accept": "application/vnd.github+json",
+        "Content-Type": "application/json",
+    })
 
 
-def gist_codes():
-    """从 Gist 自选读 [(code, name)]。"""
-    if not GIST_TOKEN:
-        return []
+def find_gist_id():
+    """找到含自选文件的 Gist id。"""
     for page in range(1, 6):
         arr = json.loads(_gh(f"{GH}/gists?per_page=100&page={page}"))
         if not arr:
-            return []
+            return None
         for g in arr:
             if WATCH_FILE in (g.get("files") or {}):
-                data = json.loads(_gh(f'{GH}/gists/{g["id"]}'))
-                raw = (data.get("files") or {}).get(WATCH_FILE, {}).get("content") or "[]"
-                return [(e["code"], e.get("name")) for e in json.loads(raw)
-                        if isinstance(e, dict) and e.get("code") and not e.get("deleted")]
+                return g["id"]
         if len(arr) < 100:
-            return []
-    return []
+            return None
+    return None
+
+
+def gist_file(gid, name):
+    """读 Gist 某文件内容（大文件被截断时走 raw_url）。"""
+    data = json.loads(_gh(f"{GH}/gists/{gid}"))
+    f = (data.get("files") or {}).get(name)
+    if not f:
+        return None
+    if f.get("truncated") and f.get("raw_url"):
+        return _req(f["raw_url"], headers={"User-Agent": "sinan-bot"})
+    return f.get("content")
+
+
+def write_state(gid, state):
+    """把去重状态写回 Gist（PATCH 只更新该文件，不动自选）。"""
+    body = json.dumps({"files": {STATE_FILE: {
+        "content": json.dumps(state, ensure_ascii=False, indent=2)
+    }}}).encode()
+    _gh(f"{GH}/gists/{gid}", data=body, method="PATCH")
+
+
+def watch_codes(gid):
+    """从 Gist 自选读 [(code, name)]。"""
+    raw = gist_file(gid, WATCH_FILE) or "[]"
+    return [(e["code"], e.get("name")) for e in json.loads(raw)
+            if isinstance(e, dict) and e.get("code") and not e.get("deleted")]
 
 
 def estimate(code):
@@ -77,19 +107,34 @@ def send_notification(title, content):
         sent = True
     if not sent:
         print("未配置任何推送通道（SC_SENDKEY），跳过发送")
+    return sent
 
 
 def main():
     now = datetime.datetime.now(CST)
+    today = now.strftime("%Y-%m-%d")
     if now.weekday() >= 5 and not FORCE:
         print("周末，跳过"); return
     if not GIST_TOKEN:
         print("未配置 GIST_TOKEN，无法读自选"); return
-    codes = gist_codes()
+    gid = find_gist_id()
+    if not gid:
+        print("未找到自选 Gist（请先在 App 配置云同步并上传自选）"); return
+
+    # 当天去重：短窗口内多次触发，仅第一条成功的才发，其余跳过（FORCE 测试除外）。
+    state = {}
+    try:
+        sraw = gist_file(gid, STATE_FILE)
+        state = json.loads(sraw) if sraw else {}
+    except Exception as ex:
+        print("读状态失败（按未推过处理）:", ex)
+    if state.get("last_date") == today and not FORCE:
+        print(f"今日（{today}）已推过，跳过"); return
+
+    codes = watch_codes(gid)
     if not codes:
         print("自选为空"); return
 
-    today = now.strftime("%Y-%m-%d")
     lines, fresh = [], False
     for code, name in codes:
         try:
@@ -114,7 +159,11 @@ def main():
 
     title = f'司南基金 · 今日估值（{now.strftime("%H:%M")}）'
     content = "\n".join(f"- {ln}" for ln in lines) + "\n\n> 盘中估值，仅供个人参考，不构成投资建议。"
-    send_notification(title, content)
+    if send_notification(title, content):
+        try:
+            write_state(gid, {"last_date": today, "pushed_at": now.isoformat()})
+        except Exception as ex:
+            print("写状态失败（下次可能重推）:", ex)
     print(f"pushed {len(lines)} funds, fresh={fresh}")
 
 
