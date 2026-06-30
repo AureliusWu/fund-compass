@@ -44,6 +44,15 @@ const verdict = computed(() =>
   detail.value ? templateInterpret(detail.value, score.value, signal.value, bt.value).verdict : '',
 )
 
+const valSigText = computed(() => {
+  const v = signal.value?.layers?.valuation
+  if (!v) return ''
+  if (v.source === 'index_pe_pb' && v.index_name) {
+    return `估值${v.label}（${v.index_name} PE${v.pe} 分位${v.pe_pct}%）`
+  }
+  return `估值${v.label}`
+})
+
 async function render(): Promise<string | null> {
   if (!card.value) return null
   const { toPng } = await import('html-to-image')
@@ -148,7 +157,7 @@ async function share() {
             <div class="r-sig">
               <span class="sg" :style="{ color: colorOf(signal.signal === '买入' ? 1 : signal.signal === '减仓' ? -1 : 0) }">{{ signal.signal }}</span>
               <span class="sl">
-                估值{{ signal.layers.valuation.label }} · 趋势{{ signal.layers.trend.label }} · 情绪{{ signal.layers.sentiment.label }}
+                {{ valSigText }} · 趋势{{ signal.layers.trend.label }} · 情绪{{ signal.layers.sentiment.label }}
               </span>
             </div>
           </template>

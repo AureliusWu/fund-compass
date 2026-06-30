@@ -100,8 +100,9 @@ async function loadSimilar() {
   }
 }
 
-onMounted(async () => {
-  watch.load().catch(() => {})
+async function loadData() {
+  loading.value = true
+  error.value = ''
   // 盘中估值独立于后端，立即并发抓取（不阻塞详情）
   fetchEstimate(code).then((e) => { est.value = e }).finally(() => { estDone.value = true })
   getHoldings(code).then((h) => { holdings.value = h }).finally(() => { holdingsDone.value = true })
@@ -116,6 +117,11 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
+}
+
+onMounted(async () => {
+  watch.load().catch(() => {})
+  loadData()
 })
 
 const btOption = computed(() => {
@@ -148,6 +154,16 @@ const navOption = computed(() => {
   }
 })
 
+const valuationDisplay = computed(() => {
+  const v = signal.value?.layers?.valuation
+  if (!v) return ''
+  if (v.source === 'index_pe_pb' && v.pe != null) {
+    return `${v.label} · PE ${v.pe}（分位 ${v.pe_pct}%）`
+  }
+  if (v.percentile != null) return `${v.label} · 分位 ${v.percentile}`
+  return v.label
+})
+
 async function toggleWatch() {
   try {
     await watch.toggle(code, detail.value?.name)
@@ -168,7 +184,9 @@ async function toggleWatch() {
     </van-nav-bar>
     <div class="page-body">
       <van-loading v-if="loading" style="text-align:center;padding:40px" />
-      <van-empty v-else-if="error" :description="error" />
+      <van-empty v-else-if="error" :description="error">
+        <van-button round type="primary" size="small" @click="loadData">重试</van-button>
+      </van-empty>
       <template v-else-if="detail">
         <div class="est card">
           <div class="est-head">
@@ -310,8 +328,8 @@ async function toggleWatch() {
               <span class="advice">{{ signal.advice }}</span>
             </div>
             <van-cell-group>
-              <van-cell title="估值"
-                :value="signal.layers.valuation.label + (signal.layers.valuation.percentile != null ? ' · 分位 ' + signal.layers.valuation.percentile : '')" />
+              <van-cell title="估值" :value="valuationDisplay"
+                :label="signal.layers.valuation.source === 'index_pe_pb' ? '基于 ' + signal.layers.valuation.index_name + ' · PB ' + signal.layers.valuation.pb + '（分位 ' + signal.layers.valuation.pb_pct + '%）' : ''" />
               <van-cell title="趋势" :value="signal.layers.trend.label" />
               <van-cell title="情绪"
                 :value="signal.layers.sentiment.label + (signal.layers.sentiment.rsi != null ? ' · RSI ' + signal.layers.sentiment.rsi : '')" />

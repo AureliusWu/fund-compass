@@ -3,6 +3,8 @@
 // 黄金：东方财富 push2 fetch（CORS 友好），secid=118/113/114.AU9999，f43/f57/f60=价、f170=涨跌%。
 // A 股休市时接口自带返回上一交易日收盘价；30s 刷新；离线回退本地缓存。
 
+import { recordSource } from './resilience'
+
 export interface IndexQuote { name: string; price: number; changePct: number }
 
 interface Cfg { code: string; name: string; gold?: boolean }
@@ -92,10 +94,20 @@ async function fetchGold(): Promise<{ price: number; changePct: number } | null>
 }
 
 // 拉全部行情（指数 + 黄金并行），失败的项回退缓存；有任一成功就刷新缓存。
+// V3-9：记录各数据源状态到 resilience 框架，供 HomePage 源状态点灯。
 export async function getIndices(): Promise<IndexQuote[]> {
   const cache = loadCache()
   const gtimgCodes = CONFIG.filter((c) => !c.gold).map((c) => c.code)
   const [idx, gold] = await Promise.all([fetchIndices(gtimgCodes), fetchGold()])
+
+  // 记录腾讯行情状态（任一指数有有效数据即算成功）
+  const tencentOk = Object.values(idx).some((v) => v && Number.isFinite(v.price))
+  recordSource('tencent', '腾讯行情', tencentOk)
+
+  // 记录东方财富状态（黄金或 jjcc/ulist 共享同一个 eastmoney 源 ID）
+  const eastmoneyOk = gold != null && Number.isFinite(gold.price)
+  if (gold !== null) recordSource('eastmoney', '东方财富', eastmoneyOk)
+
   const out: IndexQuote[] = CONFIG.map((c, i) => {
     const got = c.gold ? gold : idx[c.code]
     if (got && Number.isFinite(got.price)) return { name: c.name, price: got.price, changePct: got.changePct }

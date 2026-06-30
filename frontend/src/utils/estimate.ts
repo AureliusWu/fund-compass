@@ -4,6 +4,8 @@
 // 字段：dwjz=昨日单位净值, gsz=盘中估算净值, gszzl=估算涨跌%, jzrq=净值日期, gztime=估值时间。
 // 注意：gszzl 是百分比可为负/为 0，统一用 Number.isFinite 判断；QDII 常无 gsz（盘中估值缺失）。
 
+import { recordSource } from './resilience'
+
 export interface Estimate {
   code: string
   name: string
@@ -54,16 +56,20 @@ window.jsonpgz = (d: Gz) => {
     estTime: d.gztime || '',
   }
   cache.set(code, { e, t: Date.now() })
+  recordSource('tiantian', '天天基金', true)
   p.resolve(e)
 }
 
 // 抓单只盘中估值；失败/超时返回 null。force 跳过缓存。
+// V3-9：记录天天基金源状态。
 export function fetchEstimate(code: string, force = false): Promise<Estimate | null> {
   const c = cache.get(code)
   if (!force && c && Date.now() - c.t < TTL) return Promise.resolve(c.e)
   return new Promise((resolve) => {
     codeGen[code] = (codeGen[code] || 0) + 1
     const gen = codeGen[code]
+    let recorded = false
+    const fail = () => { if (!recorded) { recorded = true; recordSource('tiantian', '天天基金', false) } }
     const script = document.createElement('script')
     script.src = `https://fundgz.1234567.com.cn/js/${code}.js?rt=${Date.now()}`
     const timer = window.setTimeout(() => {
@@ -72,6 +78,7 @@ export function fetchEstimate(code: string, force = false): Promise<Estimate | n
         pending.delete(code)
         script.remove()
         cache.set(code, { e: null, t: Date.now() })
+        fail()
         resolve(null)
       }
     }, TIMEOUT)
@@ -82,6 +89,7 @@ export function fetchEstimate(code: string, force = false): Promise<Estimate | n
         clearTimeout(p.timer)
         pending.delete(code)
         script.remove()
+        fail()
         resolve(null)
       }
     }

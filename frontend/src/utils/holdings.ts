@@ -3,6 +3,8 @@
 //   表格列：cells[1]=股票代码(a), cells[2]=名称(a), cells[6]=占净值比例(%)。jjcc 本身不含涨跌幅。
 // 涨跌幅：另查东方财富 push2 ulist（f12=代码, f3=涨跌%），secid 沪市(6/9 开头)=1.code、深市=0.code。
 
+import { recordSource } from './resilience'
+
 export interface Holding { code: string; name: string; ratio: number; change?: number }
 
 declare global { interface Window { apidata?: { content?: string } } }
@@ -91,8 +93,10 @@ async function fetchQuotes(stocks: Holding[]): Promise<void> {
 }
 
 // 取某基金十大重仓（名称/代码/占比 缓存 12h；涨跌幅每次实时刷新）。
+// V3-9：记录东方财富源状态。
 export async function getHoldings(code: string, force = false): Promise<Holding[]> {
   let list = !force ? (mem.get(code) || loadLS(code)) : null
+  let emOk = true
   if (!list) {
     const prev = lock
     let release!: () => void
@@ -100,10 +104,16 @@ export async function getHoldings(code: string, force = false): Promise<Holding[
     try {
       await prev.catch(() => {})
       list = await fetchJjcc(code)
+      emOk = list.length > 0
       if (list.length) { mem.set(code, list); saveLS(code, list) }
-    } finally { release() }
+    } catch { emOk = false } finally { release() }
   }
   list = list || []
-  if (list.length) await fetchQuotes(list)
+  if (list.length) {
+    try {
+      await fetchQuotes(list)
+    } catch { emOk = false }
+  }
+  recordSource('eastmoney', '东方财富', emOk)
   return list.map((s) => ({ ...s }))
 }

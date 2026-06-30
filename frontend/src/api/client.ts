@@ -31,7 +31,28 @@ export interface ScoreResp {
   components: { return: Component; risk: Component; management: Component; cost: Component }
 }
 
-export interface Layer { label: string; value: number; [k: string]: unknown }
+export interface Layer {
+  label: string
+  value: number
+  // V3-5 真实 PE/PB 估值字段（source === "index_pe_pb" 时存在）
+  source?: string
+  percentile?: number | null
+  index_name?: string
+  pe?: number | null
+  pe_pct?: number | null
+  pb?: number | null
+  pb_pct?: number | null
+  valuation_date?: string
+  note?: string
+  // 趋势层扩展字段
+  current?: number
+  ma20?: number
+  ma60?: number
+  ma120?: number
+  // 情绪层扩展字段
+  rsi?: number | null
+  [k: string]: unknown
+}
 export interface SignalResp {
   code: string; name: string; type: string | null
   signal: string; advice: string; composite: number; disclaimer?: string

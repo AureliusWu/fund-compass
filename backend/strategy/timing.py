@@ -1,14 +1,15 @@
 """择时三层信号：估值 + 趋势 + 情绪 → 买入 / 定投 / 持有 / 减仓。
 
-- 估值层：真正的 PE/PB 百分位需把基金映射到跟踪指数再取指数估值（免登录数据源暂缺）。
-  当前用「去趋势净值分位」代理：把复权净值拟合指数趋势线，取当前点相对趋势的残差在历史
-  残差中的分位 —— 贴着自身趋势涨为「合理」，显著偏离上/下方为「高估/低估」（均值回归语义，
-  不再像绝对分位那样把长牛恒判高估）。真·PE/PB 留作后续增强。
+- 估值层：优先用真实指数 PE/PB 分位（V3-5 步骤2，需 fund_index_map.json 有映射 +
+  index-valuation.json 有估值数据），无数据时回退到「去趋势净值分位」代理：
+  把复权净值拟合指数趋势线，取当前点相对趋势的残差在历史残差中的分位。
 - 趋势层：MA20 / MA60 / MA120 多头/空头排列。
 - 情绪层：RSI(14)。
 RSI/MA 用纯 Python 计算（单序列足够），pandas-ta 留待更复杂指标。
 """
 import math
+
+from strategy.index_valuation import lookup as _index_lookup
 
 
 def _navs(nav_history, n=None):
@@ -55,14 +56,39 @@ def _rsi(vals, period=14):
     return round(100 - 100 / (1 + rs), 1)
 
 
-def valuation_layer(nav_history, window=504):
-    """去趋势净值分位估值（对数线性回归残差）。
+def valuation_layer(nav_history, window=504, fund_code=None):
+    """估值层：优先用真实指数 PE/PB 分位，无数据时回退到去趋势净值分位。
 
-    旧法用「当前净值在历史中的绝对分位」，对长牛基金恒为高分位 → 永远误判高估。
-    新法：把复权净值拟合到指数趋势线（对 log 做最小二乘），取当前点相对趋势线的「残差」
-    在历史残差中的分位。稳步贴着趋势涨 → 残差≈0 → 合理；显著偏离趋势上方/下方 → 高估/低估。
-    （真·指数 PE/PB 分位需付费/鉴权数据源，暂以此去趋势代理替代，语义更稳。）
+    若 fund_code 能在 fund_index_map.json 中找到对应指数且该指数有 PE 分位数据，
+    则用 PE 分位做主信号（<30 低估 / 30-70 合理 / >70 高估），同时附 PB 分位供参考。
+    否则回退到「对数线性回归去趋势分位」的代理方法。
     """
+    # ── 真实 PE/PB 分位（优先） ──
+    if fund_code:
+        idx = _index_lookup(fund_code)
+        if idx:
+            pct = idx["pe_pct"]
+            if pct < 30:
+                label, value = "低估", 1
+            elif pct > 70:
+                label, value = "高估", -1
+            else:
+                label, value = "合理", 0
+            return {
+                "label": label,
+                "value": value,
+                "percentile": pct,
+                "source": "index_pe_pb",
+                "index_name": idx["index_name"],
+                "pe": idx["pe"],
+                "pe_pct": idx["pe_pct"],
+                "pb": idx["pb"],
+                "pb_pct": idx["pb_pct"],
+                "valuation_date": idx["date"],
+                "note": f"基于 {idx['index_name']} PE={idx['pe']} 历史分位 {pct}%（数据: {idx['source']} {idx['date']}）",
+            }
+
+    # ── 回退：去趋势净值分位（现有逻辑，不变） ──
     vals = _series(nav_history, window)  # 分红复权，取近 window
     n = len(vals)
     if n < 120 or any(v <= 0 for v in vals):
@@ -84,6 +110,7 @@ def valuation_layer(nav_history, window=504):
     else:
         label, value = "合理", 0
     return {"label": label, "value": value, "percentile": pct,
+            "source": "nav_detrended",
             "note": f"去趋势分位 {pct}%（当前净值相对自身指数趋势的偏离，在历史中的位置；非真·PE/PB）"}
 
 
@@ -122,7 +149,7 @@ def sentiment_layer(nav_history):
 def timing_signal(detail):
     """合成三层为最终信号。权重 估值0.4 / 趋势0.35 / 情绪0.25。"""
     nh = detail.get("nav_history")
-    val = valuation_layer(nh)
+    val = valuation_layer(nh, fund_code=detail.get("code"))
     tr = trend_layer(nh)
     se = sentiment_layer(nh)
     composite = round(0.4 * val["value"] + 0.35 * tr["value"] + 0.25 * se["value"], 3)

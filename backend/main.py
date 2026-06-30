@@ -72,12 +72,25 @@ def _meta(d: dict) -> dict:
 
 @app.get("/api/health")
 def health() -> dict:
+    # 指数估值数据新鲜度（V3-5）
+    iv_info = None
+    try:
+        from strategy.index_valuation import _valuation_data
+        if _valuation_data:
+            iv_info = {
+                "updated": _valuation_data.get("updated"),
+                "indices": len(_valuation_data.get("indices", [])),
+                "source": _valuation_data.get("source"),
+            }
+    except Exception:
+        pass
     return {
         "status": "ok",
         "service": "fund-compass",
         "version": app.version,
         "universe": repo.universe_count(),
         "source": eastmoney.source_health(),
+        "index_valuation": iv_info,
     }
 
 

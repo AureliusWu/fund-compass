@@ -60,7 +60,16 @@ export function templateInterpret(
     let t = `当前信号「${signal.signal}」。`
     const L = signal.layers
     const bits: string[] = []
-    if (L?.valuation?.label) bits.push(`估值${L.valuation.label}${L.valuation.percentile != null ? `（分位 ${L.valuation.percentile}）` : ''}`)
+    if (L?.valuation?.label) {
+      const v = L.valuation
+      if (v.source === 'index_pe_pb' && v.index_name) {
+        bits.push(`估值${v.label}（${v.index_name} PE${v.pe} 分位${v.pe_pct}%）`)
+      } else if (v.percentile != null) {
+        bits.push(`估值${v.label}（分位 ${v.percentile}）`)
+      } else {
+        bits.push(`估值${v.label}`)
+      }
+    }
     if (L?.trend?.label) bits.push(`趋势${L.trend.label}`)
     if (L?.sentiment?.label) bits.push(`情绪${L.sentiment.label}${L.sentiment.rsi != null ? `（RSI ${L.sentiment.rsi}）` : ''}`)
     if (bits.length) t += bits.join('、') + '。'

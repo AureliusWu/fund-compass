@@ -31,20 +31,19 @@
 
 - [~] **V3-5 真实 PE/PB 估值（命门）**：建「基金 ↔ 跟踪指数」映射表，取指数真实 PE/PB 历史分位替换择时估值层现有的「去趋势净值分位」代理；非指数基金优雅降级到代理。**分两步推进：**
   - [x] 步骤1 数据管线（✅ 2026-06-29，经 4 轮 CI 验证）：`tools/enrich_index_valuation.py` 用乐咕乐股 `stock_index_pe_lg`/`pb_lg`（akshare 1.18.64 已移除 funddb 系列）取 6 个主流宽基（沪深300/上证50/上证180/中证100/中证500/中证1000）市值加权 PE/PB + 自算历史分位 → `index-valuation.json`；`fund_index_map.json` 种子映射；接入 `enrich.yml`（continue-on-error，第三方源不阻断其他富集）。**数据源已验证可用、数值合理。**
-  - [ ] 步骤2 接入：后端按 Pages URL 加载指数估值 JSON，`timing.valuation_layer` 对指数基金用真实分位、非指数降级；前端详情页展示真实分位。
+  - [x] 步骤2 接入（✅ 2026-06-30）：后端 `strategy/index_valuation.py` 模块导入时加载 `index-valuation.json` + `fund_index_map.json` 到内存；`timing.valuation_layer` 对已映射指数基金优先用 PE 分位（<30 低估/30-70 合理/>70 高估），非指数基金回退去趋势代理（标记 `source: "index_pe_pb"` vs `"nav_detrended"`）；前端详情页/报告页/解读模板展示 PE/PB 数值与指数名。新增 `test_index_valuation.py`（8 用例）+ `test_timing.py` 补 6 用例。后端 pytest 49 全绿，前端 type-check+build 全绿。
   - 价值高·工作量高（难在免登录的指数估值数据源）。验收：指数基金估值层用真实分位，强趋势长牛被误判高估的问题缓解；回测踏空改善；非指数基金不报错。
 
 ### P2 · 功能打磨
 
-- [ ] **V3 落地质量巡检**：对照 [ROADMAP-V3.md](./ROADMAP-V3.md) 逐项核实已落地功能（持仓穿透 / 富集筛选 / NL 选基 / 收益归因 / 多源容灾 / 快照…）的实际质量，补缺口、修边角。
-  - 价值中·工作量中。验收：每项功能在真实数据下复核通过。
+- [x] **V3 落地质量巡检**（✅ 2026-06-30）：逐项核实 V3-0~V3-10 十大功能。结论：九项完整落地；仅 V3-9 多源容灾有缺口——`resilience.ts` 框架（SWR/熔断/重试）已编写但未注入 `indices.ts`/`holdings.ts`/`estimate.ts` 的实际请求。已修复：在三文件中注入 `recordSource()` 调用，HomePage 源状态点灯现在可真实反映腾讯行情、东方财富、天天基金三源健康度。
 - [ ] **盘中「按持仓重算估值」（可选）**：基于已有十大重仓（`holdings.ts`）+ 成分股实时行情自建盘中估值，主要补天天基金 `gsz` 缺失的品种（尤其 QDII）。
   - 价值中·工作量中。注意：精度上限受「仅前十大重仓」限制，性价比中等，排在巡检之后。
 
 ### P3 · 体验与运维
 
-- [ ] 体验细节：骨架屏 / 下拉刷新 / 错误态优化。
-- [ ] 运维可见性：后端健康与定时任务（enrich / estimate-push / notify）运行状态的可观测。
+- [~] 体验细节：骨架屏 / 下拉刷新（待后续）；错误态优化——FundDetailPage 加载失败增加「重试」按钮（✅ 2026-06-30）。
+- [~] 运维可见性：`/api/health` 新增 `index_valuation` 字段（数据更新时间 + 覆盖指数数）（✅ 2026-06-30）；定时任务运行状态可观测待后续。
 
 ---
 
@@ -58,6 +57,11 @@
 
 ## 迭代日志（最近在前）
 
+- **2026-06-30**
+  - 功能(P1/V3-5 步骤2)：真实 PE/PB 估值接入——新建 `backend/strategy/index_valuation.py` 加载器（模块级缓存、优雅降级）；`timing.valuation_layer` 对已映射指数基金优先用 PE 分位，非指数基金回退去趋势代理（新增 `source` 字段区分）；`timing_signal` 透传 `detail["code"]`。前端 `Layer` 类型扩展 PE/PB 字段，详情页/报告页/解读模板展示真实 PE/PB 与指数名。新增 `test_index_valuation.py`（8 用例）+ `test_timing.py` 补 6 用例（49 全绿）。
+  - 巡检(P2/V3 落地质量)：逐项核实 V3-0~V3-10 十大功能——九项完整落地，仅 V3-9 多源容灾有缺口。修复：在 `indices.ts`/`holdings.ts`/`estimate.ts` 注入 `recordSource()` 调用，腾讯行情/东方财富/天天基金三源状态现在真实反映到 HomePage 源状态点灯。
+  - 体验(P3)：FundDetailPage 加载失败增加「重试」按钮；`/api/health` 新增 `index_valuation` 数据新鲜度字段。
+  - 质量门禁：后端 pytest 49 ✅ · 前端 type-check ✅ · build ✅ · vitest 28 ✅。
 - **2026-06-29**
   - 修复：详情 `source`（primary/fallback）持久化——`fund_detail` 加 `source` 列 + 旧库轻量迁移（`db._migrate`），`repo._save_detail` 写入，缓存命中不再丢失。
   - 优化：`vite.config.ts` 用函数式 `manualChunks` 把 echarts+zrender 拆为独立 vendor chunk，`chunkSizeWarningLimit` 提至 600，消除构建告警。
