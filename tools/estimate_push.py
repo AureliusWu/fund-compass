@@ -108,8 +108,43 @@ def watch_codes(gid):
             if isinstance(e, dict) and e.get("code") and not e.get("deleted")]
 
 
+def _to_float(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_estimate(d, code):
+    last_nav = _to_float(d.get("dwjz"))
+    est_nav = _to_float(d.get("gsz"))
+    est_change = _to_float(d.get("gszzl"))
+    if est_change is None and last_nav and est_nav:
+        est_change = (est_nav - last_nav) / last_nav * 100
+    if est_nav is None and last_nav and est_change is not None:
+        est_nav = last_nav * (1 + est_change / 100)
+
+    name = d.get("name") or code
+    gztime = d.get("gztime") or ""
+    hour = None
+    m = re.search(r"\s(\d{1,2}):\d{2}$", gztime)
+    if m:
+        hour = int(m.group(1))
+    overseas = (
+        re.search(r"QDII|全球|海外|新兴市场|纳斯达克|标普|恒生|港股|美元|国际|日经|德国|越南|印度|香港", name, re.I)
+        and hour is not None
+        and (hour < 9 or hour >= 15)
+    )
+    return {
+        "name": name,
+        "gszzl": est_change,
+        "gztime": gztime,
+        "label": "海外估值" if overseas else "盘中估值",
+    }
+
+
 def estimate(code):
-    """天天基金盘中估值：jsonpgz({...})。返回 name / gszzl(涨跌%) / gztime。"""
+    """天天基金估值：jsonpgz({...})。返回 name / gszzl(涨跌%) / gztime / label。"""
     rt = int(datetime.datetime.now().timestamp() * 1000)
     txt = _req(f"https://fundgz.1234567.com.cn/js/{code}.js?rt={rt}",
                headers={"Referer": "http://fund.eastmoney.com/"})
@@ -117,7 +152,7 @@ def estimate(code):
     if not m:
         return None
     d = json.loads(m.group(1))
-    return {"name": d.get("name") or code, "gszzl": d.get("gszzl"), "gztime": d.get("gztime") or ""}
+    return _normalize_estimate(d, code)
 
 
 def send_notification(title, content):
@@ -176,7 +211,8 @@ def main():
             fresh = True
         try:
             chg = float(e["gszzl"])
-            lines.append(f"**{nm}**  {'+' if chg >= 0 else ''}{chg:.2f}%")
+            label = e.get("label") or "估值"
+            lines.append(f"**{nm}**  {'+' if chg >= 0 else ''}{chg:.2f}%（{label}）")
         except (TypeError, ValueError):
             lines.append(f"**{nm}**  —")
 
@@ -186,7 +222,7 @@ def main():
         print("今日无盘中估值（非交易日/休市），跳过"); return
 
     title = f"司南基金 · 自选涨跌幅（{slot}）"
-    content = "\n".join(f"- {ln}" for ln in lines) + "\n\n> 盘中估值，仅供个人参考，不构成投资建议。"
+    content = "\n".join(f"- {ln}" for ln in lines) + "\n\n> 盘中/海外估值，仅供个人参考，不构成投资建议。"
     if send_notification(title, content):
         if FORCE:
             print("FORCE 测试推送，不写入 slot 去重状态")

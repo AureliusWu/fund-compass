@@ -190,7 +190,7 @@ async function toggleWatch() {
       <template v-else-if="detail">
         <div class="est card">
           <div class="est-head">
-            <span class="est-label">盘中估值</span>
+            <span class="est-label">{{ est?.label || '盘中估值' }}</span>
             <span class="est-time">{{ est?.estTime || (estDone ? '' : '加载中…') }}</span>
           </div>
           <div class="est-main" v-if="est && est.estChange != null">
@@ -200,7 +200,7 @@ async function toggleWatch() {
               <div>昨净值 <b>{{ num(est.lastNav) }}</b><em v-if="est.navDate"> @{{ est.navDate }}</em></div>
             </div>
           </div>
-          <div class="est-empty" v-else-if="estDone">暂无盘中估值（QDII/货币基金或非交易时段），以最新净值为准。</div>
+          <div class="est-empty" v-else-if="estDone">暂无估值，以最新净值为准。</div>
           <van-loading v-else size="18" style="padding:6px 0" />
         </div>
 

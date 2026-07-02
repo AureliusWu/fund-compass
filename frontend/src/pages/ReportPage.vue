@@ -130,7 +130,7 @@ async function share() {
               <div class="hr" v-if="score?.rank_in_type">同类 {{ score.rank_in_type }}/{{ score.rank_total }}</div>
             </div>
             <div class="hb" style="text-align:right">
-              <div class="hk">盘中估值</div>
+              <div class="hk">{{ est?.label || '盘中估值' }}</div>
               <div class="hv" :style="{ color: colorOf(est?.estChange) }">{{ est && est.estChange != null ? pct(est.estChange) : '--' }}</div>
               <div class="hr">估算净值 {{ est ? num(est.estNav) : '--' }}</div>
               <div class="hr" v-if="est?.estTime">{{ est.estTime }}</div>

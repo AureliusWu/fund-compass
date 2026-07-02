@@ -205,7 +205,7 @@ onMounted(refresh)
           </div>
           <div class="port-today" v-if="todayEst != null">
             今日估算 <b :style="{ color: colorOf(todayEst) }">{{ (todayEst >= 0 ? '+' : '') + num(todayEst, 2) }}</b>
-            <span class="port-today-cap">盘中估值 · 收盘前为估算值</span>
+            <span class="port-today-cap">估值数据 · 仅供参考</span>
           </div>
           <Chart :option="allocOption" height="180px" />
           <div class="port-cap">{{ portfolio.count }} 只持仓 · 按类型配置</div>
@@ -228,7 +228,7 @@ onMounted(refresh)
         >
           <template #value>
             <div class="wl-val">
-              <span v-if="est[it.code]?.estChange != null" class="est-chg" :style="{ color: colorOf(est[it.code]!.estChange) }">估 {{ pct(est[it.code]!.estChange) }}</span>
+              <span v-if="est[it.code]?.estChange != null" class="est-chg" :style="{ color: colorOf(est[it.code]!.estChange) }">{{ est[it.code]!.kind === 'overseas' ? '海外' : '估' }} {{ pct(est[it.code]!.estChange) }}</span>
               <span class="sig" :style="{ color: signalColor(rows[it.code]?.signal || '') }">{{ rows[it.code]?.signal || '…' }}</span>
               <StarRating :star="rows[it.code]?.star ?? null" />
               <span v-if="sharesOf(it.code) && rows[it.code]?.nav != null" class="nav">

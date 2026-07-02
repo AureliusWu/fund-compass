@@ -2,7 +2,7 @@
 // 司南前端用同一全局回调 window.jsonpgz —— 纯前端、不依赖后端，盘中实时。
 // 接口：https://fundgz.1234567.com.cn/js/{code}.js → jsonpgz({...})
 // 字段：dwjz=昨日单位净值, gsz=盘中估算净值, gszzl=估算涨跌%, jzrq=净值日期, gztime=估值时间。
-// 注意：gszzl 是百分比可为负/为 0，统一用 Number.isFinite 判断；QDII 常无 gsz（盘中估值缺失）。
+// 注意：gszzl 是百分比可为负/为 0，统一用 Number.isFinite 判断；QDII/全球基金常返回海外收盘后的估值时间。
 
 import { recordSource } from './resilience'
 
@@ -14,9 +14,11 @@ export interface Estimate {
   estChange: number | null // 估算涨跌% gszzl
   navDate: string // 上一净值日期 jzrq
   estTime: string // 估值时间 gztime
+  kind: 'intraday' | 'overseas'
+  label: '盘中估值' | '海外估值'
 }
 
-interface Gz {
+export interface Gz {
   fundcode?: string; name?: string
   dwjz?: string; gsz?: string; gszzl?: string; jzrq?: string; gztime?: string
 }
@@ -38,26 +40,60 @@ function num(s: unknown): number | null {
   return Number.isFinite(n) ? n : null
 }
 
+function usableNav(n: number | null): n is number {
+  return n != null && Number.isFinite(n) && n > 0
+}
+
+function isOverseasEstimate(name: string, estTime: string): boolean {
+  const overseasFund = /QDII|全球|海外|新兴市场|纳斯达克|标普|恒生|港股|美元|国际|日经|德国|越南|印度|香港/i.test(name)
+  const hour = Number((estTime.match(/\s(\d{1,2}):\d{2}$/) || [])[1])
+  return overseasFund && Number.isFinite(hour) && (hour < 9 || hour >= 15)
+}
+
+export function normalizeEstimate(d: Gz): Estimate {
+  const lastNav = num(d.dwjz)
+  let estNav = num(d.gsz)
+  let estChange = num(d.gszzl)
+
+  if (estChange == null && usableNav(lastNav) && usableNav(estNav)) {
+    estChange = (estNav - lastNav) / lastNav * 100
+  }
+  if (!usableNav(estNav) && usableNav(lastNav) && estChange != null) {
+    estNav = lastNav * (1 + estChange / 100)
+  }
+
+  const name = d.name || d.fundcode || ''
+  const estTime = d.gztime || ''
+  const overseas = isOverseasEstimate(name, estTime)
+  return {
+    code: d.fundcode || '',
+    name,
+    lastNav,
+    estNav,
+    estChange,
+    navDate: d.jzrq || '',
+    estTime,
+    kind: overseas ? 'overseas' : 'intraday',
+    label: overseas ? '海外估值' : '盘中估值',
+  }
+}
+
 // 全局 JSONP 回调（接口里写死的函数名，按 fundcode 调度到对应 Promise）。
-window.jsonpgz = (d: Gz) => {
+function handleJsonpgz(d: Gz) {
   if (!d || !d.fundcode) return
   const code = d.fundcode
   const p = pending.get(code)
   if (!p) return
   pending.delete(code)
   clearTimeout(p.timer)
-  const e: Estimate = {
-    code,
-    name: d.name || code,
-    lastNav: num(d.dwjz),
-    estNav: num(d.gsz),
-    estChange: num(d.gszzl),
-    navDate: d.jzrq || '',
-    estTime: d.gztime || '',
-  }
+  const e = normalizeEstimate(d)
   cache.set(code, { e, t: Date.now() })
   recordSource('tiantian', '天天基金', true)
   p.resolve(e)
+}
+
+if (typeof window !== 'undefined') {
+  window.jsonpgz = handleJsonpgz
 }
 
 // 抓单只盘中估值；失败/超时返回 null。force 跳过缓存。
