@@ -1,18 +1,23 @@
 name: estimate-push
 
-# 司南基金 · 交易日 14:20 前后自选估值推送
+# 司南基金 · 交易日 14:30 / 14:40 / 14:50 自选估值推送
 # 仅在当日有盘中估值（=交易日）时推送，自动避开周末/节假日。复用 V2-6 的 Secret。
-# GitHub 免费定时任务会延迟/丢弃单次触发，故在窗口内多触发几次，脚本按 Gist 状态做当天去重，
-# 保证一天最多推一条。
+# GitHub 免费定时任务可能延迟；脚本按 slot 去重，确保每个时段最多推一次。
 on:
   schedule:
-    - cron: '15,25,35 6 * * 1-5' # UTC 06:15/06:25/06:35 周一~五 = CST 14:15/14:25/14:35
+    - cron: '30 6 * * 1-5' # UTC 06:30 周一~五 = CST 14:30
+    - cron: '40 6 * * 1-5' # UTC 06:40 周一~五 = CST 14:40
+    - cron: '50 6 * * 1-5' # UTC 06:50 周一~五 = CST 14:50
   workflow_dispatch:
     inputs:
       force:
         description: 忽略交易日判断强制推送（测试用）
         type: boolean
         default: false
+      slot:
+        description: 推送时段（测试用，留空则按当前北京时间）
+        type: string
+        default: ''
 
 jobs:
   push:
@@ -26,7 +31,10 @@ jobs:
       - name: 估值推送
         env:
           GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+          WECHAT_SENDKEY: ${{ secrets.WECHAT_SENDKEY }}
           SC_SENDKEY: ${{ secrets.SC_SENDKEY }}
           FORCE: ${{ inputs.force }}
+          PUSH_SLOT: ${{ inputs.slot }}
+          SCHEDULE_CRON: ${{ github.event.schedule }}
           PYTHONUNBUFFERED: '1'
         run: python tools/estimate_push.py
