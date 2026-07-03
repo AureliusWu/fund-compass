@@ -2,15 +2,15 @@
 
 本地启动（建议 Python 3.12）：
     cd backend
-    python -m venv .venv && .venv\Scripts\activate   # Windows
+    python -m venv .venv\Scripts\activate   # Windows
     pip install -r requirements.txt
     uvicorn main:app --reload --port 8000
 
-首次启动会在后台自动抓取全量基金列表入库（约 2.7 万只），不阻塞服务启动。
+启动阶段只初始化本地 SQLite 表结构，不抓取第三方数据、不导入基金全集。
+基金全集需要时通过 POST /api/admin/refresh-universe 手动刷新，避免冷启动被网络请求拖慢。
 """
 import logging
 import re
-import threading
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Query
@@ -28,60 +28,11 @@ log = logging.getLogger(__name__)
 
 NAV_TAIL = 800  # 返回给前端的净值条数（≈3年，供走势图 / 定投回放 / 指标计算）
 
-_universe_import_lock = threading.Lock()
-_universe_import_state = {
-    "running": False,
-    "last_imported": None,
-    "last_error": None,
-}
-
-
-def _universe_import_status() -> dict:
-    with _universe_import_lock:
-        return dict(_universe_import_state)
-
-
-def _import_universe_background() -> None:
-    try:
-        n = repo.import_universe()
-        with _universe_import_lock:
-            _universe_import_state["last_imported"] = n
-            _universe_import_state["last_error"] = None
-        log.info("后台导入基金全集完成：%d 只", n)
-    except Exception as e:
-        with _universe_import_lock:
-            _universe_import_state["last_error"] = f"{type(e).__name__}: {e}"
-        log.warning("后台基金全集导入失败；不影响服务启动，可稍后 POST /api/admin/refresh-universe 重试", exc_info=True)
-    finally:
-        with _universe_import_lock:
-            _universe_import_state["running"] = False
-
-
-def _ensure_universe_import_async() -> None:
-    """基金全集为空时后台导入，避免 Render/Railway 部署健康检查被第三方数据源阻塞。"""
-    try:
-        if repo.universe_count() > 0:
-            return
-    except Exception:
-        log.warning("检查基金全集数量失败；跳过启动期后台导入", exc_info=True)
-        return
-
-    with _universe_import_lock:
-        if _universe_import_state["running"]:
-            return
-        _universe_import_state["running"] = True
-
-    threading.Thread(
-        target=_import_universe_background,
-        name="fund-universe-import",
-        daemon=True,
-    ).start()
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 冷启动只做本地建表，绝不在启动路径里访问第三方数据源。
     init_db()
-    _ensure_universe_import_async()
     yield
 
 
@@ -129,12 +80,14 @@ def health() -> dict:
             }
     except Exception:
         pass
+    universe = repo.universe_count()
     return {
         "status": "ok",
         "service": "fund-compass",
         "version": app.version,
-        "universe": repo.universe_count(),
-        "universe_import": _universe_import_status(),
+        "universe": universe,
+        "universe_ready": universe > 0,
+        "universe_import": {"mode": "manual", "running": False},
         "source": eastmoney.source_health(),
         "index_valuation": iv_info,
     }
