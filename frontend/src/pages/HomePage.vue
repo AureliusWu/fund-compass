@@ -9,6 +9,7 @@ import { signalColor } from '@/utils/format'
 import IndexBar from '@/components/IndexBar.vue'
 import { checkBackend, getSourceSummary, type SourceStatus } from '@/utils/resilience'
 import { loadAlerts, runAllChecks, markRead, markAllRead, dismissAlert, requestNotifyPermission, unreadCount, type Alert } from '@/utils/alerts'
+import { APP_VERSION } from '@/version'
 
 const router = useRouter()
 const app = useAppStore()
@@ -97,7 +98,7 @@ const tempStampClass = computed(() => {
       <template #title>
         <div style="text-align:center">
           <div style="font-size:16px;font-weight:600;line-height:1.2">司南基金</div>
-          <div style="font-size:10px;color:var(--text-hint);font-weight:400;line-height:1.2">v5.0.0</div>
+          <div style="font-size:10px;color:var(--text-hint);font-weight:400;line-height:1.2">v{{ APP_VERSION }}</div>
         </div>
       </template>
     </van-nav-bar>
