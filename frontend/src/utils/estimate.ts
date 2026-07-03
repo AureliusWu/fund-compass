@@ -14,10 +14,12 @@ export interface Estimate {
   estChange: number | null // 估算涨跌% gszzl
   navDate: string // 上一净值日期 jzrq
   estTime: string // 估值时间 gztime
-  kind: 'intraday' | 'overseas'
-  label: '盘中估值' | '海外估值'
+  kind: 'intraday' | 'overseas' | 'overseas_model'
+  label: '盘中估值' | '海外估值' | '海外模型估算'
   isRealtime: boolean
   sourceNote: string
+  modelWeight?: number
+  modelCode?: string
 }
 
 export interface Gz {
@@ -37,6 +39,46 @@ const cache = new Map<string, { e: Estimate | null; t: number }>()
 const TTL = 60_000 // 盘中估值 1 分钟内复用，避免频繁注入
 const TIMEOUT = 8000
 
+interface ModelLeg { code: string; weight: number; note?: string }
+interface OverseasModel { label: string; legs: ModelLeg[]; minWeight?: number; fallback?: OverseasModel }
+
+const OVERSEAS_MODEL_BY_CODE: Record<string, OverseasModel> = {
+  '539002': {
+    label: '2026Q1重仓穿透模型',
+    minWeight: 30,
+    fallback: { label: '半导体+韩国兜底模型', legs: [{ code: 'usSMH', weight: 70 }, { code: 'usEWY', weight: 20 }, { code: 'usEEM', weight: 10 }] },
+    legs: [
+      { code: 'usTSM', weight: 10.26 },
+      { code: 'usNVDA', weight: 10.14 },
+      { code: 'usEWY', weight: 8.65, note: 'SK海力士代理' },
+      { code: 'usAVGO', weight: 8.52 },
+      { code: 'usEWY', weight: 6.76, note: '三星电子代理' },
+      { code: 'usSNDK', weight: 4.91 },
+      { code: 'usGLW', weight: 4.29 },
+      { code: 'usWDC', weight: 3.73 },
+      { code: 'usLITE', weight: 3.58 },
+      { code: 'usMPWR', weight: 3.49 },
+    ],
+  },
+  '012920': {
+    label: '2026Q1重仓穿透模型',
+    minWeight: 25,
+    fallback: { label: '成长+半导体+A股兜底模型', legs: [{ code: 'usQQQ', weight: 45 }, { code: 'usSOXX', weight: 30 }, { code: 'sh000300', weight: 25 }] },
+    legs: [
+      { code: 'usTSM', weight: 8.88 },
+      { code: 'usLITE', weight: 8.68 },
+      { code: 'sz300502', weight: 6.02 },
+      { code: 'usGLW', weight: 4.67 },
+      { code: 'usAXTI', weight: 4.67 },
+      { code: 'sz300308', weight: 4.67 },
+      { code: 'sh688498', weight: 4.49 },
+      { code: 'usTSEM', weight: 3.72 },
+      { code: 'usGOOGL', weight: 3.36 },
+      { code: 'sz002384', weight: 2.67 },
+    ],
+  },
+}
+
 function num(s: unknown): number | null {
   const n = typeof s === 'number' ? s : parseFloat(String(s))
   return Number.isFinite(n) ? n : null
@@ -44,6 +86,10 @@ function num(s: unknown): number | null {
 
 function usableNav(n: number | null): n is number {
   return n != null && Number.isFinite(n) && n > 0
+}
+
+function fmt(n: number): string {
+  return Number.isFinite(n) ? n.toFixed(2).replace(/\.?0+$/, '') : '--'
 }
 
 function isOverseasEstimate(name: string, estTime: string): boolean {
@@ -85,15 +131,123 @@ export function normalizeEstimate(d: Gz): Estimate {
   }
 }
 
+function collectModelCodes(model: OverseasModel | undefined, out: Set<string>) {
+  if (!model) return
+  model.legs.forEach((leg) => out.add(leg.code))
+  if (model.fallback) collectModelCodes(model.fallback, out)
+}
+
+function parseTencentQuote(raw: string | undefined): { price: number; changePct: number } | null {
+  if (!raw) return null
+  const fields = raw.split('~')
+  if (fields.length < 4) return null
+  const price = Number(fields[3])
+  if (!Number.isFinite(price) || price <= 0) return null
+  let changePct = Number(fields[32])
+  if (!Number.isFinite(changePct)) {
+    const prevClose = Number(fields[4])
+    if (Number.isFinite(prevClose) && prevClose > 0) changePct = (price - prevClose) / prevClose * 100
+  }
+  return { price, changePct: Number.isFinite(changePct) ? changePct : NaN }
+}
+
+function fetchTencentQuotes(codes: string[]): Promise<Record<string, { price: number; changePct: number }>> {
+  const uniq = Array.from(new Set(codes.filter(Boolean)))
+  if (!uniq.length || typeof document === 'undefined') return Promise.resolve({})
+
+  return new Promise((resolve) => {
+    const script = document.createElement('script')
+    let done = false
+    const timer = window.setTimeout(finish, TIMEOUT)
+
+    function finish() {
+      if (done) return
+      done = true
+      clearTimeout(timer)
+      script.remove()
+      const out: Record<string, { price: number; changePct: number }> = {}
+      uniq.forEach((code) => {
+        try {
+          const varName = 'v_' + code.replace(/\./g, '_')
+          const parsed = parseTencentQuote((window as unknown as Record<string, string | undefined>)[varName])
+          delete (window as unknown as Record<string, string | undefined>)[varName]
+          if (parsed && Number.isFinite(parsed.changePct)) out[code] = parsed
+        } catch { /* ignore bad quote */ }
+      })
+      recordSource('tencent', '腾讯行情', Object.keys(out).length > 0)
+      resolve(out)
+    }
+
+    script.onload = finish
+    script.onerror = finish
+    script.src = `https://qt.gtimg.cn/q=${uniq.join(',')}&_t=${Date.now()}`
+    document.head.appendChild(script)
+  })
+}
+
+function calcModelChange(model: OverseasModel, quotes: Record<string, { changePct: number }>) {
+  let sum = 0
+  let weight = 0
+  for (const leg of model.legs) {
+    const quote = quotes[leg.code]
+    if (!quote || !Number.isFinite(quote.changePct)) continue
+    sum += quote.changePct * leg.weight
+    weight += leg.weight
+  }
+  const minWeight = Number.isFinite(model.minWeight) ? model.minWeight! : 0
+  if (weight <= 0 || weight < minWeight) return { changePct: NaN, weight }
+  return { changePct: sum / weight, weight }
+}
+
+export function applyOverseasModelEstimate(
+  estimate: Estimate,
+  quotes: Record<string, { changePct: number }>,
+): Estimate {
+  if (!estimate || estimate.isRealtime || estimate.kind !== 'overseas') return estimate
+  let model = OVERSEAS_MODEL_BY_CODE[estimate.code]
+  if (!model) return estimate
+
+  let result = calcModelChange(model, quotes)
+  if (!Number.isFinite(result.changePct) && model.fallback) {
+    result = calcModelChange(model.fallback, quotes)
+    if (Number.isFinite(result.changePct)) model = model.fallback
+  }
+  if (!Number.isFinite(result.changePct)) return estimate
+
+  const estNav = usableNav(estimate.lastNav)
+    ? estimate.lastNav * (1 + result.changePct / 100)
+    : estimate.estNav
+  return {
+    ...estimate,
+    estNav,
+    estChange: result.changePct,
+    kind: 'overseas_model',
+    label: '海外模型估算',
+    isRealtime: true,
+    modelWeight: result.weight,
+    modelCode: model.legs.map((leg) => `${leg.code}:${leg.weight}`).join(','),
+    sourceNote: `${model.label} · 可用权重${fmt(result.weight)}% · 基于实时市场行情自建估算，不是基金官方实时净值`,
+  }
+}
+
+async function enhanceOverseasEstimate(e: Estimate): Promise<Estimate> {
+  const model = OVERSEAS_MODEL_BY_CODE[e.code]
+  if (!model || e.isRealtime || e.kind !== 'overseas') return e
+  const codes = new Set<string>()
+  collectModelCodes(model, codes)
+  const quotes = await fetchTencentQuotes(Array.from(codes))
+  return applyOverseasModelEstimate(e, quotes)
+}
+
 // 全局 JSONP 回调（接口里写死的函数名，按 fundcode 调度到对应 Promise）。
-function handleJsonpgz(d: Gz) {
+async function handleJsonpgz(d: Gz) {
   if (!d || !d.fundcode) return
   const code = d.fundcode
   const p = pending.get(code)
   if (!p) return
   pending.delete(code)
   clearTimeout(p.timer)
-  const e = normalizeEstimate(d)
+  const e = await enhanceOverseasEstimate(normalizeEstimate(d))
   cache.set(code, { e, t: Date.now() })
   recordSource('tiantian', '天天基金', true)
   p.resolve(e)
