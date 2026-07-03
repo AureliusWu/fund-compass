@@ -16,6 +16,8 @@ export interface Estimate {
   estTime: string // 估值时间 gztime
   kind: 'intraday' | 'overseas'
   label: '盘中估值' | '海外估值'
+  isRealtime: boolean
+  sourceNote: string
 }
 
 export interface Gz {
@@ -65,6 +67,7 @@ export function normalizeEstimate(d: Gz): Estimate {
   const name = d.name || d.fundcode || ''
   const estTime = d.gztime || ''
   const overseas = isOverseasEstimate(name, estTime)
+  const isRealtime = !overseas
   return {
     code: d.fundcode || '',
     name,
@@ -75,6 +78,10 @@ export function normalizeEstimate(d: Gz): Estimate {
     estTime,
     kind: overseas ? 'overseas' : 'intraday',
     label: overseas ? '海外估值' : '盘中估值',
+    isRealtime,
+    sourceNote: overseas
+      ? '天天基金当前仅返回海外基金收盘后/延迟估值，未提供实时盘中估值'
+      : '天天基金盘中估值',
   }
 }
 

@@ -228,7 +228,12 @@ onMounted(refresh)
         >
           <template #value>
             <div class="wl-val">
-              <span v-if="est[it.code]?.estChange != null" class="est-chg" :style="{ color: colorOf(est[it.code]!.estChange) }">{{ est[it.code]!.kind === 'overseas' ? '海外' : '估' }} {{ pct(est[it.code]!.estChange) }}</span>
+              <span
+                v-if="est[it.code]?.estChange != null"
+                class="est-chg"
+                :style="{ color: colorOf(est[it.code]!.estChange) }"
+                :title="est[it.code]!.sourceNote"
+              >{{ est[it.code]!.isRealtime ? '估' : '海外非实时' }} {{ pct(est[it.code]!.estChange) }}</span>
               <span class="sig" :style="{ color: signalColor(rows[it.code]?.signal || '') }">{{ rows[it.code]?.signal || '…' }}</span>
               <StarRating :star="rows[it.code]?.star ?? null" />
               <span v-if="sharesOf(it.code) && rows[it.code]?.nav != null" class="nav">

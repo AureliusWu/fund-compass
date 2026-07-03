@@ -16,6 +16,8 @@ describe('normalizeEstimate', () => {
 
     expect(e.kind).toBe('overseas')
     expect(e.label).toBe('海外估值')
+    expect(e.isRealtime).toBe(false)
+    expect(e.sourceNote).toContain('未提供实时盘中估值')
     expect(e.estChange).toBeCloseTo(0.01)
     expect(e.estNav).toBeCloseTo(2.8474)
   })
@@ -44,6 +46,7 @@ describe('normalizeEstimate', () => {
 
     expect(e.kind).toBe('intraday')
     expect(e.label).toBe('盘中估值')
+    expect(e.isRealtime).toBe(true)
     expect(e.estChange).toBeCloseTo(2)
   })
 })

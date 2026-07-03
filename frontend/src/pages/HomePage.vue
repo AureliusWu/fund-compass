@@ -20,7 +20,7 @@ const sigs = ref<Record<string, string>>({})
 const alerts = ref<Alert[]>(loadAlerts())
 const unread = ref(unreadCount())
 
-onMounted(async () => {
+onMounted(() => {
   // 多源健康检查
   checkBackend().then((ok) => {
     sources.value = getSourceSummary()
@@ -35,8 +35,12 @@ onMounted(async () => {
   app.loadMarketTemp()
 
   // 自选信号
+  void loadWatchSignals()
+})
+
+async function loadWatchSignals() {
   try {
-    await watch.load(true)
+    await watch.load(false)
     const tasks = watch.items.map(async (it) => {
       try { sigs.value[it.code] = (await funds.signal(it.code)).signal } catch { /* skip */ }
     })
@@ -53,7 +57,7 @@ onMounted(async () => {
       unread.value = unreadCount()
     }
   })
-})
+}
 
 const SIG_WEIGHT: Record<string, number> = { 买入: 100, 定投: 70, 持有: 45, 减仓: 15 }
 
