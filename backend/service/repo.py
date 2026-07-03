@@ -11,6 +11,21 @@ CST = timezone(timedelta(hours=8))
 DETAIL_TTL = timedelta(hours=12)
 HIST_KEEP = 800   # 入库保留的净值条数（≈3年，供 MA120 / 估值分位）
 
+# 冷启动兜底种子：只覆盖常用指数/ETF，避免空库时选基页完全空白。
+# 完整 universe 不再启动时抓取；需要完整列表时手动 POST /api/admin/refresh-universe。
+SEED_FUNDS = [
+    {"code": "510300", "name": "华泰柏瑞沪深300ETF", "type": "指数型-股票", "pinyin": "HTBRHS300ETF"},
+    {"code": "050002", "name": "博时沪深300指数A", "type": "指数型-股票", "pinyin": "BSHS300ZSA"},
+    {"code": "510500", "name": "南方中证500ETF", "type": "指数型-股票", "pinyin": "NFZZ500ETF"},
+    {"code": "510050", "name": "华夏上证50ETF", "type": "指数型-股票", "pinyin": "HXSZ50ETF"},
+    {"code": "159915", "name": "易方达创业板ETF", "type": "指数型-股票", "pinyin": "YFDCYBETF"},
+    {"code": "588000", "name": "华夏科创50ETF", "type": "指数型-股票", "pinyin": "HXKC50ETF"},
+    {"code": "161725", "name": "招商中证白酒指数A", "type": "指数型-股票", "pinyin": "ZSZZBJZSA"},
+    {"code": "513100", "name": "国泰纳斯达克100ETF", "type": "QDII-指数", "pinyin": "GTNSDK100ETF"},
+    {"code": "161130", "name": "易方达纳斯达克100人民币A", "type": "QDII-指数", "pinyin": "YFDNSDK100RMB A"},
+    {"code": "513500", "name": "博时标普500ETF", "type": "QDII-指数", "pinyin": "BSBP500ETF"},
+]
+
 
 def _now():
     return datetime.now(CST)
@@ -25,7 +40,7 @@ def universe_count() -> int:
 
 
 def import_universe() -> int:
-    """抓取全量基金并写入 funds 表，返回条数。"""
+    """抓取全量基金并写入 funds 表，返回条数。只在手动刷新时调用，不进入启动路径。"""
     funds = fetch_universe()
     conn = get_conn()
     try:
@@ -39,19 +54,49 @@ def import_universe() -> int:
     return len(funds)
 
 
-def query_funds(q=None, type=None, page=1, page_size=20) -> dict:
-    where, args = [], []
+def _query_seed(q=None, type=None, page=1, page_size=20) -> dict:
+    """空库冷启动时的极速兜底列表；纯内存过滤，不访问网络。"""
+    items = SEED_FUNDS
     if type:
-        where.append("type LIKE ?")
-        args.append(f"%{type}%")
+        items = [f for f in items if type in (f.get("type") or "")]
     if q:
-        where.append("(code LIKE ? OR name LIKE ? OR pinyin LIKE ?)")
-        args += [f"%{q}%", f"%{q}%", f"%{q.upper()}%"]
-    clause = (" WHERE " + " AND ".join(where)) if where else ""
+        needle = q.strip().upper()
+        items = [
+            f for f in items
+            if needle in f["code"]
+            or needle in f["name"].upper()
+            or needle in f["pinyin"].upper()
+        ]
+    total = len(items)
+    start = (page - 1) * page_size
+    page_items = items[start:start + page_size]
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "items": [{"code": f["code"], "name": f["name"], "type": f["type"]} for f in page_items],
+        "seed": True,
+    }
+
+
+def query_funds(q=None, type=None, page=1, page_size=20) -> dict:
     page = max(1, page)
     page_size = max(1, min(page_size, 100))
     conn = get_conn()
     try:
+        # 空库说明还没手动刷新完整 universe。此时绝不自动抓全量，直接走内存种子。
+        base_total = conn.execute("SELECT COUNT(*) FROM funds").fetchone()[0]
+        if base_total == 0:
+            return _query_seed(q=q, type=type, page=page, page_size=page_size)
+
+        where, args = [], []
+        if type:
+            where.append("type LIKE ?")
+            args.append(f"%{type}%")
+        if q:
+            where.append("(code LIKE ? OR name LIKE ? OR pinyin LIKE ?)")
+            args += [f"%{q}%", f"%{q}%", f"%{q.upper()}%"]
+        clause = (" WHERE " + " AND ".join(where)) if where else ""
         total = conn.execute("SELECT COUNT(*) FROM funds" + clause, args).fetchone()[0]
         rows = conn.execute(
             "SELECT code,name,type FROM funds" + clause + " ORDER BY code LIMIT ? OFFSET ?",
@@ -62,6 +107,7 @@ def query_funds(q=None, type=None, page=1, page_size=20) -> dict:
     return {
         "total": total, "page": page, "page_size": page_size,
         "items": [dict(r) for r in rows],
+        "seed": False,
     }
 
 
