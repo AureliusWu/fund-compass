@@ -20,6 +20,10 @@ import urllib.request
 
 GIST_TOKEN = os.environ.get("GIST_TOKEN", "").strip()
 WECHAT_SENDKEY = (os.environ.get("WECHAT_SENDKEY") or os.environ.get("SC_SENDKEY") or "").strip()
+PUSHPLUS_TOKEN = os.environ.get("PUSHPLUS_TOKEN", "").strip()
+PUSHPLUS_TOPIC = os.environ.get("PUSHPLUS_TOPIC", "").strip()
+PUSHPLUS_CHANNEL = os.environ.get("PUSHPLUS_CHANNEL", "wechat").strip()
+NOTIFY_WEBHOOK_URL = os.environ.get("NOTIFY_WEBHOOK_URL", "").strip()
 FORCE = os.environ.get("FORCE", "").lower() in ("1", "true", "yes")
 PUSH_SLOT = os.environ.get("PUSH_SLOT", "").strip()
 SCHEDULE_CRON = os.environ.get("SCHEDULE_CRON", "").strip()
@@ -27,7 +31,8 @@ WATCH_FILE = "sinan-watchlist.json"
 STATE_FILE = "sinan-estimate-state.json"
 GH = "https://api.github.com"
 CST = datetime.timezone(datetime.timedelta(hours=8))
-VALID_SLOTS = ("14:30", "14:40", "14:50")
+VALID_SLOTS = ("14:30",)
+MAX_SCHEDULE_DELAY_MINUTES = 25
 
 
 def _req(url, data=None, headers=None, method=None, timeout=30):
@@ -80,26 +85,29 @@ def write_state(gid, state):
     _gh(f"{GH}/gists/{gid}", data=body, method="PATCH")
 
 
+def slot_from_schedule():
+    m = re.match(r"^\s*30\s+6\s+", SCHEDULE_CRON)
+    if m:
+        return "14:30"
+    return None
+
+
+def schedule_delay_minutes(now, slot):
+    hour, minute = map(int, slot.split(":"))
+    planned = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    return int((now - planned).total_seconds() // 60)
+
+
 def push_slot(now):
-    """确定本次推送 slot：优先 workflow 显式输入，其次 GitHub schedule，最后当前北京时间。"""
+    """Resolve the push slot from manual input, GitHub schedule, or Beijing time."""
     if PUSH_SLOT in VALID_SLOTS:
         return PUSH_SLOT
 
-    # github.event.schedule 形如 "30 6 * * 1-5"，UTC 06:mm 对应北京时间 14:mm。
-    m = re.match(r"^\s*(30|40|50)\s+6\s+", SCHEDULE_CRON)
-    if m:
-        return f"14:{m.group(1)}"
+    scheduled_slot = slot_from_schedule()
+    if scheduled_slot:
+        return scheduled_slot
 
-    if now.hour == 14 and now.minute in (30, 40, 50):
-        return f"14:{now.minute:02d}"
-
-    # 手动测试或 GitHub 严重延迟时，用最近一个未明确识别的收盘前 slot 标记。
-    if now.hour < 14 or (now.hour == 14 and now.minute < 40):
-        return "14:30"
-    if now.hour == 14 and now.minute < 50:
-        return "14:40"
-    return "14:50"
-
+    return "14:30"
 
 def watch_codes(gid):
     """从 Gist 自选读 [(code, name)]。"""
@@ -156,23 +164,64 @@ def estimate(code):
 
 
 def send_notification(title, content):
-    """微信推送通道（Server酱 SendKey，兼容旧 SC_SENDKEY Secret）。"""
-    sent = False
+    """Send through the first configured channel: PushPlus, ServerChan, or webhook."""
+    if PUSHPLUS_TOKEN:
+        payload = {
+            "token": PUSHPLUS_TOKEN,
+            "title": title,
+            "content": content,
+            "template": "markdown",
+            "channel": PUSHPLUS_CHANNEL or "wechat",
+        }
+        if PUSHPLUS_TOPIC:
+            payload["topic"] = PUSHPLUS_TOPIC
+        out = _req(
+            "https://www.pushplus.plus/send",
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={"Content-Type": "application/json; charset=utf-8"},
+        )
+        print("pushplus:", out[:160])
+        return True
+
     if WECHAT_SENDKEY:
         body = urllib.parse.urlencode({"title": title, "desp": content}).encode()
         out = _req(f"https://sctapi.ftqq.com/{WECHAT_SENDKEY}.send", data=body,
                    headers={"Content-Type": "application/x-www-form-urlencoded"})
-        print("微信推送:", out[:120])
-        sent = True
-    if not sent:
-        print("未配置微信推送通道（WECHAT_SENDKEY 或 SC_SENDKEY），跳过发送")
-    return sent
+        print("serverchan:", out[:160])
+        return True
 
+    if NOTIFY_WEBHOOK_URL:
+        payload = json.dumps({"title": title, "content": content}, ensure_ascii=False).encode("utf-8")
+        out = _req(
+            NOTIFY_WEBHOOK_URL,
+            data=payload,
+            headers={"Content-Type": "application/json; charset=utf-8"},
+        )
+        print("webhook:", out[:160])
+        return True
+
+    print("no notification channel configured; set PUSHPLUS_TOKEN, WECHAT_SENDKEY/SC_SENDKEY, or NOTIFY_WEBHOOK_URL")
+    return False
 
 def main():
     now = datetime.datetime.now(CST)
     today = now.strftime("%Y-%m-%d")
     slot = push_slot(now)
+    planned_slot = slot_from_schedule() or (PUSH_SLOT if PUSH_SLOT in VALID_SLOTS else None)
+    if planned_slot and not FORCE:
+        delay = schedule_delay_minutes(now, planned_slot)
+        if delay > MAX_SCHEDULE_DELAY_MINUTES:
+            print(
+                f"planned slot {planned_slot} is {delay} minutes late "
+                f"(now={now.isoformat()}); skip stale push"
+            )
+            return
+        if delay < -5:
+            print(
+                f"planned slot {planned_slot} is {-delay} minutes early "
+                f"(now={now.isoformat()}); skip unexpected early push"
+            )
+            return
     if now.weekday() >= 5 and not FORCE:
         print("周末，跳过"); return
     if not GIST_TOKEN:

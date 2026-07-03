@@ -1,13 +1,10 @@
 name: estimate-push
 
-# 司南基金 · 交易日 14:30 / 14:40 / 14:50 自选估值推送
-# 仅在当日有盘中估值（=交易日）时推送，自动避开周末/节假日。复用 V2-6 的 Secret。
-# GitHub 免费定时任务可能延迟；脚本按 slot 去重，确保每个时段最多推一次。
+# 司南基金 · 交易日北京时间 14:30 自选实时估值推送。
+# Render cron 是主触发器；GitHub Actions 作为兜底，脚本会跳过延迟超过 25 分钟的旧任务。
 on:
   schedule:
     - cron: '30 6 * * 1-5' # UTC 06:30 周一~五 = CST 14:30
-    - cron: '40 6 * * 1-5' # UTC 06:40 周一~五 = CST 14:40
-    - cron: '50 6 * * 1-5' # UTC 06:50 周一~五 = CST 14:50
   workflow_dispatch:
     inputs:
       force:
@@ -15,7 +12,7 @@ on:
         type: boolean
         default: false
       slot:
-        description: 推送时段（测试用，留空则按当前北京时间）
+        description: 推送时段（测试用，目前仅支持 14:30；留空则按当前北京时间）
         type: string
         default: ''
 
@@ -31,8 +28,11 @@ jobs:
       - name: 估值推送
         env:
           GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+          PUSHPLUS_TOPIC: ${{ secrets.PUSHPLUS_TOPIC }}
           WECHAT_SENDKEY: ${{ secrets.WECHAT_SENDKEY }}
           SC_SENDKEY: ${{ secrets.SC_SENDKEY }}
+          NOTIFY_WEBHOOK_URL: ${{ secrets.NOTIFY_WEBHOOK_URL }}
           FORCE: ${{ inputs.force }}
           PUSH_SLOT: ${{ inputs.slot }}
           SCHEDULE_CRON: ${{ github.event.schedule }}

@@ -1,70 +1,57 @@
-# 司南基金 · 微信推送配置
+# 司南基金 · 14:30 自选估值推送配置
 
-当前有两类推送：
+核心目标：交易日北京时间 **14:30**，读取 Gist 里的自选基金，抓天天基金实时估值，并推送到微信或其它通知通道。
 
-- `estimate-push`：交易日北京时间 **14:30 / 14:40 / 14:50**，推送自选基金盘中涨跌幅。
-- `signal-notify`：交易时段检查择时信号变化，变化时才推送，并顺带 ping 后端保活。
+## 触发方式
 
-状态存在同一个 Gist，不写仓库（不会触发前端重新部署）。
+推荐主触发器：`render.yaml` 里的 Render Cron Job：
 
-> 不配 Secret 也不会报错，工作流只是空跑。配齐下面 Secret 才会真正推送。
+- `fund-compass-estimate-push`
+- cron：`30 6 * * 1-5`，即北京时间 14:30
+- 脚本：`python tools/estimate_push.py`
 
-## 一、开通微信推送（Server酱 SendKey，约 2 分钟）
+GitHub Actions 的 `estimate-push` 仍保留为兜底，但 GitHub 免费定时任务可能延迟。脚本会自动跳过延迟超过 25 分钟的旧任务，避免 18 点补发一条标题写着 14:30 的消息。
 
-1. 打开 <https://sct.ftqq.com> → 用**微信扫码登录**。
-2. 进「SendKey」页，复制你的 **SENDKEY**（形如 `SCT xxxxxxxx`）。
-3. 按页面提示**关注公众号并绑定微信**，否则收不到推送。
-4. （免费版每天最多 5 条；本工具只在信号真变化时推，足够用。）
+> Render Cron Job 没有 free plan；如果不启用 Render Cron，只用 GitHub Actions，也能工作，但准点性不保证。
 
-## 二、在 GitHub 仓库加两个 Secret
+## 必填 Secret
 
-仓库 `AureliusWu/fund-compass` → **Settings → Secrets and variables → Actions → New repository secret**，
-分别新建：
+需要能读取 App 云同步自选的 Gist：
 
 | Name | Value |
 |------|-------|
-| `WECHAT_SENDKEY` | 第一步拿到的 Server酱 SENDKEY |
-| `GIST_TOKEN` | 你的 GitHub Personal Access Token（**gist** 权限）——就是 App「云同步」里填的那个 |
+| `GIST_TOKEN` | GitHub Personal Access Token，需勾选 `gist` 权限 |
 
-> 兼容旧配置：如果你已经有 `SC_SENDKEY`，脚本仍会继续使用；新建时建议用 `WECHAT_SENDKEY`。
+先在 App「自选 → 云同步」里上传一次，确保 Gist 中存在 `sinan-watchlist.json`。
 
-> 没有 GIST_TOKEN？去 <https://github.com/settings/tokens> 建一个 **classic** token，
-> 勾选 **gist** 作用域即可。这个 token 同时能用于 App 云同步。
+## 通知通道
 
-## 三、确保 Gist 里有自选
+脚本按下面顺序使用第一个已配置通道：
 
-定时任务从 Gist 文件 `sinan-watchlist.json` 读自选，所以：
-**先在 App「自选 → 云同步」里填好 Token 并「上传」一次**，把自选推到 Gist。
-（用 App 多设备同步时这步本来就会做。）
+| 通道 | Secret / Env | 说明 |
+|------|--------------|------|
+| PushPlus | `PUSHPLUS_TOKEN` | 推荐，微信推送；可选 `PUSHPLUS_TOPIC`、`PUSHPLUS_CHANNEL` |
+| Server 酱 | `WECHAT_SENDKEY` 或旧名 `SC_SENDKEY` | 兼容旧配置 |
+| 自定义 Webhook | `NOTIFY_WEBHOOK_URL` | POST JSON：`{ "title": "...", "content": "..." }` |
 
-## 四、测试
+Render Cron Job 需要在 Render 服务环境变量里配置；GitHub Actions 兜底需要在仓库 Actions Secrets 里配置同名 Secret。
 
-自选涨跌幅：
+## 测试
 
-仓库 → **Actions → estimate-push → Run workflow** → 勾选 `force = true` → 可选填 `slot = 14:30` → Run。
+GitHub Actions 手动测试：
 
-- 微信应收到一条「司南基金 · 自选涨跌幅（14:30）」。
-- `force = true` 只用于测试，不会占用当天正式推送 slot。
+1. 仓库 → Actions → `estimate-push` → Run workflow
+2. 勾选 `force = true`
+3. `slot` 填 `14:30` 或留空
+4. 运行后应收到「司南基金 · 自选涨跌幅（14:30）」
 
-择时信号：
+`force = true` 只用于测试，不会占用当天正式推送去重状态。
 
-仓库 → **Actions → signal-notify → Run workflow** → 勾选 `force = true` → Run。
+## 去重与跳过规则
 
-- 看运行日志：应有 `health ok（已保活）`、`codes=N`；
-- 微信应收到一条「司南基金 · 推送测试」，列出当前自选信号。
+- 每个交易日 `14:30` 最多正式推送一次。
+- 周末跳过。
+- 如果天天基金没有返回当天盘中估值，跳过。
+- 定时任务晚到超过 25 分钟，跳过，避免推送过期实时估值。
 
-## 五、已排查的定时问题
-
-- GitHub Actions 的 schedule 是尽力而为，可能延迟甚至跳过；近期日志里 `estimate-push` 曾延迟到北京时间 18 点后才执行。
-- 旧版脚本用 `last_date` 去重，一天最多只会推一条，不可能满足 14:30 / 14:40 / 14:50 三次推送。
-- 新版改为按 `slot` 去重：当天 `14:30`、`14:40`、`14:50` 各最多推一次。
-
-## 工作原理 / 注意
-
-- **estimate-push** 每个交易日下午尝试推送三次自选涨跌幅，非交易日或当日无盘中估值会跳过。
-- **signal-notify** 首次正式运行只播种状态、不推送，之后某只基金信号变化（如「持有」→「买入」）才会推。
-- **保活**：每次运行都会 ping `/health`，交易时段保持后端常驻。GitHub 免费定时任务可能延迟几分钟、
-  偶尔跳过，所以保活并非 100% 严丝合缝；真要零冷启动得上 Render 付费档。
-- **时段门控**：脚本内按 A 股 09:30–11:30 / 13:00–15:00（CST）精确判断，非交易时段直接跳过。
-- 推送内容仅为数据信号，**不构成投资建议**。
-- 想换通道（Bark / 邮件）：改 `tools/notify.py` 里的 `notify()` 一个函数即可，其余逻辑通用。
+推送内容仅为数据参考，不构成投资建议。
