@@ -2,7 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useWatchlistStore } from '@/stores/watchlist'
 import { useFundsStore } from '@/stores/funds'
-import { fetchEstimates, type Estimate } from '@/utils/estimate'
+import { fetchEstimates, latestNavMove, preferredDailyMove, type Estimate, type NavMove } from '@/utils/estimate'
 import { colorOf } from '@/utils/format'
 import Chart from '@/components/Chart.vue'
 import { compileStoryData, generateStorySummary, type StoryData } from '@/utils/story'
@@ -18,7 +18,14 @@ const exporting = ref(false)
 const exportErr = ref('')
 const cardRef = ref<HTMLElement | null>(null)
 
-const meta = ref<Record<string, { nav: number | null; type: string; signal?: string | null; score?: number | null; star?: number | null }>>({})
+const meta = ref<Record<string, {
+  nav: number | null
+  type: string
+  navMove: NavMove | null
+  signal?: string | null
+  score?: number | null
+  star?: number | null
+}>>({})
 const est = ref<Record<string, Estimate | null>>({})
 
 onMounted(async () => {
@@ -41,12 +48,13 @@ onMounted(async () => {
         ])
         meta.value[e.code] = {
           nav: d.latest_nav, type: d.type || '其他',
+          navMove: latestNavMove(d.nav_history),
           signal: sig?.signal,
           score: sc?.score ?? null,
           star: sc?.star ?? null,
         }
       } catch {
-        meta.value[e.code] = { nav: null, type: '其他' }
+        meta.value[e.code] = { nav: null, type: '其他', navMove: null }
       }
     }))
 
@@ -55,9 +63,9 @@ onMounted(async () => {
       const m = meta.value[e.code]
       const nav = m?.nav ?? null
       const value = nav != null ? e.shares! * nav : 0
-      const es = est.value[e.code]
-      const today = es && es.estChange != null && es.lastNav != null
-        ? e.shares! * es.lastNav * es.estChange / 100 : null
+      const move = preferredDailyMove(est.value[e.code], m?.navMove, m?.type || e.name)
+      const today = move && move.change != null && move.baseNav != null
+        ? e.shares! * move.baseNav * move.change / 100 : null
       return {
         code: e.code, name: e.name || e.code, type: m?.type || '其他',
         value, shares: e.shares!, cost: e.cost ?? 0, nav,

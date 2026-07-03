@@ -22,6 +22,22 @@ export interface Estimate {
   modelCode?: string
 }
 
+export interface NavMove {
+  date: string
+  prevDate: string
+  nav: number
+  prevNav: number
+  change: number
+}
+
+export interface DailyMove {
+  change: number | null
+  baseNav: number | null
+  label: '估' | '净' | '海外非实时'
+  sourceNote: string
+  date?: string
+}
+
 export interface Gz {
   fundcode?: string; name?: string
   dwjz?: string; gsz?: string; gszzl?: string; jzrq?: string; gztime?: string
@@ -40,7 +56,14 @@ const TTL = 60_000 // 盘中估值 1 分钟内复用，避免频繁注入
 const TIMEOUT = 8000
 
 interface ModelLeg { code: string; weight: number; note?: string }
-interface OverseasModel { label: string; legs: ModelLeg[]; minWeight?: number; fallback?: OverseasModel }
+interface ModelAdjustment { scale?: number; bias?: number }
+interface OverseasModel {
+  label: string
+  legs: ModelLeg[]
+  minWeight?: number
+  adjustment?: ModelAdjustment
+  fallback?: OverseasModel
+}
 
 const OVERSEAS_MODEL_BY_CODE: Record<string, OverseasModel> = {
   '539002': {
@@ -61,20 +84,46 @@ const OVERSEAS_MODEL_BY_CODE: Record<string, OverseasModel> = {
     ],
   },
   '012920': {
-    label: '2026Q1重仓穿透模型',
-    minWeight: 25,
-    fallback: { label: '成长+半导体+A股兜底模型', legs: [{ code: 'usQQQ', weight: 45 }, { code: 'usSOXX', weight: 30 }, { code: 'sh000300', weight: 25 }] },
+    label: '2026Q1风格因子模型',
+    minWeight: 100,
+    adjustment: { scale: 1.4 },
+    fallback: {
+      label: '2026Q1重仓穿透模型',
+      minWeight: 25,
+      legs: [
+        { code: 'usTSM', weight: 8.88 },
+        { code: 'usLITE', weight: 8.68 },
+        { code: 'sz300502', weight: 6.02 },
+        { code: 'usGLW', weight: 4.67 },
+        { code: 'usAXTI', weight: 4.67 },
+        { code: 'sz300308', weight: 4.67 },
+        { code: 'sh688498', weight: 4.49 },
+        { code: 'usTSEM', weight: 3.72 },
+        { code: 'usGOOGL', weight: 3.36 },
+        { code: 'sz002384', weight: 2.67 },
+      ],
+    },
     legs: [
-      { code: 'usTSM', weight: 8.88 },
-      { code: 'usLITE', weight: 8.68 },
-      { code: 'sz300502', weight: 6.02 },
-      { code: 'usGLW', weight: 4.67 },
-      { code: 'usAXTI', weight: 4.67 },
-      { code: 'sz300308', weight: 4.67 },
-      { code: 'sh688498', weight: 4.49 },
-      { code: 'usTSEM', weight: 3.72 },
-      { code: 'usGOOGL', weight: 3.36 },
-      { code: 'sz002384', weight: 2.67 },
+      { code: 'usQQQ', weight: 45 },
+      { code: 'usSOXX', weight: 30 },
+      { code: 'sh000300', weight: 25 },
+    ],
+  },
+  '018147': {
+    label: '2026Q1重仓穿透模型',
+    minWeight: 30,
+    fallback: { label: '半导体+韩国兜底模型', legs: [{ code: 'usSMH', weight: 70 }, { code: 'usEWY', weight: 20 }, { code: 'usEEM', weight: 10 }] },
+    legs: [
+      { code: 'usTSM', weight: 10.26 },
+      { code: 'usNVDA', weight: 10.14 },
+      { code: 'usEWY', weight: 8.65, note: 'SK海力士代理' },
+      { code: 'usAVGO', weight: 8.52 },
+      { code: 'usEWY', weight: 6.76, note: '三星电子代理' },
+      { code: 'usSNDK', weight: 4.91 },
+      { code: 'usGLW', weight: 4.29 },
+      { code: 'usWDC', weight: 3.73 },
+      { code: 'usLITE', weight: 3.58 },
+      { code: 'usMPWR', weight: 3.49 },
     ],
   },
 }
@@ -96,6 +145,53 @@ function isOverseasEstimate(name: string, estTime: string): boolean {
   const overseasFund = /QDII|全球|海外|新兴市场|纳斯达克|标普|恒生|港股|美元|国际|日经|德国|越南|印度|香港/i.test(name)
   const hour = Number((estTime.match(/\s(\d{1,2}):\d{2}$/) || [])[1])
   return overseasFund && Number.isFinite(hour) && (hour < 9 || hour >= 15)
+}
+
+export function latestNavMove(
+  navHistory: Array<{ date: string; nav: number | null | undefined }> | null | undefined,
+): NavMove | null {
+  const points = (navHistory || [])
+    .filter((p): p is { date: string; nav: number } => !!p.date && usableNav(p.nav ?? null))
+  if (points.length < 2) return null
+  const prev = points[points.length - 2]
+  const cur = points[points.length - 1]
+  return {
+    date: cur.date,
+    prevDate: prev.date,
+    nav: cur.nav,
+    prevNav: prev.nav,
+    change: (cur.nav - prev.nav) / prev.nav * 100,
+  }
+}
+
+export function isOverseasLike(typeOrName: string | null | undefined, estimate?: Estimate | null): boolean {
+  if (estimate?.kind === 'overseas' || estimate?.kind === 'overseas_model') return true
+  return /QDII|全球|海外|新兴市场|纳斯达克|标普|恒生|港股|美元|国际|日经|德国|越南|印度|香港/i
+    .test(typeOrName || estimate?.name || '')
+}
+
+export function preferredDailyMove(
+  estimate: Estimate | null | undefined,
+  navMove: NavMove | null | undefined,
+  typeOrName?: string | null,
+): DailyMove | null {
+  if (navMove && isOverseasLike(typeOrName, estimate)) {
+    return {
+      change: navMove.change,
+      baseNav: navMove.prevNav,
+      label: '净',
+      sourceNote: `最新公布净值涨跌：${navMove.prevDate} → ${navMove.date}`,
+      date: navMove.date,
+    }
+  }
+  if (!estimate || estimate.estChange == null || estimate.lastNav == null) return null
+  return {
+    change: estimate.estChange,
+    baseNav: estimate.lastNav,
+    label: estimate.isRealtime ? '估' : '海外非实时',
+    sourceNote: estimate.sourceNote,
+    date: estimate.estTime || estimate.navDate,
+  }
 }
 
 export function normalizeEstimate(d: Gz): Estimate {
@@ -196,7 +292,10 @@ function calcModelChange(model: OverseasModel, quotes: Record<string, { changePc
   }
   const minWeight = Number.isFinite(model.minWeight) ? model.minWeight! : 0
   if (weight <= 0 || weight < minWeight) return { changePct: NaN, weight }
-  return { changePct: sum / weight, weight }
+  const rawChange = sum / weight
+  const scale = Number.isFinite(model.adjustment?.scale) ? model.adjustment!.scale! : 1
+  const bias = Number.isFinite(model.adjustment?.bias) ? model.adjustment!.bias! : 0
+  return { changePct: rawChange * scale + bias, weight }
 }
 
 export function applyOverseasModelEstimate(

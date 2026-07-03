@@ -8,7 +8,7 @@ import { pct, num, colorOf, signalColor } from '@/utils/format'
 import StarRating from '@/components/StarRating.vue'
 import Chart from '@/components/Chart.vue'
 import DcaCalc from '@/components/DcaCalc.vue'
-import { fetchEstimate, type Estimate } from '@/utils/estimate'
+import { fetchEstimate, latestNavMove, preferredDailyMove, type Estimate } from '@/utils/estimate'
 import { getHoldings, type Holding } from '@/utils/holdings'
 import { templateInterpret, llmInterpret } from '@/utils/interpret'
 import { getAiConfig, setAiConfig, hasAiKey, providerDef, PROVIDERS, type AiConfig } from '@/utils/ai'
@@ -164,6 +164,12 @@ const valuationDisplay = computed(() => {
   return v.label
 })
 
+const navMove = computed(() => latestNavMove(detail.value?.nav_history))
+const primaryMove = computed(() => preferredDailyMove(est.value, navMove.value, detail.value?.type || detail.value?.name))
+const showModelLine = computed(() =>
+  primaryMove.value?.label === '净' && est.value?.estChange != null && est.value?.estNav != null,
+)
+
 async function toggleWatch() {
   try {
     await watch.toggle(code, detail.value?.name)
@@ -190,17 +196,22 @@ async function toggleWatch() {
       <template v-else-if="detail">
         <div class="est card">
           <div class="est-head">
-            <span class="est-label">{{ est?.label || '盘中估值' }}</span>
-            <span class="est-time">{{ est?.estTime || (estDone ? '' : '加载中…') }}</span>
+            <span class="est-label">{{ primaryMove?.label === '净' ? '最新净值涨跌' : (est?.label || '盘中估值') }}</span>
+            <span class="est-time">{{ primaryMove?.date || est?.estTime || (estDone ? '' : '加载中…') }}</span>
           </div>
-          <div class="est-main" v-if="est && est.estChange != null">
-            <div class="est-chg" :style="{ color: colorOf(est.estChange) }">{{ pct(est.estChange) }}</div>
+          <div class="est-main" v-if="primaryMove && primaryMove.change != null">
+            <div class="est-chg" :style="{ color: colorOf(primaryMove.change) }">{{ pct(primaryMove.change) }}</div>
             <div class="est-side">
-              <div>估算净值 <b>{{ num(est.estNav) }}</b></div>
-              <div>昨净值 <b>{{ num(est.lastNav) }}</b><em v-if="est.navDate"> @{{ est.navDate }}</em></div>
+              <div v-if="primaryMove.label === '净'">最新净值 <b>{{ num(navMove?.nav) }}</b></div>
+              <div v-else>估算净值 <b>{{ num(est?.estNav) }}</b></div>
+              <div>基准净值 <b>{{ num(primaryMove.baseNav) }}</b><em v-if="navMove && primaryMove.label === '净'"> @{{ navMove.prevDate }}</em></div>
             </div>
           </div>
-          <div class="est-empty" v-else-if="estDone">暂无估值，以最新净值为准。</div>
+          <div class="est-empty" v-if="primaryMove?.sourceNote">{{ primaryMove.sourceNote }}</div>
+          <div class="est-empty" v-if="showModelLine">
+            下一净值模型：{{ pct(est!.estChange) }}，估算净值 {{ num(est!.estNav) }}。{{ est!.sourceNote }}
+          </div>
+          <div class="est-empty" v-if="!primaryMove && estDone">暂无估值，以最新净值为准。</div>
           <van-loading v-else size="18" style="padding:6px 0" />
         </div>
 

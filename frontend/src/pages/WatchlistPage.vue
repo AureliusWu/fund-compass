@@ -7,7 +7,7 @@ import { useWatchlistStore } from '@/stores/watchlist'
 import { useFundsStore } from '@/stores/funds'
 import { getFunds, type FundListItem } from '@/api/client'
 import { pct, num, colorOf, signalColor } from '@/utils/format'
-import { fetchEstimates, type Estimate } from '@/utils/estimate'
+import { fetchEstimates, latestNavMove, preferredDailyMove, type Estimate, type NavMove } from '@/utils/estimate'
 import StarRating from '@/components/StarRating.vue'
 import Chart from '@/components/Chart.vue'
 import { exportWatchlistCSV } from '@/utils/export'
@@ -15,7 +15,7 @@ import Icon from '@/components/Icon.vue'
 
 interface Row {
   name: string; type: string | null; nav: number | null; ret1y: number | null
-  signal: string; star: number | null
+  signal: string; star: number | null; navMove: NavMove | null
 }
 
 const router = useRouter()
@@ -41,10 +41,18 @@ const accountChips = computed(() => {
 })
 
 async function loadOne(code: string, name: string | null) {
-  rows[code] = { name: name || code, type: null, nav: null, ret1y: null, signal: '', star: null }
+  rows[code] = { name: name || code, type: null, nav: null, ret1y: null, signal: '', star: null, navMove: null }
   try {
     const [d, s, sig] = await Promise.all([funds.detail(code), funds.score(code), funds.signal(code)])
-    rows[code] = { name: d.name || code, type: d.type, nav: d.latest_nav, ret1y: d.ret_1y, star: s.star, signal: sig.signal }
+    rows[code] = {
+      name: d.name || code,
+      type: d.type,
+      nav: d.latest_nav,
+      ret1y: d.ret_1y,
+      star: s.star,
+      signal: sig.signal,
+      navMove: latestNavMove(d.nav_history),
+    }
   } catch { /* 占位 */ }
 }
 
@@ -62,13 +70,17 @@ const todayEst = computed(() => {
   let amt = 0, has = false
   for (const e of watch.entries) {
     if (e.deleted || !(e.shares && e.shares > 0)) continue
-    const es = est[e.code]
-    if (!es || es.estChange == null || es.lastNav == null) continue
-    amt += e.shares * es.lastNav * es.estChange / 100
+    const move = preferredDailyMove(est[e.code], rows[e.code]?.navMove, rows[e.code]?.type || rows[e.code]?.name)
+    if (!move || move.change == null || move.baseNav == null) continue
+    amt += e.shares * move.baseNav * move.change / 100
     has = true
   }
   return has ? amt : null
 })
+
+function dailyMoveOf(code: string) {
+  return preferredDailyMove(est[code], rows[code]?.navMove, rows[code]?.type || rows[code]?.name)
+}
 
 // 组合（仅 shares>0 的持仓）
 const portfolio = computed(() => {
@@ -229,11 +241,11 @@ onMounted(refresh)
           <template #value>
             <div class="wl-val">
               <span
-                v-if="est[it.code]?.estChange != null"
+                v-if="dailyMoveOf(it.code)?.change != null"
                 class="est-chg"
-                :style="{ color: colorOf(est[it.code]!.estChange) }"
-                :title="est[it.code]!.sourceNote"
-              >{{ est[it.code]!.isRealtime ? '估' : '海外非实时' }} {{ pct(est[it.code]!.estChange) }}</span>
+                :style="{ color: colorOf(dailyMoveOf(it.code)!.change) }"
+                :title="dailyMoveOf(it.code)!.sourceNote"
+              >{{ dailyMoveOf(it.code)!.label }} {{ pct(dailyMoveOf(it.code)!.change) }}</span>
               <span class="sig" :style="{ color: signalColor(rows[it.code]?.signal || '') }">{{ rows[it.code]?.signal || '…' }}</span>
               <StarRating :star="rows[it.code]?.star ?? null" />
               <span v-if="sharesOf(it.code) && rows[it.code]?.nav != null" class="nav">

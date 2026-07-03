@@ -3,7 +3,7 @@ import { reactive, ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useWatchlistStore } from '@/stores/watchlist'
 import { useFundsStore } from '@/stores/funds'
-import { fetchEstimates, type Estimate } from '@/utils/estimate'
+import { fetchEstimates, latestNavMove, preferredDailyMove, type Estimate, type NavMove } from '@/utils/estimate'
 import { pct, num, colorOf } from '@/utils/format'
 import Chart from '@/components/Chart.vue'
 import { computeAttribution } from '@/utils/attribution'
@@ -16,7 +16,7 @@ const router = useRouter()
 const watch = useWatchlistStore()
 const funds = useFundsStore()
 
-const meta = reactive<Record<string, { nav: number | null; type: string }>>({})
+const meta = reactive<Record<string, { nav: number | null; type: string; navMove: NavMove | null }>>({})
 const est = reactive<Record<string, Estimate | null>>({})
 const loading = ref(true)
 const dim = ref<'account' | 'type'>('account')
@@ -33,8 +33,8 @@ async function refresh() {
   await Promise.all(held.map(async (e) => {
     try {
       const d = await funds.detail(e.code)
-      meta[e.code] = { nav: d.latest_nav, type: d.type || '其他' }
-    } catch { meta[e.code] = { nav: null, type: '其他' } }
+      meta[e.code] = { nav: d.latest_nav, type: d.type || '其他', navMove: latestNavMove(d.nav_history) }
+    } catch { meta[e.code] = { nav: null, type: '其他', navMove: null } }
   }))
   loading.value = false
 }
@@ -54,9 +54,9 @@ const holdings = computed<Holding[]>(() => {
     const nav = m?.nav ?? null
     const value = nav != null ? e.shares * nav : 0
     const cost = e.shares * (e.cost ?? 0)
-    const es = est[e.code]
-    const today = es && es.estChange != null && es.lastNav != null
-      ? e.shares * es.lastNav * es.estChange / 100 : null
+    const move = preferredDailyMove(est[e.code], m?.navMove, m?.type || e.name)
+    const today = move && move.change != null && move.baseNav != null
+      ? e.shares * move.baseNav * move.change / 100 : null
     out.push({
       code: e.code, name: e.name || e.code, account: e.account?.trim() || UNGROUPED,
       type: m?.type || '其他', shares: e.shares, cost: e.cost ?? 0, nav,
@@ -82,11 +82,11 @@ const attr = computed(() => {
   const hl = holdings.value.filter((h) => h.value > 0)
   if (!hl.length) return null
   return computeAttribution(hl.map((h) => {
-    const es = est[h.code]
+    const move = preferredDailyMove(est[h.code], meta[h.code]?.navMove, h.type || h.name)
     return {
       code: h.code, name: h.name, account: h.account, type: h.type,
       shares: h.shares, cost: h.cost, nav: h.nav, value: h.value, profit: h.profit, today: h.today,
-      todayPct: es && es.lastNav != null ? es.estChange : null,
+      todayPct: move?.change ?? null,
     }
   }))
 })
