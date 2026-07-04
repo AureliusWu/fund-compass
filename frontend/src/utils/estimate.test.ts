@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   applyOverseasModelEstimate,
+  holdingsToOverseasModel,
   latestNavMove,
   normalizeEstimate,
   preferredDailyMove,
@@ -143,6 +144,72 @@ describe('normalizeEstimate', () => {
 
     expect(modeled.kind).toBe('overseas')
     expect(modeled.isRealtime).toBe(false)
+    expect(modeled.estChange).toBeCloseTo(0.01)
+  })
+
+  it('builds a holdings-through model from public top holdings', () => {
+    const model = holdingsToOverseasModel([
+      { code: 'TSM', name: '台积电', ratio: 8.88 },
+      { code: '300502', name: '新易盛', ratio: 6.02 },
+      { code: '00700', name: '腾讯控股', ratio: 5 },
+      { code: '000660', name: 'SK海力士', ratio: 4 },
+      { code: 'BAD-CODE', name: '未知', ratio: 9 },
+    ])
+
+    expect(model?.label).toBe('十大重仓穿透模型')
+    expect(model?.minWeight).toBe(25)
+    expect(model?.legs).toEqual([
+      { code: 'usTSM', weight: 8.88 },
+      { code: 'sz300502', weight: 6.02 },
+      { code: 'hk00700', weight: 5 },
+      { code: 'usEWY', weight: 4 },
+    ])
+  })
+
+  it('can apply a generated holdings-through model to an unconfigured overseas fund', () => {
+    const e = normalizeEstimate({
+      fundcode: '999999',
+      name: '测试全球精选(QDII)',
+      dwjz: '2',
+      gszzl: '0.01',
+      gztime: '2026-07-02 04:00',
+    })
+    const model = holdingsToOverseasModel([
+      { code: 'TSM', name: '台积电', ratio: 20 },
+      { code: 'NVDA', name: '英伟达', ratio: 10 },
+      { code: '300502', name: '新易盛', ratio: 5 },
+    ])
+    const modeled = applyOverseasModelEstimate(e, {
+      usTSM: { changePct: -2 },
+      usNVDA: { changePct: -4 },
+      sz300502: { changePct: 3 },
+    }, model)
+
+    expect(modeled.kind).toBe('overseas_model')
+    expect(modeled.modelWeight).toBeCloseTo(35)
+    expect(modeled.modelCode).toBe('usTSM:20,usNVDA:10,sz300502:5')
+    expect(modeled.estChange).toBeCloseTo(-1.8571)
+    expect(modeled.estNav).toBeCloseTo(2 * (1 + modeled.estChange! / 100))
+  })
+
+  it('keeps stale overseas estimate when generated holdings model has too little usable weight', () => {
+    const e = normalizeEstimate({
+      fundcode: '999998',
+      name: '测试全球精选(QDII)',
+      dwjz: '2',
+      gszzl: '0.01',
+      gztime: '2026-07-02 04:00',
+    })
+    const model = holdingsToOverseasModel([
+      { code: 'TSM', name: '台积电', ratio: 10 },
+      { code: 'NVDA', name: '英伟达', ratio: 8 },
+    ])
+    const modeled = applyOverseasModelEstimate(e, {
+      usTSM: { changePct: -2 },
+      usNVDA: { changePct: -4 },
+    }, model)
+
+    expect(modeled.kind).toBe('overseas')
     expect(modeled.estChange).toBeCloseTo(0.01)
   })
 

@@ -19,7 +19,7 @@
 
 ### P0 · 工程地基与技术债（先做，给后续改动兜底）
 
-- [~] **前端单测**：引入 vitest，接入 CI。首批已覆盖 `format` + `dca`（28 用例，✅ 2026-06-29）；剩余 `estimate` / `screener` / `attribution` / `lookthrough` 等留后续补齐。
+- [x] **前端单测**（✅ 2026-07-04）：引入 vitest，接入 CI；已覆盖 `format`、`dca`、`estimate`、`screener`、`attribution`、`lookthrough`，前端单测 52 用例全绿。
   - 价值高·工作量中。验收：关键计算函数有测试，CI 跑前端单测。
 - [x] **可观测性**（✅ 2026-06-29）：eastmoney/repo/main 的静默吞错改结构化 `logging`——主源降级、退陈旧缓存、启动导入失败均可见，字段级容错保持静默不刷屏。
   - 价值中·工作量小。验收：数据源异常/降级在日志可见，便于线上定位。
@@ -37,7 +37,7 @@
 ### P2 · 功能打磨
 
 - [x] **V3 落地质量巡检**（✅ 2026-06-30）：逐项核实 V3-0~V3-10 十大功能。结论：九项完整落地；仅 V3-9 多源容灾有缺口——`resilience.ts` 框架（SWR/熔断/重试）已编写但未注入 `indices.ts`/`holdings.ts`/`estimate.ts` 的实际请求。已修复：在三文件中注入 `recordSource()` 调用，HomePage 源状态点灯现在可真实反映腾讯行情、东方财富、天天基金三源健康度。
-- [ ] **盘中「按持仓重算估值」（可选）**：基于已有十大重仓（`holdings.ts`）+ 成分股实时行情自建盘中估值，主要补天天基金 `gsz` 缺失的品种（尤其 QDII）。
+- [x] **盘中「按持仓重算估值」**（✅ 2026-07-04）：`estimate.ts` 新增通用十大重仓穿透模型，定向模型缺失时按 `holdings.ts` 的公开持仓把 A股/港股/美股映射到腾讯行情并按占净值比例加权估算；保留 012920/018147 等定向模型优先，报告页同步使用最新净值涨跌/下一净值模型双口径。
   - 价值中·工作量中。注意：精度上限受「仅前十大重仓」限制，性价比中等，排在巡检之后。
 
 ### P3 · 体验与运维
@@ -57,6 +57,9 @@
 
 ## 迭代日志（最近在前）
 
+- **2026-07-04**
+  - 地基(P0)：补齐前端关键工具函数单测——新增 `screener.test.ts`、`attribution.test.ts`、`lookthrough.test.ts`，覆盖排行缓存/同类更优、收益归因、持仓穿透 enrich/top10/mixed/none 降级口径。前端 vitest 从 37 扩到 52 用例，`npm run test` ✅、`type-check` ✅、`build` ✅。P0「前端单测」收口完成。
+  - 功能(P2)：盘中「按持仓重算估值」系统化——新增 `holdingsToOverseasModel`，定向海外模型缺失时自动用公开十大重仓生成穿透模型；支持 A股/港股/美股/韩国代理映射，低于 25% 可用权重时保守降级。报告页同步使用 `preferredDailyMove`，避免海外模型冒充最新净值涨跌。新增 estimate 单测 3 个。
 - **2026-06-30**
   - 功能(P1/V3-5 步骤2)：真实 PE/PB 估值接入——新建 `backend/strategy/index_valuation.py` 加载器（模块级缓存、优雅降级）；`timing.valuation_layer` 对已映射指数基金优先用 PE 分位，非指数基金回退去趋势代理（新增 `source` 字段区分）；`timing_signal` 透传 `detail["code"]`。前端 `Layer` 类型扩展 PE/PB 字段，详情页/报告页/解读模板展示真实 PE/PB 与指数名。新增 `test_index_valuation.py`（8 用例）+ `test_timing.py` 补 6 用例（49 全绿）。
   - 巡检(P2/V3 落地质量)：逐项核实 V3-0~V3-10 十大功能——九项完整落地，仅 V3-9 多源容灾有缺口。修复：在 `indices.ts`/`holdings.ts`/`estimate.ts` 注入 `recordSource()` 调用，腾讯行情/东方财富/天天基金三源状态现在真实反映到 HomePage 源状态点灯。

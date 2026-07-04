@@ -3,7 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { showToast } from 'vant'
 import { useFundsStore } from '@/stores/funds'
-import { fetchEstimate, type Estimate } from '@/utils/estimate'
+import { fetchEstimate, latestNavMove, preferredDailyMove, type Estimate } from '@/utils/estimate'
 import { templateInterpret } from '@/utils/interpret'
 import { pct, num, colorOf, stars } from '@/utils/format'
 import type { FundDetail, ScoreResp, SignalResp, BacktestResp } from '@/api/client'
@@ -52,6 +52,12 @@ const valSigText = computed(() => {
   }
   return `估值${v.label}`
 })
+
+const navMove = computed(() => latestNavMove(detail.value?.nav_history))
+const primaryMove = computed(() => preferredDailyMove(est.value, navMove.value, detail.value?.type || detail.value?.name))
+const showModelLine = computed(() =>
+  primaryMove.value?.label === '净' && est.value?.estChange != null && est.value?.estNav != null,
+)
 
 async function render(): Promise<string | null> {
   if (!card.value) return null
@@ -130,11 +136,13 @@ async function share() {
               <div class="hr" v-if="score?.rank_in_type">同类 {{ score.rank_in_type }}/{{ score.rank_total }}</div>
             </div>
             <div class="hb" style="text-align:right">
-              <div class="hk">{{ est?.isRealtime === false ? '海外非实时估值' : (est?.label || '盘中估值') }}</div>
-              <div class="hv" :style="{ color: colorOf(est?.estChange) }">{{ est && est.estChange != null ? pct(est.estChange) : '--' }}</div>
-              <div class="hr">估算净值 {{ est ? num(est.estNav) : '--' }}</div>
-              <div class="hr" v-if="est?.estTime">{{ est.estTime }}</div>
-              <div class="hr" v-if="est?.sourceNote">{{ est.sourceNote }}</div>
+              <div class="hk">{{ primaryMove?.label === '净' ? '最新净值涨跌' : (est?.label || '盘中估值') }}</div>
+              <div class="hv" :style="{ color: colorOf(primaryMove?.change) }">{{ primaryMove && primaryMove.change != null ? pct(primaryMove.change) : '--' }}</div>
+              <div class="hr" v-if="primaryMove?.label === '净'">最新净值 {{ navMove ? num(navMove.nav) : '--' }}</div>
+              <div class="hr" v-else>估算净值 {{ est ? num(est.estNav) : '--' }}</div>
+              <div class="hr" v-if="primaryMove?.date">{{ primaryMove.date }}</div>
+              <div class="hr" v-if="primaryMove?.sourceNote">{{ primaryMove.sourceNote }}</div>
+              <div class="hr" v-if="showModelLine">下一净值模型 {{ pct(est!.estChange) }} · {{ num(est!.estNav) }}</div>
             </div>
           </div>
 

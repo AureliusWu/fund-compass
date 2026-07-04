@@ -5,6 +5,7 @@
 // 注意：gszzl 是百分比可为负/为 0，统一用 Number.isFinite 判断；QDII/全球基金常返回海外收盘后的估值时间。
 
 import { recordSource } from './resilience'
+import { getHoldings, type Holding } from './holdings'
 
 export interface Estimate {
   code: string
@@ -64,6 +65,8 @@ interface OverseasModel {
   adjustment?: ModelAdjustment
   fallback?: OverseasModel
 }
+
+const HOLDINGS_MODEL_MIN_WEIGHT = 25
 
 const OVERSEAS_MODEL_BY_CODE: Record<string, OverseasModel> = {
   '539002': {
@@ -227,10 +230,37 @@ export function normalizeEstimate(d: Gz): Estimate {
   }
 }
 
-function collectModelCodes(model: OverseasModel | undefined, out: Set<string>) {
+function collectModelCodes(model: OverseasModel | null | undefined, out: Set<string>) {
   if (!model) return
   model.legs.forEach((leg) => out.add(leg.code))
   if (model.fallback) collectModelCodes(model.fallback, out)
+}
+
+function quoteCodeForHolding(h: Pick<Holding, 'code' | 'name'>): string | null {
+  const raw = String(h.code || '').trim().toUpperCase()
+  const name = String(h.name || '')
+  if (/^\d{6}$/.test(raw)) {
+    if (/三星|SK海力士|海力士/i.test(name)) return 'usEWY'
+    return (/^[69]/.test(raw) ? 'sh' : 'sz') + raw
+  }
+  if (/^\d{5}$/.test(raw)) return 'hk' + raw
+  if (/^[A-Z.]{1,8}$/.test(raw)) return 'us' + raw.replace(/\./g, '-')
+  return null
+}
+
+export function holdingsToOverseasModel(
+  holdings: Array<Pick<Holding, 'code' | 'name' | 'ratio'>>,
+): OverseasModel | null {
+  const legs: ModelLeg[] = []
+  for (const h of holdings) {
+    const weight = Number(h.ratio)
+    if (!Number.isFinite(weight) || weight <= 0) continue
+    const code = quoteCodeForHolding(h)
+    if (!code) continue
+    legs.push({ code, weight })
+  }
+  if (!legs.length) return null
+  return { label: '十大重仓穿透模型', minWeight: HOLDINGS_MODEL_MIN_WEIGHT, legs }
 }
 
 function parseTencentQuote(raw: string | undefined): { price: number; changePct: number } | null {
@@ -301,9 +331,10 @@ function calcModelChange(model: OverseasModel, quotes: Record<string, { changePc
 export function applyOverseasModelEstimate(
   estimate: Estimate,
   quotes: Record<string, { changePct: number }>,
+  modelOverride?: OverseasModel | null,
 ): Estimate {
   if (!estimate || estimate.isRealtime || estimate.kind !== 'overseas') return estimate
-  let model = OVERSEAS_MODEL_BY_CODE[estimate.code]
+  let model = modelOverride || OVERSEAS_MODEL_BY_CODE[estimate.code]
   if (!model) return estimate
 
   let result = calcModelChange(model, quotes)
@@ -330,12 +361,23 @@ export function applyOverseasModelEstimate(
 }
 
 async function enhanceOverseasEstimate(e: Estimate): Promise<Estimate> {
-  const model = OVERSEAS_MODEL_BY_CODE[e.code]
-  if (!model || e.isRealtime || e.kind !== 'overseas') return e
+  if (e.isRealtime || e.kind !== 'overseas') return e
+  const configuredModel = OVERSEAS_MODEL_BY_CODE[e.code]
+  let holdingsModel: OverseasModel | null = null
+  if (!configuredModel) {
+    try {
+      holdingsModel = holdingsToOverseasModel(await getHoldings(e.code))
+    } catch { /* holdings model is best-effort */ }
+  }
+  const model = configuredModel || holdingsModel
+  if (!model) return e
   const codes = new Set<string>()
-  collectModelCodes(model, codes)
+  collectModelCodes(configuredModel, codes)
+  collectModelCodes(holdingsModel, codes)
   const quotes = await fetchTencentQuotes(Array.from(codes))
-  return applyOverseasModelEstimate(e, quotes)
+  const configured = configuredModel ? applyOverseasModelEstimate(e, quotes, configuredModel) : e
+  if (configured !== e || !holdingsModel) return configured
+  return applyOverseasModelEstimate(e, quotes, holdingsModel)
 }
 
 // 全局 JSONP 回调（接口里写死的函数名，按 fundcode 调度到对应 Promise）。
