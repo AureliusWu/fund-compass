@@ -20,24 +20,28 @@ const sources = ref<SourceStatus[]>([])
 const sigs = ref<Record<string, string>>({})
 const alerts = ref<Alert[]>(loadAlerts())
 const unread = ref(unreadCount())
+const refreshing = ref(false)
 
-onMounted(() => {
+async function refreshHome() {
   // 多源健康检查
-  checkBackend().then((ok) => {
+  await checkBackend().then(async (ok) => {
     sources.value = getSourceSummary()
     if (ok) {
-      getHealth().then((r) => { health.value = `正常 · 收录 ${r.universe} 只` }).catch(() => {})
+      await getHealth().then((r) => { health.value = `正常 · 收录 ${r.universe} 只` }).catch(() => {})
     } else {
       health.value = '未连接（请启动后端）'
     }
   })
 
   // 市场温度（缓存优先，后台刷新）
-  app.loadMarketTemp()
+  await app.loadMarketTemp()
 
   // 自选信号
-  void loadWatchSignals()
-})
+  await loadWatchSignals()
+  refreshing.value = false
+}
+
+onMounted(refreshHome)
 
 async function loadWatchSignals() {
   try {
@@ -104,6 +108,7 @@ const tempStampClass = computed(() => {
     </van-nav-bar>
     <IndexBar />
 
+    <van-pull-refresh v-model="refreshing" @refresh="refreshHome">
     <div class="page-body">
 
       <!-- ═══ 市场温度计 ═══ -->
@@ -210,6 +215,7 @@ const tempStampClass = computed(() => {
       </template>
 
     </div>
+    </van-pull-refresh>
   </div>
 </template>
 

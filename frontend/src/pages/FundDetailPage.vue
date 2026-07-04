@@ -30,6 +30,7 @@ const estDone = ref(false)
 const holdings = ref<Holding[]>([])
 const holdingsDone = ref(false)
 const loading = ref(true)
+const refreshing = ref(false)
 const error = ref('')
 
 const holdMax = computed(() => Math.max(1, ...holdings.value.map((s) => s.ratio)))
@@ -100,9 +101,11 @@ async function loadSimilar() {
   }
 }
 
-async function loadData() {
-  loading.value = true
+async function loadData(showInitialLoading = true) {
+  if (showInitialLoading) loading.value = true
   error.value = ''
+  estDone.value = false
+  holdingsDone.value = false
   // 盘中估值独立于后端，立即并发抓取（不阻塞详情）
   fetchEstimate(code).then((e) => { est.value = e }).finally(() => { estDone.value = true })
   getHoldings(code).then((h) => { holdings.value = h }).finally(() => { holdingsDone.value = true })
@@ -116,7 +119,12 @@ async function loadData() {
     error.value = '加载失败，后端是否已启动？'
   } finally {
     loading.value = false
+    refreshing.value = false
   }
+}
+
+function refreshData() {
+  return loadData(false)
 }
 
 onMounted(async () => {
@@ -188,8 +196,13 @@ async function toggleWatch() {
           :color="watch.has(code) ? '#C8A75B' : ''" size="20" @click="toggleWatch" />
       </template>
     </van-nav-bar>
+    <van-pull-refresh v-model="refreshing" @refresh="refreshData">
     <div class="page-body">
-      <van-loading v-if="loading" style="text-align:center;padding:40px" />
+      <div v-if="loading" class="detail-skeleton">
+        <van-skeleton title avatar :row="3" />
+        <van-skeleton title :row="4" />
+        <van-skeleton title :row="3" />
+      </div>
       <van-empty v-else-if="error" :description="error">
         <van-button round type="primary" size="small" @click="loadData">重试</van-button>
       </van-empty>
@@ -357,6 +370,7 @@ async function toggleWatch() {
         </template>
       </template>
     </div>
+    </van-pull-refresh>
 
     <van-dialog v-model:show="cfgShow" title="AI 配置" show-cancel-button @confirm="saveCfg">
       <div style="padding:10px 14px">
@@ -449,4 +463,6 @@ async function toggleWatch() {
 .sim-r { width: 70px; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
 .sim-fee { width: 64px; text-align: right; color: #5A6A60; }
 .sim-note { font-size: 11px; color: #A8B2A8; margin-top: 8px; line-height: 1.5; }
+.detail-skeleton { display: flex; flex-direction: column; gap: 12px; }
+.detail-skeleton .van-skeleton { background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px 12px; }
 </style>

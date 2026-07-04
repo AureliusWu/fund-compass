@@ -24,6 +24,7 @@ const funds = useFundsStore()
 const rows = reactive<Record<string, Row>>({})
 const est = reactive<Record<string, Estimate | null>>({})
 const loading = ref(true)
+const refreshing = ref(false)
 
 const showSync = ref(false)
 const token = ref(getToken())
@@ -63,6 +64,7 @@ async function refresh() {
   fetchEstimates(watch.items.map((i) => i.code)).then((m) => m.forEach((v, k) => { est[k] = v }))
   await Promise.all(watch.items.map((i) => loadOne(i.code, i.name)))
   loading.value = false
+  refreshing.value = false
 }
 
 // 今日估算盈亏：Σ 份额 × 昨净值 × 估算涨跌%（仅有盘中估值的持仓计入）
@@ -200,6 +202,7 @@ onMounted(refresh)
         </span>
       </template>
     </van-nav-bar>
+    <van-pull-refresh v-model="refreshing" @refresh="refresh">
     <div class="page-body">
       <!-- 组合概览 -->
       <template v-if="portfolio.count > 0">
@@ -229,7 +232,11 @@ onMounted(refresh)
         </div>
       </template>
 
-      <van-loading v-if="loading" style="text-align:center;padding:40px" />
+      <div v-if="loading" class="list-skeleton">
+        <van-skeleton title :row="2" />
+        <van-skeleton title :row="2" />
+        <van-skeleton title :row="2" />
+      </div>
       <van-empty v-else-if="watch.items.length === 0" description="还没有自选，去选基页添加" />
       <van-cell-group v-else inset>
         <van-cell
@@ -261,6 +268,7 @@ onMounted(refresh)
         </van-cell>
       </van-cell-group>
     </div>
+    </van-pull-refresh>
 
     <!-- 持仓编辑 -->
     <van-dialog v-model:show="editShow" title="编辑持仓" show-cancel-button @confirm="saveHolding">
@@ -343,4 +351,6 @@ onMounted(refresh)
 .acc-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 16px 4px; }
 .acc-chips .chip { font-size: 12px; color: var(--text-secondary); background: var(--chip-bg); border-radius: 12px; padding: 3px 10px; }
 .acc-chips .chip.on { color: #fff; background: var(--teal); }
+.list-skeleton { background: var(--card-bg); border-radius: var(--radius-lg); padding: 14px 12px 4px; border: 1px solid var(--border); }
+.list-skeleton .van-skeleton { padding: 0 0 18px; }
 </style>
