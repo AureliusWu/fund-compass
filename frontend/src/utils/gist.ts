@@ -3,6 +3,7 @@ const TOKEN_KEY = 'sinan_gist_token'
 const ID_KEY = 'sinan_gist_id'
 const SYNC_KEY = 'sinan_gist_sync_time'
 const FILENAME = 'sinan-watchlist.json'
+const MANUAL_ASSETS_FILE = 'sinan-manual-assets.json'
 const API = 'https://api.github.com/gists'
 const TIMEOUT = 15000
 
@@ -21,7 +22,7 @@ export interface WatchEntry {
 
 /** 生成/取得复合 ID */
 export function entryId(code: string, account?: string): string {
-  return `${code}::${account || ''}`
+  return `${code}::${(account || '').trim()}`
 }
 
 /** 迁移：为缺少 id 的旧条目补全 */
@@ -62,10 +63,41 @@ async function findExistingGist(): Promise<string | null> {
     if (!r.ok) return null
     const gists = await r.json()
     if (!gists.length) return null
-    for (const g of gists) if (g.files && g.files[FILENAME]) return g.id
+    for (const g of gists) if (g.files && (g.files[FILENAME] || g.files[MANUAL_ASSETS_FILE])) return g.id
     if (gists.length < 100) return null
   }
   return null
+}
+
+export async function pullJsonFile<T>(filename: string): Promise<T | null> {
+  if (!getToken()) return null
+  let id = getGistId()
+  if (!id) {
+    const found = await findExistingGist()
+    if (found) { setGistId(found); id = found } else return null
+  }
+  const r = await ghFetch(`${API}/${id}`)
+  if (!r.ok) { if (r.status === 404) setGistId(''); return null }
+  const data = await r.json()
+  const file = data.files?.[filename]
+  if (!file?.content) return null
+  try { return JSON.parse(file.content) as T } catch { return null }
+}
+
+export async function pushJsonFile(filename: string, value: unknown, desc = '司南基金 云同步'): Promise<boolean> {
+  if (!getToken()) return false
+  const content = JSON.stringify(value, null, 2)
+  let id = getGistId()
+  if (!id) id = (await findExistingGist()) || ''
+  const body = { description: desc + ' | ' + new Date().toISOString(), files: { [filename]: { content } } }
+  const r = id
+    ? await ghFetch(`${API}/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    : await ghFetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, public: false }) })
+  if (!r.ok) { if (r.status === 404) setGistId(''); return false }
+  const data = await r.json()
+  if (data.id) setGistId(data.id)
+  setSyncTime(new Date().toISOString())
+  return true
 }
 
 export async function pullEntries(): Promise<WatchEntry[] | null> {
@@ -90,27 +122,5 @@ export async function pullEntries(): Promise<WatchEntry[] | null> {
 
 export async function pushEntries(entries: WatchEntry[]): Promise<boolean> {
   if (!getToken()) return false
-  const content = JSON.stringify(entries, null, 2)
-  let id = getGistId()
-  if (!id) id = (await findExistingGist()) || ''
-  const desc = '司南基金 自选 | ' + new Date().toISOString()
-  let r: Response
-  if (id) {
-    r = await ghFetch(`${API}/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ description: desc, files: { [FILENAME]: { content } } }),
-    })
-  } else {
-    r = await ghFetch(API, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ description: desc, public: false, files: { [FILENAME]: { content } } }),
-    })
-  }
-  if (!r.ok) { if (r.status === 404) setGistId(''); return false }
-  const data = await r.json()
-  if (data.id) setGistId(data.id)
-  setSyncTime(new Date().toISOString())
-  return true
+  return pushJsonFile(FILENAME, entries, '司南基金 自选')
 }

@@ -112,7 +112,29 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     return entries.value.some((x) => x.code === code && !x.deleted)
   }
 
+  function removeCode(code: string, account?: string) {
+    const targets = account
+      ? entries.value.filter((x) => (x.id || entryId(x.code, x.account)) === entryId(code, account))
+      : entries.value.filter((x) => x.code === code)
+    if (!targets.length) {
+      entries.value.push({ id: entryId(code, account), code, account, updated_at: nowISO(), deleted: true })
+    } else {
+      for (const e of targets) {
+        e.deleted = true
+        e.updated_at = nowISO()
+        e.id = e.id || entryId(e.code, e.account)
+      }
+    }
+    entries.value = [...entries.value]
+    persist()
+    schedulePush()
+  }
+
   function upsert(code: string, name: string | undefined, deleted: boolean, account?: string) {
+    if (deleted) {
+      removeCode(code, account)
+      return
+    }
     const id = entryId(code, account)
     const e = entries.value.find((x) => (x.id || entryId(x.code, x.account)) === id)
     if (e) {
@@ -129,7 +151,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
   }
 
   const add = (code: string, name?: string) => upsert(code, name, false)
-  const remove = (code: string) => upsert(code, undefined, true)
+  const remove = (code: string, account?: string) => upsert(code, undefined, true, account)
   const toggle = (code: string, name?: string) => (has(code) ? remove(code) : add(code, name))
 
   function setHolding(code: string, shares: number, cost: number, name?: string, account?: string) {

@@ -1,4 +1,4 @@
-"""指数估值加载器测试：lookup 命中 / 未映射 / PE缺失 / 数据为空。"""
+"""指数估值加载器测试：lookup 命中 / 未映射 / PE缺失 / 数据为空 / 降级说明。"""
 import pytest
 
 
@@ -12,9 +12,12 @@ SAMPLE_VALUATION = {
         # 创业板指：有映射但 PE 分位缺失 → lookup 应返回 None
         {"name": "创业板指", "pe": None, "pe_pct": None, "pb": None, "pb_pct": None, "date": None},
     ],
+    "unsupported": [
+        {"name": "纳斯达克100", "reason": "海外指数 PE/PB 免登录历史分位源未接入，暂回退净值代理"},
+    ],
 }
 
-SAMPLE_MAP = {"510300": "沪深300", "510500": "中证500", "159915": "创业板指"}
+SAMPLE_MAP = {"510300": "沪深300", "510500": "中证500", "159915": "创业板指数", "513100": "纳斯达克100"}
 
 
 @pytest.fixture
@@ -75,6 +78,34 @@ class TestLookupFallback:
         iv._index_map = None
         try:
             assert iv.lookup("510300") is None
+        finally:
+            iv._valuation_data = orig_val
+            iv._index_map = orig_map
+
+    def test_alias_reason_for_missing_pe(self, monkeypatch):
+        """映射别名会归一化，PE 缺失时给出具体回退原因"""
+        import strategy.index_valuation as iv
+
+        orig_val = iv._valuation_data
+        orig_map = iv._index_map
+        iv._valuation_data = SAMPLE_VALUATION
+        iv._index_map = SAMPLE_MAP
+        try:
+            assert iv.unavailable_reason("159915") == "已映射至 创业板指，但 PE 分位缺失"
+        finally:
+            iv._valuation_data = orig_val
+            iv._index_map = orig_map
+
+    def test_unsupported_reason(self, monkeypatch):
+        """unsupported 元信息用于说明海外指数回退"""
+        import strategy.index_valuation as iv
+
+        orig_val = iv._valuation_data
+        orig_map = iv._index_map
+        iv._valuation_data = SAMPLE_VALUATION
+        iv._index_map = SAMPLE_MAP
+        try:
+            assert "海外指数 PE/PB" in iv.unavailable_reason("513100")
         finally:
             iv._valuation_data = orig_val
             iv._index_map = orig_map

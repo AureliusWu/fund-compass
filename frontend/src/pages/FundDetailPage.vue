@@ -307,7 +307,7 @@ async function toggleWatch() {
             <div class="comp" v-for="(c, k) in score.components" :key="k">
               <span class="cn">{{ COMP_NAMES[k] }} <em>{{ c.weight * 100 }}%</em></span>
               <van-progress :percentage="Math.round(c.score ?? 0)" :show-pivot="false"
-                color="#4C7E67" track-color="#EEF1EC" style="flex:1;margin:0 10px" />
+                color="#4C7E67" track-color="var(--border)" style="flex:1;margin:0 10px" />
               <span class="cv">{{ c.score ?? '--' }}</span>
             </div>
           </div>
@@ -392,26 +392,26 @@ async function toggleWatch() {
 .card { background: var(--card-bg); border-radius: var(--radius-lg); padding: 12px; border: 1px solid var(--border); box-shadow: var(--shadow-sm); }
 .est { margin: 0 0 4px; }
 .est-head { display: flex; justify-content: space-between; align-items: center; }
-.est-label { font-size: 13px; color: #5A6A60; font-weight: 500; }
-.est-time { font-size: 11px; color: #A8B2A8; }
+.est-label { font-size: 13px; color: var(--text-secondary); font-weight: 500; }
+.est-time { font-size: 11px; color: var(--text-hint); }
 .est-main { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
 .est-chg { font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
-.est-side { text-align: right; font-size: 12px; color: #5A6A60; line-height: 1.7; }
-.est-side b { color: #1F2C24; font-weight: 600; }
-.est-side em { font-style: normal; color: #A8B2A8; }
-.est-empty { font-size: 12px; color: #5A6A60; margin-top: 6px; line-height: 1.5; }
+.est-side { text-align: right; font-size: 12px; color: var(--text-secondary); line-height: 1.7; }
+.est-side b { color: var(--text); font-weight: 600; }
+.est-side em { font-style: normal; color: var(--text-hint); }
+.est-empty { font-size: 12px; color: var(--text-secondary); margin-top: 6px; line-height: 1.5; }
 .report-btn { margin-top: 10px; }
 .hd { display: flex; align-items: center; font-size: 12px; margin: 9px 0; }
-.hd-rk { width: 18px; color: #A8B2A8; font-variant-numeric: tabular-nums; }
-.hd-nm { width: 96px; color: #1F2C24; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.hd-nm em { font-style: normal; color: #A8B2A8; font-size: 10px; margin-left: 4px; }
-.hd-bar { flex: 1; height: 6px; background: #EEF1EC; border-radius: 3px; margin: 0 8px; overflow: hidden; }
+.hd-rk { width: 18px; color: var(--text-hint); font-variant-numeric: tabular-nums; }
+.hd-nm { width: 96px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hd-nm em { font-style: normal; color: var(--text-hint); font-size: 10px; margin-left: 4px; }
+.hd-bar { flex: 1; height: 6px; background: var(--border); border-radius: 3px; margin: 0 8px; overflow: hidden; }
 .hd-bar i { display: block; height: 100%; background: #4C7E67; border-radius: 3px; }
-.hd-rt { width: 44px; text-align: right; color: #5A6A60; font-variant-numeric: tabular-nums; }
+.hd-rt { width: 44px; text-align: right; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 .hd-ch { width: 56px; text-align: right; font-variant-numeric: tabular-nums; }
-.hd-note { font-size: 11px; color: #A8B2A8; margin-top: 8px; line-height: 1.5; }
-.grid4 { display: grid; grid-template-columns: repeat(4, 1fr); background: #fff; border-radius: 10px; padding: 12px 0; }
-.grid4 .k { font-size: 11px; color: #5A6A60; text-align: center; }
+.hd-note { font-size: 11px; color: var(--text-hint); margin-top: 8px; line-height: 1.5; }
+.grid4 { display: grid; grid-template-columns: repeat(4, 1fr); background: var(--card-bg); border-radius: 10px; padding: 12px 0; }
+.grid4 .k { font-size: 11px; color: var(--text-secondary); text-align: center; }
 .grid4 .v { font-size: 14px; font-weight: 500; text-align: center; margin-top: 4px; }
 .scorehead { display: flex; align-items: center; gap: 16px; margin-bottom: 12px; }
 .bigscore { font-size: 34px; font-weight: 600; color: #4C7E67; }

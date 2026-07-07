@@ -123,6 +123,15 @@ def test_valuation_fallback_when_lookup_none(make_navs, monkeypatch):
     assert "note" in v
 
 
+def test_valuation_fallback_explains_mapped_index_gap(make_navs, monkeypatch):
+    """已映射但 PE/PB 未覆盖时，回退说明里点名原因"""
+    monkeypatch.setattr("strategy.timing._index_lookup", lambda code: None)
+    monkeypatch.setattr("strategy.timing._index_unavailable_reason", lambda code: "已映射至 纳斯达克100，海外指数 PE/PB 暂未覆盖")
+    v = valuation_layer(make_navs(n=400), fund_code="513100")
+    assert v["source"] == "nav_detrended"
+    assert v["note"].startswith("已映射至 纳斯达克100")
+
+
 def test_valuation_fallback_when_no_code(make_navs):
     """未传 fund_code → 直接走代理（不调 lookup）"""
     v = valuation_layer(make_navs(n=400))

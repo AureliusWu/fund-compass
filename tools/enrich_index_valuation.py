@@ -20,11 +20,30 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "frontend", "public", "data", "index-valuation.json")
 
-# 乐咕乐股 symbol（中文全称，简称会 KeyError）。以下为 CI 实测可用的主流宽基。
-# TODO 步骤2：创业板/科创/行业(白酒等)/海外指数乐咕乐股 symbol 名不一致
-#   （"上证指数/深证成指/创业板指/科创50" 均 KeyError），待查确切 symbol，
-#   或改用 stock_zh_index_value_csindex（中证官方，按指数代码覆盖更全）。
-LG_SYMBOLS = ["沪深300", "上证50", "上证180", "中证100", "中证500", "中证1000"]
+# 乐咕乐股 symbol（中文全称，简称可能 KeyError）。key 是司南内部标准指数名，
+# value 是按稳定性排序的候选 symbol；CI 逐个尝试，成功才写入。
+LG_SYMBOLS = {
+    "沪深300": ["沪深300"],
+    "上证50": ["上证50"],
+    "上证180": ["上证180"],
+    "中证100": ["中证100"],
+    "中证500": ["中证500"],
+    "中证1000": ["中证1000"],
+    "创业板指": ["创业板指", "创业板指数", "创业板综"],
+    "科创50": ["科创50", "上证科创板50成份指数"],
+    "中证红利": ["中证红利"],
+    "中证主要消费": ["中证主要消费", "中证消费", "消费指数"],
+    "中证白酒": ["中证白酒", "中证酒"],
+    "中证医药": ["中证医药", "中证医药卫生", "全指医药"],
+    "证券公司": ["证券公司", "中证全指证券公司", "证券指数"],
+    "半导体": ["半导体", "中证全指半导体", "国证芯片"],
+}
+
+UNSUPPORTED_INDICES = [
+    {"name": "恒生科技", "reason": "乐咕乐股 A 股指数 PE/PB 源不稳定覆盖港股指数，暂回退净值代理"},
+    {"name": "纳斯达克100", "reason": "海外指数 PE/PB 免登录历史分位源未接入，暂回退净值代理"},
+    {"name": "标普500", "reason": "海外指数 PE/PB 免登录历史分位源未接入，暂回退净值代理"},
+]
 
 
 def _pct(series):
@@ -78,18 +97,36 @@ def _series_from(ak, fn_name, sym, prefer, dump_cols):
     return cur, pct, date, col
 
 
-def fetch_index_valuation(ak) -> list[dict]:
-    out = []
-    dumped = False
-    for sym in LG_SYMBOLS:
+def _fetch_one_index(ak, name, candidates, dumped):
+    last_warn = None
+    for sym in candidates:
         pe, pe_pct, d1, pe_col = _series_from(ak, "stock_index_pe_lg", sym, ("滚动市盈率", "市盈率"), not dumped)
         pb, pb_pct, d2, pb_col = _series_from(ak, "stock_index_pb_lg", sym, ("市净率",), False)
         if pe is None and pb is None:
+            last_warn = sym
             continue
-        dumped = True
-        print(f"[col] {sym}: pe列={pe_col} pb列={pb_col}")
-        out.append({"name": sym, "pe": pe, "pe_pct": pe_pct, "pb": pb, "pb_pct": pb_pct,
-                    "date": d1 or d2 or datetime.date.today().isoformat()})
+        print(f"[col] {name}: symbol={sym} pe列={pe_col} pb列={pb_col}")
+        return {
+            "name": name,
+            "symbol": sym,
+            "pe": pe,
+            "pe_pct": pe_pct,
+            "pb": pb,
+            "pb_pct": pb_pct,
+            "date": d1 or d2 or datetime.date.today().isoformat(),
+        }
+    print(f"[warn] {name} 候选 symbol 均失败: {candidates} last={last_warn}")
+    return None
+
+
+def fetch_index_valuation(ak) -> list[dict]:
+    out = []
+    dumped = False
+    for name, candidates in LG_SYMBOLS.items():
+        item = _fetch_one_index(ak, name, candidates, dumped)
+        if item:
+            dumped = True
+            out.append(item)
     return out
 
 
@@ -106,7 +143,12 @@ def main():
         return 1
 
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
-    payload = {"updated": datetime.date.today().isoformat(), "source": "legulegu", "indices": data}
+    payload = {
+        "updated": datetime.date.today().isoformat(),
+        "source": "legulegu",
+        "indices": data,
+        "unsupported": UNSUPPORTED_INDICES,
+    }
     with open(OUT, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
     print(f"done: {len(data)} indices → {OUT}")

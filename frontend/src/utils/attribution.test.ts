@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { computeAttribution } from './attribution'
+import { computeAttribution, computePeriodAttribution } from './attribution'
 
 describe('computeAttribution', () => {
   it('returns empty summary when portfolio value is zero', () => {
@@ -139,5 +139,56 @@ describe('computeAttribution', () => {
     expect(r.bestDay).toBeNull()
     expect(r.worstDay).toBeNull()
     expect(r.bestTotal?.code).toBe('A')
+  })
+})
+
+describe('computePeriodAttribution', () => {
+  it('returns null when snapshots are insufficient or lack holding detail', () => {
+    expect(computePeriodAttribution([])).toBeNull()
+    expect(computePeriodAttribution([
+      { date: '2026-07-03', value: 1000, cost: 900 },
+      { date: '2026-07-04', value: 1100, cost: 900 },
+    ])).toBeNull()
+  })
+
+  it('computes period contribution by holding, account and type', () => {
+    const r = computePeriodAttribution([
+      {
+        date: '2026-07-01',
+        value: 1000,
+        cost: 900,
+        holdings: [
+          { id: '支付宝|A', code: 'A', name: '基金A', account: '支付宝', type: '混合型', value: 600, cost: 500 },
+          { id: '券商|B', code: 'B', name: '基金B', account: '券商', type: '债券型', value: 400, cost: 400 },
+        ],
+      },
+      {
+        date: '2026-07-04',
+        value: 1080,
+        cost: 900,
+        holdings: [
+          { id: '支付宝|A', code: 'A', name: '基金A', account: '支付宝', type: '混合型', value: 660, cost: 500 },
+          { id: '券商|B', code: 'B', name: '基金B', account: '券商', type: '债券型', value: 420, cost: 400 },
+        ],
+      },
+    ])
+
+    expect(r).not.toBeNull()
+    expect(r!.delta).toBe(80)
+    expect(r!.returnPct).toBeCloseTo(8)
+    expect(r!.best?.key).toBe('支付宝|A')
+    expect(r!.byAccount[0]).toMatchObject({ account: '支付宝', delta: 60 })
+    expect(r!.byType[0]).toMatchObject({ type: '混合型', delta: 60 })
+  })
+
+  it('uses the first snapshot inside the requested window when available', () => {
+    const r = computePeriodAttribution([
+      { date: '2026-06-01', value: 800, cost: 700, holdings: [{ id: 'A', code: 'A', name: 'A', account: 'x', type: 't', value: 800, cost: 700 }] },
+      { date: '2026-07-01', value: 1000, cost: 700, holdings: [{ id: 'A', code: 'A', name: 'A', account: 'x', type: 't', value: 1000, cost: 700 }] },
+      { date: '2026-07-04', value: 1100, cost: 700, holdings: [{ id: 'A', code: 'A', name: 'A', account: 'x', type: 't', value: 1100, cost: 700 }] },
+    ], 30)
+
+    expect(r?.startDate).toBe('2026-07-01')
+    expect(r?.delta).toBe(100)
   })
 })

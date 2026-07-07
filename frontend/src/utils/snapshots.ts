@@ -8,6 +8,17 @@ export interface Snapshot {
   date: string   // ISO date
   value: number  // 组合总市值
   cost: number   // 组合总成本
+  holdings?: SnapshotHolding[]
+}
+
+export interface SnapshotHolding {
+  id: string
+  code: string
+  name: string
+  account: string
+  type: string
+  value: number
+  cost: number
 }
 
 export function loadSnapshots(): Snapshot[] {
@@ -29,11 +40,26 @@ function saveSnapshots(snaps: Snapshot[]): void {
   try { localStorage.setItem(KEY, JSON.stringify(trimmed)) } catch { /* quota exceeded */ }
 }
 
+function snapshotDate(now = new Date()): string {
+  return now.toISOString().slice(0, 10)
+}
+
 /** 拍摄当前快照（同一天覆盖） */
-export function takeSnapshot(value: number, cost: number): Snapshot[] {
+export function takeSnapshot(value: number, cost: number, now = new Date(), holdings?: SnapshotHolding[]): Snapshot[] {
   const snaps = loadSnapshots()
-  const today = new Date().toISOString().slice(0, 10)
-  snaps.push({ date: today, value, cost })
+  const today = snapshotDate(now)
+  snaps.push({ date: today, value, cost, holdings })
+  saveSnapshots(snaps)
+  return loadSnapshots()
+}
+
+/** 每天自动记录一次；当天已有快照时不覆盖用户手动快照 */
+export function takeDailySnapshot(value: number, cost: number, now = new Date(), holdings?: SnapshotHolding[]): Snapshot[] {
+  if (!(value > 0)) return loadSnapshots()
+  const today = snapshotDate(now)
+  const snaps = loadSnapshots()
+  if (snaps.some((s) => s.date === today)) return snaps
+  snaps.push({ date: today, value, cost, holdings })
   saveSnapshots(snaps)
   return loadSnapshots()
 }

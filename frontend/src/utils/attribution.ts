@@ -3,6 +3,8 @@
 // - 账户/类型归因
 // - 集中度风险提示
 
+import type { Snapshot } from './snapshots'
+
 export interface HoldingAttribution {
   code: string
   name: string
@@ -25,6 +27,32 @@ export interface AttributionSummary {
   concentration: { top1: number; top3: number; top5: number } // 集中度
   byAccount: { account: string; dayContrib: number; totalContrib: number; weight: number }[]
   byType: { type: string; dayContrib: number; totalContrib: number; weight: number }[]
+}
+
+export interface PeriodContribution {
+  key: string
+  name: string
+  account: string
+  type: string
+  startValue: number
+  endValue: number
+  delta: number
+  contribPct: number
+}
+
+export interface PeriodAttribution {
+  startDate: string
+  endDate: string
+  days: number
+  startValue: number
+  endValue: number
+  delta: number
+  returnPct: number
+  holdings: PeriodContribution[]
+  byAccount: { account: string; delta: number; contribPct: number }[]
+  byType: { type: string; delta: number; contribPct: number }[]
+  best: PeriodContribution | null
+  worst: PeriodContribution | null
 }
 
 /** 计算个基收益归因 */
@@ -86,5 +114,70 @@ export function computeAttribution(holdings: {
     concentration: { top1: topN(1), top3: topN(3), top5: topN(5) },
     byAccount: [...acctMap.entries()].map(([k, v]) => ({ account: k, ...v })).sort((a, b) => b.weight - a.weight),
     byType: [...typeMap.entries()].map(([k, v]) => ({ type: k, ...v })).sort((a, b) => b.weight - a.weight),
+  }
+}
+
+function groupPeriod<T extends 'account' | 'type'>(rows: PeriodContribution[], key: T, startValue: number) {
+  const map = new Map<string, { delta: number }>()
+  for (const r of rows) {
+    const k = r[key]
+    const g = map.get(k) || { delta: 0 }
+    g.delta += r.delta
+    map.set(k, g)
+  }
+  return [...map.entries()]
+    .map(([k, v]) => ({ [key]: k, delta: v.delta, contribPct: startValue > 0 ? (v.delta / startValue) * 100 : 0 }))
+    .sort((a, b) => Math.abs(b.delta as number) - Math.abs(a.delta as number)) as (
+      T extends 'account' ? { account: string; delta: number; contribPct: number }[] : { type: string; delta: number; contribPct: number }[]
+    )
+}
+
+/** 基于快照明细做近 N 日区间归因。老快照缺 holdings 时返回 null。 */
+export function computePeriodAttribution(snaps: Snapshot[], days = 30): PeriodAttribution | null {
+  const sorted = [...snaps].sort((a, b) => a.date.localeCompare(b.date))
+  if (sorted.length < 2) return null
+  const end = sorted[sorted.length - 1]
+  const endTs = Date.parse(end.date)
+  const cutoff = endTs - days * 864e5
+  const candidates = sorted.slice(0, -1).filter((s) => Date.parse(s.date) >= cutoff)
+  const start = candidates[0] || sorted[0]
+  if (!start.holdings?.length || !end.holdings?.length || start.value <= 0) return null
+
+  const startMap = new Map(start.holdings.map((h) => [h.id, h]))
+  const endMap = new Map(end.holdings.map((h) => [h.id, h]))
+  const keys = new Set([...startMap.keys(), ...endMap.keys()])
+  const rows: PeriodContribution[] = [...keys].map((key) => {
+    const a = startMap.get(key)
+    const b = endMap.get(key)
+    const startValue = a?.value ?? 0
+    const endValue = b?.value ?? 0
+    const delta = endValue - startValue
+    return {
+      key,
+      name: b?.name || a?.name || key,
+      account: b?.account || a?.account || '未分组',
+      type: b?.type || a?.type || '其他',
+      startValue,
+      endValue,
+      delta,
+      contribPct: (delta / start.value) * 100,
+    }
+  }).sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
+
+  const ranked = rows.filter((r) => r.delta !== 0).sort((a, b) => b.delta - a.delta)
+  const delta = end.value - start.value
+  return {
+    startDate: start.date,
+    endDate: end.date,
+    days,
+    startValue: start.value,
+    endValue: end.value,
+    delta,
+    returnPct: (delta / start.value) * 100,
+    holdings: rows,
+    byAccount: groupPeriod(rows, 'account', start.value),
+    byType: groupPeriod(rows, 'type', start.value),
+    best: ranked[0] || null,
+    worst: ranked[ranked.length - 1] || null,
   }
 }

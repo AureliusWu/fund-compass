@@ -8,6 +8,7 @@ import { useFundsStore } from '@/stores/funds'
 import { signalColor } from '@/utils/format'
 import IndexBar from '@/components/IndexBar.vue'
 import { checkBackend, getSourceSummary, type SourceStatus } from '@/utils/resilience'
+import { fetchTaskStatuses, type TaskStatus } from '@/utils/taskStatus'
 import { loadAlerts, runAllChecks, markRead, markAllRead, dismissAlert, requestNotifyPermission, unreadCount, type Alert } from '@/utils/alerts'
 import { APP_VERSION } from '@/version'
 
@@ -21,6 +22,8 @@ const sigs = ref<Record<string, string>>({})
 const alerts = ref<Alert[]>(loadAlerts())
 const unread = ref(unreadCount())
 const refreshing = ref(false)
+const tasks = ref<TaskStatus[]>([])
+const taskLoading = ref(false)
 
 async function refreshHome() {
   // 多源健康检查
@@ -38,6 +41,13 @@ async function refreshHome() {
 
   // 自选信号
   await loadWatchSignals()
+
+  taskLoading.value = true
+  try {
+    tasks.value = await fetchTaskStatuses(true)
+  } catch { /* GitHub API 限流/网络异常时保持空态 */ }
+  finally { taskLoading.value = false }
+
   refreshing.value = false
 }
 
@@ -94,6 +104,17 @@ const tempStampClass = computed(() => {
   if (s <= 60) return 'stamp-hold'
   return 'stamp-sell'
 })
+
+function taskTitle(t: TaskStatus) {
+  const age = t.ageMinutes == null
+    ? '未知'
+    : t.ageMinutes < 60 ? `${t.ageMinutes} 分钟前` : `${Math.round(t.ageMinutes / 60)} 小时前`
+  return `${t.label} · ${t.note} · ${age} · ${t.cadence}`
+}
+
+function openTask(t: TaskStatus) {
+  window.open(t.url, '_blank', 'noopener')
+}
 </script>
 
 <template>
@@ -181,6 +202,18 @@ const tempStampClass = computed(() => {
           </template>
         </van-cell>
       </van-cell-group>
+
+      <div class="task-card" v-if="tasks.length || taskLoading">
+        <div class="task-head">
+          <span>定时任务</span>
+          <van-loading v-if="taskLoading" size="14" />
+        </div>
+        <div class="task-row" v-for="t in tasks" :key="t.id" @click="openTask(t)">
+          <span class="task-dot" :class="{ ok: t.ok, warn: !t.ok && t.stale, err: !t.ok && !t.stale }">●</span>
+          <span class="task-name">{{ t.label }}</span>
+          <span class="task-note">{{ taskTitle(t) }}</span>
+        </div>
+      </div>
 
       <!-- ═══ 自选温度 ═══ -->
       <div class="sec">自选温度</div>
@@ -275,6 +308,15 @@ const tempStampClass = computed(() => {
 .src-dot { font-size: 10px; margin-left: 4px; }
 .src-dot.ok { color: #3D8B63; }
 .src-dot.err { color: #C44536; }
+.task-card { margin-top: 10px; background: var(--card-bg, #fff); border: 1px solid var(--border); border-radius: var(--radius-lg, 18px); padding: 10px 12px; box-shadow: var(--shadow-sm); }
+.task-head { display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+.task-row { display: flex; align-items: center; gap: 7px; padding: 7px 0; cursor: pointer; }
+.task-dot { font-size: 10px; flex-shrink: 0; }
+.task-dot.ok { color: #3D8B63; }
+.task-dot.warn { color: #C8963E; }
+.task-dot.err { color: #C44536; }
+.task-name { width: 64px; flex-shrink: 0; font-size: 12px; color: var(--text); }
+.task-note { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--text-muted); }
 
 /* ── 自选温度 ── */
 .watch-temp-card {

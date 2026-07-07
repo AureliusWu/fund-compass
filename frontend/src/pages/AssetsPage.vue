@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { reactive, ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useWatchlistStore } from '@/stores/watchlist'
@@ -6,10 +6,11 @@ import { useFundsStore } from '@/stores/funds'
 import { fetchEstimates, latestNavMove, preferredDailyMove, type Estimate, type NavMove } from '@/utils/estimate'
 import { pct, num, colorOf } from '@/utils/format'
 import Chart from '@/components/Chart.vue'
-import { computeAttribution } from '@/utils/attribution'
-import { exportHoldingsCSV } from '@/utils/export'
-import { loadSnapshots, takeSnapshot, buildSnapChart } from '@/utils/snapshots'
+import { computeAttribution, computePeriodAttribution } from '@/utils/attribution'
+import { exportHoldingsCSV, exportPeriodAttributionCSV, exportSnapshotsCSV } from '@/utils/export'
+import { loadSnapshots, takeSnapshot, takeDailySnapshot, buildSnapChart } from '@/utils/snapshots'
 import { computeAssetClass, REFERENCE_ALLOCATION, CLASS_COLORS, type AssetClass } from '@/utils/assetclass'
+import { loadManualAssets, pullManualAssets, pushManualAssets, removeManualAsset, upsertManualAsset, MANUAL_ASSET_CLASSES, type ManualAsset } from '@/utils/manualAssets'
 import { stressTest, computeStyleBox, rebalancePlan, computeCorrelation, type StyleBoxItem, type StressResult, type RebalanceAction, type CorrMatrix } from '@/utils/diagnostics'
 
 const router = useRouter()
@@ -20,6 +21,14 @@ const meta = reactive<Record<string, { nav: number | null; type: string; navMove
 const est = reactive<Record<string, Estimate | null>>({})
 const loading = ref(true)
 const dim = ref<'account' | 'type'>('account')
+const manualAssets = ref<ManualAsset[]>(loadManualAssets())
+const manualShow = ref(false)
+const manualId = ref('')
+const manualName = ref('')
+const manualClass = ref<AssetClass>('现金')
+const manualValue = ref('')
+const manualNote = ref('')
+const manualSyncing = ref(false)
 
 const UNGROUPED = '未分组'
 
@@ -36,6 +45,7 @@ async function refresh() {
       meta[e.code] = { nav: d.latest_nav, type: d.type || '其他', navMove: latestNavMove(d.nav_history) }
     } catch { meta[e.code] = { nav: null, type: '其他', navMove: null } }
   }))
+  snaps.value = takeDailySnapshot(total.value.value, total.value.cost, new Date(), snapshotHoldings.value)
   loading.value = false
 }
 
@@ -73,6 +83,10 @@ const total = computed(() => {
     cost += h.shares * h.cost
     if (h.today != null) { today += h.today; hasToday = true }
   }
+  for (const a of manualAssets.value) {
+    value += a.value
+    cost += a.value
+  }
   const profit = value - cost
   return { value, cost, profit, rate: cost > 0 ? (profit / cost) * 100 : null, today: hasToday ? today : null }
 })
@@ -95,12 +109,33 @@ const attrDim = ref<'account' | 'type'>('account')
 // V3-10 组合历史快照
 const snaps = ref(loadSnapshots())
 const snapChart = computed(() => buildSnapChart(snaps.value))
+const snapshotHoldings = computed(() => holdings.value.map((h) => ({
+  id: `${h.account}|${h.code}`,
+  code: h.code,
+  name: h.name,
+  account: h.account,
+  type: h.type,
+  value: h.value,
+  cost: h.shares * h.cost,
+})).concat(manualAssets.value.map((a) => ({
+  id: `manual|${a.id}`,
+  code: a.id,
+  name: a.name,
+  account: '手工资产',
+  type: a.cls,
+  value: a.value,
+  cost: a.value,
+}))))
+const periodAttr = computed(() => computePeriodAttribution(snaps.value, 30))
 function doSnap() {
-  snaps.value = takeSnapshot(total.value.value, total.value.cost)
+  snaps.value = takeSnapshot(total.value.value, total.value.cost, new Date(), snapshotHoldings.value)
 }
 
 // V3-13 大类资产
-const assetClass = computed(() => computeAssetClass(holdings.value))
+const assetClass = computed(() => computeAssetClass([
+  ...holdings.value,
+  ...manualAssets.value.map((a) => ({ value: a.value, type: a.cls })),
+]))
 const classPieOption = computed(() => ({
   tooltip: { trigger: 'item', formatter: '{b}: {d}%' },
   legend: { bottom: 0, type: 'scroll', textStyle: { fontSize: 11 } },
@@ -111,7 +146,7 @@ const classPieOption = computed(() => ({
 }))
 const classBars = computed(() => {
   const map = new Map(assetClass.value.classes.map((c) => [c.cls, c.pct]))
-  const order: AssetClass[] = ['权益', '固收', '混合', '海外', '现金']
+  const order: AssetClass[] = ['权益', '固收', '混合', '海外', '现金', '商品']
   return order.map((cls) => ({ cls, actual: map.get(cls) || 0, ref: REFERENCE_ALLOCATION[cls] }))
 })
 
@@ -192,6 +227,45 @@ const pieOption = computed(() => {
 const rateOf = (g: Group) => (g.cost > 0 ? (g.profit / g.cost) * 100 : null)
 const share = (v: number) => (total.value.value > 0 ? (v / total.value.value) * 100 : 0)
 
+function openManual(asset?: ManualAsset) {
+  manualId.value = asset?.id || ''
+  manualName.value = asset?.name || ''
+  manualClass.value = asset?.cls || '现金'
+  manualValue.value = asset ? String(asset.value) : ''
+  manualNote.value = asset?.note || ''
+  manualShow.value = true
+}
+
+function saveManual() {
+  manualAssets.value = upsertManualAsset(manualAssets.value, {
+    id: manualId.value || undefined,
+    name: manualName.value,
+    cls: manualClass.value,
+    value: Number(manualValue.value) || 0,
+    note: manualNote.value,
+  })
+}
+
+function delManual(id: string) {
+  manualAssets.value = removeManualAsset(manualAssets.value, id)
+}
+
+async function uploadManual() {
+  if (!watch.hasToken || manualSyncing.value) return
+  manualSyncing.value = true
+  try { await pushManualAssets(manualAssets.value) }
+  finally { manualSyncing.value = false }
+}
+
+async function downloadManual() {
+  if (!watch.hasToken || manualSyncing.value) return
+  manualSyncing.value = true
+  try {
+    const cloud = await pullManualAssets()
+    if (cloud) manualAssets.value = cloud
+  } finally { manualSyncing.value = false }
+}
+
 onMounted(refresh)
 </script>
 
@@ -200,7 +274,7 @@ onMounted(refresh)
     <van-nav-bar title="资产" />
     <div class="page-body">
       <van-loading v-if="loading" style="text-align:center;padding:40px" />
-      <van-empty v-else-if="holdings.length === 0"
+      <van-empty v-else-if="holdings.length === 0 && manualAssets.length === 0"
         description="还没有持仓。去自选页给基金填上份额/成本/账户" />
       <template v-else>
         <!-- 总资产 -->
@@ -235,13 +309,16 @@ onMounted(refresh)
         <div class="card">
           <div class="dim-head">
             <span class="sec-t">组合历史</span>
-            <van-button size="mini" plain icon="photograph" @click="doSnap">拍快照</van-button>
+            <div class="snap-actions">
+              <van-button size="mini" plain icon="down" :disabled="!snaps.length" @click="exportSnapshotsCSV(snaps)">导出</van-button>
+              <van-button size="mini" plain icon="photograph" @click="doSnap">拍快照</van-button>
+            </div>
           </div>
           <template v-if="snapChart">
             <Chart :option="snapChart" height="220px" />
-            <div class="snap-hint">共 {{ snaps.length }} 个快照 · {{ snaps[0].date.slice(0,10) }} ~ {{ snaps[snaps.length-1].date.slice(0,10) }}。点击「拍快照」记录当日市值/成本。</div>
+            <div class="snap-hint">共 {{ snaps.length }} 个快照 · {{ snaps[0].date.slice(0,10) }} ~ {{ snaps[snaps.length-1].date.slice(0,10) }}。每天打开资产页会自动记录一次，手动快照会覆盖当天数值。</div>
           </template>
-          <van-empty v-else description="还没有快照。点击上方「拍快照」开始记录组合历史。" image-size="60" />
+          <van-empty v-else description="快照已开始记录，累计两天后显示组合曲线。" image-size="60" />
         </div>
 
         <div class="act-row">
@@ -279,6 +356,21 @@ onMounted(refresh)
             </div>
             <div class="class-ref">参考：{{ classBars.map((b) => `${b.cls}~${b.ref}%`).join(' / ') }}</div>
             <div class="class-tip" v-if="assetClass.tip">{{ assetClass.tip }}</div>
+            <div class="manual-head">
+              <span>手工资产</span>
+              <div class="manual-actions">
+                <van-button size="mini" plain icon="down" :disabled="!watch.hasToken" :loading="manualSyncing" @click="downloadManual">下载</van-button>
+                <van-button size="mini" plain icon="upgrade" :disabled="!watch.hasToken" :loading="manualSyncing" @click="uploadManual">上传</van-button>
+                <van-button size="mini" plain icon="plus" @click="openManual()">新增</van-button>
+              </div>
+            </div>
+            <div class="manual-row" v-for="a in manualAssets" :key="a.id">
+              <span class="manual-name">{{ a.name }}<em>{{ a.cls }}</em></span>
+              <span class="manual-value">{{ num(a.value, 2) }}</span>
+              <van-icon name="edit" color="#4C7E67" size="16" @click="openManual(a)" />
+              <van-icon name="cross" color="#A8B2A8" size="16" @click="delManual(a.id)" />
+            </div>
+            <div class="class-ref" v-if="!manualAssets.length">可把现金、股票、黄金等非基金资产手工纳入总览。</div>
           </div>
         </template>
 
@@ -386,7 +478,7 @@ onMounted(refresh)
                 <span class="atr-nm">{{ g.account }}</span>
                 <span class="atr-w">{{ g.weight.toFixed(1) }}%</span>
                 <van-progress :percentage="Math.min(g.weight, 100)" :show-pivot="false"
-                  color="#4C7E67" track-color="#EEF1EC" style="flex:1;margin:0 8px" />
+                  color="#4C7E67" track-color="var(--border)" style="flex:1;margin:0 8px" />
                 <span class="atr-d" :style="{ color: colorOf(g.dayContrib) }">{{ g.dayContrib != null ? (g.dayContrib >= 0 ? '+' : '') + g.dayContrib.toFixed(2) + 'bp' : '--' }}</span>
               </div>
             </template>
@@ -395,11 +487,58 @@ onMounted(refresh)
                 <span class="atr-nm">{{ g.type }}</span>
                 <span class="atr-w">{{ g.weight.toFixed(1) }}%</span>
                 <van-progress :percentage="Math.min(g.weight, 100)" :show-pivot="false"
-                  color="#4C7E67" track-color="#EEF1EC" style="flex:1;margin:0 8px" />
+                  color="#4C7E67" track-color="var(--border)" style="flex:1;margin:0 8px" />
                 <span class="atr-d" :style="{ color: colorOf(g.dayContrib) }">{{ g.dayContrib != null ? (g.dayContrib >= 0 ? '+' : '') + g.dayContrib.toFixed(2) + 'bp' : '--' }}</span>
               </div>
             </template>
             <div class="atr-note">bp = 基点（万分比），今日估算贡献</div>
+          </div>
+
+          <div class="card">
+            <div class="dim-head">
+              <span class="sec-t">近30日归因</span>
+              <div class="period-tools" v-if="periodAttr">
+                <span class="period-range">{{ periodAttr.startDate.slice(5) }} ~ {{ periodAttr.endDate.slice(5) }}</span>
+                <van-button size="mini" plain icon="down" @click="exportPeriodAttributionCSV(periodAttr)">导出</van-button>
+              </div>
+            </div>
+            <template v-if="periodAttr">
+              <div class="period-head">
+                <div>
+                  <div class="kk">区间收益</div>
+                  <div class="period-v" :style="{ color: colorOf(periodAttr.delta) }">
+                    {{ periodAttr.delta >= 0 ? '+' : '' }}{{ num(periodAttr.delta, 2) }}
+                    <em>{{ pct(periodAttr.returnPct) }}</em>
+                  </div>
+                </div>
+                <div>
+                  <div class="kk">期初 / 期末</div>
+                  <div class="period-small">{{ num(periodAttr.startValue, 0) }} → {{ num(periodAttr.endValue, 0) }}</div>
+                </div>
+              </div>
+              <div class="period-sub">按账户</div>
+              <div class="atr-row" v-for="g in periodAttr.byAccount.slice(0, 5)" :key="g.account">
+                <span class="atr-nm">{{ g.account }}</span>
+                <span class="atr-w">{{ g.contribPct.toFixed(2) }}%</span>
+                <van-progress :percentage="Math.min(Math.abs(g.contribPct), 100)" :show-pivot="false"
+                  :color="g.delta >= 0 ? '#C44536' : '#3D8B63'" track-color="var(--border)" style="flex:1;margin:0 8px" />
+                <span class="atr-d" :style="{ color: colorOf(g.delta) }">{{ g.delta >= 0 ? '+' : '' }}{{ num(g.delta, 0) }}</span>
+              </div>
+              <div class="period-sub">按类型</div>
+              <div class="atr-row" v-for="g in periodAttr.byType.slice(0, 5)" :key="g.type">
+                <span class="atr-nm">{{ g.type }}</span>
+                <span class="atr-w">{{ g.contribPct.toFixed(2) }}%</span>
+                <van-progress :percentage="Math.min(Math.abs(g.contribPct), 100)" :show-pivot="false"
+                  :color="g.delta >= 0 ? '#C44536' : '#3D8B63'" track-color="var(--border)" style="flex:1;margin:0 8px" />
+                <span class="atr-d" :style="{ color: colorOf(g.delta) }">{{ g.delta >= 0 ? '+' : '' }}{{ num(g.delta, 0) }}</span>
+              </div>
+              <div class="period-best" v-if="periodAttr.best || periodAttr.worst">
+                <span v-if="periodAttr.best">最佳 {{ periodAttr.best.name }}：<b :style="{ color: colorOf(periodAttr.best.delta) }">{{ periodAttr.best.delta >= 0 ? '+' : '' }}{{ num(periodAttr.best.delta, 0) }}</b></span>
+                <span v-if="periodAttr.worst">最弱 {{ periodAttr.worst.name }}：<b :style="{ color: colorOf(periodAttr.worst.delta) }">{{ periodAttr.worst.delta >= 0 ? '+' : '' }}{{ num(periodAttr.worst.delta, 0) }}</b></span>
+              </div>
+              <div class="atr-note">基于组合快照明细，反映区间资产变动贡献；申赎/手工调仓会影响归因。</div>
+            </template>
+            <van-empty v-else description="需要至少两条含持仓明细的快照，之后会自动显示近30日归因。" image-size="50" />
           </div>
 
           <div class="card">
@@ -430,6 +569,19 @@ onMounted(refresh)
         <div class="tip">同一只基金归属一个账户；在「自选」页编辑持仓时设置账户。市值用最新净值/盘中估算，仅供参考。</div>
       </template>
     </div>
+
+    <van-dialog v-model:show="manualShow" title="手工资产" show-cancel-button @confirm="saveManual">
+      <div style="padding:8px 4px">
+        <van-field v-model="manualName" label="名称" placeholder="如 现金、股票账户、黄金" />
+        <van-field v-model="manualValue" type="number" label="市值" placeholder="0.00" />
+        <van-field v-model="manualNote" label="备注" placeholder="可留空" />
+        <div class="manual-chips">
+          <span v-for="c in MANUAL_ASSET_CLASSES" :key="c"
+            :class="['chip', { on: manualClass === c }]"
+            @click="manualClass = c">{{ c }}</span>
+        </div>
+      </div>
+    </van-dialog>
   </div>
 </template>
 
@@ -467,6 +619,14 @@ onMounted(refresh)
 .atr-w { width: 40px; text-align: right; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 .atr-d { width: 100px; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
 .atr-note { font-size: 11px; color: var(--text-hint); margin-top: 6px; }
+.period-range { font-size: 11px; color: var(--text-hint); }
+.period-head { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.period-v { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.period-v em { font-style: normal; font-size: 12px; margin-left: 4px; }
+.period-small { font-size: 13px; color: var(--text-secondary); font-variant-numeric: tabular-nums; margin-top: 2px; }
+.period-sub { font-size: 12px; color: var(--text-muted); margin: 10px 0 4px; }
+.period-best { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--text-secondary); margin-top: 8px; }
+.period-best b { font-weight: 700; font-variant-numeric: tabular-nums; }
 .conc { display: flex; gap: 16px; }
 .conc div { text-align: center; }
 .conc div span { display: block; font-size: 11px; color: var(--text-muted); }
@@ -474,6 +634,8 @@ onMounted(refresh)
 .conc-warn { font-size: 12px; color: #C8963E; margin-top: 6px; }
 /* ── 快照 ── */
 .snap-hint { font-size: 11px; color: var(--text-hint); text-align: center; margin-top: 6px; line-height: 1.5; }
+.snap-actions { display: flex; gap: 6px; }
+.period-tools { display: flex; align-items: center; gap: 6px; }
 /* ── V3-13 大类资产 ── */
 .class-bars { margin-top: 10px; }
 .class-bar { display: flex; align-items: center; margin: 6px 0; font-size: 12px; }
@@ -481,6 +643,15 @@ onMounted(refresh)
 .cb-pct { width: 42px; text-align: right; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
 .class-ref { font-size: 11px; color: var(--text-hint); margin-top: 6px; }
 .class-tip { font-size: 12px; color: #C8963E; margin-top: 4px; }
+.manual-head { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; font-size: 12px; color: var(--text-muted); }
+.manual-actions { display: flex; gap: 6px; }
+.manual-row { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-top: 1px solid var(--border); font-size: 12px; }
+.manual-name { flex: 1; min-width: 0; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.manual-name em { font-style: normal; color: var(--text-hint); font-size: 10px; margin-left: 4px; }
+.manual-value { font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+.manual-chips { display: flex; gap: 8px; padding: 8px 16px 4px; }
+.manual-chips .chip { font-size: 12px; color: var(--text-secondary); background: var(--chip-bg); border-radius: 12px; padding: 3px 10px; }
+.manual-chips .chip.on { color: #fff; background: var(--teal); }
 /* ── V4-3 组合诊断 ── */
 .diag-err { font-size: 12px; color: #C44536; margin-top: 6px; }
 .diag-sub { font-size: 14px; font-weight: 600; color: var(--text); margin: 16px 0 8px; }
