@@ -3,11 +3,12 @@ import { ref, computed } from 'vue'
 import { useWatchlistStore } from '@/stores/watchlist'
 import { useFundsStore } from '@/stores/funds'
 import { colorOf } from '@/utils/format'
+import { getCalibration } from '@/api/client'
 import Chart from '@/components/Chart.vue'
 import {
   annualReturns, rollingMetrics, sweepMAPeriod, computeSummary,
 } from '@/utils/backtest'
-import type { BacktestResp, FundDetail } from '@/api/client'
+import type { BacktestResp, CalibrationResp, FundDetail } from '@/api/client'
 
 const watchStore = useWatchlistStore()
 const fundsStore = useFundsStore()
@@ -17,6 +18,7 @@ const bt = ref<BacktestResp | null>(null)
 const loading = ref(false)
 const err = ref('')
 const detail = ref<FundDetail | null>(null)
+const calibration = ref<CalibrationResp | null>(null)
 const dcaAmount = ref(1000)
 
 // 基金列表（有持仓的优先）
@@ -35,9 +37,14 @@ async function run() {
   if (!picked.value) return
   loading.value = true; err.value = ''
   try {
-    const [b, d] = await Promise.all([fundsStore.backtest(picked.value), fundsStore.detail(picked.value)])
+    const [b, d, c] = await Promise.all([
+      fundsStore.backtest(picked.value),
+      fundsStore.detail(picked.value),
+      getCalibration(picked.value).catch(() => null),
+    ])
     bt.value = b
     detail.value = d
+    calibration.value = c
   } catch (e) {
     err.value = e instanceof Error ? e.message : '加载失败'
   } finally { loading.value = false }
@@ -178,6 +185,30 @@ const fp = (n: number | null | undefined, d = 2) => n != null ? (n >= 0 ? '+' : 
           </div>
         </div>
 
+        <div class="sec">算法自校准</div>
+        <div class="card calibration" v-if="calibration">
+          <div class="cal-head">
+            <span>{{ calibration.available ? (calibration.accepted ? '候选通过' : '保留当前参数') : '样本不足' }}</span>
+            <em :class="{ pass: calibration.accepted }">{{ calibration.accepted ? '已通过留出验证' : '未晋级' }}</em>
+          </div>
+          <div class="cal-grid" v-if="calibration.validation">
+            <div>
+              <span>当前参数超额</span>
+              <b :style="{ color: colorOf(calibration.validation.baseline.outperform) }">{{ fp(calibration.validation.baseline.outperform) }}</b>
+            </div>
+            <div>
+              <span>候选参数超额</span>
+              <b :style="{ color: colorOf(calibration.validation.candidate.outperform) }">{{ fp(calibration.validation.candidate.outperform) }}</b>
+            </div>
+            <div>
+              <span>验证区间</span>
+              <b>{{ calibration.validation_points }} 点</b>
+            </div>
+          </div>
+          <div class="cal-reason">{{ calibration.reason }}</div>
+          <div class="note">训练段选择参数，最后 30% 历史仅用于验证；单基金通过后仍需跨基金门槛才能进入线上版本。</div>
+        </div>
+
         <!-- 回测对比图 -->
         <div class="sec">策略对比</div>
         <div class="card" v-if="comparisonOption">
@@ -263,6 +294,15 @@ const fp = (n: number | null | undefined, d = 2) => n != null ? (n >= 0 ? '+' : 
 .ann-tbl td:first-child, .ann-tbl th:first-child { text-align: left; }
 
 .note { font-size: 11px; color: var(--text-hint, #A8B2A8); margin-top: 8px; }
+.calibration { padding: 12px 14px; }
+.cal-head { display: flex; justify-content: space-between; align-items: center; font-size: 14px; font-weight: 600; }
+.cal-head em { font-size: 11px; font-style: normal; color: var(--text-hint); font-weight: 500; }
+.cal-head em.pass { color: var(--success); }
+.cal-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+.cal-grid div { min-width: 0; }
+.cal-grid span { display: block; color: var(--text-hint); font-size: 10px; }
+.cal-grid b { display: block; margin-top: 2px; font-size: 14px; white-space: nowrap; }
+.cal-reason { margin-top: 10px; font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
 :deep(.red) { color: #C44536 !important; }
 :deep(.green) { color: #3D8B63 !important; }
 </style>

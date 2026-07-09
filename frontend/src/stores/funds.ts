@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import {
   getFundDetail, getScore, getSignal, getBacktest, getAnalyze,
-  type FundDetail, type ScoreResp, type SignalResp, type BacktestResp,
+  type FundDetail, type ScoreResp, type SignalResp, type BacktestResp, type DecisionResp,
 } from '@/api/client'
 import { cacheGet, cacheSet } from '@/utils/cache'
 
@@ -13,6 +13,7 @@ export const useFundsStore = defineStore('funds', () => {
   const scoreMem = new Map<string, ScoreResp>()
   const signalMem = new Map<string, SignalResp>()
   const btMem = new Map<string, BacktestResp>()
+  const decisionMem = new Map<string, DecisionResp>()
 
   async function detail(code: string): Promise<FundDetail> {
     if (detailMem.has(code)) return detailMem.get(code)!
@@ -53,22 +54,25 @@ export const useFundsStore = defineStore('funds', () => {
   // 聚合获取：详情页一次往返取齐详情/评分/信号/回测。四块若都已在缓存内则直接拼装、
   // 不再请求；否则单次 getAnalyze 取回后回填四个缓存，使后续单项获取（回测页/对比页等）命中。
   async function analyze(code: string): Promise<{
-    detail: FundDetail; score: ScoreResp; signal: SignalResp; backtest: BacktestResp
+    detail: FundDetail; score: ScoreResp; signal: SignalResp; backtest: BacktestResp; decision: DecisionResp
   }> {
     const cd = detailMem.get(code) ?? cacheGet<FundDetail>('detail_' + code, TTL)
     const cs = scoreMem.get(code) ?? cacheGet<ScoreResp>('score_' + code, TTL)
     const cg = signalMem.get(code) ?? cacheGet<SignalResp>('signal_' + code, TTL)
     const cb = btMem.get(code) ?? cacheGet<BacktestResp>('bt_' + code, TTL)
-    if (cd && cs && cg && cb) {
-      detailMem.set(code, cd); scoreMem.set(code, cs); signalMem.set(code, cg); btMem.set(code, cb)
-      return { detail: cd, score: cs, signal: cg, backtest: cb }
+    const cdec = decisionMem.get(code) ?? cacheGet<DecisionResp>('decision_' + code, TTL)
+    if (cd && cs && cg && cb && cdec) {
+      detailMem.set(code, cd); scoreMem.set(code, cs); signalMem.set(code, cg)
+      btMem.set(code, cb); decisionMem.set(code, cdec)
+      return { detail: cd, score: cs, signal: cg, backtest: cb, decision: cdec }
     }
     const a = await getAnalyze(code)
     detailMem.set(code, a.detail); cacheSet('detail_' + code, a.detail)
     scoreMem.set(code, a.score); cacheSet('score_' + code, a.score)
     signalMem.set(code, a.signal); cacheSet('signal_' + code, a.signal)
     btMem.set(code, a.backtest); cacheSet('bt_' + code, a.backtest)
-    return { detail: a.detail, score: a.score, signal: a.signal, backtest: a.backtest }
+    decisionMem.set(code, a.decision); cacheSet('decision_' + code, a.decision)
+    return { detail: a.detail, score: a.score, signal: a.signal, backtest: a.backtest, decision: a.decision }
   }
 
   return { detail, score, signal, backtest, analyze }

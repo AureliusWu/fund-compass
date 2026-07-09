@@ -8,7 +8,8 @@
 工作流定义 14:30 / 14:40 / 14:50 三个 slot，脚本用 Gist 状态文件
 sinan-estimate-state.json 记「当天每个 slot 已推」做去重，保证每个 slot 最多推一条。
 
-环境变量：GIST_TOKEN、WECHAT_SENDKEY（兼容 SC_SENDKEY）、SCHEDULE_CRON、PUSH_SLOT、FORCE。
+环境变量：GIST_TOKEN、WECHAT_SENDKEY（兼容 SC_SENDKEY）、FUND_API_BASE、
+SCHEDULE_CRON、PUSH_SLOT、FORCE。
 纯 stdlib，无需 pip。
 """
 import datetime
@@ -27,6 +28,7 @@ NOTIFY_WEBHOOK_URL = os.environ.get("NOTIFY_WEBHOOK_URL", "").strip()
 FORCE = os.environ.get("FORCE", "").lower() in ("1", "true", "yes")
 PUSH_SLOT = os.environ.get("PUSH_SLOT", "").strip()
 SCHEDULE_CRON = os.environ.get("SCHEDULE_CRON", "").strip()
+FUND_API_BASE = os.environ.get("FUND_API_BASE", "").strip().rstrip("/")
 WATCH_FILE = "sinan-watchlist.json"
 STATE_FILE = "sinan-estimate-state.json"
 GH = "https://api.github.com"
@@ -109,10 +111,10 @@ def push_slot(now):
 
     return "14:30"
 
-def watch_codes(gid):
-    """从 Gist 自选读 [(code, name)]。"""
+def watch_entries(gid):
+    """从 Gist 读取有效自选/持仓条目。"""
     raw = gist_file(gid, WATCH_FILE) or "[]"
-    return [(e["code"], e.get("name")) for e in json.loads(raw)
+    return [e for e in json.loads(raw)
             if isinstance(e, dict) and e.get("code") and not e.get("deleted")]
 
 
@@ -145,6 +147,8 @@ def _normalize_estimate(d, code):
     )
     return {
         "name": name,
+        "last_nav": last_nav,
+        "est_nav": est_nav,
         "gszzl": est_change,
         "gztime": gztime,
         "label": "海外估值" if overseas else "盘中估值",
@@ -161,6 +165,115 @@ def estimate(code):
         return None
     d = json.loads(m.group(1))
     return _normalize_estimate(d, code)
+
+
+def build_portfolio_payload(entries, estimates):
+    """聚合跨账户持仓，并按实时估值计算当前仓位。"""
+    by_code = {}
+    for entry in entries:
+        code = str(entry.get("code", "")).strip()
+        row = by_code.setdefault(code, {"code": code, "shares": 0.0, "target_weight": None})
+        row["shares"] += _to_float(entry.get("shares")) or 0
+        if entry.get("target_weight") is not None:
+            row["target_weight"] = _to_float(entry.get("target_weight"))
+
+    values = {}
+    for code, row in by_code.items():
+        est = estimates.get(code) or {}
+        nav = est.get("est_nav") or est.get("last_nav")
+        values[code] = row["shares"] * nav if nav and row["shares"] > 0 else 0
+    portfolio_value = sum(values.values())
+
+    explicit_total = sum(
+        row["target_weight"] or 0 for row in by_code.values()
+        if row["shares"] > 0 and row["target_weight"] is not None
+    )
+    unset = [
+        row for row in by_code.values()
+        if row["shares"] > 0 and row["target_weight"] is None
+    ]
+    default_target = max(0, 100 - explicit_total) / len(unset) if unset else 0
+
+    items = []
+    for code, row in by_code.items():
+        item = {"code": code}
+        if row["shares"] > 0 and portfolio_value > 0:
+            item["current_weight"] = round(values[code] / portfolio_value * 100, 2)
+            item["target_weight"] = round(
+                row["target_weight"] if row["target_weight"] is not None else default_target,
+                2,
+            )
+        items.append(item)
+    return items, round(portfolio_value, 2)
+
+
+def fetch_portfolio_decisions(items, portfolio_value):
+    """一次请求获取全部决策与组合校准；失败时调用方降级为纯估值。"""
+    if not FUND_API_BASE:
+        return None
+    try:
+        body = json.dumps({
+            "items": items,
+            "portfolio_value": portfolio_value,
+        }).encode("utf-8")
+        raw = _req(
+            f"{FUND_API_BASE}/api/portfolio/decisions",
+            data=body,
+            headers={"User-Agent": "sinan-bot", "Content-Type": "application/json"},
+        )
+        data = json.loads(raw)
+        return data if isinstance(data, dict) and isinstance(data.get("decisions"), list) else None
+    except Exception as ex:
+        print("portfolio decision fail", ex)
+        return None
+
+
+def format_push_line(code, name, estimate_data, decision):
+    """组合涨跌幅 + 决策动作为一行推送文案。"""
+    nm = name or (estimate_data or {}).get("name") or code
+    chg_txt = "—"
+    if estimate_data and estimate_data.get("gszzl") is not None:
+        try:
+            chg = float(estimate_data["gszzl"])
+            label = estimate_data.get("label") or "估值"
+            chg_txt = f"{'+' if chg >= 0 else ''}{chg:.2f}%（{label}）"
+        except (TypeError, ValueError):
+            chg_txt = "—"
+    if decision:
+        action = decision.get("action") or "观察"
+        summary = (decision.get("summary") or "").strip()
+        tail = f"，{summary}" if summary else ""
+        return f"**{nm}** {chg_txt} → **{action}**{tail}"
+    return f"**{nm}**  {chg_txt}"
+
+
+def format_portfolio_summary(result):
+    """格式化组合校准摘要，限制长度避免通知过载。"""
+    if not result:
+        return ""
+    allocation = result.get("allocation") or {}
+    parts = [
+        "### 组合校准",
+        (
+            f"目标仓位 {float(allocation.get('target_total') or 0):.1f}%"
+            f" · 目标现金 {float(allocation.get('target_cash') or 0):.1f}%"
+        ),
+    ]
+    for warning in allocation.get("warnings") or []:
+        parts.append(f"- 注意：{warning}")
+    actionable = [
+        row for row in (result.get("rebalance") or [])
+        if row.get("suggestion") != "维持"
+    ][:3]
+    for row in actionable:
+        gap = float(row.get("gap") or 0)
+        amount = row.get("amount")
+        amount_text = f"，约 {float(amount):,.0f} 元" if amount is not None else ""
+        parts.append(
+            f"- {row.get('suggestion')}：{row.get('name') or row.get('code')}"
+            f"（{gap:+.1f}%{amount_text}）"
+        )
+    return "\n".join(parts)
 
 
 def send_notification(title, content):
@@ -243,35 +356,50 @@ def main():
     if slot in sent_slots and not FORCE:
         print(f"今日（{today}）{slot} 已推过，跳过"); return
 
-    codes = watch_codes(gid)
-    if not codes:
+    entries = watch_entries(gid)
+    if not entries:
         print("自选为空"); return
 
-    lines, fresh = [], False
-    for code, name in codes:
+    unique = {}
+    for entry in entries:
+        code = str(entry["code"]).strip()
+        unique.setdefault(code, entry.get("name"))
+
+    estimates, fresh = {}, False
+    for code in unique:
         try:
             e = estimate(code)
         except Exception as ex:
             print("est fail", code, ex); continue
         if not e:
             continue
-        nm = name or e["name"]
+        estimates[code] = e
         if e["gztime"].startswith(today):
             fresh = True
-        try:
-            chg = float(e["gszzl"])
-            label = e.get("label") or "估值"
-            lines.append(f"**{nm}**  {'+' if chg >= 0 else ''}{chg:.2f}%（{label}）")
-        except (TypeError, ValueError):
-            lines.append(f"**{nm}**  —")
 
-    if not lines:
+    if not estimates:
         print("无估值数据"); return
     if not fresh and not FORCE:
         print("今日无盘中估值（非交易日/休市），跳过"); return
 
-    title = f"司南基金 · 自选涨跌幅（{slot}）"
-    content = "\n".join(f"- {ln}" for ln in lines) + "\n\n> 盘中/海外估值，仅供个人参考，不构成投资建议。"
+    decision_result = None
+    if FUND_API_BASE:
+        items, portfolio_value = build_portfolio_payload(entries, estimates)
+        decision_result = fetch_portfolio_decisions(items, portfolio_value)
+    decisions = {
+        str(row.get("code")): row
+        for row in ((decision_result or {}).get("decisions") or [])
+    }
+    lines = [
+        format_push_line(code, name, estimates.get(code), decisions.get(code))
+        for code, name in unique.items()
+        if code in estimates
+    ]
+    title = f"司南基金 · 自选决策摘要（{slot}）" if decision_result else f"司南基金 · 自选涨跌幅（{slot}）"
+    content = "\n".join(f"- {ln}" for ln in lines) + "\n\n> 数据辅助分析，不构成投资建议。"
+    portfolio_summary = format_portfolio_summary(decision_result)
+    if portfolio_summary:
+        content = "\n".join(f"- {ln}" for ln in lines) + "\n\n" + portfolio_summary + "\n\n> 数据辅助分析，不构成投资建议。"
     if send_notification(title, content):
         if FORCE:
             print("FORCE 测试推送，不写入 slot 去重状态")

@@ -8,16 +8,21 @@
 from strategy.scoring import score_fund
 from strategy.timing import timing_signal
 from strategy.backtest import backtest
+from strategy.rules import build_decision
 
 
-def analyze_fund(detail: dict) -> dict:
-    """对单只基金详情一次性产出：综合评分 + 择时信号 + 策略回测。
+def analyze_fund(detail: dict, holding: dict | None = None) -> dict:
+    """对单只基金详情一次性产出：综合评分 + 择时信号 + 策略回测 + 决策卡片。
 
     入参为 repo.get_detail(code) 的返回；三块算法共享同一 nav_history，
     回测内部按月重切片自行处理历史，与此处无耦合。
     """
+    score = score_fund(detail)
+    signal = timing_signal(detail)
+    bt = backtest(detail)
     return {
-        "score": score_fund(detail),
-        "signal": timing_signal(detail),
-        "backtest": backtest(detail),
+        "score": score,
+        "signal": signal,
+        "backtest": bt,
+        "decision": build_decision(detail, score, signal, bt, holding),
     }

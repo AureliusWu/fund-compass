@@ -83,16 +83,88 @@ export interface BacktestResp {
   strategy?: BtSeries; benchmark?: BtSeries
   outperform?: number; win_rate?: number | null
   actions?: { date: string; signal: string; weight: number }[]
+  weights?: Record<string, number>
 }
 export const getBacktest = (code: string) => req<BacktestResp>(`/fund/${code}/backtest`)
 
-// 聚合分析：一次往返取齐详情 + 评分 + 信号 + 回测，详情页据此把四次请求收敛为一次。
+export interface CalibrationResp {
+  code: string
+  name: string
+  available: boolean
+  accepted: boolean
+  reason: string
+  split_date?: string
+  train_points?: number
+  validation_points?: number
+  current_weights?: Record<string, number>
+  candidate_weights?: Record<string, number>
+  validation?: {
+    baseline: { outperform: number; max_drawdown: number }
+    candidate: { outperform: number; max_drawdown: number }
+  }
+}
+export const getCalibration = (code: string) => req<CalibrationResp>(`/fund/${code}/calibrate`)
+
+export interface DecisionResp {
+  code: string; name: string; type?: string | null
+  action: string
+  confidence: '高' | '中' | '低'
+  summary: string
+  reasons: string[]
+  risks: string[]
+  position_rule: string
+  next_check: string
+  disclaimer?: string
+}
+export const getDecision = (code: string, p?: { target_weight?: number; current_weight?: number }) => {
+  const u = new URLSearchParams()
+  if (p?.target_weight != null) u.set('target_weight', String(p.target_weight))
+  if (p?.current_weight != null) u.set('current_weight', String(p.current_weight))
+  const q = u.toString()
+  return req<DecisionResp>(`/fund/${code}/decision` + (q ? '?' + q : ''))
+}
+
+export interface PortfolioDecisionItem {
+  code: string
+  current_weight?: number
+  target_weight?: number
+}
+export interface PortfolioDecisionsResp {
+  decisions: DecisionResp[]
+  errors: { code: string; error: string }[]
+  total: number
+  allocation: {
+    current_total: number
+    target_total: number
+    target_cash: number
+    status: string
+    warnings: string[]
+  }
+  rebalance: {
+    code: string
+    name: string
+    current_weight: number
+    target_weight: number
+    gap: number
+    suggestion: string
+    amount: number | null
+  }[]
+}
+export const postPortfolioDecisions = (items: PortfolioDecisionItem[], portfolioValue?: number) =>
+  req<PortfolioDecisionsResp>('/portfolio/decisions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items, portfolio_value: portfolioValue }),
+  })
+
+// 聚合分析：一次往返取齐详情 + 评分 + 信号 + 回测 + 决策，详情页据此把四次请求收敛为一次。
 export interface AnalyzeResp {
   code: string; name: string; type: string | null
   detail: FundDetail
   score: ScoreResp
   signal: SignalResp
   backtest: BacktestResp
+  decision: DecisionResp
 }
 export const getAnalyze = (code: string) => req<AnalyzeResp>(`/fund/${code}/analyze`)
 

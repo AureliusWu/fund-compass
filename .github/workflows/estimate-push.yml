@@ -33,6 +33,7 @@ jobs:
           WECHAT_SENDKEY: ${{ secrets.WECHAT_SENDKEY }}
           SC_SENDKEY: ${{ secrets.SC_SENDKEY }}
           NOTIFY_WEBHOOK_URL: ${{ secrets.NOTIFY_WEBHOOK_URL }}
+          FUND_API_BASE: ${{ secrets.FUND_API_BASE }}
           FORCE: ${{ inputs.force }}
           PUSH_SLOT: ${{ inputs.slot }}
           SCHEDULE_CRON: ${{ github.event.schedule }}

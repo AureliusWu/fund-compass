@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import { showToast } from 'vant'
 import { getFunds, type FundListItem } from '@/api/client'
 import { useWatchlistStore } from '@/stores/watchlist'
-import { loadScreener, type ScreenFund } from '@/utils/screener'
+import { loadScreener, filterAndSortRank, rankMetric, screenQuality, type ScreenFund, type ScreenPresetId } from '@/utils/screener'
 import { loadManagers, type Manager } from '@/utils/managers'
 import { pct, colorOf } from '@/utils/format'
 import { parseQuery, applySpec, specSummary } from '@/utils/nlselect'
@@ -45,16 +45,32 @@ function resetBasic() {
   page.value = 1; items.value = []; finished.value = false; loadBasic()
 }
 
-// ── 排行模式（前端 screener.json，按收益/费率筛选排序）──
+// ── 排行模式（V6-P4：决策质量筛选 + 场景预设）──
 const RANK_TYPES = ['', '股票型', '混合型', '债券型', '指数型', 'QDII', 'FOF']
+const PRESETS: { id: ScreenPresetId; label: string }[] = [
+  { id: '', label: '全部' },
+  { id: 'broad', label: '宽基指数' },
+  { id: 'sector', label: '行业主题' },
+  { id: 'qdii', label: 'QDII' },
+  { id: 'bond', label: '债基' },
+]
 const SORTS = [
-  { k: 'r1y', label: '近1年' }, { k: 'r3y', label: '近3年' }, { k: 'r6m', label: '近6月' },
-  { k: 'r3m', label: '近3月' }, { k: 'ytd', label: '今年来' }, { k: 'fee', label: '低费率' },
-] as const
+  { k: 'quality' as const, label: '综合质量' },
+  { k: 'r1y' as const, label: '近1年' },
+  { k: 'r3y' as const, label: '近3年' },
+  { k: 'stable' as const, label: '低波动' },
+  { k: 'r6m' as const, label: '近6月' },
+  { k: 'r3m' as const, label: '近3月' },
+  { k: 'ytd' as const, label: '今年来' },
+  { k: 'fee' as const, label: '低费率' },
+]
 type SortKey = (typeof SORTS)[number]['k']
-const sortKey = ref<SortKey>('r1y')
+const sortKey = ref<SortKey>('quality')
+const preset = ref<ScreenPresetId>('')
 const minR1y = ref('')
+const minR3y = ref('')
 const maxFee = ref('')
+const minQuality = ref('')
 const rankAll = ref<ScreenFund[]>([])
 const rankUpdated = ref('')
 const rankLoading = ref(false)
@@ -75,28 +91,29 @@ async function ensureRank() {
 
 const ranked = computed(() => {
   const minY = parseFloat(minR1y.value)
+  const min3 = parseFloat(minR3y.value)
   const maxF = parseFloat(maxFee.value)
-  const kw = q.value.trim().toLowerCase()
-  const arr = rankAll.value.filter((f) => {
-    if (type.value && f.t !== type.value) return false
-    if (Number.isFinite(minY) && !(f.r1y != null && f.r1y >= minY)) return false
-    if (Number.isFinite(maxF) && !(f.fee != null && f.fee <= maxF)) return false
-    if (kw && !(f.c.includes(kw) || f.n.toLowerCase().includes(kw))) return false
-    return true
+  const minQ = parseFloat(minQuality.value)
+  return filterAndSortRank(rankAll.value, {
+    type: type.value || undefined,
+    preset: preset.value || undefined,
+    keyword: q.value,
+    minR1y: Number.isFinite(minY) ? minY : undefined,
+    minR3y: Number.isFinite(min3) ? min3 : undefined,
+    maxFee: Number.isFinite(maxF) ? maxF : undefined,
+    minQuality: Number.isFinite(minQ) ? minQ : undefined,
+    sortKey: sortKey.value,
   })
-  const k = sortKey.value
-  const asc = k === 'fee'
-  arr.sort((a, b) => {
-    const av = a[k]; const bv = b[k]
-    if (av == null && bv == null) return 0
-    if (av == null) return 1
-    if (bv == null) return -1
-    return asc ? av - bv : bv - av
-  })
-  return arr
 })
 const rankedTop = computed(() => ranked.value.slice(0, 200))
-function metric(f: ScreenFund): number | null { return f[sortKey.value] }
+function metric(f: ScreenFund): number | null { return rankMetric(f, sortKey.value) }
+
+function pickPreset(id: ScreenPresetId) {
+  preset.value = id
+  if (id === 'qdii') type.value = 'QDII'
+  else if (id === 'bond') type.value = '债券型'
+  else if (id === 'broad' || id === 'sector') type.value = '指数型'
+}
 
 // ── 基金经理模式 ──
 const managersAll = ref<Manager[]>([])

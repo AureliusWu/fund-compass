@@ -5,8 +5,8 @@ import { showToast } from 'vant'
 import { getToken } from '@/utils/gist'
 import { useWatchlistStore } from '@/stores/watchlist'
 import { useFundsStore } from '@/stores/funds'
-import { getFunds, type FundListItem } from '@/api/client'
-import { pct, num, colorOf, signalColor } from '@/utils/format'
+import { getFunds, postPortfolioDecisions, type FundListItem, type DecisionResp } from '@/api/client'
+import { pct, num, colorOf, signalColor, actionColor } from '@/utils/format'
 import { fetchEstimates, latestNavMove, preferredDailyMove, type Estimate, type NavMove } from '@/utils/estimate'
 import StarRating from '@/components/StarRating.vue'
 import Chart from '@/components/Chart.vue'
@@ -17,6 +17,11 @@ interface Row {
   name: string; type: string | null; nav: number | null; ret1y: number | null
   signal: string; star: number | null; navMove: NavMove | null
 }
+
+const decisions = reactive<Record<string, DecisionResp>>({})
+const decisionsLoading = ref(false)
+const allocation = ref<import('@/api/client').PortfolioDecisionsResp['allocation'] | null>(null)
+const rebalance = ref<import('@/api/client').PortfolioDecisionsResp['rebalance']>([])
 
 const router = useRouter()
 const watch = useWatchlistStore()
@@ -35,10 +40,76 @@ const editCode = ref('')
 const editShares = ref('')
 const editCost = ref('')
 const editAccount = ref('')
+const editTargetWeight = ref('')
 const ACCOUNT_PRESETS = ['支付宝', '天天基金', '微信理财通', '蛋卷', '券商', '银行']
 const accountChips = computed(() => {
   const s = new Set<string>([...watch.accounts, ...ACCOUNT_PRESETS])
   return [...s]
+})
+
+async function loadDecisions() {
+  if (!watch.items.length) {
+    Object.keys(decisions).forEach((k) => delete decisions[k])
+    allocation.value = null
+    rebalance.value = []
+    return
+  }
+  decisionsLoading.value = true
+  try {
+    const weights = portfolioWeights()
+    const payload = watch.items.map((it) => {
+      const w = weights[it.code]
+      const item: { code: string; current_weight?: number; target_weight?: number } = { code: it.code }
+      if (w) {
+        item.current_weight = +w.current.toFixed(2)
+        item.target_weight = +w.target.toFixed(2)
+      }
+      return item
+    })
+    const resp = await postPortfolioDecisions(payload, portfolio.value.value)
+    Object.keys(decisions).forEach((k) => delete decisions[k])
+    for (const d of resp.decisions) decisions[d.code] = d
+    allocation.value = resp.allocation
+    rebalance.value = resp.rebalance
+  } catch { /* 后端未启动时静默 */ } finally {
+    decisionsLoading.value = false
+  }
+}
+
+/** 按 code 聚合跨账户持仓，计算当前/目标仓位 % */
+function portfolioWeights(): Record<string, { current: number; target: number }> {
+  const total = portfolio.value.value
+  const byCode: Record<string, { value: number; target: number | null }> = {}
+  for (const e of watch.entries) {
+    if (e.deleted || !(e.shares && e.shares > 0)) continue
+    const nav = rows[e.code]?.nav
+    if (nav == null) continue
+    const v = e.shares * nav
+    if (!byCode[e.code]) byCode[e.code] = { value: 0, target: e.target_weight ?? null }
+    byCode[e.code].value += v
+    if (e.target_weight != null) byCode[e.code].target = e.target_weight
+  }
+  const heldCodes = Object.keys(byCode)
+  const explicitTotal = heldCodes.reduce((sum, code) => sum + (byCode[code].target ?? 0), 0)
+  const unsetCount = heldCodes.filter((code) => byCode[code].target == null).length
+  const defaultTarget = unsetCount ? Math.max(0, 100 - explicitTotal) / unsetCount : 0
+  const out: Record<string, { current: number; target: number }> = {}
+  for (const code of heldCodes) {
+    const cur = total > 0 ? (byCode[code].value / total) * 100 : 0
+    out[code] = { current: cur, target: byCode[code].target ?? defaultTarget }
+  }
+  return out
+}
+
+const decisionSummary = computed(() => {
+  const groups: Record<string, string[]> = {}
+  for (const it of watch.items) {
+    const d = decisions[it.code]
+    if (!d) continue
+    if (!groups[d.action]) groups[d.action] = []
+    groups[d.action].push(rows[it.code]?.name || it.name || it.code)
+  }
+  return groups
 })
 
 async function loadOne(code: string, name: string | null) {
@@ -63,6 +134,7 @@ async function refresh() {
   // 盘中估值并发抓取（纯前端，不阻塞列表渲染）
   fetchEstimates(watch.items.map((i) => i.code)).then((m) => m.forEach((v, k) => { est[k] = v }))
   await Promise.all(watch.items.map((i) => loadOne(i.code, i.name)))
+  await loadDecisions()
   loading.value = false
   refreshing.value = false
 }
@@ -124,14 +196,18 @@ function openEdit(code: string) {
   editShares.value = e?.shares ? String(e.shares) : ''
   editCost.value = e?.cost ? String(e.cost) : ''
   editAccount.value = e?.account || ''
+  editTargetWeight.value = e?.target_weight != null ? String(e.target_weight) : ''
   editShow.value = true
 }
 function saveHolding() {
+  const tw = editTargetWeight.value.trim()
   watch.setHolding(
     editCode.value, Number(editShares.value) || 0, Number(editCost.value) || 0,
     rows[editCode.value]?.name, editAccount.value.trim() || undefined,
+    tw ? Number(tw) : undefined,
   )
   showToast('已保存持仓')
+  loadDecisions()
 }
 function accountOf(code: string) {
   return watch.entries.find((x) => x.code === code)?.account || ''
@@ -232,6 +308,33 @@ onMounted(refresh)
         </div>
       </template>
 
+      <!-- V6 今日决策摘要 -->
+      <div v-if="!loading && watch.items.length && Object.keys(decisionSummary).length" class="dec card">
+        <div class="dec-title">今日决策摘要</div>
+        <div v-if="decisionsLoading" class="dec-loading"><van-loading size="16" /> 加载决策…</div>
+        <div v-for="(names, action) in decisionSummary" :key="action" class="dec-row">
+          <span class="dec-act" :style="{ color: actionColor(action) }">{{ action }}</span>
+          <span class="dec-names">{{ names.join('、') }}</span>
+        </div>
+        <div class="dec-disc">数据辅助分析，不构成投资建议。</div>
+      </div>
+
+      <div v-if="!loading && allocation" class="dec card">
+        <div class="dec-title">组合校准</div>
+        <div class="alloc-line">
+          <span>当前 {{ allocation.current_total.toFixed(1) }}%</span>
+          <span>目标 {{ allocation.target_total.toFixed(1) }}%</span>
+          <span>现金 {{ allocation.target_cash.toFixed(1) }}%</span>
+        </div>
+        <div v-for="warning in allocation.warnings" :key="warning" class="alloc-warning">{{ warning }}</div>
+        <div v-for="row in rebalance.filter((x) => x.suggestion !== '维持').slice(0, 5)" :key="row.code" class="dec-row">
+          <span class="dec-act">{{ row.suggestion }}</span>
+          <span class="dec-names">{{ row.name }} · {{ pct(row.gap) }}</span>
+          <span v-if="row.amount != null" class="alloc-amount">约 {{ num(row.amount, 0) }} 元</span>
+        </div>
+        <div v-if="rebalance.length && rebalance.every((x) => x.suggestion === '维持')" class="dec-names">当前组合接近目标仓位。</div>
+      </div>
+
       <div v-if="loading" class="list-skeleton">
         <van-skeleton title :row="2" />
         <van-skeleton title :row="2" />
@@ -254,6 +357,9 @@ onMounted(refresh)
                 :title="dailyMoveOf(it.code)!.sourceNote"
               >{{ dailyMoveOf(it.code)!.label }} {{ pct(dailyMoveOf(it.code)!.change) }}</span>
               <span class="sig" :style="{ color: signalColor(rows[it.code]?.signal || '') }">{{ rows[it.code]?.signal || '…' }}</span>
+              <span v-if="decisions[it.code]" class="act" :style="{ color: actionColor(decisions[it.code].action) }">
+                {{ decisions[it.code].action }}
+              </span>
               <StarRating :star="rows[it.code]?.star ?? null" />
               <span v-if="sharesOf(it.code) && rows[it.code]?.nav != null" class="nav">
                 市值 {{ num(sharesOf(it.code)!.shares! * rows[it.code]!.nav!, 2) }}
@@ -275,6 +381,7 @@ onMounted(refresh)
       <div style="padding:8px 4px">
         <van-field v-model="editShares" type="number" label="份额" placeholder="0（0=仅关注）" />
         <van-field v-model="editCost" type="number" label="成本净值" placeholder="0.000" />
+        <van-field v-model="editTargetWeight" type="number" label="目标仓位%" placeholder="留空=等权分配" />
         <van-field v-model="editAccount" label="账户" placeholder="如 支付宝（可留空）" />
         <div class="acc-chips">
           <span v-for="a in accountChips" :key="a"
@@ -338,7 +445,18 @@ onMounted(refresh)
 .port-cap { font-size: 11px; color: var(--text-hint); text-align: center; }
 .wl-val { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
 .est-chg { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.sig { font-size: 14px; font-weight: 500; }
+.sig { font-size: 13px; font-weight: 500; }
+.act { font-size: 13px; font-weight: 600; }
+.dec { margin-bottom: 12px; }
+.dec-title { font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; }
+.dec-row { font-size: 12px; line-height: 1.6; margin: 4px 0; display: flex; gap: 8px; }
+.dec-act { font-weight: 600; white-space: nowrap; min-width: 64px; }
+.dec-names { color: var(--text-secondary); flex: 1; }
+.dec-disc { font-size: 11px; color: var(--text-hint); margin-top: 8px; }
+.dec-loading { font-size: 12px; color: var(--text-hint); margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+.alloc-line { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
+.alloc-warning { font-size: 12px; color: var(--danger); margin: 4px 0 8px; }
+.alloc-amount { font-size: 11px; color: var(--text-hint); white-space: nowrap; }
 .nav { font-size: 12px; color: var(--text-secondary); }
 .nav em { font-style: normal; margin-left: 4px; }
 .sync-title { font-size: 15px; font-weight: 600; margin-bottom: 6px; }

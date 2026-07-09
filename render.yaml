@@ -37,3 +37,5 @@ services:
         sync: false
       - key: NOTIFY_WEBHOOK_URL
         sync: false
+      - key: FUND_API_BASE
+        sync: false

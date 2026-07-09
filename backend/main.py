@@ -18,7 +18,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from database.db import init_db
 from service import eastmoney, repo
-from strategy import backtest, score_fund, timing_signal
+from strategy import backtest, decide_fund, score_fund, timing_signal
+from strategy.calibration import calibrate
+from strategy.portfolio import decide_portfolio
+from strategy.registry import registry_summary
 
 logging.basicConfig(
     level=logging.INFO,
@@ -90,6 +93,7 @@ def health() -> dict:
         "universe_import": {"mode": "manual", "running": False},
         "source": eastmoney.source_health(),
         "index_valuation": iv_info,
+        "strategy_registry": registry_summary(),
     }
 
 
@@ -129,22 +133,102 @@ def fund_backtest(detail: dict = Depends(fund_detail_dep)) -> dict:
     return {"code": detail["code"], "name": detail.get("name"), **backtest(detail)}
 
 
-@app.get("/api/fund/{code}/analyze")
-def fund_analyze(detail: dict = Depends(fund_detail_dep)) -> dict:
-    """一次性聚合：详情 + 评分 + 信号 + 回测，单次往返取齐详情页所需全部数据。
+@app.get("/api/fund/{code}/calibrate")
+def fund_calibrate(detail: dict = Depends(fund_detail_dep)) -> dict:
+    """训练/验证隔离的参数校准；只产出候选，不直接覆盖线上规则。"""
+    return {"code": detail["code"], "name": detail.get("name"), **calibrate(detail)}
 
-    详情取一次、净值历史解析一次，三块算法共享同份数据；前端详情页由原先四次串行
+
+@app.get("/api/strategy/registry")
+def strategy_registry() -> dict:
+    """当前线上参数、候选版本及其跨基金验证依据。"""
+    return registry_summary()
+
+
+@app.get("/api/fund/{code}/decision")
+def fund_decision(
+    detail: dict = Depends(fund_detail_dep),
+    target_weight: float | None = Query(None, ge=0, le=100),
+    current_weight: float | None = Query(None, ge=0, le=100),
+) -> dict:
+    """决策卡片：综合评分 + 择时 + 回测 → 可执行动作（V6-P0）。"""
+    holding = None
+    if target_weight is not None and current_weight is not None:
+        holding = {"target_weight": target_weight, "current_weight": current_weight}
+    return {**_meta(detail), **decide_fund(detail, holding)}
+
+
+@app.get("/api/fund/{code}/analyze")
+def fund_analyze(
+    detail: dict = Depends(fund_detail_dep),
+    target_weight: float | None = Query(None, ge=0, le=100),
+    current_weight: float | None = Query(None, ge=0, le=100),
+) -> dict:
+    """一次性聚合：详情 + 评分 + 信号 + 回测 + 决策，单次往返取齐详情页所需全部数据。
+
+    详情取一次、净值历史解析一次，各块算法共享同份数据；前端详情页由原先四次串行
     请求收敛为一次。各子对象保留 code/name/type，与独立端点的响应结构一致，便于复用类型。
     """
     meta = _meta(detail)
     nav = (detail.get("nav_history") or [])[-NAV_TAIL:]
+    holding = None
+    if target_weight is not None and current_weight is not None:
+        holding = {"target_weight": target_weight, "current_weight": current_weight}
+    score = score_fund(detail)
+    signal = timing_signal(detail)
+    bt = backtest(detail)
+    decision = decide_fund(detail, holding, score=score, signal=signal, backtest_result=bt)
     return {
         **meta,
         "detail": {**detail, "nav_history": nav},
-        "score": {**meta, **score_fund(detail)},
-        "signal": {**meta, **timing_signal(detail)},
-        "backtest": {"code": meta["code"], "name": meta["name"], **backtest(detail)},
+        "score": {**meta, **score},
+        "signal": {**meta, **signal},
+        "backtest": {"code": meta["code"], "name": meta["name"], **bt},
+        "decision": {**meta, **decision},
     }
+
+
+@app.post("/api/portfolio/decisions")
+def portfolio_decisions(payload: dict) -> dict:
+    """批量决策：自选列表一次返回各基金决策卡片（V6-P1）。
+
+    body: { "items": [{ "code": "510300", "current_weight": 5, "target_weight": 15 }] }
+    current_weight / target_weight 可选；缺省时 position_rule 仅给方向建议。
+    """
+    items = payload.get("items") or []
+    if not isinstance(items, list):
+        raise HTTPException(status_code=400, detail="items 需为数组")
+    cleaned = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        code = str(it.get("code", "")).strip()
+        if not re.fullmatch(r"\d{6}", code):
+            raise HTTPException(status_code=400, detail=f"无效基金代码: {code or '(空)'}")
+        row = {"code": code}
+        for k in ("current_weight", "target_weight"):
+            if it.get(k) is not None:
+                try:
+                    weight = float(it[k])
+                except (TypeError, ValueError) as ex:
+                    raise HTTPException(status_code=400, detail=f"{code} 的 {k} 需为数字") from ex
+                if weight < 0 or weight > 100:
+                    raise HTTPException(status_code=400, detail=f"{code} 的 {k} 需在 0-100 之间")
+                row[k] = weight
+        cleaned.append(row)
+    if not cleaned:
+        raise HTTPException(status_code=400, detail="items 不能为空")
+    if len(cleaned) > 50:
+        raise HTTPException(status_code=400, detail="单次最多 50 只基金")
+    portfolio_value = payload.get("portfolio_value")
+    if portfolio_value is not None:
+        try:
+            portfolio_value = float(portfolio_value)
+        except (TypeError, ValueError) as ex:
+            raise HTTPException(status_code=400, detail="portfolio_value 需为数字") from ex
+        if portfolio_value < 0:
+            raise HTTPException(status_code=400, detail="portfolio_value 不能为负数")
+    return decide_portfolio(cleaned, portfolio_value)
 
 
 @app.get("/api/watchlist")

@@ -6,6 +6,7 @@ import { useFundsStore } from '@/stores/funds'
 import { useWatchlistStore } from '@/stores/watchlist'
 import { pct, num, colorOf, signalColor } from '@/utils/format'
 import StarRating from '@/components/StarRating.vue'
+import DecisionCard from '@/components/DecisionCard.vue'
 import Chart from '@/components/Chart.vue'
 import DcaCalc from '@/components/DcaCalc.vue'
 import { fetchEstimate, latestNavMove, preferredDailyMove, type Estimate } from '@/utils/estimate'
@@ -13,7 +14,7 @@ import { getHoldings, type Holding } from '@/utils/holdings'
 import { templateInterpret, llmInterpret } from '@/utils/interpret'
 import { getAiConfig, setAiConfig, hasAiKey, providerDef, PROVIDERS, type AiConfig } from '@/utils/ai'
 import { findSimilar, type ScreenFund } from '@/utils/screener'
-import type { FundDetail, ScoreResp, SignalResp, BacktestResp } from '@/api/client'
+import type { FundDetail, ScoreResp, SignalResp, BacktestResp, DecisionResp } from '@/api/client'
 
 const route = useRoute()
 const router = useRouter()
@@ -25,6 +26,7 @@ const detail = ref<FundDetail | null>(null)
 const score = ref<ScoreResp | null>(null)
 const signal = ref<SignalResp | null>(null)
 const bt = ref<BacktestResp | null>(null)
+const decision = ref<DecisionResp | null>(null)
 const est = ref<Estimate | null>(null)
 const estDone = ref(false)
 const holdings = ref<Holding[]>([])
@@ -115,6 +117,7 @@ async function loadData(showInitialLoading = true) {
     score.value = a.score
     signal.value = a.signal
     bt.value = a.backtest
+    decision.value = a.decision
   } catch {
     error.value = '加载失败，后端是否已启动？'
   } finally {
@@ -230,6 +233,9 @@ async function toggleWatch() {
 
         <van-button class="report-btn" block plain icon="description" size="small"
           @click="router.push('/report/' + code)">生成体检报告</van-button>
+
+        <div class="sec">决策建议</div>
+        <DecisionCard v-if="decision" :decision="decision" />
 
         <div class="sec">智能解读</div>
         <div class="card interp" v-if="interp">

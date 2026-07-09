@@ -5,9 +5,10 @@
 - 月间组合收益 = w × 基金涨跌；基准为始终满仓持有。
 - 不计申赎费、不滑点。需要 ≥120 个净值点起步（MA120 等指标要历史）。
 """
+from strategy.registry import DEFAULT_WEIGHTS, active_weights
 from strategy.timing import timing_signal
 
-WEIGHT = {"买入": 1.0, "定投": 0.75, "持有": 0.5, "减仓": 0.25}
+WEIGHT = DEFAULT_WEIGHTS
 
 
 def _max_drawdown(curve):
@@ -19,7 +20,8 @@ def _max_drawdown(curve):
     return round(mdd * 100, 2)
 
 
-def backtest(detail):
+def backtest(detail, weights=None):
+    weights = weights or active_weights()
     navs = [(h["date"], h["nav"]) for h in (detail.get("nav_history") or []) if h.get("nav")]
     if len(navs) < 150:
         return {"available": False, "reason": "净值历史不足，无法回测"}
@@ -39,8 +41,14 @@ def backtest(detail):
     strat_curve, bench_curve, actions = [], [], []
     for k in range(len(pts) - 1):
         i, j = pts[k], pts[k + 1]
-        sig = timing_signal({"nav_history": [{"date": d, "nav": n} for d, n in navs[:i + 1]]})
-        w = WEIGHT.get(sig["signal"], 0.5)
+        # 透传 code/type，使回测中的估值层能用真实 PE/PB 映射（V6-P0）
+        sig = timing_signal({
+            "code": detail.get("code"),
+            "type": detail.get("type"),
+            "name": detail.get("name"),
+            "nav_history": [{"date": d, "nav": n} for d, n in navs[:i + 1]],
+        })
+        w = weights.get(sig["signal"], 0.5)
         ret = navs[j][1] / navs[i][1] - 1
         strat *= 1 + w * ret
         bench *= 1 + ret
@@ -59,4 +67,5 @@ def backtest(detail):
         "outperform": round(strat_ret - bench_ret, 2),
         "win_rate": round(wins / len(strat_curve) * 100, 1) if strat_curve else None,
         "actions": actions[-12:],
+        "weights": weights,
     }

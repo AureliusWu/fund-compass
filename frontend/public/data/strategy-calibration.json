@@ -1,0 +1,20 @@
+{
+  "updated_at": null,
+  "active": {
+    "version": "v1-default",
+    "weights": {
+      "买入": 1.0,
+      "定投": 0.75,
+      "持有": 0.5,
+      "减仓": 0.25
+    }
+  },
+  "candidate": null,
+  "summary": {
+    "sampled": 0,
+    "valid": 0,
+    "accepted": 0,
+    "passed": false
+  },
+  "funds": []
+}

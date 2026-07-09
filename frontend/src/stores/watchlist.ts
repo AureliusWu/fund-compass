@@ -154,19 +154,24 @@ export const useWatchlistStore = defineStore('watchlist', () => {
   const remove = (code: string, account?: string) => upsert(code, undefined, true, account)
   const toggle = (code: string, name?: string) => (has(code) ? remove(code) : add(code, name))
 
-  function setHolding(code: string, shares: number, cost: number, name?: string, account?: string) {
+  function setHolding(code: string, shares: number, cost: number, name?: string, account?: string, targetWeight?: number) {
     const id = entryId(code, account)
     const e = entries.value.find((x) => (x.id || entryId(x.code, x.account)) === id)
     if (e) {
       e.shares = shares
       e.cost = cost
       e.account = account
+      if (targetWeight != null && !Number.isNaN(targetWeight)) e.target_weight = targetWeight
       e.deleted = false
       e.updated_at = nowISO()
       e.id = id
       if (name) e.name = name
     } else {
-      entries.value.push({ id, code, name, shares, cost, account, updated_at: nowISO() })
+      entries.value.push({
+        id, code, name, shares, cost, account,
+        target_weight: targetWeight != null && !Number.isNaN(targetWeight) ? targetWeight : undefined,
+        updated_at: nowISO(),
+      })
     }
     entries.value = [...entries.value]
     persist()

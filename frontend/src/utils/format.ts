@@ -23,6 +23,16 @@ export function signalColor(sig: string): string {
   return 'var(--text-muted)'
 }
 
+/** V6 决策动作 → 颜色 */
+export function actionColor(action: string): string {
+  if (action === '分批买入') return 'var(--danger)'
+  if (action === '继续定投') return 'var(--teal, #4C7E67)'
+  if (action === '持有观望') return 'var(--text-muted)'
+  if (action === '停止加仓' || action === '部分观察') return 'var(--warn)'
+  if (action === '考虑替换') return 'var(--success)'
+  return 'var(--text-hint)'
+}
+
 export function stars(star: number | null | undefined): string {
   const s = star ?? 0
   return '★'.repeat(s) + '☆'.repeat(Math.max(0, 5 - s))

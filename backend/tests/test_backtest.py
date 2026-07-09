@@ -14,6 +14,14 @@ def test_backtest_runs(uptrend):
         assert k in r
     assert r["strategy"]["total_return"] is not None
     assert len(r["actions"]) <= 12
+    assert r["weights"]["定投"] == 0.75
+
+
+def test_backtest_accepts_custom_weights(uptrend):
+    custom = {"买入": 0.9, "定投": 0.8, "持有": 0.7, "减仓": 0.6}
+    r = backtest({"nav_history": uptrend}, custom)
+    assert r["available"] is True
+    assert r["weights"] == custom
 
 
 def test_max_drawdown_monotonic_up_is_zero():

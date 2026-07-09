@@ -40,12 +40,20 @@ jobs:
         env:
           PYTHONUNBUFFERED: '1'
         run: python tools/managers.py
+      - name: 跨基金校准策略参数
+        continue-on-error: true
+        env:
+          AUTO_PROMOTE_STRATEGY: 'true'
+          CALIBRATION_MIN_VALID: '12'
+          CALIBRATION_MAX_FUNDS: '30'
+          PYTHONUNBUFFERED: '1'
+        run: python tools/calibrate_strategy.py
       - name: 提交数据
         run: |
-          if [[ -n "$(git status --porcelain frontend/public/data)" ]]; then
+          if [[ -n "$(git status --porcelain frontend/public/data backend/data)" ]]; then
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add frontend/public/data
+            git add frontend/public/data backend/data
             git commit -m "chore: 富集持仓+排行数据"
             git push
           else
