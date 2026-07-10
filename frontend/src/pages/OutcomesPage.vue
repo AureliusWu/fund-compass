@@ -1,19 +1,40 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { getStrategyOutcomes, type OutcomeMetric, type StrategyOutcomesResp } from '@/api/client'
+import { getPortfolioOutcomes, getStrategyOutcomes, type OutcomeMetric, type PortfolioOutcomesResp, type StrategyOutcomesResp } from '@/api/client'
 import OverseasAccuracyPanel from '@/components/OverseasAccuracyPanel.vue'
+import Icon from '@/components/Icon.vue'
+import { loadOverseasAccuracy, type AccuracyReport } from '@/utils/overseasAccuracy'
+import { exportDecisionOutcomesCSV, exportOverseasAccuracyCSV } from '@/utils/export'
+import { colorOf } from '@/utils/format'
 
 const loading = ref(true)
 const error = ref('')
 const data = ref<StrategyOutcomesResp | null>(null)
 const dimension = ref<'action' | 'confidence' | 'type'>('action')
 const horizon = ref(20)
+const accuracy = ref<AccuracyReport | null>(null)
+const portfolio = ref<PortfolioOutcomesResp | null>(null)
+const exportOpen = ref(false)
+const exportActions = [{ name: '决策实盘 CSV', key: 'decisions' }, { name: '海外误差 CSV', key: 'overseas' }]
 
 onMounted(async () => {
-  try { data.value = await getStrategyOutcomes() }
+  try {
+    const [outcomes, overseas, portfolioOutcomes] = await Promise.all([
+      getStrategyOutcomes(), loadOverseasAccuracy(), getPortfolioOutcomes().catch(() => null),
+    ])
+    data.value = outcomes
+    accuracy.value = overseas
+    portfolio.value = portfolioOutcomes
+  }
   catch { error.value = '实盘结果暂时不可用' }
   finally { loading.value = false }
 })
+
+function onExport(action: { key: string }) {
+  if (action.key === 'decisions' && data.value) exportDecisionOutcomesCSV(data.value)
+  if (action.key === 'overseas' && accuracy.value) exportOverseasAccuracyCSV(accuracy.value)
+  exportOpen.value = false
+}
 
 const rows = computed(() => (
   (data.value?.breakdowns[dimension.value] || [])
@@ -31,7 +52,9 @@ function pct(value: number | null | undefined) {
 
 <template>
   <div class="page">
-    <van-nav-bar title="实盘验证" left-arrow @click-left="$router.back()" />
+    <van-nav-bar title="实盘验证" left-arrow @click-left="$router.back()">
+      <template #right><Icon name="export" :size="18" @click="exportOpen = true" /></template>
+    </van-nav-bar>
     <div class="page-body outcomes-page">
       <van-loading v-if="loading" class="center" />
       <van-empty v-else-if="error" :description="error" />
@@ -65,9 +88,19 @@ function pct(value: number | null | undefined) {
         <van-empty v-else description="该周期还没有成熟样本" />
         <div class="method-note">仅使用决策日之后公布的净值。少量样本只展示事实，不触发模型晋级。</div>
 
+        <section class="portfolio-outcomes" v-if="portfolio">
+          <div class="po-head"><b>组合建议结果</b><span>{{ portfolio.mature }} 成熟 · {{ portfolio.pending }} 等待</span></div>
+          <div v-for="item in portfolio.items.slice(0, 5)" :key="item.id" class="po-row">
+            <div><b>{{ item.snapshot_date }}</b><span>{{ item.items.length }} 只 · {{ item.strategy_version }}</span></div>
+            <div v-for="(outcome, key) in item.returns" :key="key"><span>{{ key }}日</span><b :style="{ color: colorOf(outcome.return) }">{{ pct(outcome.return) }}</b></div>
+          </div>
+          <div v-if="!portfolio.items.length" class="po-empty">暂无组合建议快照</div>
+        </section>
+
         <OverseasAccuracyPanel />
       </template>
     </div>
+    <van-action-sheet v-model:show="exportOpen" :actions="exportActions" cancel-text="取消" @select="onExport" />
   </div>
 </template>
 
@@ -88,6 +121,12 @@ function pct(value: number | null | undefined) {
 .result-name span, .metric span { display: block; color: var(--text-hint); font-size: 10px; margin-bottom: 3px; }
 .metric { text-align: right; min-width: 66px; }
 .method-note { padding: 12px 14px; color: var(--text-hint); font-size: 11px; line-height: 1.6; }
+.portfolio-outcomes { margin-top: 8px; background: var(--card-bg); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.po-head, .po-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 11px 14px; border-bottom: 1px solid var(--border); }
+.po-head b, .po-row b { color: var(--ink); font-size: 12px; }
+.po-head span, .po-row span { display: block; color: var(--text-hint); font-size: 10px; }
+.po-row > div:not(:first-child) { text-align: right; }
+.po-empty { padding: 18px 14px; color: var(--text-hint); font-size: 12px; text-align: center; }
 @media (max-width: 520px) {
   .result-row { grid-template-columns: minmax(105px, 1.4fr) repeat(2, minmax(72px, 1fr)); }
   .metric:nth-of-type(4), .metric:nth-of-type(5) { display: none; }

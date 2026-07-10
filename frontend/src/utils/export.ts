@@ -2,6 +2,8 @@
 
 import type { PeriodAttribution } from './attribution'
 import type { Snapshot } from './snapshots'
+import type { StrategyOutcomesResp } from '@/api/client'
+import type { AccuracyReport } from './overseasAccuracy'
 
 /** 生成 CSV 字符串（自动处理中文/逗号/引号转义） */
 export function toCSV(rows: Record<string, any>[]): string {
@@ -105,4 +107,33 @@ export function exportPeriodAttributionCSV(attr: PeriodAttribution): void {
     贡献占比: h.contribPct.toFixed(4) + '%',
   }))
   download(`司南基金_近30日归因_${dateStamp()}.csv`, toCSV(rows))
+}
+
+export function decisionOutcomesRows(data: StrategyOutcomesResp): Record<string, unknown>[] {
+  return data.items.flatMap((item) => Object.entries(item.returns).map(([horizon, result]) => ({
+    决策日期: item.decision_date, 代码: item.code, 名称: item.name, 类型: item.type,
+    动作: item.action, 置信度: item.confidence, 策略版本: item.strategy_version,
+    周期: `${horizon}日`, 结果日期: result.date, 收益率: result.return,
+    最大回撤: result.max_drawdown, 同类基准: result.benchmark_return ?? '',
+    同类样本: result.benchmark_samples ?? '', 同类超额: result.excess_return ?? '',
+  })))
+}
+
+export function overseasAccuracyRows(data: AccuracyReport): Record<string, unknown>[] {
+  return data.records.map((row) => ({
+    代码: row.code, 名称: row.name, 预测日期: row.prediction_date || '',
+    展示日期: row.display_date || '', 净值归属日: row.target_nav_date,
+    基准净值日: row.base_nav_date, 模型版本: row.model_version || '',
+    预测涨跌: row.predicted_change ?? '', 实际涨跌: row.actual_change ?? '',
+    误差: row.error ?? '', 状态: row.status, 等待天数: row.waiting_days ?? '',
+    结算说明: row.settlement_note || row.note || '',
+  }))
+}
+
+export function exportDecisionOutcomesCSV(data: StrategyOutcomesResp): void {
+  download(`司南基金_决策实盘_${dateStamp()}.csv`, toCSV(decisionOutcomesRows(data)))
+}
+
+export function exportOverseasAccuracyCSV(data: AccuracyReport): void {
+  download(`司南基金_海外估值误差_${dateStamp()}.csv`, toCSV(overseasAccuracyRows(data)))
 }

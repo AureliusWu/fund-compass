@@ -21,6 +21,7 @@ from service import eastmoney, repo
 from strategy import backtest, decide_fund, score_fund, timing_signal
 from strategy.calibration import calibrate
 from strategy.portfolio import decide_portfolio
+from strategy.portfolio_lab import analyze_portfolio
 from strategy.registry import registry_summary
 
 logging.basicConfig(
@@ -39,7 +40,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="司南基金 API", version="0.5.0", lifespan=lifespan)
+app = FastAPI(title="司南基金 API", version="0.6.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -231,6 +232,7 @@ def portfolio_decisions(payload: dict) -> dict:
     result = decide_portfolio(cleaned, portfolio_value)
     version = (registry_summary().get("active") or {}).get("version") or "unknown"
     repo.record_decisions(result["decisions"], version)
+    repo.record_portfolio_decision(cleaned, result["decisions"], version)
     return result
 
 
@@ -238,6 +240,68 @@ def portfolio_decisions(payload: dict) -> dict:
 def strategy_outcomes() -> dict:
     """历史决策在 5/20/60 个净值观测后的真实表现。"""
     return repo.decision_outcomes()
+
+
+@app.get("/api/strategy/portfolio-outcomes")
+def strategy_portfolio_outcomes() -> dict:
+    """组合建议快照在 20/60 个净值观测后的真实表现。"""
+    return repo.portfolio_decision_outcomes()
+
+
+@app.post("/api/portfolio/lab")
+def portfolio_lab(payload: dict) -> dict:
+    """组合历史回测、风险贡献与受约束再平衡建议。"""
+    items = payload.get("items") or []
+    if not isinstance(items, list) or not 1 <= len(items) <= 10:
+        raise HTTPException(status_code=400, detail="组合需包含 1-10 只基金")
+    cleaned, details = [], []
+    for item in items:
+        code = str((item or {}).get("code") or "").strip()
+        if not re.fullmatch(r"\d{6}", code):
+            raise HTTPException(status_code=400, detail=f"无效基金代码: {code or '(空)'}")
+        row = {"code": code}
+        for field in ("current_weight", "target_weight"):
+            try:
+                value = float(item.get(field, 0))
+            except (TypeError, ValueError) as ex:
+                raise HTTPException(status_code=400, detail=f"{code} 的 {field} 需为数字") from ex
+            if value < 0 or value > 100:
+                raise HTTPException(status_code=400, detail=f"{code} 的 {field} 需在 0-100 之间")
+            row[field] = value
+        cleaned.append(row)
+        try:
+            details.append(repo.get_detail(code))
+        except Exception as ex:
+            raise HTTPException(status_code=422, detail=f"{code} 数据不可用: {ex}") from ex
+    portfolio_value = payload.get("portfolio_value")
+    if portfolio_value is not None:
+        try:
+            portfolio_value = max(0.0, float(portfolio_value))
+        except (TypeError, ValueError) as ex:
+            raise HTTPException(status_code=400, detail="portfolio_value 需为数字") from ex
+    raw_assumptions = payload.get("assumptions") or {}
+    if not isinstance(raw_assumptions, dict):
+        raise HTTPException(status_code=400, detail="assumptions 需为对象")
+    assumption_ranges = {
+        "rebalance_fee": (0, 0.05), "annual_cash_yield": (0, 0.2),
+        "max_weight": (1, 100), "min_trade": (0, 20),
+    }
+    assumptions = {}
+    for key, value in raw_assumptions.items():
+        if key not in assumption_ranges:
+            continue
+        try:
+            number = float(value)
+        except (TypeError, ValueError) as ex:
+            raise HTTPException(status_code=400, detail=f"{key} 需为数字") from ex
+        low, high = assumption_ranges[key]
+        if number < low or number > high:
+            raise HTTPException(status_code=400, detail=f"{key} 需在 {low}-{high} 之间")
+        assumptions[key] = number
+    try:
+        return analyze_portfolio(details, cleaned, portfolio_value, assumptions)
+    except ValueError as ex:
+        raise HTTPException(status_code=422, detail=str(ex)) from ex
 
 
 @app.get("/api/watchlist")

@@ -99,7 +99,7 @@ def add_predictions(ledger: dict, registry: dict, quotes: dict[str, float], fund
 def settle_records(ledger: dict, details: dict[str, dict]) -> int:
     settled = 0
     for row in ledger.get("records", []):
-        if row.get("status") != "pending":
+        if row.get("status") not in ("pending", "stale", "market_closed"):
             continue
         history = {
             point.get("date"): _float(point.get("nav"))
@@ -117,15 +117,66 @@ def settle_records(ledger: dict, details: dict[str, dict]) -> int:
             "absolute_error": round(abs(error), 4),
             "direction_hit": (row["predicted_change"] >= 0) == (actual_change >= 0),
             "status": "settled",
+            "settlement_note": "按预测目标日精确匹配已公布净值",
         })
         settled += 1
     return settled
 
 
+def update_pending_states(ledger: dict, today: dt.date) -> None:
+    for row in ledger.get("records", []):
+        if row.get("status") not in ("pending", "stale", "market_closed"):
+            continue
+        try:
+            target = dt.date.fromisoformat(row["target_nav_date"])
+        except (KeyError, TypeError, ValueError):
+            row["status"] = "stale"
+            row["settlement_note"] = "目标净值日期无效，等待人工审计"
+            continue
+        waiting = max(0, (today - target).days)
+        row["waiting_days"] = waiting
+        if target.weekday() >= 5:
+            row["status"] = "market_closed"
+            row["settlement_note"] = "目标日为周末，不参与训练并等待人工确认"
+        elif waiting > 7:
+            row["status"] = "stale"
+            row["settlement_note"] = "超过 7 天仍无对应净值，不自动顺延配对"
+        else:
+            row["status"] = "pending"
+            row["settlement_note"] = "等待同一归属日净值公布"
+
+
+def percentile(values: list[float], ratio: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    position = (len(ordered) - 1) * ratio
+    lower = int(position)
+    upper = min(lower + 1, len(ordered) - 1)
+    weight = position - lower
+    return ordered[lower] * (1 - weight) + ordered[upper] * weight
+
+
+def window_metrics(rows: list[dict], size: int) -> dict | None:
+    selected = rows[-size:]
+    if not selected:
+        return None
+    errors = [float(row["error"]) for row in selected]
+    return {
+        "samples": len(selected),
+        "mae": round(sum(abs(value) for value in errors) / len(errors), 3),
+        "bias": round(sum(errors) / len(errors), 3),
+        "direction_accuracy": round(sum(bool(row["direction_hit"]) for row in selected) / len(selected) * 100, 1),
+    }
+
+
 def summarize(ledger: dict, registry: dict) -> dict:
     output = {}
     for code, entry in registry["models"].items():
-        rows = [row for row in ledger.get("records", []) if row.get("code") == code and row.get("status") == "settled"]
+        rows = sorted(
+            [row for row in ledger.get("records", []) if row.get("code") == code and row.get("status") == "settled"],
+            key=lambda row: row["target_nav_date"],
+        )
         errors = [float(row["error"]) for row in rows]
         samples = len(rows)
         mae = sum(abs(value) for value in errors) / samples if samples else None
@@ -141,6 +192,21 @@ def summarize(ledger: dict, registry: dict) -> dict:
             "bias": round(sum(errors) / samples, 3) if samples else None,
             "direction_accuracy": round(sum(bool(row["direction_hit"]) for row in rows) / samples * 100, 1) if samples else None,
             "error_band": round(p80, 3) if p80 is not None else None,
+            "error_percentiles": {
+                "p50": round(percentile(sorted_abs, 0.5), 3) if sorted_abs else None,
+                "p80": round(percentile(sorted_abs, 0.8), 3) if sorted_abs else None,
+                "p95": round(percentile(sorted_abs, 0.95), 3) if sorted_abs else None,
+            },
+            "rolling_5": window_metrics(rows, 5),
+            "rolling_20": window_metrics(rows, 20),
+            "pending": sum(
+                row.get("code") == code and row.get("status") == "pending"
+                for row in ledger.get("records", [])
+            ),
+            "stale": sum(
+                row.get("code") == code and row.get("status") in ("stale", "market_closed")
+                for row in ledger.get("records", [])
+            ),
             "model_version": entry["active"]["version"],
         }
     return output
@@ -191,6 +257,7 @@ def main() -> None:
         except Exception as ex:
             print(f"fundgz unavailable {code}: {ex}")
     written = add_predictions(ledger, registry, quotes, fund_data, now)
+    update_pending_states(ledger, now.date())
     ledger["updated_at"] = now.isoformat(timespec="seconds")
     ledger["summary"] = summarize(ledger, registry)
     ledger["records"] = ledger.get("records", [])[-1000:]

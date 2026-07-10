@@ -15,6 +15,7 @@ def load(name):
 
 accuracy = load("overseas_accuracy")
 calibration = load("calibrate_overseas")
+audit_module = load("audit_overseas_accuracy")
 
 
 def test_settle_pairs_exact_nav_date_only():
@@ -34,6 +35,33 @@ def test_settle_pairs_exact_nav_date_only():
     assert ledger["records"][0]["actual_change"] == -8.0085
     assert ledger["records"][0]["status"] == "settled"
     assert ledger["records"][1]["status"] == "pending"
+
+
+def test_pending_state_never_rolls_forward_to_next_nav():
+    import datetime as dt
+    ledger = {"records": [
+        {"code": "A", "target_nav_date": "2026-07-01", "status": "pending"},
+        {"code": "B", "target_nav_date": "2026-07-05", "status": "pending"},
+    ]}
+    accuracy.update_pending_states(ledger, dt.date(2026, 7, 10))
+    assert ledger["records"][0]["status"] == "stale"
+    assert ledger["records"][0]["waiting_days"] == 9
+    assert ledger["records"][1]["status"] == "market_closed"
+
+
+def test_summary_has_rolling_windows_and_error_percentiles():
+    rows = []
+    for i in range(1, 7):
+        rows.append({
+            "code": "X", "target_nav_date": f"2026-01-{i:02d}", "status": "settled",
+            "error": float(i), "direction_hit": i % 2 == 0,
+        })
+    registry = {"models": {"X": {"active": {"version": "v1"}, "governance": {"status": "healthy"}}}}
+    summary = accuracy.summarize({"records": rows}, registry)["X"]
+    assert summary["rolling_5"]["samples"] == 5
+    assert summary["rolling_20"]["samples"] == 6
+    assert summary["error_percentiles"]["p50"] == 3.5
+    assert summary["error_percentiles"]["p95"] == 5.75
 
 
 def test_calibration_keeps_time_holdout_and_rejects_small_sample():
@@ -72,3 +100,17 @@ def test_drift_requires_sustained_recent_error_and_low_direction_hit():
     assert degraded is True
     assert evidence["recent_mae"] == 1.2
     assert evidence["recent_direction_accuracy"] == 0.0
+
+
+def test_audit_blocks_duplicates_but_only_warns_on_stale():
+    ledger = {"records": [{
+        "code": "012920", "prediction_date": "2026-01-02", "target_nav_date": "2026-01-02",
+        "base_nav_date": "2026-01-01", "model_version": "v1", "status": "stale",
+    }, {
+        "code": "012920", "prediction_date": "2026-01-02", "target_nav_date": "2026-01-02",
+        "base_nav_date": "2026-01-01", "model_version": "v1", "status": "pending",
+    }]}
+    result = audit_module.audit(ledger, {"models": {}})
+    assert result["status"] == "failed"
+    assert any("重复预测" in error for error in result["errors"])
+    assert any("超过 7 天" in warning for warning in result["warnings"])

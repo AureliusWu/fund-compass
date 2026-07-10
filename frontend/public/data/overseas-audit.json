@@ -1,0 +1,12 @@
+{
+  "status": "healthy",
+  "errors": [],
+  "warnings": [],
+  "stats": {
+    "records": 2,
+    "statuses": {
+      "observed_only": 2
+    }
+  },
+  "updated_at": "2026-07-10T09:26:11+08:00"
+}

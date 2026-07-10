@@ -135,6 +135,14 @@ export interface StrategyOutcomesResp {
   mature: number
   pending: number
   summary: OutcomeMetric[]
+  items: {
+    id: number; code: string; name: string; type: string; decision_date: string
+    action: string; confidence: string; strategy_version: string
+    returns: Record<string, {
+      date: string; return: number; max_drawdown: number
+      benchmark_return?: number; excess_return?: number; benchmark_samples?: number
+    }>
+  }[]
   breakdowns: {
     strategy_version: OutcomeMetric[]
     action: OutcomeMetric[]
@@ -195,6 +203,49 @@ export const postPortfolioDecisions = (items: PortfolioDecisionItem[], portfolio
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ items, portfolio_value: portfolioValue }),
   })
+
+export interface PortfolioLabResp {
+  backtest: {
+    available: boolean; start: string; end: string; points: number
+    strategy: BtSeries & { annual_return: number; annual_volatility: number }
+    benchmark: BtSeries & { annual_return: number; annual_volatility: number }
+    cash: BtSeries & { annual_return: number; annual_volatility: number }
+    turnover: number; friction_cost: number
+    assumptions: { rebalance_fee: number; annual_cash_yield: number; max_weight: number; min_trade: number }
+  }
+  risk: {
+    annual_volatility: number; effective_holdings: number; correlation_concentration: number
+    contributions: { code: string; name: string; weight: number; risk_contribution: number; annual_volatility: number }[]
+  }
+  rebalance: {
+    turnover: number; estimated_cost: number | null
+    risk_change: { current_volatility: number; suggested_volatility: number; delta: number }
+    constraints: { max_weight: number; effective_max_weight: number; min_trade: number }
+    actions: {
+      code: string; name: string; current_weight: number; suggested_weight: number
+      delta: number; action: string; amount: number | null; reason: string
+    }[]
+  }
+  stress: { name: string; return: number; pnl: number | null }[]
+}
+export const postPortfolioLab = (
+  items: { code: string; current_weight: number; target_weight: number }[],
+  portfolioValue?: number,
+) => req<PortfolioLabResp>('/portfolio/lab', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ items, portfolio_value: portfolioValue }),
+})
+
+export interface PortfolioOutcomesResp {
+  total: number; mature: number; pending: number
+  items: {
+    id: number; snapshot_date: string; strategy_version: string
+    items: { code: string; name: string; weight: number; base_nav: number; base_date: string; action: string }[]
+    returns: Record<string, { date: string; return: number; components: number }>
+  }[]
+}
+export const getPortfolioOutcomes = () => req<PortfolioOutcomesResp>('/strategy/portfolio-outcomes')
 
 // 聚合分析：一次往返取齐详情 + 评分 + 信号 + 回测 + 决策，详情页据此把四次请求收敛为一次。
 export interface AnalyzeResp {

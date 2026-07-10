@@ -27,6 +27,8 @@
 - **决策卡片（V6）**：综合评分 + 择时 + 回测 → 分批买入 / 继续定投 / 持有观望等可执行动作；自选页批量决策摘要；14:30 推送可升级为决策摘要（配置 `FUND_API_BASE`）。
 - **受约束自迭代回测**：单基金训练/留出验证、跨基金聚合门槛、参数版本注册表与自动回滚；只有满足样本数、支持率、超额收益和回撤约束的候选才会晋级。
 - **实盘结果闭环（V8）**：决策按动作、置信度、基金类型统计 5/20/60 日命中率、收益、同类超额和回撤，原始决策不可事后改写。
+- **证据质量监控（V9）**：海外净值日期状态机、同类基准 leave-one-out、滚动误差分位、账本审计告警与可审计 CSV 导出。
+- **组合实验室（V10）**：多基金共同历史回测、风险贡献、有效持仓数、压力情景和受约束再平衡；组合建议按 20/60 日结果留痕。
 - 指数 PE/PB 估值分位与净值代理降级。
 - 基金对比、回测实验室、体检报告。
 - 自选与持仓、跨账户资产、大类配置、持仓穿透。
@@ -75,6 +77,8 @@ npm run build
 - `GET /api/strategy/registry`
 - `GET /api/strategy/outcomes`
 - `POST /api/portfolio/decisions`
+- `POST /api/portfolio/lab`
+- `GET /api/strategy/portfolio-outcomes`
 - `GET / POST / DELETE /api/watchlist`
 - `POST /api/admin/refresh-universe`
 

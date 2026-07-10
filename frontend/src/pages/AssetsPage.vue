@@ -6,6 +6,7 @@ import { useFundsStore } from '@/stores/funds'
 import { fetchEstimates, latestNavMove, preferredDailyMove, type Estimate, type NavMove } from '@/utils/estimate'
 import { pct, num, colorOf } from '@/utils/format'
 import Chart from '@/components/Chart.vue'
+import Icon from '@/components/Icon.vue'
 import { computeAttribution, computePeriodAttribution } from '@/utils/attribution'
 import { exportHoldingsCSV, exportPeriodAttributionCSV, exportSnapshotsCSV } from '@/utils/export'
 import { loadSnapshots, takeSnapshot, takeDailySnapshot, buildSnapChart } from '@/utils/snapshots'
@@ -271,7 +272,9 @@ onMounted(refresh)
 
 <template>
   <div class="page">
-    <van-nav-bar title="资产" />
+    <van-nav-bar title="资产">
+      <template #right><Icon name="trend" :size="18" @click="router.push('/portfolio-lab')" /></template>
+    </van-nav-bar>
     <div class="page-body">
       <van-loading v-if="loading" style="text-align:center;padding:40px" />
       <van-empty v-else-if="holdings.length === 0 && manualAssets.length === 0"

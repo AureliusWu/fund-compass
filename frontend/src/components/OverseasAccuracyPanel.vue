@@ -32,6 +32,14 @@ const value = (n: number | null, suffix = '%') => n == null ? '--' : `${n.toFixe
         <div><span>方向命中</span><b>{{ value(fund.summary.direction_accuracy) }}</b></div>
         <div><span>误差区间</span><b>{{ fund.summary.error_band == null ? '--' : '±' + value(fund.summary.error_band) }}</b></div>
       </div>
+      <div class="trend-row" v-if="fund.summary.rolling_5 || fund.summary.rolling_20">
+        <span>近5次 MAE {{ value(fund.summary.rolling_5?.mae ?? null) }}</span>
+        <span>近20次 MAE {{ value(fund.summary.rolling_20?.mae ?? null) }}</span>
+        <span>P95 {{ value(fund.summary.error_percentiles?.p95 ?? null) }}</span>
+      </div>
+      <div class="quality-row" v-if="(fund.summary.pending || 0) + (fund.summary.stale || 0) > 0">
+        待结算 {{ fund.summary.pending || 0 }} · 异常等待 {{ fund.summary.stale || 0 }}
+      </div>
       <div v-if="fund.anomaly" class="anomaly">
         {{ fund.anomaly.display_date }} 可见净值对应 {{ fund.anomaly.target_nav_date }}：{{ value(fund.anomaly.actual_change ?? null) }}
       </div>
@@ -53,4 +61,6 @@ const value = (n: number | null, suffix = '%') => n == null ? '--' : `${n.toFixe
 .accuracy-metrics span { color: var(--text-hint); font-size: 10px; }
 .accuracy-metrics b { color: var(--ink); font-size: 13px; margin-top: 3px; }
 .anomaly { margin-top: 10px; color: var(--text-muted); font-size: 11px; line-height: 1.5; }
+.trend-row { display: flex; flex-wrap: wrap; gap: 5px 14px; margin-top: 10px; color: var(--text-muted); font-size: 11px; }
+.quality-row { margin-top: 7px; color: var(--warn); font-size: 11px; }
 </style>

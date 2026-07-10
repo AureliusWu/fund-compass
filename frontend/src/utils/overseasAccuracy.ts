@@ -8,7 +8,13 @@ export interface AccuracySummary {
   bias: number | null
   direction_accuracy: number | null
   error_band: number | null
+  error_percentiles?: { p50: number | null; p80: number | null; p95: number | null }
+  rolling_5?: AccuracyWindow | null
+  rolling_20?: AccuracyWindow | null
+  pending?: number
+  stale?: number
 }
+export interface AccuracyWindow { samples: number; mae: number; bias: number; direction_accuracy: number }
 export interface AccuracyRecord {
   code: string
   name: string
@@ -22,6 +28,8 @@ export interface AccuracyRecord {
   status: string
   model_version?: string
   note?: string
+  waiting_days?: number
+  settlement_note?: string
 }
 export interface AccuracyReport {
   updated_at: string

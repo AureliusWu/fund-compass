@@ -1,5 +1,6 @@
 """数据仓储：universe 导入、列表查询、详情缓存（SQLite）。"""
 import logging
+import json
 import statistics
 from datetime import datetime, timedelta, timezone
 
@@ -281,20 +282,27 @@ def decision_outcomes(horizons=(5, 20, 60)) -> dict:
     finally:
         conn.close()
 
-    # 以同类型、同周期的真实样本均值作横截面对照；样本不足时只展示绝对收益。
-    benchmark_groups: dict[tuple[str, str], list[float]] = {}
+    # 同类型、相近决策日期、相同周期的 leave-one-out 横截面对照。
     for row in results:
         fund_type = row.get("type") or "未知"
         for horizon, outcome in row["returns"].items():
-            benchmark_groups.setdefault((fund_type, horizon), []).append(outcome["return"])
-    for row in results:
-        fund_type = row.get("type") or "未知"
-        for horizon, outcome in row["returns"].items():
-            peers = benchmark_groups[(fund_type, horizon)]
+            decision_date = datetime.fromisoformat(row["decision_date"]).date()
+            peers = []
+            for peer in results:
+                if peer["id"] == row["id"] or (peer.get("type") or "未知") != fund_type:
+                    continue
+                peer_outcome = peer["returns"].get(horizon)
+                if not peer_outcome:
+                    continue
+                peer_date = datetime.fromisoformat(peer["decision_date"]).date()
+                if abs((peer_date - decision_date).days) <= 7:
+                    peers.append(peer_outcome["return"])
             if len(peers) >= 2:
                 benchmark = statistics.fmean(peers)
                 outcome["benchmark_return"] = round(benchmark, 2)
                 outcome["excess_return"] = round(outcome["return"] - benchmark, 2)
+                outcome["benchmark_samples"] = len(peers)
+                outcome["benchmark_method"] = "same-type ±7d leave-one-out"
 
     groups: dict[tuple[str, str, str], list[float]] = {}
     positive_actions = {"分批买入", "继续定投"}
@@ -374,4 +382,77 @@ def decision_outcomes(horizons=(5, 20, 60)) -> dict:
             "confidence": breakdown("confidence"),
             "type": breakdown("type"),
         },
+    }
+
+
+def record_portfolio_decision(items: list[dict], decisions: list[dict], strategy_version: str) -> int:
+    """保存组合建议时点的成分、权重和各自最新净值；同日同版本不可覆盖。"""
+    decision_map = {row.get("code"): row for row in decisions}
+    snapshot = []
+    for item in items:
+        decision = decision_map.get(item.get("code")) or {}
+        weight = item.get("current_weight")
+        if weight is None or float(weight) <= 0 or not decision.get("as_of_nav") or not decision.get("as_of_date"):
+            continue
+        snapshot.append({
+            "code": item["code"], "name": decision.get("name"), "weight": float(weight),
+            "base_nav": float(decision["as_of_nav"]), "base_date": decision["as_of_date"],
+            "action": decision.get("action"),
+        })
+    total = sum(row["weight"] for row in snapshot)
+    if not snapshot or total <= 0:
+        return 0
+    for row in snapshot:
+        row["weight"] = row["weight"] / total
+    now = _now()
+    conn = get_conn()
+    try:
+        before = conn.total_changes
+        conn.execute(
+            """INSERT OR IGNORE INTO portfolio_decision_history
+            (snapshot_date,strategy_version,items_json,created_at) VALUES (?,?,?,?)""",
+            (now.date().isoformat(), strategy_version, json.dumps(snapshot, ensure_ascii=False), now.isoformat(timespec="seconds")),
+        )
+        conn.commit()
+        return conn.total_changes - before
+    finally:
+        conn.close()
+
+
+def portfolio_decision_outcomes(horizons=(20, 60)) -> dict:
+    """按每个成分决策后第 N 个净值观测计算组合收益，不改写原始快照。"""
+    conn = get_conn()
+    try:
+        snapshots = [dict(row) for row in conn.execute(
+            "SELECT * FROM portfolio_decision_history ORDER BY snapshot_date DESC"
+        ).fetchall()]
+        results = []
+        for snapshot in snapshots:
+            items = json.loads(snapshot.pop("items_json"))
+            returns = {}
+            for horizon in horizons:
+                parts, dates = [], []
+                for item in items:
+                    future = conn.execute(
+                        "SELECT date,nav FROM nav_history WHERE code=? AND date>? ORDER BY date LIMIT ?",
+                        (item["code"], item["base_date"], horizon),
+                    ).fetchall()
+                    if len(future) < horizon:
+                        break
+                    point = future[horizon - 1]
+                    parts.append(item["weight"] * (point["nav"] / item["base_nav"] - 1))
+                    dates.append(point["date"])
+                if len(parts) == len(items):
+                    returns[str(horizon)] = {
+                        "date": max(dates), "return": round(sum(parts) * 100, 2),
+                        "components": len(parts),
+                    }
+            results.append({**snapshot, "items": items, "returns": returns})
+    finally:
+        conn.close()
+    return {
+        "total": len(results),
+        "mature": sum(bool(row["returns"]) for row in results),
+        "pending": sum(not row["returns"] for row in results),
+        "items": results,
     }

@@ -23,6 +23,12 @@ def test_decision_outcomes_are_forward_only(monkeypatch, tmp_path):
                 ("000002", "2026-01-04", 0.97),
                 ("000002", "2026-01-05", 0.96),
                 ("000002", "2026-01-06", 0.95),
+                ("000003", "2026-01-01", 1.0),
+                ("000003", "2026-01-02", 1.00),
+                ("000003", "2026-01-03", 1.00),
+                ("000003", "2026-01-04", 1.00),
+                ("000003", "2026-01-05", 1.00),
+                ("000003", "2026-01-06", 1.00),
             ],
         )
         conn.commit()
@@ -47,6 +53,11 @@ def test_decision_outcomes_are_forward_only(monkeypatch, tmp_path):
         "as_of_date": "2026-01-01", "as_of_nav": 1.0,
         "action": "停止加仓", "confidence": "高",
     }], "v1")
+    repo.record_decisions([{
+        "code": "000003", "name": "第二只同类", "type": "混合型",
+        "as_of_date": "2026-01-01", "as_of_nav": 1.0,
+        "action": "持有观望", "confidence": "中",
+    }], "v1")
     result = repo.decision_outcomes(horizons=(5,))
 
     assert written == 1
@@ -55,8 +66,9 @@ def test_decision_outcomes_are_forward_only(monkeypatch, tmp_path):
     first = next(row for row in result["items"] if row["code"] == "000001")
     assert first["returns"]["5"]["return"] == 5.0
     assert first["returns"]["5"]["max_drawdown"] == 0.0
-    assert first["returns"]["5"]["excess_return"] == 5.0
-    assert result["mature"] == 2
+    assert first["returns"]["5"]["excess_return"] == 7.5
+    assert first["returns"]["5"]["benchmark_samples"] == 2
+    assert result["mature"] == 3
     assert result["pending"] == 0
     assert result["breakdowns"]["confidence"][0]["horizon"] == 5
     assert all(row["hit_rate"] == 100.0 for row in result["summary"])

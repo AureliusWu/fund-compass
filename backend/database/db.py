@@ -65,6 +65,16 @@ CREATE TABLE IF NOT EXISTS decision_history (
   UNIQUE(code, decision_date, strategy_version)
 );
 CREATE INDEX IF NOT EXISTS idx_decision_history_date ON decision_history(decision_date);
+
+CREATE TABLE IF NOT EXISTS portfolio_decision_history (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  snapshot_date    TEXT NOT NULL,
+  strategy_version TEXT NOT NULL,
+  items_json       TEXT NOT NULL,
+  created_at       TEXT NOT NULL,
+  UNIQUE(snapshot_date, strategy_version)
+);
+CREATE INDEX IF NOT EXISTS idx_portfolio_decision_date ON portfolio_decision_history(snapshot_date);
 """
 
 
