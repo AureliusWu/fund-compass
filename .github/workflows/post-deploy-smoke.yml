@@ -11,13 +11,13 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      FUND_API_BASE: ${{ secrets.FUND_API_BASE }}
     steps:
       - name: 检查 GitHub Pages
         run: curl --fail --show-error --retry 4 --retry-delay 10 https://aureliuswu.github.io/fund-compass/
       - name: 检查后端健康与策略注册表
-        if: ${{ secrets.FUND_API_BASE != '' }}
-        env:
-          FUND_API_BASE: ${{ secrets.FUND_API_BASE }}
+        if: ${{ env.FUND_API_BASE != '' }}
         run: |
           curl --fail --show-error --retry 4 --retry-delay 10 "$FUND_API_BASE/api/health"
           curl --fail --show-error --retry 4 --retry-delay 10 "$FUND_API_BASE/api/strategy/registry"

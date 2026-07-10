@@ -117,6 +117,33 @@ export interface CalibrationResp {
 }
 export const getCalibration = (code: string) => req<CalibrationResp>(`/fund/${code}/calibrate`)
 
+export interface OutcomeMetric {
+  horizon: number
+  samples: number
+  average_return: number
+  hit_rate: number
+  average_excess: number | null
+  average_drawdown: number
+  worst_drawdown?: number
+  strategy_version?: string
+  action?: string
+  confidence?: string
+  type?: string
+}
+export interface StrategyOutcomesResp {
+  total: number
+  mature: number
+  pending: number
+  summary: OutcomeMetric[]
+  breakdowns: {
+    strategy_version: OutcomeMetric[]
+    action: OutcomeMetric[]
+    confidence: OutcomeMetric[]
+    type: OutcomeMetric[]
+  }
+}
+export const getStrategyOutcomes = () => req<StrategyOutcomesResp>('/strategy/outcomes')
+
 export interface DecisionResp {
   code: string; name: string; type?: string | null
   action: string

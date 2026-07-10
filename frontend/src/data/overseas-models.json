@@ -1,0 +1,273 @@
+{
+  "schema": 1,
+  "updated_at": "2026-07-10T09:04:27+08:00",
+  "models": {
+    "539002": {
+      "name": "建信新兴市场混合(QDII)A",
+      "active": {
+        "version": "v1-2026q1-holdings",
+        "label": "2026Q1重仓穿透模型",
+        "min_weight": 30,
+        "scale": 1.0,
+        "bias": 0.0,
+        "legs": [
+          {
+            "code": "usTSM",
+            "weight": 10.26
+          },
+          {
+            "code": "usNVDA",
+            "weight": 10.14
+          },
+          {
+            "code": "usEWY",
+            "weight": 8.65
+          },
+          {
+            "code": "usAVGO",
+            "weight": 8.52
+          },
+          {
+            "code": "usEWY",
+            "weight": 6.76
+          },
+          {
+            "code": "usSNDK",
+            "weight": 4.91
+          },
+          {
+            "code": "usGLW",
+            "weight": 4.29
+          },
+          {
+            "code": "usWDC",
+            "weight": 3.73
+          },
+          {
+            "code": "usLITE",
+            "weight": 3.58
+          },
+          {
+            "code": "usMPWR",
+            "weight": 3.49
+          }
+        ],
+        "fallback": {
+          "label": "半导体+韩国兜底模型",
+          "min_weight": 70,
+          "scale": 1.0,
+          "bias": 0.0,
+          "legs": [
+            {
+              "code": "usSMH",
+              "weight": 70
+            },
+            {
+              "code": "usEWY",
+              "weight": 20
+            },
+            {
+              "code": "usEEM",
+              "weight": 10
+            }
+          ]
+        }
+      },
+      "candidate": {
+        "version": "candidate-20260710",
+        "created_at": "2026-07-10T09:04:27+08:00",
+        "status": "collecting",
+        "samples": 0,
+        "required": 20
+      },
+      "history": [],
+      "governance": {
+        "status": "collecting",
+        "min_samples": 20,
+        "poor_cycles": 0,
+        "drift_evidence": {
+          "samples": 0,
+          "reason": "insufficient"
+        }
+      }
+    },
+    "012920": {
+      "name": "易方达全球成长精选混合(QDII)人民币A",
+      "active": {
+        "version": "v1-2026q1-style",
+        "label": "2026Q1风格因子模型",
+        "min_weight": 100,
+        "scale": 1.4,
+        "bias": 0.0,
+        "legs": [
+          {
+            "code": "usQQQ",
+            "weight": 45
+          },
+          {
+            "code": "usSOXX",
+            "weight": 30
+          },
+          {
+            "code": "sh000300",
+            "weight": 25
+          }
+        ],
+        "fallback": {
+          "label": "2026Q1重仓穿透模型",
+          "min_weight": 25,
+          "scale": 1.0,
+          "bias": 0.0,
+          "legs": [
+            {
+              "code": "usTSM",
+              "weight": 8.88
+            },
+            {
+              "code": "usLITE",
+              "weight": 8.68
+            },
+            {
+              "code": "sz300502",
+              "weight": 6.02
+            },
+            {
+              "code": "usGLW",
+              "weight": 4.67
+            },
+            {
+              "code": "usAXTI",
+              "weight": 4.67
+            },
+            {
+              "code": "sz300308",
+              "weight": 4.67
+            },
+            {
+              "code": "sh688498",
+              "weight": 4.49
+            },
+            {
+              "code": "usTSEM",
+              "weight": 3.72
+            },
+            {
+              "code": "usGOOGL",
+              "weight": 3.36
+            },
+            {
+              "code": "sz002384",
+              "weight": 2.67
+            }
+          ]
+        }
+      },
+      "candidate": {
+        "version": "candidate-20260710",
+        "created_at": "2026-07-10T09:04:27+08:00",
+        "status": "collecting",
+        "samples": 0,
+        "required": 20
+      },
+      "history": [],
+      "governance": {
+        "status": "collecting",
+        "min_samples": 20,
+        "poor_cycles": 0,
+        "drift_evidence": {
+          "samples": 0,
+          "reason": "insufficient"
+        }
+      }
+    },
+    "018147": {
+      "name": "建信新兴市场混合(QDII)C",
+      "active": {
+        "version": "v1-2026q1-holdings",
+        "label": "2026Q1重仓穿透模型",
+        "min_weight": 30,
+        "scale": 1.0,
+        "bias": 0.0,
+        "legs": [
+          {
+            "code": "usTSM",
+            "weight": 10.26
+          },
+          {
+            "code": "usNVDA",
+            "weight": 10.14
+          },
+          {
+            "code": "usEWY",
+            "weight": 8.65
+          },
+          {
+            "code": "usAVGO",
+            "weight": 8.52
+          },
+          {
+            "code": "usEWY",
+            "weight": 6.76
+          },
+          {
+            "code": "usSNDK",
+            "weight": 4.91
+          },
+          {
+            "code": "usGLW",
+            "weight": 4.29
+          },
+          {
+            "code": "usWDC",
+            "weight": 3.73
+          },
+          {
+            "code": "usLITE",
+            "weight": 3.58
+          },
+          {
+            "code": "usMPWR",
+            "weight": 3.49
+          }
+        ],
+        "fallback": {
+          "label": "半导体+韩国兜底模型",
+          "min_weight": 70,
+          "scale": 1.0,
+          "bias": 0.0,
+          "legs": [
+            {
+              "code": "usSMH",
+              "weight": 70
+            },
+            {
+              "code": "usEWY",
+              "weight": 20
+            },
+            {
+              "code": "usEEM",
+              "weight": 10
+            }
+          ]
+        }
+      },
+      "candidate": {
+        "version": "candidate-20260710",
+        "created_at": "2026-07-10T09:04:27+08:00",
+        "status": "collecting",
+        "samples": 0,
+        "required": 20
+      },
+      "history": [],
+      "governance": {
+        "status": "collecting",
+        "min_samples": 20,
+        "poor_cycles": 0,
+        "drift_evidence": {
+          "samples": 0,
+          "reason": "insufficient"
+        }
+      }
+    }
+  }
+}

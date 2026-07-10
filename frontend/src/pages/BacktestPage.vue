@@ -138,7 +138,9 @@ const fp = (n: number | null | undefined, d = 2) => n != null ? (n >= 0 ? '+' : 
 
 <template>
   <div class="page">
-    <van-nav-bar title="回测实验室" />
+    <van-nav-bar title="回测实验室">
+      <template #right><span class="outcome-link" @click="$router.push('/outcomes')">实盘验证</span></template>
+    </van-nav-bar>
     <div class="page-body">
       <!-- 基金选择 -->
       <van-cell-group inset>
@@ -314,6 +316,7 @@ const fp = (n: number | null | undefined, d = 2) => n != null ? (n >= 0 ? '+' : 
 
 .note { font-size: 11px; color: var(--text-hint, #A8B2A8); margin-top: 8px; }
 .calibration { padding: 12px 14px; }
+.outcome-link { color: var(--teal); font-size: 13px; cursor: pointer; }
 .cal-head { display: flex; justify-content: space-between; align-items: center; font-size: 14px; font-weight: 600; }
 .cal-head em { font-size: 11px; font-style: normal; color: var(--text-hint); font-weight: 500; }
 .cal-head em.pass { color: var(--success); }

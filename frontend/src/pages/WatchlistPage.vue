@@ -356,6 +356,9 @@ onMounted(refresh)
                 :style="{ color: colorOf(dailyMoveOf(it.code)!.change) }"
                 :title="dailyMoveOf(it.code)!.sourceNote"
               >{{ dailyMoveOf(it.code)!.label }} {{ pct(dailyMoveOf(it.code)!.change) }}</span>
+              <span v-if="est[it.code]?.kind === 'overseas_model'" class="est-confidence">
+                覆盖 {{ num(est[it.code]?.modelWeight, 0) }}% · {{ est[it.code]?.confidence || '样本积累中' }}
+              </span>
               <span class="sig" :style="{ color: signalColor(rows[it.code]?.signal || '') }">{{ rows[it.code]?.signal || '…' }}</span>
               <span v-if="decisions[it.code]" class="act" :style="{ color: actionColor(decisions[it.code].action) }">
                 {{ decisions[it.code].action }}
@@ -445,6 +448,7 @@ onMounted(refresh)
 .port-cap { font-size: 11px; color: var(--text-hint); text-align: center; }
 .wl-val { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
 .est-chg { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.est-confidence { color: var(--text-hint); font-size: 10px; white-space: normal; text-align: right; }
 .sig { font-size: 13px; font-weight: 500; }
 .act { font-size: 13px; font-weight: 600; }
 .dec { margin-bottom: 12px; }

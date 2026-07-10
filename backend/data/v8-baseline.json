@@ -1,0 +1,25 @@
+{
+  "frozen_at": "2026-07-10T09:00:00+08:00",
+  "frontend_version": "5.1.0",
+  "api_version": "0.4.0",
+  "active_strategy": "v1-default",
+  "calibration": {
+    "sampled": 30,
+    "valid": 26,
+    "accepted": 2,
+    "winner_votes": 2,
+    "required_votes": 11,
+    "median_validation_improvement": 0.46,
+    "passed": false
+  },
+  "overseas_models": {
+    "012920": "2026Q1-style-factor-scale-1.4",
+    "018147": "2026Q1-holdings-lookthrough"
+  },
+  "release_checks": {
+    "pages": "healthy",
+    "api": "healthy",
+    "ci": "healthy",
+    "post_deploy_smoke": "workflow-syntax-fix-pending-v8-release"
+  }
+}

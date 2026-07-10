@@ -31,5 +31,14 @@
       "median_validation_improvement": 0.46,
       "passed": false
     }
+  },
+  "governance": {
+    "status": "healthy",
+    "poor_cycles": 0,
+    "outcome_evidence": {
+      "mature_groups": 0,
+      "poor_groups": 0,
+      "samples": 0
+    }
   }
 }

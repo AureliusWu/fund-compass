@@ -227,8 +227,14 @@ async function toggleWatch() {
           <div class="est-empty" v-if="showModelLine">
             下一净值模型：{{ pct(est!.estChange) }}，估算净值 {{ num(est!.estNav) }}。{{ est!.sourceNote }}
           </div>
+          <div class="reliability" v-if="est?.kind === 'overseas_model'">
+            <span>{{ est.modelVersion || '持仓穿透模型' }}</span>
+            <span>覆盖 {{ num(est.modelWeight, 1) }}%</span>
+            <span>{{ est.confidence || '样本积累中' }}</span>
+            <span v-if="est.errorBand != null">历史约 ±{{ num(est.errorBand, 2) }}%</span>
+          </div>
           <div class="est-empty" v-if="!primaryMove && estDone">暂无估值，以最新净值为准。</div>
-          <van-loading v-else size="18" style="padding:6px 0" />
+          <van-loading v-if="!estDone" size="18" style="padding:6px 0" />
         </div>
 
         <van-button class="report-btn" block plain icon="description" size="small"
@@ -402,6 +408,8 @@ async function toggleWatch() {
 .est-time { font-size: 11px; color: var(--text-hint); }
 .est-main { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
 .est-chg { font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.reliability { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 11px; }
+.reliability span:first-child { color: var(--teal); }
 .est-side { text-align: right; font-size: 12px; color: var(--text-secondary); line-height: 1.7; }
 .est-side b { color: var(--text); font-weight: 600; }
 .est-side em { font-style: normal; color: var(--text-hint); }

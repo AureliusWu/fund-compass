@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "updated_at": "2026-07-10T09:00:00+08:00",
+  "summary": {
+    "539002": { "samples": 0, "status": "collecting", "confidence": "样本积累中", "mae": null, "bias": null, "direction_accuracy": null, "error_band": null },
+    "012920": { "samples": 0, "status": "collecting", "confidence": "样本积累中", "mae": null, "bias": null, "direction_accuracy": null, "error_band": null },
+    "018147": { "samples": 0, "status": "collecting", "confidence": "样本积累中", "mae": null, "bias": null, "direction_accuracy": null, "error_band": null }
+  },
+  "records": [
+    {
+      "code": "018147",
+      "name": "建信新兴市场混合(QDII)C",
+      "display_date": "2026-07-03",
+      "target_nav_date": "2026-07-02",
+      "base_nav_date": "2026-06-30",
+      "base_nav": 2.803,
+      "actual_nav": 2.464,
+      "actual_change": -12.09,
+      "status": "observed_only",
+      "note": "7月3日可见的最新净值实际对应7月2日，不作为模型训练样本"
+    },
+    {
+      "code": "012920",
+      "name": "易方达全球成长精选混合(QDII)人民币A",
+      "display_date": "2026-07-03",
+      "target_nav_date": "2026-07-02",
+      "base_nav_date": "2026-07-01",
+      "base_nav": 5.0259,
+      "actual_nav": 4.6234,
+      "actual_change": -8.01,
+      "status": "observed_only",
+      "note": "7月3日可见的最新净值实际对应7月2日，不作为模型训练样本"
+    }
+  ]
+}

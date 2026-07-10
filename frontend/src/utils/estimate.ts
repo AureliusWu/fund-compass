@@ -6,6 +6,8 @@
 
 import { recordSource } from './resilience'
 import { getHoldings, type Holding } from './holdings'
+import overseasRegistry from '@/data/overseas-models.json'
+import { attachAccuracy } from './overseasAccuracy'
 
 export interface Estimate {
   code: string
@@ -21,6 +23,10 @@ export interface Estimate {
   sourceNote: string
   modelWeight?: number
   modelCode?: string
+  modelVersion?: string
+  confidence?: string
+  accuracySamples?: number
+  errorBand?: number | null
 }
 
 export interface NavMove {
@@ -58,78 +64,32 @@ const TIMEOUT = 8000
 
 interface ModelLeg { code: string; weight: number; note?: string }
 interface ModelAdjustment { scale?: number; bias?: number }
-interface OverseasModel {
+export interface OverseasModel {
   label: string
   legs: ModelLeg[]
   minWeight?: number
   adjustment?: ModelAdjustment
   fallback?: OverseasModel
+  version?: string
 }
 
 const HOLDINGS_MODEL_MIN_WEIGHT = 25
 
-const OVERSEAS_MODEL_BY_CODE: Record<string, OverseasModel> = {
-  '539002': {
-    label: '2026Q1重仓穿透模型',
-    minWeight: 30,
-    fallback: { label: '半导体+韩国兜底模型', legs: [{ code: 'usSMH', weight: 70 }, { code: 'usEWY', weight: 20 }, { code: 'usEEM', weight: 10 }] },
-    legs: [
-      { code: 'usTSM', weight: 10.26 },
-      { code: 'usNVDA', weight: 10.14 },
-      { code: 'usEWY', weight: 8.65, note: 'SK海力士代理' },
-      { code: 'usAVGO', weight: 8.52 },
-      { code: 'usEWY', weight: 6.76, note: '三星电子代理' },
-      { code: 'usSNDK', weight: 4.91 },
-      { code: 'usGLW', weight: 4.29 },
-      { code: 'usWDC', weight: 3.73 },
-      { code: 'usLITE', weight: 3.58 },
-      { code: 'usMPWR', weight: 3.49 },
-    ],
-  },
-  '012920': {
-    label: '2026Q1风格因子模型',
-    minWeight: 100,
-    adjustment: { scale: 1.4 },
-    fallback: {
-      label: '2026Q1重仓穿透模型',
-      minWeight: 25,
-      legs: [
-        { code: 'usTSM', weight: 8.88 },
-        { code: 'usLITE', weight: 8.68 },
-        { code: 'sz300502', weight: 6.02 },
-        { code: 'usGLW', weight: 4.67 },
-        { code: 'usAXTI', weight: 4.67 },
-        { code: 'sz300308', weight: 4.67 },
-        { code: 'sh688498', weight: 4.49 },
-        { code: 'usTSEM', weight: 3.72 },
-        { code: 'usGOOGL', weight: 3.36 },
-        { code: 'sz002384', weight: 2.67 },
-      ],
-    },
-    legs: [
-      { code: 'usQQQ', weight: 45 },
-      { code: 'usSOXX', weight: 30 },
-      { code: 'sh000300', weight: 25 },
-    ],
-  },
-  '018147': {
-    label: '2026Q1重仓穿透模型',
-    minWeight: 30,
-    fallback: { label: '半导体+韩国兜底模型', legs: [{ code: 'usSMH', weight: 70 }, { code: 'usEWY', weight: 20 }, { code: 'usEEM', weight: 10 }] },
-    legs: [
-      { code: 'usTSM', weight: 10.26 },
-      { code: 'usNVDA', weight: 10.14 },
-      { code: 'usEWY', weight: 8.65, note: 'SK海力士代理' },
-      { code: 'usAVGO', weight: 8.52 },
-      { code: 'usEWY', weight: 6.76, note: '三星电子代理' },
-      { code: 'usSNDK', weight: 4.91 },
-      { code: 'usGLW', weight: 4.29 },
-      { code: 'usWDC', weight: 3.73 },
-      { code: 'usLITE', weight: 3.58 },
-      { code: 'usMPWR', weight: 3.49 },
-    ],
-  },
+function registryModel(active: (typeof overseasRegistry.models)[keyof typeof overseasRegistry.models]['active']): OverseasModel {
+  const convert = (model: typeof active | NonNullable<typeof active.fallback>): OverseasModel => ({
+    label: model.label,
+    minWeight: model.min_weight,
+    adjustment: { scale: model.scale, bias: model.bias },
+    legs: model.legs,
+    ...('version' in model ? { version: model.version } : {}),
+    ...('fallback' in model && model.fallback ? { fallback: convert(model.fallback) } : {}),
+  })
+  return convert(active)
 }
+
+const OVERSEAS_MODEL_BY_CODE: Record<string, OverseasModel> = Object.fromEntries(
+  Object.entries(overseasRegistry.models).map(([code, entry]) => [code, registryModel(entry.active)]),
+)
 
 function num(s: unknown): number | null {
   const n = typeof s === 'number' ? s : parseFloat(String(s))
@@ -356,6 +316,7 @@ export function applyOverseasModelEstimate(
     isRealtime: true,
     modelWeight: result.weight,
     modelCode: model.legs.map((leg) => `${leg.code}:${leg.weight}`).join(','),
+    modelVersion: model.version,
     sourceNote: `${model.label} · 可用权重${fmt(result.weight)}% · 基于实时市场行情自建估算，不是基金官方实时净值`,
   }
 }
@@ -376,8 +337,8 @@ async function enhanceOverseasEstimate(e: Estimate): Promise<Estimate> {
   collectModelCodes(holdingsModel, codes)
   const quotes = await fetchTencentQuotes(Array.from(codes))
   const configured = configuredModel ? applyOverseasModelEstimate(e, quotes, configuredModel) : e
-  if (configured !== e || !holdingsModel) return configured
-  return applyOverseasModelEstimate(e, quotes, holdingsModel)
+  if (configured !== e || !holdingsModel) return attachAccuracy(configured)
+  return attachAccuracy(applyOverseasModelEstimate(e, quotes, holdingsModel))
 }
 
 // 全局 JSONP 回调（接口里写死的函数名，按 fundcode 调度到对应 Promise）。

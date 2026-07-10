@@ -16,6 +16,7 @@ declare module 'vue' {
     DecisionCard: typeof import('./src/components/DecisionCard.vue')['default']
     Icon: typeof import('./src/components/Icon.vue')['default']
     IndexBar: typeof import('./src/components/IndexBar.vue')['default']
+    OverseasAccuracyPanel: typeof import('./src/components/OverseasAccuracyPanel.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     StarRating: typeof import('./src/components/StarRating.vue')['default']
@@ -36,7 +37,9 @@ declare module 'vue' {
     VanSearch: typeof import('vant/es')['Search']
     VanSkeleton: typeof import('vant/es')['Skeleton']
     VanStepper: typeof import('vant/es')['Stepper']
+    VanTab: typeof import('vant/es')['Tab']
     VanTabbar: typeof import('vant/es')['Tabbar']
     VanTabbarItem: typeof import('vant/es')['TabbarItem']
+    VanTabs: typeof import('vant/es')['Tabs']
   }
 }

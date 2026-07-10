@@ -1,5 +1,6 @@
 """数据仓储：universe 导入、列表查询、详情缓存（SQLite）。"""
 import logging
+import statistics
 from datetime import datetime, timedelta, timezone
 
 from database.db import get_conn
@@ -265,13 +266,35 @@ def decision_outcomes(horizons=(5, 20, 60)) -> dict:
             for horizon in horizons:
                 if len(future) >= horizon:
                     point = future[horizon - 1]
+                    path = [float(row["nav"]) for row in future[:horizon]]
+                    peak = float(decision["base_nav"])
+                    max_drawdown = 0.0
+                    for nav in path:
+                        peak = max(peak, nav)
+                        max_drawdown = min(max_drawdown, (nav / peak - 1) * 100)
                     outcome["returns"][str(horizon)] = {
                         "date": point["date"],
                         "return": round((point["nav"] / decision["base_nav"] - 1) * 100, 2),
+                        "max_drawdown": round(max_drawdown, 2),
                     }
             results.append(outcome)
     finally:
         conn.close()
+
+    # 以同类型、同周期的真实样本均值作横截面对照；样本不足时只展示绝对收益。
+    benchmark_groups: dict[tuple[str, str], list[float]] = {}
+    for row in results:
+        fund_type = row.get("type") or "未知"
+        for horizon, outcome in row["returns"].items():
+            benchmark_groups.setdefault((fund_type, horizon), []).append(outcome["return"])
+    for row in results:
+        fund_type = row.get("type") or "未知"
+        for horizon, outcome in row["returns"].items():
+            peers = benchmark_groups[(fund_type, horizon)]
+            if len(peers) >= 2:
+                benchmark = statistics.fmean(peers)
+                outcome["benchmark_return"] = round(benchmark, 2)
+                outcome["excess_return"] = round(outcome["return"] - benchmark, 2)
 
     groups: dict[tuple[str, str, str], list[float]] = {}
     positive_actions = {"分批买入", "继续定投"}
@@ -289,6 +312,14 @@ def decision_outcomes(horizons=(5, 20, 60)) -> dict:
             hits = sum(value <= 0 for value in returns)
         else:
             hits = sum(value >= 0 for value in returns)
+        matching = [
+            outcome
+            for row in results
+            if row["strategy_version"] == version and row["action"] == action
+            for key, outcome in row["returns"].items() if key == horizon
+        ]
+        excess = [row["excess_return"] for row in matching if "excess_return" in row]
+        drawdowns = [row["max_drawdown"] for row in matching]
         summary.append({
             "action": action,
             "strategy_version": version,
@@ -296,5 +327,51 @@ def decision_outcomes(horizons=(5, 20, 60)) -> dict:
             "samples": len(returns),
             "average_return": round(sum(returns) / len(returns), 2),
             "hit_rate": round(hits / len(returns) * 100, 1),
+            "average_excess": round(statistics.fmean(excess), 2) if excess else None,
+            "average_drawdown": round(statistics.fmean(drawdowns), 2),
+            "worst_drawdown": round(min(drawdowns), 2),
         })
-    return {"total": len(results), "items": results, "summary": summary}
+
+    def breakdown(field: str) -> list[dict]:
+        buckets: dict[tuple[str, int], list[tuple[float, float, float | None, str]]] = {}
+        for row in results:
+            label = row.get(field) or "未知"
+            for horizon, outcome in row["returns"].items():
+                buckets.setdefault((label, int(horizon)), []).append((
+                    outcome["return"], outcome["max_drawdown"],
+                    outcome.get("excess_return"), row["action"],
+                ))
+        output = []
+        for (label, horizon), values in sorted(buckets.items()):
+            hits = sum(
+                value > 0 if action in positive_actions
+                else value <= 0 if action in defensive_actions
+                else value >= 0
+                for value, _, _, action in values
+            )
+            excess = [value[2] for value in values if value[2] is not None]
+            output.append({
+                field: label,
+                "horizon": horizon,
+                "samples": len(values),
+                "average_return": round(statistics.fmean(value[0] for value in values), 2),
+                "hit_rate": round(hits / len(values) * 100, 1),
+                "average_excess": round(statistics.fmean(excess), 2) if excess else None,
+                "average_drawdown": round(statistics.fmean(value[1] for value in values), 2),
+            })
+        return output
+
+    mature = sum(1 for row in results if row["returns"])
+    return {
+        "total": len(results),
+        "mature": mature,
+        "pending": len(results) - mature,
+        "items": results,
+        "summary": summary,
+        "breakdowns": {
+            "strategy_version": breakdown("strategy_version"),
+            "action": breakdown("action"),
+            "confidence": breakdown("confidence"),
+            "type": breakdown("type"),
+        },
+    }
