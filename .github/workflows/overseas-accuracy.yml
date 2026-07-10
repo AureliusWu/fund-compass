@@ -1,0 +1,69 @@
+name: overseas-accuracy
+
+on:
+  schedule:
+    - cron: '35 6 * * 1-5' # 北京时间工作日 14:35，独立于推送任务落账
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: overseas-accuracy-ledger
+  cancel-in-progress: false
+
+jobs:
+  ledger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 更新海外估值误差账本
+        env:
+          FUND_API_BASE: ${{ secrets.FUND_API_BASE }}
+          PYTHONUNBUFFERED: '1'
+        run: python tools/overseas_accuracy.py
+      - name: 校准海外 Challenger
+        env:
+          AUTO_PROMOTE_OVERSEAS: 'true'
+          OVERSEAS_MIN_SAMPLES: '20'
+        run: python tools/calibrate_overseas.py
+      - name: 审计海外精度账本
+        run: python tools/audit_overseas_accuracy.py
+      - name: 写入海外精度摘要
+        shell: bash
+        run: |
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          from pathlib import Path
+          data = json.loads(Path("frontend/public/data/overseas-accuracy.json").read_text(encoding="utf-8"))
+          pipeline = data.get("pipeline") or {}
+          print("## 海外估值精度")
+          print(f"- 运行：{pipeline.get('last_run_at')} · 行情 {pipeline.get('quotes_count', 0)} · 详情 {pipeline.get('details_count', 0)}")
+          for code, row in (data.get("summary") or {}).items():
+              print(f"- {code}: {row.get('samples', 0)} 样本 · 待结算 {row.get('pending', 0)} · MAE {row.get('mae')} · {row.get('confidence')}")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: overseas-accuracy-${{ github.run_number }}
+          path: |
+            frontend/public/data/overseas-accuracy.json
+            frontend/public/data/overseas-audit.json
+            frontend/src/data/overseas-models.json
+          retention-days: 90
+      - name: 提交海外精度数据
+        shell: bash
+        run: |
+          if [[ -n "$(git status --porcelain frontend/public/data/overseas-accuracy.json frontend/public/data/overseas-audit.json frontend/src/data/overseas-models.json)" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add frontend/public/data/overseas-accuracy.json frontend/public/data/overseas-audit.json frontend/src/data/overseas-models.json
+            git commit -m "chore: 更新海外估值精度账本"
+            git pull --rebase origin main
+            git push origin main
+          else
+            echo "海外精度数据无变化"
+          fi

@@ -1,4 +1,5 @@
 import importlib.util
+import datetime as dt
 from pathlib import Path
 
 
@@ -16,6 +17,47 @@ def load(name):
 accuracy = load("overseas_accuracy")
 calibration = load("calibrate_overseas")
 audit_module = load("audit_overseas_accuracy")
+
+
+def registry_fixture():
+    return {"models": {"012920": {"name": "测试基金", "active": {
+        "version": "v1", "label": "测试模型", "min_weight": 50,
+        "scale": 1, "bias": 0, "legs": [{"code": "usQQQ", "weight": 100}],
+    }}}}
+
+
+def test_add_predictions_is_daily_idempotent_and_precedes_settlement():
+    ledger = {"records": []}
+    registry = registry_fixture()
+    fund_data = {"012920": {"name": "测试基金", "dwjz": "5", "jzrq": "2026-07-09"}}
+    now = dt.datetime(2026, 7, 10, 14, 35, tzinfo=accuracy.CST)
+
+    assert accuracy.add_predictions(ledger, registry, {"usQQQ": 2}, fund_data, now) == 1
+    assert accuracy.add_predictions(ledger, registry, {"usQQQ": 3}, fund_data, now) == 0
+    row = ledger["records"][0]
+    assert row["status"] == "pending"
+    assert row["prediction_date"] == "2026-07-10"
+    assert row["target_nav_date"] == "2026-07-10"
+    assert row["predicted_change"] == 2
+
+    assert accuracy.settle_records(ledger, {"012920": {"nav_history": [
+        {"date": "2026-07-11", "nav": 5.2},
+    ]}}) == 0
+    assert accuracy.settle_records(ledger, {"012920": {"nav_history": [
+        {"date": "2026-07-10", "nav": 5.1},
+    ]}}) == 1
+    assert row["status"] == "settled"
+    assert row["actual_change"] == 2
+
+
+def test_add_predictions_skips_weekends():
+    ledger = {"records": []}
+    now = dt.datetime(2026, 7, 11, 14, 35, tzinfo=accuracy.CST)
+    assert accuracy.add_predictions(
+        ledger, registry_fixture(), {"usQQQ": 2},
+        {"012920": {"dwjz": "5", "jzrq": "2026-07-10"}}, now,
+    ) == 0
+    assert ledger["records"] == []
 
 
 def test_settle_pairs_exact_nav_date_only():

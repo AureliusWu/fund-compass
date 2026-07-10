@@ -16,14 +16,19 @@
 4. 从蜉蝣基金或盘中宝借鉴能力时，在本项目用 TypeScript/现有结构实现。
 5. 不在代码、日志或文档示例中写真实密钥、Token、私有 URL。
 6. 用户明确要求推送时才 `git push`；否则先说明提交状态。
+7. 主导航保持首页、选基、自选三项；隐藏的资产、对比和高级实验能力保留，不扩张也不删除。
+8. 严重过期的数据不得继续展示貌似精确的估值百分比。
 
 ## 关键文件
 
 - `frontend/src/utils/estimate.ts`：盘中估值、海外模型、最新净值涨跌口径。
+- `frontend/src/utils/presentation.ts`：主导航、自选区域、数据新鲜度、可信度与决策摘要的展示契约。
 - `frontend/src/pages/WatchlistPage.vue`：自选与持仓展示。
 - `frontend/src/pages/AssetsPage.vue`：资产与组合口径。
 - `backend/strategy/`：评分、择时、回测、指数估值。
 - `tools/estimate_push.py`：定时推送脚本。
+- `tools/overseas_accuracy.py`：海外估值每日预测落账与精确净值日期结算。
+- `.github/workflows/overseas-accuracy.yml`：独立于推送任务的海外精度流水线。
 - `docs/ITERATION-PLAN.md`：长期计划与迭代日志。
 
 ## 估值口径
@@ -32,8 +37,11 @@ QDII/海外基金必须区分：
 
 - 最新公布净值涨跌：用于主显示、排序、今日盈亏。
 - 下一净值模型估算：用于辅助说明，不冒充官方净值。
+- 海外模型估算：必须带净值基准日、行情覆盖率、样本状态和可用时的 P80 误差区间。
+- 预测记录只能由同一净值归属日结算；`observed_only` 历史复盘不进入训练。
+- 训练样本少于 20 条时只收集证据，不自动晋级 Challenger。
 
-修改估值或收益口径时，至少更新 `frontend/src/utils/estimate.test.ts`。
+修改估值或收益口径时，至少更新 `frontend/src/utils/estimate.test.ts`、`frontend/src/utils/presentation.test.ts` 或对应后端账本测试。
 
 ## 自检
 

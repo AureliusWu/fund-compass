@@ -27,6 +27,8 @@ export interface Estimate {
   confidence?: string
   accuracySamples?: number
   errorBand?: number | null
+  generatedAt?: string
+  accuracyUpdatedAt?: string
 }
 
 export interface NavMove {
@@ -317,6 +319,7 @@ export function applyOverseasModelEstimate(
     modelWeight: result.weight,
     modelCode: model.legs.map((leg) => `${leg.code}:${leg.weight}`).join(','),
     modelVersion: model.version,
+    generatedAt: new Date().toISOString(),
     sourceNote: `${model.label} · 可用权重${fmt(result.weight)}% · 基于实时市场行情自建估算，不是基金官方实时净值`,
   }
 }

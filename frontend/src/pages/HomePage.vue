@@ -9,6 +9,7 @@ import { checkBackend, getSourceSummary, type SourceStatus } from '@/utils/resil
 import { fetchTaskStatuses, type TaskStatus } from '@/utils/taskStatus'
 import { loadAlerts, runAllChecks, markRead, markAllRead, dismissAlert, requestNotifyPermission, type Alert } from '@/utils/alerts'
 import { APP_VERSION } from '@/version'
+import { combineTemperature, sourceFreshness, visibleUnreadAlerts } from '@/utils/presentation'
 
 const app = useAppStore()
 const watch = useWatchlistStore()
@@ -38,11 +39,7 @@ const dist = computed(() => {
 })
 
 const combinedTemp = computed(() => {
-  const market = app.marketTemp?.score
-  const holding = watchTemp.value
-  if (market == null) return holding
-  if (holding == null) return market
-  return Math.round(market * 0.6 + holding * 0.4)
+  return combineTemperature(app.marketTemp?.score, watchTemp.value)
 })
 
 const tempLabel = computed(() => {
@@ -60,20 +57,21 @@ const tempTone = computed(() => {
   return score <= 40 ? 'cool' : score <= 60 ? 'calm' : score <= 80 ? 'warm' : 'hot'
 })
 
-const visibleAlerts = computed(() => alerts.value
-  .filter((alert) => !alert.dismissed && !alert.read)
-  .sort((a, b) => b.time.localeCompare(a.time))
-  .slice(0, 8))
+const visibleAlerts = computed(() => visibleUnreadAlerts(alerts.value))
 
 type Light = 'green' | 'yellow' | 'red'
 const statusLights = computed<{ label: string; state: Light; text: string; detail: string }[]>(() => {
   const failedSources = sources.value.filter((source) => !source.ok)
-  const sourceState: Light = !sources.value.length ? 'yellow' : !failedSources.length ? 'green' : failedSources.length === sources.value.length ? 'red' : 'yellow'
+  const expiredSources = sources.value.filter((source) => sourceFreshness(source) === 'expired')
+  const staleSources = sources.value.filter((source) => sourceFreshness(source) === 'stale')
+  const sourceState: Light = !sources.value.length || staleSources.length
+    ? 'yellow'
+    : expiredSources.length === sources.value.length ? 'red' : expiredSources.length ? 'yellow' : 'green'
   const failedTasks = tasks.value.filter((task) => !task.ok)
   const taskState: Light = taskLoading.value || !tasks.value.length ? 'yellow' : failedTasks.some((task) => !task.stale) ? 'red' : failedTasks.length ? 'yellow' : 'green'
   return [
     { label: '服务', state: backendOk.value == null ? 'yellow' : backendOk.value ? 'green' : 'red', text: backendOk.value ? '正常' : backendOk.value == null ? '检查中' : '异常', detail: healthText.value },
-    { label: '数据', state: sourceState, text: sourceState === 'green' ? '正常' : sourceState === 'yellow' ? '降级' : '异常', detail: failedSources.map((source) => source.label).join('、') || '公开数据源正常' },
+    { label: '数据', state: sourceState, text: sourceState === 'green' ? '正常' : sourceState === 'yellow' ? '降级' : '异常', detail: [...new Set([...failedSources, ...staleSources, ...expiredSources])].map((source) => source.label).join('、') || '公开数据源正常' },
     { label: '任务', state: taskState, text: taskState === 'green' ? '正常' : taskState === 'yellow' ? '延迟' : '异常', detail: failedTasks.map((task) => task.label).join('、') || '定时任务正常' },
   ]
 })
@@ -106,6 +104,7 @@ async function refreshHome() {
   }
   await app.loadMarketTemp()
   await loadWatchSignals()
+  sources.value = getSourceSummary()
   taskLoading.value = true
   try { tasks.value = await fetchTaskStatuses(true) } catch { tasks.value = [] }
   finally { taskLoading.value = false; refreshing.value = false }

@@ -33,6 +33,7 @@ export interface AccuracyRecord {
 }
 export interface AccuracyReport {
   updated_at: string
+  pipeline?: { last_run_at?: string; last_prediction_at?: string; last_settlement_at?: string }
   summary: Record<string, AccuracySummary>
   records: AccuracyRecord[]
 }
@@ -50,13 +51,17 @@ export function loadOverseasAccuracy(force = false): Promise<AccuracyReport | nu
 
 export async function attachAccuracy(estimate: Estimate): Promise<Estimate> {
   if (estimate.kind !== 'overseas_model') return estimate
-  const summary = (await loadOverseasAccuracy())?.summary?.[estimate.code]
+  const report = await loadOverseasAccuracy()
+  const summary = report?.summary?.[estimate.code]
   if (!summary) return estimate
+  const reportAge = report?.updated_at ? Date.now() - Date.parse(report.updated_at) : Infinity
+  const confidence = reportAge > 72 * 60 * 60 * 1000 ? '精度数据过期' : summary.confidence
   return {
     ...estimate,
-    confidence: summary.confidence,
+    confidence,
     accuracySamples: summary.samples,
     errorBand: summary.error_band,
-    sourceNote: `${estimate.sourceNote} · ${summary.confidence}${summary.error_band != null ? ` · 历史约±${summary.error_band.toFixed(2)}%` : ''}`,
+    accuracyUpdatedAt: report?.updated_at,
+    sourceNote: `${estimate.sourceNote} · ${confidence}${summary.error_band != null ? ` · 历史约±${summary.error_band.toFixed(2)}%` : ''}`,
   }
 }

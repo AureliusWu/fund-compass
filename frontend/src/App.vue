@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { getTheme, toggleTheme, type Theme } from './utils/theme'
 import Icon from '@/components/Icon.vue'
+import { MAIN_NAV_ITEMS } from '@/utils/presentation'
 
 const theme = ref<Theme>(getTheme())
 function onToggleTheme() {
@@ -51,23 +52,11 @@ function onToggleTheme() {
     <router-view class="app-main" />
 
     <van-tabbar route :safe-area-inset-bottom="true">
-      <van-tabbar-item to="/">
+      <van-tabbar-item v-for="item in MAIN_NAV_ITEMS" :key="item.to" :to="item.to">
         <template #icon>
-          <Icon name="home" :size="20" />
+          <Icon :name="item.icon" :size="20" />
         </template>
-        首页
-      </van-tabbar-item>
-      <van-tabbar-item to="/screen">
-        <template #icon>
-          <Icon name="mirror" :size="20" />
-        </template>
-        选基
-      </van-tabbar-item>
-      <van-tabbar-item to="/watch">
-        <template #icon>
-          <Icon name="scroll" :size="20" />
-        </template>
-        自选
+        {{ item.label }}
       </van-tabbar-item>
     </van-tabbar>
 

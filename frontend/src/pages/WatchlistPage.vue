@@ -9,6 +9,7 @@ import { fetchEstimates, type Estimate } from '@/utils/estimate'
 import { colorOf, pct } from '@/utils/format'
 import { getToken } from '@/utils/gist'
 import Icon from '@/components/Icon.vue'
+import { estimateChangeForDisplay, estimateFreshness, estimateTrustText, groupDecisions, WATCH_SECTIONS } from '@/utils/presentation'
 
 interface Row { name: string; type: string | null }
 
@@ -31,14 +32,10 @@ const importLoading = ref(false)
 let importTimer: ReturnType<typeof setTimeout> | null = null
 
 const decisionSummary = computed(() => {
-  const groups: Record<string, string[]> = {}
-  for (const item of watch.items) {
-    const decision = decisions[item.code]
-    if (!decision) continue
-    if (!groups[decision.action]) groups[decision.action] = []
-    groups[decision.action].push(rows[item.code]?.name || item.name || item.code)
-  }
-  return groups
+  return groupDecisions(watch.items.map((item) => ({
+    code: item.code,
+    name: rows[item.code]?.name || item.name || item.code,
+  })), decisions)
 })
 
 async function loadDecisions() {
@@ -72,13 +69,18 @@ async function refresh() {
 }
 
 function estimateText(code: string) {
-  const value = estimates[code]?.estChange
+  const value = displayChange(code)
   return value == null ? '—' : pct(value)
+}
+
+function displayChange(code: string) {
+  return estimateChangeForDisplay(estimates[code])
 }
 
 function estimateMeta(code: string) {
   const estimate = estimates[code]
   if (!estimate) return '暂无估值'
+  if (estimateFreshness(estimate) === 'expired') return '数据过期'
   const time = estimate.estTime ? estimate.estTime.slice(5) : ''
   return `${estimate.label}${time ? ' · ' + time : ''}`
 }
@@ -132,18 +134,19 @@ onMounted(refresh)
 
     <van-pull-refresh v-model="refreshing" @refresh="refresh">
       <div class="page-body">
-        <div class="sec">今日决策摘要</div>
+        <div class="sec">{{ WATCH_SECTIONS[0] }}</div>
         <section class="card decision-card">
           <div v-if="decisionsLoading" class="decision-loading"><van-loading size="15" /> 计算中</div>
-          <template v-else-if="Object.keys(decisionSummary).length">
-            <div v-for="(names, action) in decisionSummary" :key="action" class="decision-row">
-              <b>{{ action }}</b><span>{{ names.join('、') }}</span>
+          <template v-else-if="decisionSummary.length">
+            <div v-for="group in decisionSummary" :key="group.action" class="decision-row">
+              <b>{{ group.action }}</b>
+              <div><span>{{ group.names.join('、') }}</span><em>{{ group.confidence }}置信 · {{ group.reason }}</em></div>
             </div>
           </template>
           <div v-else class="empty-line">暂无决策结果</div>
         </section>
 
-        <div class="sec">盘中估值</div>
+        <div class="sec">{{ WATCH_SECTIONS[1] }}</div>
         <div v-if="loading" class="estimate-list skeleton-list"><van-skeleton title :row="6" /></div>
         <van-empty v-else-if="!watch.items.length" description="还没有自选基金" />
         <section v-else class="estimate-list">
@@ -151,9 +154,9 @@ onMounted(refresh)
             <article class="estimate-row" @click="router.push('/fund/' + item.code)">
               <div class="fund-name"><b>{{ rows[item.code]?.name || item.name || item.code }}</b><span>{{ item.code }} · {{ rows[item.code]?.type || '基金' }}</span></div>
               <div class="estimate-value">
-                <strong :style="{ color: colorOf(estimates[item.code]?.estChange) }">{{ estimateText(item.code) }}</strong>
+                <strong :style="{ color: colorOf(displayChange(item.code)) }">{{ estimateText(item.code) }}</strong>
                 <span>{{ estimateMeta(item.code) }}</span>
-                <em v-if="estimates[item.code]?.kind === 'overseas_model'">覆盖 {{ estimates[item.code]?.modelWeight?.toFixed(0) }}%</em>
+                <em v-if="estimates[item.code]?.kind === 'overseas_model'" class="trust-line">{{ estimateTrustText(estimates[item.code]) }}</em>
               </div>
             </article>
             <template #right><van-button square type="danger" text="移除" class="remove-button" @click="remove(item.code)" /></template>
@@ -190,12 +193,12 @@ onMounted(refresh)
 <style scoped>
 .nav-tool { width: 34px; height: 34px; display: inline-grid; place-items: center; padding: 0; border: 0; color: var(--teal); background: transparent; cursor: pointer; }
 .decision-card { min-height: 76px; padding: 10px 14px; }
-.decision-row { display: grid; grid-template-columns: 76px 1fr; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 12px; }.decision-row:last-child { border-bottom: 0; }.decision-row b { color: var(--teal-deep); }.decision-row span { color: var(--text-secondary); line-height: 1.5; }
+.decision-row { display: grid; grid-template-columns: 76px 1fr; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 12px; }.decision-row:last-child { border-bottom: 0; }.decision-row b { color: var(--teal-deep); }.decision-row span, .decision-row em { display: block; }.decision-row span { color: var(--text-secondary); line-height: 1.5; }.decision-row em { color: var(--text-hint); font-size: 9px; font-style: normal; margin-top: 3px; }
 .decision-loading, .empty-line { min-height: 54px; display: flex; align-items: center; justify-content: center; gap: 7px; color: var(--text-hint); font-size: 11px; }
 .estimate-list { overflow: hidden; background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); }
 .estimate-row { min-height: 76px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 13px 14px; border-bottom: 1px solid var(--border); cursor: pointer; }.van-swipe-cell:last-child .estimate-row { border-bottom: 0; }
 .fund-name { min-width: 0; }.fund-name b, .fund-name span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.fund-name b { color: var(--ink); font-size: 14px; font-weight: 600; }.fund-name span { color: var(--text-hint); font-family: var(--font-mono); font-size: 10px; margin-top: 6px; }
-.estimate-value { min-width: 104px; text-align: right; }.estimate-value strong, .estimate-value span, .estimate-value em { display: block; }.estimate-value strong { font-family: var(--font-mono); font-size: 19px; font-weight: 500; }.estimate-value span, .estimate-value em { color: var(--text-hint); font-size: 9px; font-style: normal; margin-top: 3px; }
+.estimate-value { min-width: 116px; max-width: 48%; text-align: right; }.estimate-value strong, .estimate-value span, .estimate-value em { display: block; }.estimate-value strong { font-family: var(--font-mono); font-size: 19px; font-weight: 500; }.estimate-value span, .estimate-value em { color: var(--text-hint); font-size: 9px; font-style: normal; margin-top: 3px; }.trust-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .remove-button { height: 100%; }.skeleton-list { padding: 15px; }
 .popup-title { color: var(--ink); font-family: var(--font-display); font-size: 17px; font-weight: 700; margin-bottom: 12px; }.sync-status { color: var(--text-hint); font-size: 10px; margin: 12px 2px; }.sync-actions { display: flex; gap: 8px; }.sync-actions .van-button { flex: 1; }.import-results { max-height: 42vh; overflow-y: auto; margin-top: 8px; }.import-loading { display: block; text-align: center; padding: 18px; }
 </style>

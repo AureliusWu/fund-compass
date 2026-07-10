@@ -69,6 +69,8 @@ def add_predictions(ledger: dict, registry: dict, quotes: dict[str, float], fund
     }
     written = 0
     target_date = now.date().isoformat()
+    if now.weekday() >= 5:
+        return 0
     for code, entry in registry["models"].items():
         data = fund_data.get(code) or {}
         active = entry["active"]
@@ -259,6 +261,16 @@ def main() -> None:
     written = add_predictions(ledger, registry, quotes, fund_data, now)
     update_pending_states(ledger, now.date())
     ledger["updated_at"] = now.isoformat(timespec="seconds")
+    pipeline = ledger.setdefault("pipeline", {})
+    pipeline.update({
+        "last_run_at": now.isoformat(timespec="seconds"),
+        "quotes_count": len(quotes),
+        "details_count": len(details),
+    })
+    if written:
+        pipeline["last_prediction_at"] = now.isoformat(timespec="seconds")
+    if settled:
+        pipeline["last_settlement_at"] = now.isoformat(timespec="seconds")
     ledger["summary"] = summarize(ledger, registry)
     ledger["records"] = ledger.get("records", [])[-1000:]
     write_json_atomic(LEDGER, ledger)

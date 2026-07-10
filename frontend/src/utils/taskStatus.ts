@@ -37,6 +37,7 @@ const TASK_CACHE_TTL = 10 * 60 * 1000
 export const SCHEDULED_TASKS: TaskConfig[] = [
   { id: 'enrich', label: '离线富集', workflow: 'enrich.yml', cadence: '每周一 09:00', staleHours: 8 * 24 },
   { id: 'estimate-push', label: '估值推送', workflow: 'estimate-push.yml', cadence: '交易日 14:30', staleHours: 72 },
+  { id: 'overseas-accuracy', label: '海外精度', workflow: 'overseas-accuracy.yml', cadence: '交易日 14:35', staleHours: 72 },
   { id: 'signal-notify', label: '信号保活', workflow: 'notify.yml', cadence: '交易时段 10 分钟', staleHours: 72 },
 ]
 
