@@ -1,478 +1,201 @@
 <script setup lang="ts">
-import { reactive, ref, computed, onMounted } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { showToast } from 'vant'
-import { getToken } from '@/utils/gist'
+import { getFunds, postPortfolioDecisions, type DecisionResp, type FundListItem } from '@/api/client'
 import { useWatchlistStore } from '@/stores/watchlist'
 import { useFundsStore } from '@/stores/funds'
-import { getFunds, postPortfolioDecisions, type FundListItem, type DecisionResp } from '@/api/client'
-import { pct, num, colorOf, signalColor, actionColor } from '@/utils/format'
-import { fetchEstimates, latestNavMove, preferredDailyMove, type Estimate, type NavMove } from '@/utils/estimate'
-import StarRating from '@/components/StarRating.vue'
-import Chart from '@/components/Chart.vue'
-import { exportWatchlistCSV } from '@/utils/export'
+import { fetchEstimates, type Estimate } from '@/utils/estimate'
+import { colorOf, pct } from '@/utils/format'
+import { getToken } from '@/utils/gist'
 import Icon from '@/components/Icon.vue'
 
-interface Row {
-  name: string; type: string | null; nav: number | null; ret1y: number | null
-  signal: string; star: number | null; navMove: NavMove | null
-}
-
-const decisions = reactive<Record<string, DecisionResp>>({})
-const decisionsLoading = ref(false)
-const allocation = ref<import('@/api/client').PortfolioDecisionsResp['allocation'] | null>(null)
-const rebalance = ref<import('@/api/client').PortfolioDecisionsResp['rebalance']>([])
+interface Row { name: string; type: string | null }
 
 const router = useRouter()
 const watch = useWatchlistStore()
 const funds = useFundsStore()
 const rows = reactive<Record<string, Row>>({})
-const est = reactive<Record<string, Estimate | null>>({})
+const estimates = reactive<Record<string, Estimate | null>>({})
+const decisions = reactive<Record<string, DecisionResp>>({})
 const loading = ref(true)
 const refreshing = ref(false)
+const decisionsLoading = ref(false)
 
 const showSync = ref(false)
 const token = ref(getToken())
-
-// 持仓编辑
-const editShow = ref(false)
-const editCode = ref('')
-const editShares = ref('')
-const editCost = ref('')
-const editAccount = ref('')
-const editTargetWeight = ref('')
-const ACCOUNT_PRESETS = ['支付宝', '天天基金', '微信理财通', '蛋卷', '券商', '银行']
-const accountChips = computed(() => {
-  const s = new Set<string>([...watch.accounts, ...ACCOUNT_PRESETS])
-  return [...s]
-})
-
-async function loadDecisions() {
-  if (!watch.items.length) {
-    Object.keys(decisions).forEach((k) => delete decisions[k])
-    allocation.value = null
-    rebalance.value = []
-    return
-  }
-  decisionsLoading.value = true
-  try {
-    const weights = portfolioWeights()
-    const payload = watch.items.map((it) => {
-      const w = weights[it.code]
-      const item: { code: string; current_weight?: number; target_weight?: number } = { code: it.code }
-      if (w) {
-        item.current_weight = +w.current.toFixed(2)
-        item.target_weight = +w.target.toFixed(2)
-      }
-      return item
-    })
-    const resp = await postPortfolioDecisions(payload, portfolio.value.value)
-    Object.keys(decisions).forEach((k) => delete decisions[k])
-    for (const d of resp.decisions) decisions[d.code] = d
-    allocation.value = resp.allocation
-    rebalance.value = resp.rebalance
-  } catch { /* 后端未启动时静默 */ } finally {
-    decisionsLoading.value = false
-  }
-}
-
-/** 按 code 聚合跨账户持仓，计算当前/目标仓位 % */
-function portfolioWeights(): Record<string, { current: number; target: number }> {
-  const total = portfolio.value.value
-  const byCode: Record<string, { value: number; target: number | null }> = {}
-  for (const e of watch.entries) {
-    if (e.deleted || !(e.shares && e.shares > 0)) continue
-    const nav = rows[e.code]?.nav
-    if (nav == null) continue
-    const v = e.shares * nav
-    if (!byCode[e.code]) byCode[e.code] = { value: 0, target: e.target_weight ?? null }
-    byCode[e.code].value += v
-    if (e.target_weight != null) byCode[e.code].target = e.target_weight
-  }
-  const heldCodes = Object.keys(byCode)
-  const explicitTotal = heldCodes.reduce((sum, code) => sum + (byCode[code].target ?? 0), 0)
-  const unsetCount = heldCodes.filter((code) => byCode[code].target == null).length
-  const defaultTarget = unsetCount ? Math.max(0, 100 - explicitTotal) / unsetCount : 0
-  const out: Record<string, { current: number; target: number }> = {}
-  for (const code of heldCodes) {
-    const cur = total > 0 ? (byCode[code].value / total) * 100 : 0
-    out[code] = { current: cur, target: byCode[code].target ?? defaultTarget }
-  }
-  return out
-}
-
-const decisionSummary = computed(() => {
-  const groups: Record<string, string[]> = {}
-  for (const it of watch.items) {
-    const d = decisions[it.code]
-    if (!d) continue
-    if (!groups[d.action]) groups[d.action] = []
-    groups[d.action].push(rows[it.code]?.name || it.name || it.code)
-  }
-  return groups
-})
-
-async function loadOne(code: string, name: string | null) {
-  rows[code] = { name: name || code, type: null, nav: null, ret1y: null, signal: '', star: null, navMove: null }
-  try {
-    const [d, s, sig] = await Promise.all([funds.detail(code), funds.score(code), funds.signal(code)])
-    rows[code] = {
-      name: d.name || code,
-      type: d.type,
-      nav: d.latest_nav,
-      ret1y: d.ret_1y,
-      star: s.star,
-      signal: sig.signal,
-      navMove: latestNavMove(d.nav_history),
-    }
-  } catch { /* 占位 */ }
-}
-
-async function refresh() {
-  loading.value = true
-  await watch.load(true)
-  // 盘中估值并发抓取（纯前端，不阻塞列表渲染）
-  fetchEstimates(watch.items.map((i) => i.code)).then((m) => m.forEach((v, k) => { est[k] = v }))
-  await Promise.all(watch.items.map((i) => loadOne(i.code, i.name)))
-  await loadDecisions()
-  loading.value = false
-  refreshing.value = false
-}
-
-// 今日估算盈亏：Σ 份额 × 昨净值 × 估算涨跌%（仅有盘中估值的持仓计入）
-const todayEst = computed(() => {
-  let amt = 0, has = false
-  for (const e of watch.entries) {
-    if (e.deleted || !(e.shares && e.shares > 0)) continue
-    const move = preferredDailyMove(est[e.code], rows[e.code]?.navMove, rows[e.code]?.type || rows[e.code]?.name)
-    if (!move || move.change == null || move.baseNav == null) continue
-    amt += e.shares * move.baseNav * move.change / 100
-    has = true
-  }
-  return has ? amt : null
-})
-
-function dailyMoveOf(code: string) {
-  return preferredDailyMove(est[code], rows[code]?.navMove, rows[code]?.type || rows[code]?.name)
-}
-
-// 组合（仅 shares>0 的持仓）
-const portfolio = computed(() => {
-  let value = 0, cost = 0
-  const byType: Record<string, number> = {}
-  let count = 0
-  for (const e of watch.entries) {
-    if (e.deleted || !(e.shares && e.shares > 0)) continue
-    const nav = rows[e.code]?.nav
-    if (nav == null) continue
-    const v = e.shares * nav
-    value += v
-    cost += e.shares * (e.cost ?? 0)
-    const t = rows[e.code]?.type || '其他'
-    byType[t] = (byType[t] || 0) + v
-    count++
-  }
-  const profit = value - cost
-  return { value, cost, profit, rate: cost > 0 ? (profit / cost) * 100 : null, byType, count }
-})
-
-const allocOption = computed(() => ({
-  tooltip: { trigger: 'item', formatter: '{b}: {d}%' },
-  legend: { bottom: 0, type: 'scroll', textStyle: { fontSize: 11 } },
-  series: [{
-    type: 'pie', radius: ['42%', '64%'], center: ['50%', '42%'], label: { show: false },
-    data: Object.entries(portfolio.value.byType).map(([name, v]) => ({ name, value: +v.toFixed(2) })),
-  }],
-}))
-
-function sharesOf(code: string) {
-  const e = watch.entries.find((x) => x.code === code)
-  return e?.shares && e.shares > 0 ? e : null
-}
-
-function openEdit(code: string) {
-  const e = watch.entries.find((x) => x.code === code)
-  editCode.value = code
-  editShares.value = e?.shares ? String(e.shares) : ''
-  editCost.value = e?.cost ? String(e.cost) : ''
-  editAccount.value = e?.account || ''
-  editTargetWeight.value = e?.target_weight != null ? String(e.target_weight) : ''
-  editShow.value = true
-}
-function saveHolding() {
-  const tw = editTargetWeight.value.trim()
-  watch.setHolding(
-    editCode.value, Number(editShares.value) || 0, Number(editCost.value) || 0,
-    rows[editCode.value]?.name, editAccount.value.trim() || undefined,
-    tw ? Number(tw) : undefined,
-  )
-  showToast('已保存持仓')
-  loadDecisions()
-}
-function accountOf(code: string) {
-  return watch.entries.find((x) => x.code === code)?.account || ''
-}
-
-async function remove(code: string) {
-  await watch.remove(code)
-  delete rows[code]
-  showToast('已移除')
-}
-
-async function saveToken() { watch.setToken(token.value); showToast(token.value ? '已保存 Token' : '已清空') }
-async function upload() {
-  if (!watch.hasToken) { showToast('请先填 Token'); return }
-  await watch.manualUpload()
-  showToast(watch.lastSync ? '已上传' : '上传失败，检查 Token')
-}
-async function download() {
-  if (!watch.hasToken) { showToast('请先填 Token'); return }
-  await watch.manualDownload(); await refresh(); showToast('已同步')
-}
-function clearCloud() { watch.clearCloud(); token.value = ''; showToast('已清除云同步') }
-
-// V5-0 导入：模糊搜索代码/名称添加到自选
 const importShow = ref(false)
 const importQuery = ref('')
 const importResults = ref<FundListItem[]>([])
 const importLoading = ref(false)
 let importTimer: ReturnType<typeof setTimeout> | null = null
 
+const decisionSummary = computed(() => {
+  const groups: Record<string, string[]> = {}
+  for (const item of watch.items) {
+    const decision = decisions[item.code]
+    if (!decision) continue
+    if (!groups[decision.action]) groups[decision.action] = []
+    groups[decision.action].push(rows[item.code]?.name || item.name || item.code)
+  }
+  return groups
+})
+
+async function loadDecisions() {
+  Object.keys(decisions).forEach((key) => delete decisions[key])
+  if (!watch.items.length) return
+  decisionsLoading.value = true
+  try {
+    const response = await postPortfolioDecisions(watch.items.map((item) => ({ code: item.code })))
+    response.decisions.forEach((decision) => { decisions[decision.code] = decision })
+  } catch { /* 后端不可用时保留估值 */ }
+  finally { decisionsLoading.value = false }
+}
+
+async function loadOne(code: string, fallbackName: string | null) {
+  rows[code] = { name: fallbackName || code, type: null }
+  try {
+    const detail = await funds.detail(code)
+    rows[code] = { name: detail.name || fallbackName || code, type: detail.type }
+  } catch { /* 保留名称 */ }
+}
+
+async function refresh() {
+  loading.value = true
+  await watch.load(true)
+  const estimateMap = await fetchEstimates(watch.items.map((item) => item.code))
+  estimateMap.forEach((value, code) => { estimates[code] = value })
+  await Promise.all(watch.items.map((item) => loadOne(item.code, item.name)))
+  await loadDecisions()
+  loading.value = false
+  refreshing.value = false
+}
+
+function estimateText(code: string) {
+  const value = estimates[code]?.estChange
+  return value == null ? '—' : pct(value)
+}
+
+function estimateMeta(code: string) {
+  const estimate = estimates[code]
+  if (!estimate) return '暂无估值'
+  const time = estimate.estTime ? estimate.estTime.slice(5) : ''
+  return `${estimate.label}${time ? ' · ' + time : ''}`
+}
+
+async function remove(code: string) {
+  await watch.remove(code)
+  delete rows[code]
+  delete estimates[code]
+  delete decisions[code]
+  showToast('已移除')
+}
+
 function onImportInput() {
   if (importTimer) clearTimeout(importTimer)
-  const q = importQuery.value.trim()
-  if (q.length < 1) { importResults.value = []; return }
+  const query = importQuery.value.trim()
+  if (!query) { importResults.value = []; return }
   importTimer = setTimeout(async () => {
     importLoading.value = true
     try {
-      const resp = await getFunds({ q, page_size: 20 })
-      importResults.value = (resp.items || []).filter((f) => !watch.has(f.code))
+      const response = await getFunds({ q: query, page_size: 20 })
+      importResults.value = response.items.filter((fund) => !watch.has(fund.code))
     } catch { importResults.value = [] }
     finally { importLoading.value = false }
-  }, 350)
+  }, 300)
 }
 
 async function doImport(code: string, name: string) {
   watch.add(code, name)
   await loadOne(code, name)
-  // 从结果中移除已添加
-  importResults.value = importResults.value.filter((f) => f.code !== code)
+  estimates[code] = (await fetchEstimates([code])).get(code) || null
+  await loadDecisions()
+  importResults.value = importResults.value.filter((fund) => fund.code !== code)
   showToast('已添加')
 }
+
+async function saveToken() { watch.setToken(token.value); showToast(token.value ? '已保存 Token' : '已清空') }
+async function upload() { await watch.manualUpload(); showToast(watch.lastSync ? '已上传' : '上传失败') }
+async function download() { await watch.manualDownload(); await refresh(); showToast('已同步') }
 
 onMounted(refresh)
 </script>
 
 <template>
-  <div class="page">
-    <van-nav-bar title="自选 · 持仓">
+  <div class="page watch-page">
+    <van-nav-bar title="自选">
       <template #right>
-        <span style="margin-right:12px;cursor:pointer;color:var(--teal)" @click="importShow = true">
-          <Icon name="plus" :size="18" />
-        </span>
-        <span style="margin-right:12px;cursor:pointer;color:var(--text-muted)" @click="exportWatchlistCSV(watch.items)">
-          <Icon name="export" :size="17" />
-        </span>
-        <span style="cursor:pointer;color:var(--text-muted)" @click="showSync = true">
-          <Icon name="refresh" :size="18" />
-        </span>
+        <button class="nav-tool" aria-label="添加基金" @click="importShow = true"><Icon name="plus" :size="18" /></button>
+        <button class="nav-tool" aria-label="同步自选" @click="showSync = true"><Icon name="refresh" :size="18" /></button>
       </template>
     </van-nav-bar>
+
     <van-pull-refresh v-model="refreshing" @refresh="refresh">
-    <div class="page-body">
-      <!-- 组合概览 -->
-      <template v-if="portfolio.count > 0">
-        <div class="port card">
-          <div class="port-top">
-            <div>
-              <div class="k">持仓市值</div>
-              <div class="big">{{ num(portfolio.value, 2) }}</div>
-            </div>
-            <div style="text-align:right">
-              <div class="k">累计收益</div>
-              <div class="big" :style="{ color: colorOf(portfolio.profit) }">{{ num(portfolio.profit, 2) }}</div>
-              <div class="r" :style="{ color: colorOf(portfolio.rate) }">{{ pct(portfolio.rate) }}</div>
-            </div>
-          </div>
-          <div class="port-today" v-if="todayEst != null">
-            今日估算 <b :style="{ color: colorOf(todayEst) }">{{ (todayEst >= 0 ? '+' : '') + num(todayEst, 2) }}</b>
-            <span class="port-today-cap">估值数据 · 仅供参考</span>
-          </div>
-          <Chart :option="allocOption" height="180px" />
-          <div class="port-cap">{{ portfolio.count }} 只持仓 · 按类型配置</div>
-          <!-- 金脊远山 -->
-          <svg class="port-ridge" viewBox="0 0 400 24" preserveAspectRatio="none">
-            <path d="M0 24 L0 12 Q60 4 120 12 Q180 20 240 8 Q300 -2 360 12 Q380 16 400 8 L400 24Z" fill="#C8A75B" opacity="0.08" />
-            <path d="M0 14 Q60 6 120 14 Q180 22 240 10 Q300 0 360 14 Q380 18 400 10" fill="none" stroke="#C8A75B" stroke-opacity="0.12" stroke-width="1.5" />
-          </svg>
-        </div>
-      </template>
-
-      <!-- V6 今日决策摘要 -->
-      <div v-if="!loading && watch.items.length && Object.keys(decisionSummary).length" class="dec card">
-        <div class="dec-title">今日决策摘要</div>
-        <div v-if="decisionsLoading" class="dec-loading"><van-loading size="16" /> 加载决策…</div>
-        <div v-for="(names, action) in decisionSummary" :key="action" class="dec-row">
-          <span class="dec-act" :style="{ color: actionColor(action) }">{{ action }}</span>
-          <span class="dec-names">{{ names.join('、') }}</span>
-        </div>
-        <div class="dec-disc">数据辅助分析，不构成投资建议。</div>
-      </div>
-
-      <div v-if="!loading && allocation" class="dec card">
-        <div class="dec-title">组合校准</div>
-        <div class="alloc-line">
-          <span>当前 {{ allocation.current_total.toFixed(1) }}%</span>
-          <span>目标 {{ allocation.target_total.toFixed(1) }}%</span>
-          <span>现金 {{ allocation.target_cash.toFixed(1) }}%</span>
-        </div>
-        <div v-for="warning in allocation.warnings" :key="warning" class="alloc-warning">{{ warning }}</div>
-        <div v-for="row in rebalance.filter((x) => x.suggestion !== '维持').slice(0, 5)" :key="row.code" class="dec-row">
-          <span class="dec-act">{{ row.suggestion }}</span>
-          <span class="dec-names">{{ row.name }} · {{ pct(row.gap) }}</span>
-          <span v-if="row.amount != null" class="alloc-amount">约 {{ num(row.amount, 0) }} 元</span>
-        </div>
-        <div v-if="rebalance.length && rebalance.every((x) => x.suggestion === '维持')" class="dec-names">当前组合接近目标仓位。</div>
-      </div>
-
-      <div v-if="loading" class="list-skeleton">
-        <van-skeleton title :row="2" />
-        <van-skeleton title :row="2" />
-        <van-skeleton title :row="2" />
-      </div>
-      <van-empty v-else-if="watch.items.length === 0" description="还没有自选，去选基页添加" />
-      <van-cell-group v-else inset>
-        <van-cell
-          v-for="it in watch.items" :key="it.code"
-          :title="rows[it.code]?.name || it.name || it.code"
-          :label="it.code + (sharesOf(it.code) ? ' · ' + sharesOf(it.code)!.shares + '份' : '') + (accountOf(it.code) ? ' · ' + accountOf(it.code) : '')"
-          @click="router.push('/fund/' + it.code)"
-        >
-          <template #value>
-            <div class="wl-val">
-              <span
-                v-if="dailyMoveOf(it.code)?.change != null"
-                class="est-chg"
-                :style="{ color: colorOf(dailyMoveOf(it.code)!.change) }"
-                :title="dailyMoveOf(it.code)!.sourceNote"
-              >{{ dailyMoveOf(it.code)!.label }} {{ pct(dailyMoveOf(it.code)!.change) }}</span>
-              <span v-if="est[it.code]?.kind === 'overseas_model'" class="est-confidence">
-                覆盖 {{ num(est[it.code]?.modelWeight, 0) }}% · {{ est[it.code]?.confidence || '样本积累中' }}
-              </span>
-              <span class="sig" :style="{ color: signalColor(rows[it.code]?.signal || '') }">{{ rows[it.code]?.signal || '…' }}</span>
-              <span v-if="decisions[it.code]" class="act" :style="{ color: actionColor(decisions[it.code].action) }">
-                {{ decisions[it.code].action }}
-              </span>
-              <StarRating :star="rows[it.code]?.star ?? null" />
-              <span v-if="sharesOf(it.code) && rows[it.code]?.nav != null" class="nav">
-                市值 {{ num(sharesOf(it.code)!.shares! * rows[it.code]!.nav!, 2) }}
-              </span>
-              <span v-else class="nav">{{ num(rows[it.code]?.nav) }} <em :style="{ color: colorOf(rows[it.code]?.ret1y) }">{{ pct(rows[it.code]?.ret1y) }}</em></span>
+      <div class="page-body">
+        <div class="sec">今日决策摘要</div>
+        <section class="card decision-card">
+          <div v-if="decisionsLoading" class="decision-loading"><van-loading size="15" /> 计算中</div>
+          <template v-else-if="Object.keys(decisionSummary).length">
+            <div v-for="(names, action) in decisionSummary" :key="action" class="decision-row">
+              <b>{{ action }}</b><span>{{ names.join('、') }}</span>
             </div>
           </template>
-          <template #right-icon>
-            <van-icon name="edit" color="#4C7E67" size="17" style="margin-left:10px" @click.stop="openEdit(it.code)" />
-            <van-icon name="cross" color="#A8B2A8" size="17" style="margin-left:8px" @click.stop="remove(it.code)" />
-          </template>
-        </van-cell>
-      </van-cell-group>
-    </div>
+          <div v-else class="empty-line">暂无决策结果</div>
+        </section>
+
+        <div class="sec">盘中估值</div>
+        <div v-if="loading" class="estimate-list skeleton-list"><van-skeleton title :row="6" /></div>
+        <van-empty v-else-if="!watch.items.length" description="还没有自选基金" />
+        <section v-else class="estimate-list">
+          <van-swipe-cell v-for="item in watch.items" :key="item.code">
+            <article class="estimate-row" @click="router.push('/fund/' + item.code)">
+              <div class="fund-name"><b>{{ rows[item.code]?.name || item.name || item.code }}</b><span>{{ item.code }} · {{ rows[item.code]?.type || '基金' }}</span></div>
+              <div class="estimate-value">
+                <strong :style="{ color: colorOf(estimates[item.code]?.estChange) }">{{ estimateText(item.code) }}</strong>
+                <span>{{ estimateMeta(item.code) }}</span>
+                <em v-if="estimates[item.code]?.kind === 'overseas_model'">覆盖 {{ estimates[item.code]?.modelWeight?.toFixed(0) }}%</em>
+              </div>
+            </article>
+            <template #right><van-button square type="danger" text="移除" class="remove-button" @click="remove(item.code)" /></template>
+          </van-swipe-cell>
+        </section>
+      </div>
     </van-pull-refresh>
 
-    <!-- 持仓编辑 -->
-    <van-dialog v-model:show="editShow" title="编辑持仓" show-cancel-button @confirm="saveHolding">
-      <div style="padding:8px 4px">
-        <van-field v-model="editShares" type="number" label="份额" placeholder="0（0=仅关注）" />
-        <van-field v-model="editCost" type="number" label="成本净值" placeholder="0.000" />
-        <van-field v-model="editTargetWeight" type="number" label="目标仓位%" placeholder="留空=等权分配" />
-        <van-field v-model="editAccount" label="账户" placeholder="如 支付宝（可留空）" />
-        <div class="acc-chips">
-          <span v-for="a in accountChips" :key="a"
-            :class="['chip', { on: editAccount === a }]"
-            @click="editAccount = editAccount === a ? '' : a">{{ a }}</span>
-        </div>
-      </div>
-    </van-dialog>
-
-    <!-- 云同步 -->
-    <van-popup v-model:show="showSync" position="bottom" round :style="{ padding: '16px' }">
-      <div class="sync-title">云同步（GitHub Gist）</div>
-      <div class="sync-sub">自选/持仓存在本机，配 Token 后可备份到私有 Gist、多设备同步。需 <code>gist</code> 权限，<a href="https://github.com/settings/tokens" target="_blank" rel="noopener">创建 Token</a>。</div>
-      <van-field v-model="token" type="password" label="Token" placeholder="ghp_xxx" />
-      <div class="sync-status">{{ watch.syncing ? '同步中…' : watch.lastSync ? '上次同步：' + new Date(watch.lastSync).toLocaleString() : '未同步' }}</div>
-      <div class="sync-btns">
-        <van-button size="small" @click="saveToken">保存 Token</van-button>
+    <van-popup v-model:show="showSync" position="bottom" round :style="{ padding: '18px', paddingBottom: '30px' }">
+      <div class="popup-title">同步自选</div>
+      <van-field v-model="token" type="password" label="Token" placeholder="GitHub Gist Token" />
+      <div class="sync-status">{{ watch.syncing ? '同步中' : watch.lastSync ? '上次同步 ' + new Date(watch.lastSync).toLocaleString() : '尚未同步' }}</div>
+      <div class="sync-actions">
+        <van-button size="small" @click="saveToken">保存</van-button>
         <van-button size="small" type="primary" @click="upload">上传</van-button>
         <van-button size="small" type="primary" plain @click="download">下载</van-button>
       </div>
-      <van-button size="small" block plain @click="clearCloud" style="margin-top:8px;color:var(--danger)">清除云同步配置</van-button>
     </van-popup>
 
-    <!-- V5-0 导入基金 -->
-    <van-popup v-model:show="importShow" position="bottom" round :safe-area-inset-bottom="true" :style="{ padding: '16px', paddingBottom: '66px', maxHeight: '70vh' }">
-      <div class="sync-title">导入基金</div>
-      <div class="sync-sub">输入代码或名称模糊搜索，点击添加到自选。</div>
-      <van-field v-model="importQuery" placeholder="例如：沪深300 或 000300" @update:model-value="onImportInput" clearable>
-        <template #left-icon>
-          <Icon name="mirror" :size="16" color="var(--teal)" />
-        </template>
+    <van-popup v-model:show="importShow" position="bottom" round :safe-area-inset-bottom="true" :style="{ padding: '18px', paddingBottom: '66px', maxHeight: '70vh' }">
+      <div class="popup-title">添加基金</div>
+      <van-field v-model="importQuery" placeholder="输入代码或名称" clearable @update:model-value="onImportInput">
+        <template #left-icon><Icon name="mirror" :size="16" color="var(--teal)" /></template>
       </van-field>
-      <div style="max-height:40vh;overflow-y:auto;margin-top:8px">
-        <van-loading v-if="importLoading" style="text-align:center;padding:12px" />
-        <div v-else-if="importQuery && importResults.length === 0" style="text-align:center;padding:20px;color:var(--text-hint);font-size:13px">
-          {{ importQuery.length < 2 ? '输入至少 2 个字符' : '无匹配结果（或已在自选中）' }}
-        </div>
-        <van-cell v-for="f in importResults" :key="f.code"
-          :title="f.name" :label="f.code + ' · ' + (f.type || '')"
-          is-link @click="doImport(f.code, f.name)">
-          <template #icon>
-            <Icon name="plus" :size="16" color="var(--teal)" style="margin-right:6px" />
-          </template>
-        </van-cell>
+      <div class="import-results">
+        <van-loading v-if="importLoading" class="import-loading" />
+        <van-empty v-else-if="importQuery && !importResults.length" description="没有可添加的基金" image-size="56" />
+        <van-cell v-for="fund in importResults" :key="fund.code" :title="fund.name" :label="fund.code + ' · ' + (fund.type || '')" is-link @click="doImport(fund.code, fund.name)" />
       </div>
     </van-popup>
   </div>
 </template>
 
 <style scoped>
-.card { background: var(--card-bg); border-radius: var(--radius-lg); padding: 14px; border: 1px solid var(--border); box-shadow: var(--shadow-sm); }
-.port { margin-bottom: 12px; overflow: hidden; }
-.port-ridge { display: block; width: 100%; height: 24px; margin-top: 8px; }
-.port-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px; }
-.port .k { font-size: 11px; color: var(--text-muted); }
-.port .big { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.port .r { font-size: 12px; }
-.port-today { font-size: 13px; color: var(--text-secondary); margin: 2px 0 10px; }
-.port-today b { font-variant-numeric: tabular-nums; font-weight: 600; }
-.port-today-cap { font-size: 11px; color: var(--text-hint); margin-left: 8px; }
-.port-cap { font-size: 11px; color: var(--text-hint); text-align: center; }
-.wl-val { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
-.est-chg { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.est-confidence { color: var(--text-hint); font-size: 10px; white-space: normal; text-align: right; }
-.sig { font-size: 13px; font-weight: 500; }
-.act { font-size: 13px; font-weight: 600; }
-.dec { margin-bottom: 12px; }
-.dec-title { font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; }
-.dec-row { font-size: 12px; line-height: 1.6; margin: 4px 0; display: flex; gap: 8px; }
-.dec-act { font-weight: 600; white-space: nowrap; min-width: 64px; }
-.dec-names { color: var(--text-secondary); flex: 1; }
-.dec-disc { font-size: 11px; color: var(--text-hint); margin-top: 8px; }
-.dec-loading { font-size: 12px; color: var(--text-hint); margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
-.alloc-line { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
-.alloc-warning { font-size: 12px; color: var(--danger); margin: 4px 0 8px; }
-.alloc-amount { font-size: 11px; color: var(--text-hint); white-space: nowrap; }
-.nav { font-size: 12px; color: var(--text-secondary); }
-.nav em { font-style: normal; margin-left: 4px; }
-.sync-title { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
-.sync-sub { font-size: 12px; color: var(--text-muted); line-height: 1.6; margin-bottom: 10px; }
-.sync-sub code { background: var(--chip-bg); padding: 1px 4px; border-radius: 3px; }
-.sync-sub a { color: var(--teal); }
-.sync-status { font-size: 12px; color: var(--text-secondary); margin: 10px 2px; }
-.sync-btns { display: flex; gap: 8px; }
-.sync-btns .van-button { flex: 1; }
-.acc-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 16px 4px; }
-.acc-chips .chip { font-size: 12px; color: var(--text-secondary); background: var(--chip-bg); border-radius: 12px; padding: 3px 10px; }
-.acc-chips .chip.on { color: #fff; background: var(--teal); }
-.list-skeleton { background: var(--card-bg); border-radius: var(--radius-lg); padding: 14px 12px 4px; border: 1px solid var(--border); }
-.list-skeleton .van-skeleton { padding: 0 0 18px; }
+.nav-tool { width: 34px; height: 34px; display: inline-grid; place-items: center; padding: 0; border: 0; color: var(--teal); background: transparent; cursor: pointer; }
+.decision-card { min-height: 76px; padding: 10px 14px; }
+.decision-row { display: grid; grid-template-columns: 76px 1fr; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 12px; }.decision-row:last-child { border-bottom: 0; }.decision-row b { color: var(--teal-deep); }.decision-row span { color: var(--text-secondary); line-height: 1.5; }
+.decision-loading, .empty-line { min-height: 54px; display: flex; align-items: center; justify-content: center; gap: 7px; color: var(--text-hint); font-size: 11px; }
+.estimate-list { overflow: hidden; background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); }
+.estimate-row { min-height: 76px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 13px 14px; border-bottom: 1px solid var(--border); cursor: pointer; }.van-swipe-cell:last-child .estimate-row { border-bottom: 0; }
+.fund-name { min-width: 0; }.fund-name b, .fund-name span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.fund-name b { color: var(--ink); font-size: 14px; font-weight: 600; }.fund-name span { color: var(--text-hint); font-family: var(--font-mono); font-size: 10px; margin-top: 6px; }
+.estimate-value { min-width: 104px; text-align: right; }.estimate-value strong, .estimate-value span, .estimate-value em { display: block; }.estimate-value strong { font-family: var(--font-mono); font-size: 19px; font-weight: 500; }.estimate-value span, .estimate-value em { color: var(--text-hint); font-size: 9px; font-style: normal; margin-top: 3px; }
+.remove-button { height: 100%; }.skeleton-list { padding: 15px; }
+.popup-title { color: var(--ink); font-family: var(--font-display); font-size: 17px; font-weight: 700; margin-bottom: 12px; }.sync-status { color: var(--text-hint); font-size: 10px; margin: 12px 2px; }.sync-actions { display: flex; gap: 8px; }.sync-actions .van-button { flex: 1; }.import-results { max-height: 42vh; overflow-y: auto; margin-top: 8px; }.import-loading { display: block; text-align: center; padding: 18px; }
 </style>

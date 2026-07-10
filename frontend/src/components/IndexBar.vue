@@ -42,11 +42,14 @@ const sign = (c: number) => (Number.isFinite(c) && c >= 0 ? '+' : '')
 </template>
 
 <style scoped>
-.ibar { background: #fff; border-bottom: 0.5px solid #ECEFE9; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.ibar { background: var(--card-bg); border-bottom: 1px solid var(--border); overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .ibar::-webkit-scrollbar { display: none; }
-.ibar-inner { display: flex; gap: 18px; padding: 8px 14px; width: max-content; }
+.ibar-inner { display: flex; gap: 24px; padding: 9px 16px; width: max-content; margin: 0 auto; }
 .item { display: flex; flex-direction: column; align-items: flex-start; min-width: 70px; line-height: 1.35; }
-.nm { font-size: 11px; color: #5A6A60; }
+.nm { font-size: 11px; color: var(--text-muted); }
 .px { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .ch { font-size: 11px; font-variant-numeric: tabular-nums; }
+@media (min-width: 900px) {
+  .ibar-inner { width: min(100%, 920px); justify-content: center; }
+}
 </style>

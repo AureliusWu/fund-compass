@@ -69,18 +69,6 @@ function onToggleTheme() {
         </template>
         自选
       </van-tabbar-item>
-      <van-tabbar-item to="/assets">
-        <template #icon>
-          <Icon name="assets" :size="20" />
-        </template>
-        资产
-      </van-tabbar-item>
-      <van-tabbar-item to="/compare">
-        <template #icon>
-          <Icon name="compare" :size="20" />
-        </template>
-        对比
-      </van-tabbar-item>
     </van-tabbar>
 
     <!-- 描金主题切换 -->
