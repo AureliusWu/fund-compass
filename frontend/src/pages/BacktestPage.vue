@@ -185,6 +185,25 @@ const fp = (n: number | null | undefined, d = 2) => n != null ? (n >= 0 ? '+' : 
           </div>
         </div>
 
+        <div class="card friction" v-if="bt.assumptions">
+          <div class="friction-head">
+            <span>真实摩擦口径</span>
+            <em>{{ bt.stress?.stable === false ? '高成本压力未通过' : '高成本压力稳定' }}</em>
+          </div>
+          <div class="friction-grid">
+            <span>无摩擦 {{ fp(bt.strategy_gross?.total_return) }}</span>
+            <span>摩擦损耗 {{ fp(-(bt.friction_cost ?? 0)) }}</span>
+            <span>高成本下降 {{ fp(-(bt.stress?.return_drop ?? 0)) }}</span>
+          </div>
+          <div class="note">
+            申购 {{ (bt.assumptions.buy_fee * 100).toFixed(2) }}% ·
+            赎回 {{ (bt.assumptions.sell_fee * 100).toFixed(2) }}% ·
+            滑点 {{ (bt.assumptions.slippage * 100).toFixed(2) }}% ·
+            现金年化 {{ (bt.assumptions.annual_cash_yield * 100).toFixed(1) }}% ·
+            最短持有 {{ bt.assumptions.min_hold_months }} 月
+          </div>
+        </div>
+
         <div class="sec">算法自校准</div>
         <div class="card calibration" v-if="calibration">
           <div class="cal-head">
@@ -303,6 +322,10 @@ const fp = (n: number | null | undefined, d = 2) => n != null ? (n >= 0 ? '+' : 
 .cal-grid span { display: block; color: var(--text-hint); font-size: 10px; }
 .cal-grid b { display: block; margin-top: 2px; font-size: 14px; white-space: nowrap; }
 .cal-reason { margin-top: 10px; font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+.friction { margin-top: 8px; }
+.friction-head { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; font-weight: 600; }
+.friction-head em { color: var(--text-hint); font-size: 11px; font-style: normal; font-weight: 500; }
+.friction-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 10px; font-size: 11px; color: var(--text-secondary); }
 :deep(.red) { color: #C44536 !important; }
 :deep(.green) { color: #3D8B63 !important; }
 </style>

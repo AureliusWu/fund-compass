@@ -82,6 +82,8 @@ def decide_portfolio(items: list[dict], portfolio_value: float | None = None) ->
                 "code": detail.get("code"),
                 "name": detail.get("name"),
                 "type": detail.get("type"),
+                "as_of_nav": detail.get("latest_nav"),
+                "as_of_date": detail.get("latest_nav_date"),
                 **d,
             })
         except Exception as ex:

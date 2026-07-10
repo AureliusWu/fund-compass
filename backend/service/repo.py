@@ -210,3 +210,91 @@ def remove_watchlist(code: str) -> None:
         conn.commit()
     finally:
         conn.close()
+
+
+# ── 决策结果闭环 ──────────────────────────────────────
+def record_decisions(decisions: list[dict], strategy_version: str) -> int:
+    """保存当时决策快照；同基金/日期/参数版本只写一次，不事后覆盖。"""
+    rows = []
+    now = _now().isoformat(timespec="seconds")
+    for decision in decisions:
+        nav = decision.get("as_of_nav")
+        date = decision.get("as_of_date")
+        if not code_is_valid(decision.get("code")) or not date or not nav:
+            continue
+        rows.append((
+            decision["code"], decision.get("name"), decision.get("type"), date,
+            float(nav), decision.get("action") or "观察", decision.get("confidence"),
+            strategy_version, now,
+        ))
+    if not rows:
+        return 0
+    conn = get_conn()
+    try:
+        before = conn.total_changes
+        conn.executemany(
+            """INSERT OR IGNORE INTO decision_history
+            (code,name,type,decision_date,base_nav,action,confidence,strategy_version,created_at)
+            VALUES (?,?,?,?,?,?,?,?,?)""",
+            rows,
+        )
+        conn.commit()
+        return conn.total_changes - before
+    finally:
+        conn.close()
+
+
+def code_is_valid(code) -> bool:
+    return isinstance(code, str) and len(code) == 6 and code.isdigit()
+
+
+def decision_outcomes(horizons=(5, 20, 60)) -> dict:
+    """按决策时点后的第 N 个净值观测计算表现，绝不使用决策日前数据。"""
+    conn = get_conn()
+    try:
+        decisions = [dict(row) for row in conn.execute(
+            "SELECT * FROM decision_history ORDER BY decision_date DESC"
+        ).fetchall()]
+        results = []
+        for decision in decisions:
+            future = conn.execute(
+                "SELECT date,nav FROM nav_history WHERE code=? AND date>? ORDER BY date",
+                (decision["code"], decision["decision_date"]),
+            ).fetchall()
+            outcome = {**decision, "returns": {}}
+            for horizon in horizons:
+                if len(future) >= horizon:
+                    point = future[horizon - 1]
+                    outcome["returns"][str(horizon)] = {
+                        "date": point["date"],
+                        "return": round((point["nav"] / decision["base_nav"] - 1) * 100, 2),
+                    }
+            results.append(outcome)
+    finally:
+        conn.close()
+
+    groups: dict[tuple[str, str, str], list[float]] = {}
+    positive_actions = {"分批买入", "继续定投"}
+    defensive_actions = {"停止加仓", "部分观察", "考虑替换"}
+    for row in results:
+        for horizon, outcome in row["returns"].items():
+            groups.setdefault((row["strategy_version"], row["action"], horizon), []).append(outcome["return"])
+    summary = []
+    for (version, action, horizon), returns in sorted(
+        groups.items(), key=lambda item: (item[0][0], int(item[0][2]), item[0][1])
+    ):
+        if action in positive_actions:
+            hits = sum(value > 0 for value in returns)
+        elif action in defensive_actions:
+            hits = sum(value <= 0 for value in returns)
+        else:
+            hits = sum(value >= 0 for value in returns)
+        summary.append({
+            "action": action,
+            "strategy_version": version,
+            "horizon": int(horizon),
+            "samples": len(returns),
+            "average_return": round(sum(returns) / len(returns), 2),
+            "hit_rate": round(hits / len(returns) * 100, 1),
+        })
+    return {"total": len(results), "items": results, "summary": summary}

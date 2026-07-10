@@ -81,9 +81,21 @@ export interface BacktestResp {
   code: string; name: string; available: boolean; reason?: string
   start?: string; end?: string; rebalances?: number
   strategy?: BtSeries; benchmark?: BtSeries
+  strategy_gross?: BtSeries
   outperform?: number; win_rate?: number | null
   actions?: { date: string; signal: string; weight: number }[]
   weights?: Record<string, number>
+  assumptions?: {
+    buy_fee: number; sell_fee: number; slippage: number
+    annual_cash_yield: number; min_hold_months: number
+  }
+  friction_cost?: number
+  stress?: {
+    high_cost_return: number | null
+    high_cost_outperform: number | null
+    return_drop: number
+    stable: boolean
+  }
 }
 export const getBacktest = (code: string) => req<BacktestResp>(`/fund/${code}/backtest`)
 

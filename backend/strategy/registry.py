@@ -42,5 +42,6 @@ def registry_summary() -> dict:
         "active": data.get("active"),
         "candidate": data.get("candidate"),
         "history": data.get("history") or [],
+        "governance": data.get("governance") or {"status": "unknown", "poor_cycles": 0},
         "updated_at": data.get("updated_at"),
     }

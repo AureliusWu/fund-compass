@@ -24,6 +24,20 @@ def test_backtest_accepts_custom_weights(uptrend):
     assert r["weights"] == custom
 
 
+def test_backtest_includes_realistic_friction(uptrend):
+    r = backtest({"nav_history": uptrend})
+    assert r["strategy_gross"]["total_return"] >= r["strategy"]["total_return"]
+    assert r["friction_cost"] >= 0
+    assert r["assumptions"]["buy_fee"] > 0
+    assert "turnover" in r["actions"][0]
+
+
+def test_backtest_stress_reports_high_cost_sensitivity(uptrend):
+    r = backtest({"nav_history": uptrend}, include_stress=True)
+    assert "stress" in r
+    assert r["stress"]["return_drop"] >= 0
+
+
 def test_max_drawdown_monotonic_up_is_zero():
     assert _max_drawdown([{"v": 1.0}, {"v": 1.1}, {"v": 1.2}]) == 0.0
 

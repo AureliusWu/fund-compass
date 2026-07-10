@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated_at": "2026-07-09T00:00:00+08:00",
+  "updated_at": "2026-07-09T22:23:18+08:00",
   "active": {
     "version": "v1-default",
     "weights": {
@@ -12,5 +12,24 @@
     "source": "built-in baseline"
   },
   "history": [],
-  "candidate": null
+  "candidate": {
+    "version": "candidate-20260709",
+    "created_at": "2026-07-09T22:23:18+08:00",
+    "weights": {
+      "买入": 1.0,
+      "减仓": 0.1,
+      "定投": 0.8,
+      "持有": 0.6
+    },
+    "status": "rejected",
+    "evidence": {
+      "sampled": 30,
+      "valid": 26,
+      "accepted": 2,
+      "winner_votes": 2,
+      "required_votes": 11,
+      "median_validation_improvement": 0.46,
+      "passed": false
+    }
+  }
 }

@@ -41,13 +41,44 @@ jobs:
           PYTHONUNBUFFERED: '1'
         run: python tools/managers.py
       - name: 跨基金校准策略参数
+        id: calibrate
         continue-on-error: true
         env:
           AUTO_PROMOTE_STRATEGY: 'true'
           CALIBRATION_MIN_VALID: '12'
           CALIBRATION_MAX_FUNDS: '30'
+          FUND_API_BASE: ${{ secrets.FUND_API_BASE }}
           PYTHONUNBUFFERED: '1'
         run: python tools/calibrate_strategy.py
+      - name: 上传策略校准报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: strategy-calibration-${{ github.run_number }}
+          path: |
+            frontend/public/data/strategy-calibration.json
+            backend/data/strategy-params.json
+          retention-days: 90
+      - name: 写入任务摘要
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          from pathlib import Path
+          path = Path("frontend/public/data/strategy-calibration.json")
+          print("## 策略校准")
+          if not path.exists():
+              print("校准报告未生成，任务失败且 active 参数未被修改。")
+          else:
+              data = json.loads(path.read_text(encoding="utf-8"))
+              s = data.get("summary") or {}
+              c = data.get("candidate") or {}
+              print(f"- 样本：{s.get('valid', 0)}/{s.get('sampled', 0)} 有效")
+              print(f"- 候选：{c.get('status', 'unknown')}")
+              print(f"- 支持：{s.get('winner_votes', 0)}/{s.get('required_votes', 0)}")
+              print(f"- 验证超额中位数提升：{s.get('median_validation_improvement')} pct")
+          PY
       - name: 提交数据
         run: |
           if [[ -n "$(git status --porcelain frontend/public/data backend/data)" ]]; then

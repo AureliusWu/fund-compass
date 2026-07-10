@@ -1,4 +1,4 @@
-"""司南基金 后端入口（FastAPI）。
+r"""司南基金 后端入口（FastAPI）。
 
 本地启动（建议 Python 3.12）：
     cd backend
@@ -39,7 +39,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="司南基金 API", version="0.3.1", lifespan=lifespan)
+app = FastAPI(title="司南基金 API", version="0.4.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -130,7 +130,7 @@ def fund_signal(detail: dict = Depends(fund_detail_dep)) -> dict:
 @app.get("/api/fund/{code}/backtest")
 def fund_backtest(detail: dict = Depends(fund_detail_dep)) -> dict:
     """择时回测：按月用三层信号调仓 vs 一直持有，给收益/回撤/胜率/净值曲线。"""
-    return {"code": detail["code"], "name": detail.get("name"), **backtest(detail)}
+    return {"code": detail["code"], "name": detail.get("name"), **backtest(detail, include_stress=True)}
 
 
 @app.get("/api/fund/{code}/calibrate")
@@ -228,7 +228,16 @@ def portfolio_decisions(payload: dict) -> dict:
             raise HTTPException(status_code=400, detail="portfolio_value 需为数字") from ex
         if portfolio_value < 0:
             raise HTTPException(status_code=400, detail="portfolio_value 不能为负数")
-    return decide_portfolio(cleaned, portfolio_value)
+    result = decide_portfolio(cleaned, portfolio_value)
+    version = (registry_summary().get("active") or {}).get("version") or "unknown"
+    repo.record_decisions(result["decisions"], version)
+    return result
+
+
+@app.get("/api/strategy/outcomes")
+def strategy_outcomes() -> dict:
+    """历史决策在 5/20/60 个净值观测后的真实表现。"""
+    return repo.decision_outcomes()
 
 
 @app.get("/api/watchlist")

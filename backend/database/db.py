@@ -50,6 +50,21 @@ CREATE TABLE IF NOT EXISTS watchlist (
   code     TEXT PRIMARY KEY,
   added_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS decision_history (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  code             TEXT NOT NULL,
+  name             TEXT,
+  type             TEXT,
+  decision_date    TEXT NOT NULL,
+  base_nav         REAL NOT NULL,
+  action           TEXT NOT NULL,
+  confidence       TEXT,
+  strategy_version TEXT NOT NULL,
+  created_at       TEXT NOT NULL,
+  UNIQUE(code, decision_date, strategy_version)
+);
+CREATE INDEX IF NOT EXISTS idx_decision_history_date ON decision_history(decision_date);
 """
 
 
