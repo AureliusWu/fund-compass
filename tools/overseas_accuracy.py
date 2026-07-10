@@ -10,7 +10,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 REGISTRY = ROOT / "frontend" / "src" / "data" / "overseas-models.json"
 LEDGER = ROOT / "frontend" / "public" / "data" / "overseas-accuracy.json"
-FUND_API_BASE = os.environ.get("FUND_API_BASE", "https://fund-compass-api.onrender.com").rstrip("/")
+DEFAULT_FUND_API_BASE = "https://fund-compass-api.onrender.com"
+
+
+def normalize_api_base(value: str | None) -> str:
+    return (value or DEFAULT_FUND_API_BASE).rstrip("/")
+
+
+FUND_API_BASE = normalize_api_base(os.environ.get("FUND_API_BASE"))
 CST = dt.timezone(dt.timedelta(hours=8))
 
 

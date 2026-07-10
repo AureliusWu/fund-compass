@@ -60,6 +60,11 @@ def test_add_predictions_skips_weekends():
     assert ledger["records"] == []
 
 
+def test_empty_api_secret_falls_back_to_public_backend():
+    assert accuracy.normalize_api_base("") == "https://fund-compass-api.onrender.com"
+    assert accuracy.normalize_api_base("https://example.test/") == "https://example.test"
+
+
 def test_settle_pairs_exact_nav_date_only():
     ledger = {"records": [{
         "code": "012920", "target_nav_date": "2026-07-02", "base_nav": 5.0259,
