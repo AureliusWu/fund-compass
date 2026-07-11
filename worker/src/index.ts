@@ -4,6 +4,7 @@ export interface Env {
   GIST_TOKEN: string
   WECHAT_SENDKEY: string
   ADMIN_TOKEN: string
+  WORKER_TOKEN: string
 }
 
 interface WatchEntry {
@@ -28,12 +29,17 @@ interface PushState {
   date: string
   sent_slots: string[]
   last_slot?: string
+  last_attempt_at?: string
   last_pushed_at?: string
+  attempt_count: number
+  last_error?: string
+  last_http_status?: number | null
 }
 
 const WATCH_FILE = 'sinan-watchlist.json'
 const STATE_FILE = 'sinan-estimate-state.json'
 const SLOT = '14:30'
+const MAX_MESSAGE_LENGTH = 8000
 
 function numberOrNull(value: unknown): number | null {
   const parsed = Number(value)
@@ -132,13 +138,16 @@ function portfolioItems(entries: WatchEntry[], estimates: Map<string, Estimate>)
   return { items, portfolioValue: Number(portfolioValue.toFixed(2)) }
 }
 
-async function decisions(env: Env, entries: WatchEntry[], estimates: Map<string, Estimate>) {
+async function decisions(env: Env, entries: WatchEntry[], estimates: Map<string, Estimate>, requestId: string) {
   if (!env.FUND_API_BASE) return null
   const payload = portfolioItems(entries, estimates)
   try {
     const response = await fetch(`${env.FUND_API_BASE.replace(/\/$/, '')}/api/portfolio/decisions`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items: payload.items, portfolio_value: payload.portfolioValue }),
+      method: 'POST', headers: {
+        'Content-Type': 'application/json',
+        ...(env.WORKER_TOKEN ? { Authorization: `Bearer ${env.WORKER_TOKEN}` } : {}),
+      },
+      body: JSON.stringify({ request_id: requestId, items: payload.items, portfolio_value: payload.portfolioValue }),
       signal: AbortSignal.timeout(25_000),
     })
     if (!response.ok) return null
@@ -158,7 +167,12 @@ export function formatMessage(entries: WatchEntry[], estimates: Map<string, Esti
     const summary = decision?.summary ? `，${String(decision.summary)}` : ''
     return `- **${entry.name || estimate.name || entry.code}** ${change}${action}${summary}`
   }).filter(Boolean)
-  return `${lines.join('\n')}\n\n> 数据辅助分析，不构成投资建议。`
+  const message = `${lines.join('\n')}\n\n> 数据辅助分析，不构成投资建议。`
+  return message.length <= MAX_MESSAGE_LENGTH ? message : `${message.slice(0, MAX_MESSAGE_LENGTH - 20)}\n\n> 内容已安全截断`
+}
+
+class PushError extends Error {
+  constructor(message: string, readonly status: number | null = null, readonly retryAfter = 0) { super(message) }
 }
 
 async function serverChan(env: Env, title: string, content: string): Promise<void> {
@@ -167,11 +181,26 @@ async function serverChan(env: Env, title: string, content: string): Promise<voi
     method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body,
   })
   const result = await response.text()
-  if (!response.ok) throw new Error(`Server酱发送失败: HTTP ${response.status}`)
+  if (!response.ok) throw new PushError(
+    `Server酱发送失败: HTTP ${response.status} ${result.slice(0, 120)}`,
+    response.status,
+    Number(response.headers.get('Retry-After') || 0),
+  )
   let parsed: { code?: number; errno?: number; message?: string } = {}
   try { parsed = JSON.parse(result) } catch { /* non-JSON response */ }
   if ((parsed.code != null && parsed.code !== 0) || (parsed.errno != null && parsed.errno !== 0)) {
-    throw new Error(`Server酱发送失败: ${parsed.message || result.slice(0, 160)}`)
+    throw new PushError(`Server酱发送失败: ${parsed.message || result.slice(0, 160)}`, response.status)
+  }
+}
+
+async function sendWithOneRetry(env: Env, title: string, content: string): Promise<void> {
+  try { await serverChan(env, title, content) }
+  catch (error) {
+    if (!(error instanceof PushError) || error.status !== 429) throw error
+    // Server酱通常使用秒；仅接受短等待，避免 Worker 长时间占用。
+    const retryAfter = Math.min(5, Math.max(0, error.retryAfter))
+    if (retryAfter) await new Promise((resolve) => setTimeout(resolve, retryAfter * 1000))
+    await serverChan(env, title, content)
   }
 }
 
@@ -183,9 +212,9 @@ async function writeState(env: Env, state: PushState): Promise<void> {
   if (!response.ok) throw new Error(`Gist 状态写入失败: HTTP ${response.status}`)
 }
 
-async function run(env: Env, force: boolean) {
+export async function run(env: Env, force: boolean, clock = new Date()) {
   if (!env.GIST_ID || !env.GIST_TOKEN || !env.WECHAT_SENDKEY) throw new Error('Worker 密钥配置不完整')
-  const now = beijingNow()
+  const now = beijingNow(clock)
   if (!force && (now.weekday === 'Sat' || now.weekday === 'Sun')) return { status: 'skipped', reason: 'weekend' }
   const files = await readGist(env)
   const entries = (JSON.parse(await fileContent(files[WATCH_FILE]) || '[]') as WatchEntry[])
@@ -193,8 +222,13 @@ async function run(env: Env, force: boolean) {
   if (!entries.length) return { status: 'skipped', reason: 'empty_watchlist' }
   const state = JSON.parse(await fileContent(files[STATE_FILE]) || '{}') as Partial<PushState>
   const current: PushState = state.date === now.date
-    ? { date: now.date, sent_slots: state.sent_slots || [], last_slot: state.last_slot, last_pushed_at: state.last_pushed_at }
-    : { date: now.date, sent_slots: [] }
+    ? {
+        date: now.date, sent_slots: state.sent_slots || [], last_slot: state.last_slot,
+        last_attempt_at: state.last_attempt_at, last_pushed_at: state.last_pushed_at,
+        attempt_count: state.attempt_count || 0, last_error: state.last_error,
+        last_http_status: state.last_http_status ?? null,
+      }
+    : { date: now.date, sent_slots: [], attempt_count: 0, last_http_status: null }
   if (!force && current.sent_slots.includes(SLOT)) return { status: 'skipped', reason: 'already_sent' }
 
   const unique = new Map<string, WatchEntry>()
@@ -206,13 +240,28 @@ async function run(env: Env, force: boolean) {
   if (!force && !fresh) return { status: 'skipped', reason: 'no_fresh_estimate' }
 
   const activeEntries = [...unique.values()].filter((entry) => estimates.has(entry.code))
-  const result = await decisions(env, activeEntries, estimates)
+  const result = await decisions(env, activeEntries, estimates, `${now.date}-${SLOT}`)
   const title = result ? `司南基金 · 自选决策摘要（${SLOT}）` : `司南基金 · 自选涨跌幅（${SLOT}）`
-  await serverChan(env, title, formatMessage(activeEntries, estimates, result))
+  current.last_slot = SLOT
+  current.last_attempt_at = now.iso
+  current.attempt_count += 1
+  current.last_error = ''
+  current.last_http_status = null
+  if (!force) await writeState(env, current)
+  try {
+    await sendWithOneRetry(env, title, formatMessage(activeEntries, estimates, result))
+  } catch (error) {
+    current.last_error = error instanceof Error ? error.message.slice(0, 240) : String(error).slice(0, 240)
+    current.last_http_status = error instanceof PushError ? error.status : null
+    if (!force) await writeState(env, current)
+    throw error
+  }
   if (!force) {
     current.sent_slots = [...new Set([...current.sent_slots, SLOT])].sort()
     current.last_slot = SLOT
     current.last_pushed_at = now.iso
+    current.last_error = ''
+    current.last_http_status = 200
     await writeState(env, current)
   }
   return { status: 'sent', funds: activeEntries.length, fresh, force }
@@ -228,6 +277,7 @@ export default {
       return Response.json({ status: 'ok', service: 'sinan-estimate-push', configured: {
         gist_id: Boolean(env.GIST_ID), fund_api: Boolean(env.FUND_API_BASE),
         gist_token: Boolean(env.GIST_TOKEN), serverchan: Boolean(env.WECHAT_SENDKEY), admin: Boolean(env.ADMIN_TOKEN),
+        worker: Boolean(env.WORKER_TOKEN),
       } })
     }
     if (url.pathname === '/test' && request.method === 'POST') {

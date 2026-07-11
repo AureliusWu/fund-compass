@@ -8,7 +8,8 @@
 
 - Worker：`sinan-estimate-push`
 - URL：`https://sinan-estimate-push.ligugu69.workers.dev`
-- cron：`30 6 * * 1-5`，即北京时间 14:30
+- cron：`30 6 * * 1-5` 与 `40 6 * * 1-5`，即北京时间 14:30 主任务和 14:40 补偿任务
+- 两次任务共享 `14:30` 槽位；成功去重，失败状态写入 Gist 后由补偿任务重试
 - Gist 状态文件继续使用 `sinan-estimate-state.json`，与旧脚本共享去重状态
 - GitHub Actions `estimate-push` 只保留手动应急入口，不再定时执行
 

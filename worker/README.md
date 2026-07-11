@@ -10,9 +10,12 @@
 npx wrangler secret put GIST_TOKEN
 npx wrangler secret put WECHAT_SENDKEY
 npx wrangler secret put ADMIN_TOKEN
+npx wrangler secret put WORKER_TOKEN
 ```
 
-`ADMIN_TOKEN` 使用密码管理器生成的至少 32 位随机字符串，只用于保护 `POST /test`。
+`ADMIN_TOKEN` 使用密码管理器生成的至少 32 位随机字符串，只用于保护 `POST /test`。`WORKER_TOKEN` 必须与后端环境中的同名 Secret 完全一致，只用于调用组合决策接口。
+
+正式 Cron 为北京时间工作日 14:30 与 14:40；二者共享 `14:30` 发送槽位。首次成功后补偿任务自动跳过，首次失败时 14:40 再尝试一次。
 
 ## 部署
 
