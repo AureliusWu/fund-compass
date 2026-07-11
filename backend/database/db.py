@@ -76,6 +76,12 @@ CREATE TABLE IF NOT EXISTS portfolio_decision_history (
   UNIQUE(snapshot_date, strategy_version)
 );
 CREATE INDEX IF NOT EXISTS idx_portfolio_decision_date ON portfolio_decision_history(snapshot_date);
+
+CREATE TABLE IF NOT EXISTS idempotency_requests (
+  request_id TEXT PRIMARY KEY,
+  endpoint   TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
 """
 
 

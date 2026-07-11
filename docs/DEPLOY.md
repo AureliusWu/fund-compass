@@ -37,6 +37,13 @@ uvicorn main:app --host 0.0.0.0 --port $PORT
 
 ```bash
 # 后端（建议 Python 3.12）
+
+生产环境必须生成并配置两个不同的高强度随机 Secret：
+
+- `ADMIN_TOKEN`：管理员写接口和重任务。
+- `WORKER_TOKEN`：Cloudflare Worker 调用组合决策接口。
+
+二者只存 Render/Cloudflare Secret，不得使用前端 `VITE_` 变量，也不得写入仓库。所有 GET 读取接口保持公开。
 cd backend
 python -m venv .venv && .venv\Scripts\activate   # Windows
 pip install -r requirements.txt

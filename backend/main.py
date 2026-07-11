@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from database.db import init_db
 from service import eastmoney, repo
+from service.security import require_admin, require_worker_or_admin
 from strategy import backtest, decide_fund, score_fund, timing_signal
 from strategy.calibration import calibrate
 from strategy.portfolio import decide_portfolio
@@ -195,7 +196,7 @@ def fund_analyze(
 
 
 @app.post("/api/portfolio/decisions")
-def portfolio_decisions(payload: dict) -> dict:
+def portfolio_decisions(payload: dict, _role: str = Depends(require_worker_or_admin)) -> dict:
     """批量决策：自选列表一次返回各基金决策卡片（V6-P1）。
 
     body: { "items": [{ "code": "510300", "current_weight": 5, "target_weight": 15 }] }
@@ -226,6 +227,9 @@ def portfolio_decisions(payload: dict) -> dict:
         raise HTTPException(status_code=400, detail="items 不能为空")
     if len(cleaned) > 50:
         raise HTTPException(status_code=400, detail="单次最多 50 只基金")
+    request_id = str(payload.get("request_id") or "").strip()
+    if request_id and not re.fullmatch(r"[A-Za-z0-9._:-]{1,100}", request_id):
+        raise HTTPException(status_code=400, detail="request_id 格式无效")
     portfolio_value = payload.get("portfolio_value")
     if portfolio_value is not None:
         try:
@@ -235,10 +239,12 @@ def portfolio_decisions(payload: dict) -> dict:
         if portfolio_value < 0:
             raise HTTPException(status_code=400, detail="portfolio_value 不能为负数")
     result = decide_portfolio(cleaned, portfolio_value)
+    if request_id and not repo.claim_request(request_id, "portfolio_decisions"):
+        return {"decisions": [], "errors": [], "total": 0, "duplicate": True, "request_id": request_id}
     version = (registry_summary().get("active") or {}).get("version") or "unknown"
     repo.record_decisions(result["decisions"], version)
     repo.record_portfolio_decision(cleaned, result["decisions"], version)
-    return result
+    return {**result, "duplicate": False, "request_id": request_id or None}
 
 
 @app.get("/api/strategy/outcomes")
@@ -254,7 +260,7 @@ def strategy_portfolio_outcomes() -> dict:
 
 
 @app.post("/api/portfolio/lab")
-def portfolio_lab(payload: dict) -> dict:
+def portfolio_lab(payload: dict, _role: str = Depends(require_admin)) -> dict:
     """组合历史回测、风险贡献与受约束再平衡建议。"""
     items = payload.get("items") or []
     if not isinstance(items, list) or not 1 <= len(items) <= 10:
@@ -315,7 +321,7 @@ def get_watchlist() -> dict:
 
 
 @app.post("/api/watchlist")
-def post_watchlist(payload: dict) -> dict:
+def post_watchlist(payload: dict, _role: str = Depends(require_admin)) -> dict:
     code = str(payload.get("code", "")).strip()
     if not re.fullmatch(r"\d{6}", code):
         raise HTTPException(status_code=400, detail="需要 6 位基金代码")
@@ -324,13 +330,13 @@ def post_watchlist(payload: dict) -> dict:
 
 
 @app.delete("/api/watchlist/{code}")
-def delete_watchlist(code: str) -> dict:
+def delete_watchlist(code: str, _role: str = Depends(require_admin)) -> dict:
     repo.remove_watchlist(code)
     return {"ok": True, "code": code}
 
 
 @app.post("/api/admin/refresh-universe")
-def refresh_universe() -> dict:
+def refresh_universe(_role: str = Depends(require_admin)) -> dict:
     """手动刷新全量基金列表。"""
     try:
         n = repo.import_universe()

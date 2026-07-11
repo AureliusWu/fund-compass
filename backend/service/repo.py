@@ -285,6 +285,21 @@ def code_is_valid(code) -> bool:
     return isinstance(code, str) and len(code) == 6 and code.isdigit()
 
 
+def claim_request(request_id: str, endpoint: str) -> bool:
+    """Atomically claim an idempotency key; an existing key is never overwritten."""
+    conn = get_conn()
+    try:
+        before = conn.total_changes
+        conn.execute(
+            "INSERT OR IGNORE INTO idempotency_requests(request_id,endpoint,created_at) VALUES (?,?,?)",
+            (request_id, endpoint, _now().isoformat(timespec="seconds")),
+        )
+        conn.commit()
+        return conn.total_changes > before
+    finally:
+        conn.close()
+
+
 def decision_outcomes(horizons=(5, 20, 60)) -> dict:
     """按决策时点后的第 N 个净值观测计算表现，绝不使用决策日前数据。"""
     conn = get_conn()
