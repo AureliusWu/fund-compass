@@ -37,7 +37,10 @@ const error = ref('')
 
 function openManager() {
   if (!detail.value?.manager) return
-  router.push({ path: '/screen', query: { mode: 'manager', q: detail.value.manager } })
+  router.push({
+    path: '/screen',
+    query: { mode: 'manager', q: detail.value.manager, manager_id: detail.value.manager_id || undefined },
+  })
 }
 
 const holdMax = computed(() => Math.max(1, ...holdings.value.map((s) => s.ratio)))

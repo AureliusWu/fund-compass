@@ -127,7 +127,10 @@ async function ensureManagers() {
   try {
     managersAll.value = await loadManagers()
     if (route.query.mode === 'manager' && typeof route.query.q === 'string') {
-      expanded.value = managersAll.value.find((manager) => manager.name === route.query.q)?.id || ''
+      const managerId = typeof route.query.manager_id === 'string' ? route.query.manager_id : ''
+      expanded.value = managersAll.value.find((manager) =>
+        managerId ? manager.id === managerId : manager.name === route.query.q,
+      )?.id || ''
     }
   }
   catch { mgrErr.value = '暂无基金经理数据（待富集任务生成后可用）' }
@@ -136,6 +139,8 @@ async function ensureManagers() {
 const managerResults = computed(() => {
   const k = q.value.trim()
   if (!k || !managersAll.value.length) return []
+  const managerId = typeof route.query.manager_id === 'string' ? route.query.manager_id : ''
+  if (managerId) return managersAll.value.filter((manager) => manager.id === managerId)
   return managersAll.value.filter((m) => m.name.includes(k) || m.company.includes(k)).slice(0, 30)
 })
 

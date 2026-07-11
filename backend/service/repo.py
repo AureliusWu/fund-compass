@@ -148,11 +148,11 @@ def _save_detail(conn, d):
     conn.execute(
         """INSERT OR REPLACE INTO fund_detail
         (code,name,type,scale,buy_rate,source_rate,ret_1m,ret_6m,ret_1y,ret_3y,
-         rank_in_type,rank_total,manager,manager_worktime,latest_nav,latest_nav_date,source,updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+         rank_in_type,rank_total,manager,manager_id,manager_worktime,latest_nav,latest_nav_date,source,updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (d["code"], d["name"], d.get("type"), d.get("scale"), d.get("buy_rate"),
          d.get("source_rate"), d.get("ret_1m"), d.get("ret_6m"), d.get("ret_1y"),
-         d.get("ret_3y"), d.get("rank_in_type"), d.get("rank_total"), d.get("manager"),
+         d.get("ret_3y"), d.get("rank_in_type"), d.get("rank_total"), d.get("manager"), d.get("manager_id"),
          d.get("manager_worktime"), d.get("latest_nav"), d.get("latest_nav_date"),
          d.get("source"), saved_at),
     )

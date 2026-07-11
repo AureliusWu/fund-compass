@@ -52,7 +52,7 @@ export interface FundDetail {
   scale: number | null; buy_rate: number | null; source_rate: number | null
   ret_1m: number | null; ret_6m: number | null; ret_1y: number | null; ret_3y: number | null
   rank_in_type: number | null; rank_total: number | null
-  manager: string | null; manager_worktime: string | null
+  manager: string | null; manager_id?: string | null; manager_worktime: string | null
   latest_nav: number | null; latest_nav_date: string | null
   nav_history: NavPoint[]
   source?: string | null; updated_at?: string | null; cached?: boolean; stale?: boolean; data_age_hours?: number

@@ -100,6 +100,7 @@ def _fetch_detail_pingzhong(code: str) -> dict:
     # 经理（取在任第一位）
     mgrs = _json_var(txt, "Data_currentFundManager", []) or []
     manager = mgrs[0].get("name") if mgrs else None
+    manager_id = str(mgrs[0].get("id")) if mgrs and mgrs[0].get("id") else None
     manager_worktime = mgrs[0].get("workTime") if mgrs else None
 
     # 规模（亿元，取最新一期）
@@ -134,7 +135,7 @@ def _fetch_detail_pingzhong(code: str) -> dict:
         "buy_rate": _num(_str_var(txt, "fund_Rate")),
         "source_rate": _num(_str_var(txt, "fund_sourceRate")),
         "ret_1m": ret_1m, "ret_6m": ret_6m, "ret_1y": ret_1y, "ret_3y": ret_3y,
-        "manager": manager, "manager_worktime": manager_worktime,
+        "manager": manager, "manager_id": manager_id, "manager_worktime": manager_worktime,
         "scale": scale,
         "rank_in_type": rank_in_type, "rank_total": rank_total,
         "latest_nav": latest_nav, "latest_nav_date": latest_nav_date,
@@ -186,7 +187,7 @@ def _fetch_detail_fallback(code: str) -> dict:
         "name": _fallback_name(code) or code,
         "buy_rate": None, "source_rate": None,
         "ret_1m": None, "ret_6m": None, "ret_1y": None, "ret_3y": None,
-        "manager": None, "manager_worktime": None,
+        "manager": None, "manager_id": None, "manager_worktime": None,
         "scale": None,
         "rank_in_type": None, "rank_total": None,
         "latest_nav": nav_history[-1]["nav"], "latest_nav_date": nav_history[-1]["date"],

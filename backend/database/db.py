@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS fund_detail (
   rank_in_type     INTEGER,-- 同类排名
   rank_total       INTEGER,-- 同类总数
   manager          TEXT,
+  manager_id       TEXT,
   manager_worktime TEXT,   -- 任职时长文本，如「14年又199天」
   latest_nav       REAL,
   latest_nav_date  TEXT,
@@ -89,6 +90,8 @@ def _migrate(conn) -> None:
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(fund_detail)")}
     if "source" not in cols:
         conn.execute("ALTER TABLE fund_detail ADD COLUMN source TEXT")
+    if "manager_id" not in cols:
+        conn.execute("ALTER TABLE fund_detail ADD COLUMN manager_id TEXT")
 
 
 def init_db() -> None:

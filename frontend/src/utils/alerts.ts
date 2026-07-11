@@ -18,6 +18,7 @@ export interface Alert {
   time: string       // ISO
   read: boolean
   dismissed: boolean
+  fingerprint?: string
 }
 
 const LS = 'sinan_alerts_v1'
@@ -25,8 +26,8 @@ const MAX_ALERTS = 100
 const DEDUPE_WINDOW_MS = 36 * 60 * 60 * 1000
 const REBALANCE_DAYS = 90  // 每 90 天提醒一次再平衡
 
-function alertKey(alert: Pick<Alert, 'kind' | 'code' | 'body'>): string {
-  return `${alert.kind}|${alert.code || ''}|${alert.body}`
+function alertKey(alert: Pick<Alert, 'kind' | 'code' | 'body' | 'fingerprint'>): string {
+  return alert.fingerprint || `${alert.kind}|${alert.code || ''}|${alert.body}`
 }
 
 function dedupeAlerts(alerts: Alert[]): Alert[] {
@@ -47,7 +48,12 @@ export function loadAlerts(): Alert[] {
     const raw = localStorage.getItem(LS)
     if (!raw) return []
     const arr = JSON.parse(raw)
-    return Array.isArray(arr) ? dedupeAlerts(arr) : []
+    if (!Array.isArray(arr)) return []
+    const deduped = dedupeAlerts(arr)
+    if (deduped.length !== arr.length) {
+      localStorage.setItem(LS, JSON.stringify(deduped.slice(-MAX_ALERTS)))
+    }
+    return deduped
   } catch { return [] }
 }
 
@@ -96,6 +102,7 @@ export async function checkSignalChange(
 
     const a = pushAlert({
       kind: 'signal_change', code, name, level,
+      fingerprint: `signal_change|${code}|${prevSignal}|${sig.signal}`,
       title: `信号变动 · ${name || code}`,
       body: `${prevSignal} → ${sig.signal}（${sig.advice || '建议关注'}）`,
     })
@@ -120,6 +127,7 @@ export async function checkNavSpike(
 
     const a = pushAlert({
       kind: 'nav_spike', code, name, level,
+      fingerprint: `nav_spike|${code}|${est.estTime || est.navDate}|${est.estChange.toFixed(4)}`,
       title: `异动 · ${name || code}`,
       body: `单日${direction} ${chg.toFixed(2)}%（${est.estTime || ''}）`,
     })
@@ -139,7 +147,7 @@ export function checkRebalance(): Alert | null {
   }
 
   const a = pushAlert({
-    kind: 'rebalance', level: 'info',
+    kind: 'rebalance', level: 'info', fingerprint: 'rebalance',
     title: '再平衡提醒',
     body: `距上次再平衡提醒已超 ${REBALANCE_DAYS} 天，建议检查组合配置是否偏离目标。`,
   })

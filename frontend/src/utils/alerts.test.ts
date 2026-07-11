@@ -42,5 +42,6 @@ describe('holding alert deduplication', () => {
     ]))
 
     expect(loadAlerts().map((alert) => alert.id)).toEqual(['new'])
+    expect(JSON.parse(storage.get('sinan_alerts_v1') || '[]')).toHaveLength(1)
   })
 })

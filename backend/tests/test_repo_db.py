@@ -24,6 +24,7 @@ def test_schema_has_source(temp_db):
     conn = temp_db.get_conn()
     try:
         assert "source" in _cols(conn)
+        assert "manager_id" in _cols(conn)
     finally:
         conn.close()
 
