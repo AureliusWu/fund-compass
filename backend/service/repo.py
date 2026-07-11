@@ -2,6 +2,9 @@
 import logging
 import json
 import statistics
+import gzip
+import hashlib
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
 from database.db import get_conn
@@ -28,6 +31,8 @@ SEED_FUNDS = [
     {"code": "161130", "name": "易方达纳斯达克100人民币A", "type": "QDII-指数", "pinyin": "YFDNSDK100RMB A"},
     {"code": "513500", "name": "博时标普500ETF", "type": "QDII-指数", "pinyin": "BSBP500ETF"},
 ]
+UNIVERSE_ARTIFACT = Path(__file__).resolve().parent.parent / "data" / "fund-universe.json.gz"
+UNIVERSE_META = Path(__file__).resolve().parent.parent / "data" / "fund-universe.meta.json"
 
 
 def _now():
@@ -55,6 +60,34 @@ def import_universe() -> int:
     finally:
         conn.close()
     return len(funds)
+
+
+def import_universe_artifact() -> dict:
+    """Import a verified local artifact. This function never performs network I/O."""
+    if not UNIVERSE_ARTIFACT.exists() or not UNIVERSE_META.exists():
+        return {"loaded": False, "reason": "missing", "fund_count": 0}
+    try:
+        meta = json.loads(UNIVERSE_META.read_text(encoding="utf-8"))
+        payload = gzip.decompress(UNIVERSE_ARTIFACT.read_bytes())
+        digest = hashlib.sha256(payload).hexdigest()
+        if meta.get("schema_version") != 1 or digest != meta.get("sha256"):
+            raise ValueError("基金全集 artifact 校验失败")
+        funds = json.loads(payload)
+        if not isinstance(funds, list) or len(funds) != meta.get("fund_count"):
+            raise ValueError("基金全集数量与元数据不一致")
+        conn = get_conn()
+        try:
+            conn.executemany(
+                "INSERT OR REPLACE INTO funds(code,name,type,pinyin) VALUES (?,?,?,?)",
+                [(f["code"], f["name"], f.get("type"), f.get("pinyin", "")) for f in funds],
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return {"loaded": True, **meta}
+    except Exception as error:
+        log.error("基金全集本地 artifact 加载失败: %s", error)
+        return {"loaded": False, "reason": str(error), "fund_count": 0}
 
 
 def _query_seed(q=None, type=None, page=1, page_size=20) -> dict:

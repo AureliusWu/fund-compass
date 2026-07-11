@@ -1,0 +1,26 @@
+name: fund-universe
+
+on:
+  schedule:
+    - cron: '20 2 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r backend/requirements.txt
+      - run: python tools/build_universe.py
+      - run: python -m pytest tests/test_universe_artifact.py
+        working-directory: backend
+      - uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: 'chore: refresh fund universe artifact'
+          file_pattern: 'backend/data/fund-universe.json.gz backend/data/fund-universe.meta.json'
