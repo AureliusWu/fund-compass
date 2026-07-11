@@ -11,6 +11,7 @@ r"""司南基金 后端入口（FastAPI）。
 """
 import logging
 import re
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Query
@@ -32,6 +33,7 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 NAV_TAIL = 800  # 返回给前端的净值条数（≈3年，供走势图 / 定投回放 / 指标计算）
+STARTED_AT = datetime.now(timezone.utc).isoformat()
 
 
 @asynccontextmanager
@@ -97,12 +99,14 @@ def health() -> dict:
         "status": "ok",
         "service": "fund-compass",
         "version": app.version,
+        "started_at": STARTED_AT,
         "universe": universe,
         "universe_ready": universe > 0,
         "universe_import": {"mode": "manual", "running": False},
         "source": eastmoney.source_health(),
         "index_valuation": iv_info,
         "strategy_registry": registry_summary(),
+        "operations": repo.operations_status(),
     }
 
 

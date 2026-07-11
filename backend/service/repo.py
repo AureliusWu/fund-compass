@@ -16,6 +16,8 @@ CST = timezone(timedelta(hours=8))
 DETAIL_TTL = timedelta(hours=12)
 STALE_MAX_AGE = timedelta(days=7)
 HIST_KEEP = 800   # 入库保留的净值条数（≈3年，供 MA120 / 估值分位）
+_detail_requests = 0
+_detail_cache_hits = 0
 
 # 冷启动兜底种子：只覆盖常用指数/ETF，避免空库时选基页完全空白。
 # 完整 universe 不再启动时抓取；需要完整列表时手动 POST /api/admin/refresh-universe。
@@ -199,6 +201,8 @@ def _save_detail(conn, d):
 
 def get_detail(code: str, force=False) -> dict:
     """详情：命中新鲜缓存直接返回，否则抓取并入库。"""
+    global _detail_requests, _detail_cache_hits
+    _detail_requests += 1
     conn = get_conn()
     try:
         row = conn.execute("SELECT * FROM fund_detail WHERE code=?", (code,)).fetchone()
@@ -208,6 +212,7 @@ def get_detail(code: str, force=False) -> dict:
             except Exception:
                 fresh = False
             if fresh:
+                _detail_cache_hits += 1
                 d = dict(row)
                 _fill_detail_type(conn, d)
                 d["nav_history"] = _load_history(conn, code)
@@ -337,6 +342,39 @@ def claim_request(request_id: str, endpoint: str) -> bool:
         return conn.total_changes > before
     finally:
         conn.close()
+
+
+def operations_status() -> dict:
+    conn = get_conn()
+    try:
+        oldest = conn.execute("SELECT MIN(updated_at) FROM fund_detail").fetchone()[0]
+        latest_decision = conn.execute("SELECT MAX(created_at) FROM decision_history").fetchone()[0]
+        latest_settlement = conn.execute(
+            "SELECT MAX(n.date) FROM nav_history n JOIN decision_history d ON n.code=d.code AND n.date>d.decision_date"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    meta = None
+    try:
+        meta = json.loads(UNIVERSE_META.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    oldest_age = None
+    if oldest:
+        try:
+            oldest_age = round((_now() - datetime.fromisoformat(oldest)).total_seconds() / 3600, 1)
+        except Exception:
+            pass
+    return {
+        "universe_artifact": meta,
+        "cache": {
+            "requests": _detail_requests, "hits": _detail_cache_hits,
+            "hit_rate": round(_detail_cache_hits / _detail_requests * 100, 1) if _detail_requests else None,
+            "oldest_age_hours": oldest_age,
+        },
+        "latest_decision_write": latest_decision,
+        "latest_result_settlement": latest_settlement,
+    }
 
 
 def decision_outcomes(horizons=(5, 20, 60)) -> dict:

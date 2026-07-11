@@ -16,7 +16,8 @@ const router = createRouter({
     { path: '/report/:code', name: 'report', component: () => import('@/pages/ReportPage.vue'), meta: { title: '体检报告' } },
     { path: '/backtest', name: 'backtest', component: () => import('@/pages/BacktestPage.vue'), meta: { title: '回测实验室' } },
     { path: '/outcomes', name: 'outcomes', component: () => import('@/pages/OutcomesPage.vue'), meta: { title: '实盘验证' } },
-    { path: '/story', name: 'story', component: () => import('@/pages/StoryPage.vue'), meta: { title: '数据故事' } }
+    { path: '/story', name: 'story', component: () => import('@/pages/StoryPage.vue'), meta: { title: '数据故事' } },
+    { path: '/operations', name: 'operations', component: () => import('@/pages/OperationsPage.vue'), meta: { title: '运行状态' } }
   ]
 })
 

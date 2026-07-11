@@ -92,4 +92,15 @@ describe('Cloudflare push worker', () => {
     const response = await worker.fetch(new Request('https://worker.test/test', { method: 'POST' }), env)
     expect(response.status).toBe(401)
   })
+
+  it('health exposes runtime state without secret values', async () => {
+    fakeNetwork()
+    const response = await worker.fetch(new Request('https://worker.test/health'), env)
+    const body = await response.text()
+    expect(response.status).toBe(200)
+    expect(body).toContain('state_available')
+    expect(body).not.toContain('gist-token')
+    expect(body).not.toContain('send-key')
+    expect(body).not.toContain('worker-token')
+  })
 })

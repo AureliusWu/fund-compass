@@ -274,7 +274,21 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
     if (url.pathname === '/health') {
-      return Response.json({ status: 'ok', service: 'sinan-estimate-push', configured: {
+      let runtime: Record<string, unknown> = { state_available: false }
+      try {
+        const files = await readGist(env)
+        const state = JSON.parse(await fileContent(files[STATE_FILE]) || '{}') as PushState
+        runtime = {
+          state_available: true, last_cron_at: state.last_attempt_at || null,
+          last_result: state.last_error ? 'failed' : state.last_pushed_at ? 'sent' : 'not_sent',
+          last_error: state.last_error || null, last_success_at: state.last_pushed_at || null,
+          attempt_count: state.attempt_count || 0, sent_today: Boolean(state.sent_slots?.includes(SLOT)),
+          state_date: state.date || null,
+        }
+      } catch (error) {
+        runtime = { state_available: false, last_error: error instanceof Error ? error.message : String(error) }
+      }
+      return Response.json({ status: 'ok', service: 'sinan-estimate-push', version: '1.1.0', runtime, configured: {
         gist_id: Boolean(env.GIST_ID), fund_api: Boolean(env.FUND_API_BASE),
         gist_token: Boolean(env.GIST_TOKEN), serverchan: Boolean(env.WECHAT_SENDKEY), admin: Boolean(env.ADMIN_TOKEN),
         worker: Boolean(env.WORKER_TOKEN),

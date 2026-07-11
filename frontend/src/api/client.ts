@@ -42,7 +42,15 @@ export async function request<T>(
 
 const req = request
 
-export interface Health { status: string; service: string; version: string; universe: number }
+export interface Health {
+  status: string; service: string; version: string; universe: number; started_at?: string
+  source?: Record<string, unknown>; index_valuation?: Record<string, unknown> | null
+  operations?: {
+    universe_artifact?: Record<string, unknown> | null
+    cache?: { requests: number; hits: number; hit_rate: number | null; oldest_age_hours: number | null }
+    latest_decision_write?: string | null; latest_result_settlement?: string | null
+  }
+}
 export interface FundListItem { code: string; name: string; type: string }
 export interface FundsResp { total: number; page: number; page_size: number; items: FundListItem[] }
 export interface NavPoint { date: string; nav: number; ac_return: number | null }
