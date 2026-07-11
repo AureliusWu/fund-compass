@@ -68,6 +68,14 @@ def test_get_detail_persists_and_reads_source(temp_db, monkeypatch):
     assert d2["cached"] is True
 
 
+def test_infer_fund_type_from_name():
+    from service import repo
+
+    assert repo._infer_fund_type("华商改革创新股票C") == "股票型"
+    assert repo._infer_fund_type("某某纯债债券A") == "债券型"
+    assert repo._infer_fund_type("名称无法判断") is None
+
+
 def test_get_detail_falls_back_to_stale_cache_with_log(temp_db, monkeypatch, caplog):
     """主源+备源都失败时退回陈旧缓存，并记 warning 日志（可观测性）。"""
     import logging

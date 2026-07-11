@@ -22,7 +22,24 @@ export interface Alert {
 
 const LS = 'sinan_alerts_v1'
 const MAX_ALERTS = 100
+const DEDUPE_WINDOW_MS = 36 * 60 * 60 * 1000
 const REBALANCE_DAYS = 90  // 每 90 天提醒一次再平衡
+
+function alertKey(alert: Pick<Alert, 'kind' | 'code' | 'body'>): string {
+  return `${alert.kind}|${alert.code || ''}|${alert.body}`
+}
+
+function dedupeAlerts(alerts: Alert[]): Alert[] {
+  const latest = new Map<string, number>()
+  return [...alerts].reverse().filter((alert) => {
+    const key = alertKey(alert)
+    const time = new Date(alert.time).getTime()
+    const newer = latest.get(key)
+    if (newer != null && Number.isFinite(time) && newer - time < DEDUPE_WINDOW_MS) return false
+    latest.set(key, Number.isFinite(time) ? time : Date.now())
+    return true
+  }).reverse()
+}
 
 // ── 存储 ──────────────────────────────────────────────
 export function loadAlerts(): Alert[] {
@@ -30,7 +47,7 @@ export function loadAlerts(): Alert[] {
     const raw = localStorage.getItem(LS)
     if (!raw) return []
     const arr = JSON.parse(raw)
-    return Array.isArray(arr) ? arr : []
+    return Array.isArray(arr) ? dedupeAlerts(arr) : []
   } catch { return [] }
 }
 
@@ -39,14 +56,16 @@ function saveAlerts(alerts: Alert[]): void {
   try { localStorage.setItem(LS, JSON.stringify(trimmed)) } catch { /* quota */ }
 }
 
-function pushAlert(a: Omit<Alert, 'id' | 'time' | 'read' | 'dismissed'>): Alert {
+function pushAlert(a: Omit<Alert, 'id' | 'time' | 'read' | 'dismissed'>): Alert | null {
   const alerts = loadAlerts()
   const id = `${a.kind}_${a.code || ''}_${Date.now()}`
   const full: Alert = { ...a, id, time: new Date().toISOString(), read: false, dismissed: false }
 
-  // 去重：同 kind+code 的未读提醒超过 1 条则跳过
-  const unread = alerts.filter((x) => x.kind === a.kind && x.code === a.code && !x.read && !x.dismissed)
-  if (unread.length >= 2) return full
+  const duplicate = alerts.some((existing) =>
+    alertKey(existing) === alertKey(full)
+    && Date.now() - new Date(existing.time).getTime() < DEDUPE_WINDOW_MS,
+  )
+  if (duplicate) return null
 
   alerts.push(full)
   saveAlerts(alerts)
@@ -55,7 +74,7 @@ function pushAlert(a: Omit<Alert, 'id' | 'time' | 'read' | 'dismissed'>): Alert 
 
 // ── 通知 ──────────────────────────────────────────────
 function notify(a: Alert): void {
-  if (!('Notification' in window) || Notification.permission !== 'granted') return
+  if (typeof window === 'undefined' || !('Notification' in window) || Notification.permission !== 'granted') return
   try {
     new Notification(a.title, { body: a.body, tag: a.kind + a.code, icon: '/favicon.ico' })
   } catch { /* ignore */ }
@@ -80,6 +99,7 @@ export async function checkSignalChange(
       title: `信号变动 · ${name || code}`,
       body: `${prevSignal} → ${sig.signal}（${sig.advice || '建议关注'}）`,
     })
+    if (!a) return null
     notify(a)
     return a
   } catch { return null }
@@ -103,6 +123,7 @@ export async function checkNavSpike(
       title: `异动 · ${name || code}`,
       body: `单日${direction} ${chg.toFixed(2)}%（${est.estTime || ''}）`,
     })
+    if (!a) return null
     notify(a)
     return a
   } catch { return null }
@@ -122,6 +143,7 @@ export function checkRebalance(): Alert | null {
     title: '再平衡提醒',
     body: `距上次再平衡提醒已超 ${REBALANCE_DAYS} 天，建议检查组合配置是否偏离目标。`,
   })
+  if (!a) return null
   notify(a)
   return a
 }

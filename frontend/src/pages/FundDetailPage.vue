@@ -35,6 +35,11 @@ const loading = ref(true)
 const refreshing = ref(false)
 const error = ref('')
 
+function openManager() {
+  if (!detail.value?.manager) return
+  router.push({ path: '/screen', query: { mode: 'manager', q: detail.value.manager } })
+}
+
 const holdMax = computed(() => Math.max(1, ...holdings.value.map((s) => s.ratio)))
 
 const COMP_NAMES: Record<string, string> = { return: '收益', risk: '风险', management: '管理', cost: '成本' }
@@ -145,8 +150,8 @@ const btOption = computed(() => {
     xAxis: { type: 'category' as const, data: s.map((p) => p.date), boundaryGap: false, axisLabel: { show: false } },
     yAxis: { type: 'value' as const, scale: true },
     series: [
-      { name: '择时策略', type: 'line' as const, showSymbol: false, data: s.map((p) => p.v), lineStyle: { color: '#4C7E67' } },
-      { name: '一直持有', type: 'line' as const, showSymbol: false, data: b.map((p) => p.v), lineStyle: { color: '#5A6A60' } },
+      { name: '择时策略', type: 'line' as const, showSymbol: false, data: s.map((p) => p.v), lineStyle: { color: '#3F765C' }, itemStyle: { color: '#3F765C' } },
+      { name: '一直持有', type: 'line' as const, showSymbol: false, data: b.map((p) => p.v), lineStyle: { color: '#D24A3A' }, itemStyle: { color: '#D24A3A' } },
     ],
   }
 })
@@ -273,8 +278,14 @@ async function toggleWatch() {
           <van-cell title="最新净值"
             :value="num(detail.latest_nav) + (detail.latest_nav_date ? ' @' + detail.latest_nav_date : '')" />
           <van-cell title="规模" :value="detail.scale != null ? detail.scale + ' 亿' : '--'" />
-          <van-cell title="经理"
-            :value="(detail.manager || '--') + (detail.manager_worktime ? ' · ' + detail.manager_worktime : '')" />
+          <van-cell title="经理">
+            <template #value>
+              <button v-if="detail.manager" type="button" class="manager-link" @click="openManager">
+                {{ detail.manager + (detail.manager_worktime ? ' · ' + detail.manager_worktime : '') }}
+              </button>
+              <span v-else>--</span>
+            </template>
+          </van-cell>
         </van-cell-group>
 
         <div class="sec">收益</div>
@@ -347,8 +358,8 @@ async function toggleWatch() {
           <div class="sec">策略回测</div>
           <div class="card" v-if="bt.available && bt.strategy && bt.benchmark">
             <div class="bt-row">
-              <div><div class="k">择时策略</div><div class="v" :style="{ color: colorOf(bt.strategy.total_return) }">{{ pct(bt.strategy.total_return) }}</div><div class="kk">回撤 {{ bt.strategy.max_drawdown }}%</div></div>
-              <div><div class="k">一直持有</div><div class="v" :style="{ color: colorOf(bt.benchmark.total_return) }">{{ pct(bt.benchmark.total_return) }}</div><div class="kk">回撤 {{ bt.benchmark.max_drawdown }}%</div></div>
+              <div><div class="k">择时策略</div><div class="v strategy-value">{{ pct(bt.strategy.total_return) }}</div><div class="kk">回撤 {{ bt.strategy.max_drawdown }}%</div></div>
+              <div><div class="k">一直持有</div><div class="v benchmark-value">{{ pct(bt.benchmark.total_return) }}</div><div class="kk">回撤 {{ bt.benchmark.max_drawdown }}%</div></div>
                <div><div class="k">超额/胜率</div><div class="v" :style="{ color: colorOf(bt.outperform) }">{{ pct(bt.outperform) }}</div><div class="kk">胜率 {{ bt.win_rate == null ? '--' : bt.win_rate + '%' }}</div></div>
             </div>
             <Chart :option="btOption" height="200px" />
@@ -418,6 +429,7 @@ async function toggleWatch() {
 .est-side em { font-style: normal; color: var(--text-hint); }
 .est-empty { font-size: 12px; color: var(--text-secondary); margin-top: 6px; line-height: 1.5; }
 .report-btn { margin-top: 10px; }
+.manager-link { padding: 0; border: 0; color: var(--teal); background: transparent; font: inherit; font-weight: 500; cursor: pointer; }
 .hd { display: flex; align-items: center; font-size: 12px; margin: 9px 0; }
 .hd-rk { width: 18px; color: var(--text-hint); font-variant-numeric: tabular-nums; }
 .hd-nm { width: 96px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -441,6 +453,8 @@ async function toggleWatch() {
 .bt-row { display: grid; grid-template-columns: repeat(3, 1fr); margin-bottom: 8px; }
 .bt-row .k { font-size: 11px; color: #5A6A60; }
 .bt-row .v { font-size: 17px; font-weight: 600; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.bt-row .strategy-value { color: var(--teal); }
+.bt-row .benchmark-value { color: var(--danger); }
 .bt-row .kk { font-size: 10px; color: #A8B2A8; margin-top: 1px; }
 .bt-note { font-size: 11px; color: #A8B2A8; margin-top: 6px; line-height: 1.5; }
 .sighead { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }

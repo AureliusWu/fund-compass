@@ -122,6 +122,27 @@ def _load_history(conn, code, limit=HIST_KEEP):
     return [dict(r) for r in reversed(rows)]
 
 
+def _infer_fund_type(name: str | None) -> str | None:
+    """Conservative fallback for detail sources that omit the fund category."""
+    if not name:
+        return None
+    for marker, category in (
+        ("QDII", "QDII"), ("FOF", "FOF"), ("货币", "货币型"),
+        ("债券", "债券型"), ("混合", "混合型"), ("股票", "股票型"),
+        ("指数", "指数型"), ("ETF", "指数型"),
+    ):
+        if marker.lower() in name.lower():
+            return category
+    return None
+
+
+def _fill_detail_type(conn, detail: dict) -> None:
+    if detail.get("type"):
+        return
+    row = conn.execute("SELECT type FROM funds WHERE code=?", (detail.get("code"),)).fetchone()
+    detail["type"] = (row["type"] if row and row["type"] else None) or _infer_fund_type(detail.get("name"))
+
+
 def _save_detail(conn, d):
     saved_at = _now().isoformat(timespec="seconds")
     conn.execute(
@@ -155,6 +176,7 @@ def get_detail(code: str, force=False) -> dict:
                 fresh = False
             if fresh:
                 d = dict(row)
+                _fill_detail_type(conn, d)
                 d["nav_history"] = _load_history(conn, code)
                 d["cached"] = True
                 return d
@@ -173,6 +195,7 @@ def get_detail(code: str, force=False) -> dict:
                     raise
                 log.warning("主源+备源均失败，退回陈旧缓存 code=%s", code, exc_info=True)
                 d = dict(row)
+                _fill_detail_type(conn, d)
                 d["nav_history"] = _load_history(conn, code)
                 d["cached"] = True
                 d["stale"] = True
@@ -180,8 +203,7 @@ def get_detail(code: str, force=False) -> dict:
                 return d
             log.error("主源+备源均失败且无缓存，详情不可用 code=%s", code, exc_info=True)
             raise
-        ftype = conn.execute("SELECT type FROM funds WHERE code=?", (code,)).fetchone()
-        detail["type"] = ftype["type"] if ftype else None
+        _fill_detail_type(conn, detail)
         _save_detail(conn, detail)
         conn.commit()
         detail["cached"] = False

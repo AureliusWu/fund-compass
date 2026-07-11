@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { showToast } from 'vant'
 import { getFunds, type FundListItem } from '@/api/client'
 import { useWatchlistStore } from '@/stores/watchlist'
@@ -12,6 +12,7 @@ import type { FilterSpec } from '@/utils/nlselect'
 import { exportRankCSV } from '@/utils/export'
 
 const router = useRouter()
+const route = useRoute()
 const watch = useWatchlistStore()
 const mode = ref<'rank' | 'basic' | 'manager' | 'nl'>('rank') // 默认排行（自带数据、不依赖后端）
 const q = ref('')
@@ -123,7 +124,12 @@ const expanded = ref('')
 async function ensureManagers() {
   if (managersAll.value.length || mgrLoading.value) return
   mgrLoading.value = true; mgrErr.value = ''
-  try { managersAll.value = await loadManagers() }
+  try {
+    managersAll.value = await loadManagers()
+    if (route.query.mode === 'manager' && typeof route.query.q === 'string') {
+      expanded.value = managersAll.value.find((manager) => manager.name === route.query.q)?.id || ''
+    }
+  }
   catch { mgrErr.value = '暂无基金经理数据（待富集任务生成后可用）' }
   finally { mgrLoading.value = false }
 }
@@ -180,7 +186,13 @@ async function toggleWatch(code: string, name: string) {
 
 onMounted(() => {
   watch.load().catch(() => {})
-  ensureRank()
+  if (route.query.mode === 'manager' && typeof route.query.q === 'string') {
+    mode.value = 'manager'
+    q.value = route.query.q
+    ensureManagers()
+  } else {
+    ensureRank()
+  }
 })
 </script>
 
