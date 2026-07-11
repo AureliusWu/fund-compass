@@ -18,6 +18,10 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from database.db import init_db
+from models.api import (
+    HealthResponse, PortfolioDecisionRequest, PortfolioDecisionResponse,
+    PortfolioLabRequest, WatchlistRequest,
+)
 from service import eastmoney, repo
 from service.security import require_admin, require_worker_or_admin
 from strategy import backtest, decide_fund, score_fund, timing_signal
@@ -80,7 +84,7 @@ def _meta(d: dict) -> dict:
     }
 
 
-@app.get("/api/health")
+@app.get("/api/health", response_model=HealthResponse)
 def health() -> dict:
     # 指数估值数据新鲜度（V3-5）
     iv_info = None
@@ -201,13 +205,14 @@ def fund_analyze(
     }
 
 
-@app.post("/api/portfolio/decisions")
-def portfolio_decisions(payload: dict, _role: str = Depends(require_worker_or_admin)) -> dict:
+@app.post("/api/portfolio/decisions", response_model=PortfolioDecisionResponse)
+def portfolio_decisions(request: PortfolioDecisionRequest, _role: str = Depends(require_worker_or_admin)) -> dict:
     """批量决策：自选列表一次返回各基金决策卡片（V6-P1）。
 
     body: { "items": [{ "code": "510300", "current_weight": 5, "target_weight": 15 }] }
     current_weight / target_weight 可选；缺省时 position_rule 仅给方向建议。
     """
+    payload = request.model_dump()
     items = payload.get("items") or []
     if not isinstance(items, list):
         raise HTTPException(status_code=400, detail="items 需为数组")
@@ -272,8 +277,9 @@ def strategy_version_comparison() -> dict:
 
 
 @app.post("/api/portfolio/lab")
-def portfolio_lab(payload: dict, _role: str = Depends(require_admin)) -> dict:
+def portfolio_lab(request: PortfolioLabRequest, _role: str = Depends(require_admin)) -> dict:
     """组合历史回测、风险贡献与受约束再平衡建议。"""
+    payload = request.model_dump()
     items = payload.get("items") or []
     if not isinstance(items, list) or not 1 <= len(items) <= 10:
         raise HTTPException(status_code=400, detail="组合需包含 1-10 只基金")
@@ -333,8 +339,8 @@ def get_watchlist() -> dict:
 
 
 @app.post("/api/watchlist")
-def post_watchlist(payload: dict, _role: str = Depends(require_admin)) -> dict:
-    code = str(payload.get("code", "")).strip()
+def post_watchlist(request: WatchlistRequest, _role: str = Depends(require_admin)) -> dict:
+    code = request.code
     if not re.fullmatch(r"\d{6}", code):
         raise HTTPException(status_code=400, detail="需要 6 位基金代码")
     repo.add_watchlist(code)

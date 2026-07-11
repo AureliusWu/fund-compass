@@ -8,12 +8,16 @@ const env: Env = {
 const monday1430 = new Date('2026-07-13T06:30:00Z')
 const monday1440 = new Date('2026-07-13T06:40:00Z')
 
-function fakeNetwork(sendStatuses = [200], options: { patchFails?: boolean; missingSecond?: boolean } = {}) {
+function fakeNetwork(sendStatuses = [200], options: {
+  patchFails?: boolean; missingSecond?: boolean; gistReadFails?: boolean
+  backend?: 'success' | 'timeout'
+} = {}) {
   let state: Record<string, unknown> = {}
   let sends = 0
   const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input)
     if (url.includes('/gists/gist') && (!init?.method || init.method === 'GET')) {
+      if (options.gistReadFails) return new Response('failed', { status: 502 })
       return Response.json({ files: {
         'sinan-watchlist.json': { content: JSON.stringify([{ code: '000001', name: '一号' }, { code: '000002', name: '二号' }]) },
         'sinan-estimate-state.json': { content: JSON.stringify(state) },
@@ -35,6 +39,13 @@ function fakeNetwork(sendStatuses = [200], options: { patchFails?: boolean; miss
       return new Response(status === 200 ? '{"code":0}' : 'rate limited', {
         status, headers: status === 429 ? { 'Retry-After': '0' } : {},
       })
+    }
+    if (url.includes('/api/portfolio/decisions')) {
+      if (options.backend === 'timeout') throw new DOMException('timeout', 'AbortError')
+      expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer worker-token')
+      const body = JSON.parse(String(init?.body))
+      expect(body.request_id).toBe('2026-07-13-14:30')
+      return Response.json({ decisions: [{ code: '000001', action: '继续定投', summary: '维持计划' }] })
     }
     throw new Error(`unexpected request ${url}`)
   })
@@ -79,6 +90,25 @@ describe('Cloudflare push worker', () => {
     const result = await run(env, false, monday1430)
     expect(result.funds).toBe(1)
     expect(net.getSends()).toBe(1)
+  })
+
+  it('runs the mocked Gist to estimate to backend to ServerChan to state chain', async () => {
+    const net = fakeNetwork([200], { backend: 'success' })
+    const result = await run({ ...env, FUND_API_BASE: 'https://api.test' }, false, monday1430)
+    expect(result.status).toBe('sent')
+    expect(net.getState().sent_slots).toEqual(['14:30'])
+  })
+
+  it('degrades to estimate-only push when the backend times out', async () => {
+    const net = fakeNetwork([200], { backend: 'timeout' })
+    expect((await run({ ...env, FUND_API_BASE: 'https://api.test' }, false, monday1430)).status).toBe('sent')
+    expect(net.getSends()).toBe(1)
+  })
+
+  it('reports a Gist read failure without attempting a push', async () => {
+    const net = fakeNetwork([200], { gistReadFails: true })
+    await expect(run(env, false, monday1430)).rejects.toThrow('Gist 读取失败')
+    expect(net.getSends()).toBe(0)
   })
 
   it('skips weekends without network access', async () => {

@@ -15,6 +15,12 @@ interface WatchEntry {
   deleted?: boolean
 }
 
+interface WorkerDecisionRequest {
+  request_id: string
+  items: Array<{ code: string; current_weight?: number; target_weight?: number }>
+  portfolio_value: number
+}
+
 export interface Estimate {
   code: string
   name: string
@@ -141,13 +147,16 @@ function portfolioItems(entries: WatchEntry[], estimates: Map<string, Estimate>)
 async function decisions(env: Env, entries: WatchEntry[], estimates: Map<string, Estimate>, requestId: string) {
   if (!env.FUND_API_BASE) return null
   const payload = portfolioItems(entries, estimates)
+  const request: WorkerDecisionRequest = {
+    request_id: requestId, items: payload.items, portfolio_value: payload.portfolioValue,
+  }
   try {
     const response = await fetch(`${env.FUND_API_BASE.replace(/\/$/, '')}/api/portfolio/decisions`, {
       method: 'POST', headers: {
         'Content-Type': 'application/json',
         ...(env.WORKER_TOKEN ? { Authorization: `Bearer ${env.WORKER_TOKEN}` } : {}),
       },
-      body: JSON.stringify({ request_id: requestId, items: payload.items, portfolio_value: payload.portfolioValue }),
+      body: JSON.stringify(request),
       signal: AbortSignal.timeout(25_000),
     })
     if (!response.ok) return null

@@ -2,6 +2,7 @@ import pytest
 from fastapi import HTTPException
 
 import main
+from models.api import PortfolioDecisionRequest
 from service import repo
 from service.security import require_admin, require_worker_or_admin, reset_rate_limits
 
@@ -37,8 +38,9 @@ def test_portfolio_request_id_is_idempotent(monkeypatch):
         "decisions": [], "errors": [], "total": len(items), "allocation": {}, "rebalance": [],
     })
     payload = {"request_id": "2026-07-11-14:30", "items": [{"code": "510300"}]}
-    first = main.portfolio_decisions(payload, "worker")
-    second = main.portfolio_decisions(payload, "worker")
+    request = PortfolioDecisionRequest(**payload)
+    first = main.portfolio_decisions(request, "worker")
+    second = main.portfolio_decisions(request, "worker")
     assert first["duplicate"] is False
     assert second["duplicate"] is True
 
