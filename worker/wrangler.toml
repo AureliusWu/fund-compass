@@ -1,0 +1,17 @@
+name = "sinan-estimate-push"
+main = "src/index.ts"
+compatibility_date = "2026-07-11"
+preview_urls = false
+
+[observability]
+enabled = true
+
+[observability.logs]
+enabled = true
+
+[triggers]
+crons = ["30 6 * * 1-5"]
+
+[vars]
+GIST_ID = "5b05af999f81be88db086cb71b8b0295"
+FUND_API_BASE = "https://fund-compass-api.onrender.com"

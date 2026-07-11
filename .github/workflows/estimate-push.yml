@@ -1,10 +1,9 @@
 name: estimate-push
 
-# 司南基金 · 交易日北京时间 14:30 自选实时估值推送。
-# Render cron 是主触发器；GitHub Actions 作为兜底，脚本会跳过延迟超过 25 分钟的旧任务。
+# 司南基金 · 自选实时估值推送人工应急入口。
+# 交易日北京时间 14:30 的正式定时任务已迁移到 Cloudflare Worker。
 on:
-  schedule:
-    - cron: '30 6 * * 1-5' # UTC 06:30 周一~五 = CST 14:30
+  # 14:30 定时触发已迁移到 Cloudflare Worker；这里仅保留人工应急入口。
   workflow_dispatch:
     inputs:
       force:

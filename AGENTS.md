@@ -19,6 +19,7 @@
 - `backend/`：API、数据源、策略算法、SQLite。
 - `tools/`：离线补全、估值推送、通知脚本。
 - `.github/workflows/overseas-accuracy.yml`：独立的海外估值预测落账、精确净值结算、校准和审计流水线。
+- `worker/`：Cloudflare Workers Cron 14:30 自选决策推送；Secret 只存 Cloudflare，不写入仓库。
 - `docs/`：部署、路线图、推送配置、迭代记录。
 
 ## 常用命令

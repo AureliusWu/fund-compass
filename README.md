@@ -92,6 +92,7 @@ npm run build
 - 前端：GitHub Pages。
 - 后端：Render / Railway。
 - 自动任务：14:30 估值推送与 14:35 海外精度账本相互独立，避免推送失败阻断模型证据收集。
+- 14:30 自选决策推送由 Cloudflare Workers Cron 执行；GitHub Actions 仅保留手动应急入口，Gist 状态负责跨平台去重。
 - 配置参考：`docs/DEPLOY.md`、`docs/PUSH-SETUP.md`、`render.yaml`。
 
 ## 项目关系

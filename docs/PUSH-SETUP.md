@@ -4,7 +4,17 @@
 
 ## 触发方式
 
-推荐主触发器：`render.yaml` 里的 Render Cron Job：
+当前主触发器：`worker/` 中的 Cloudflare Worker：
+
+- Worker：`sinan-estimate-push`
+- URL：`https://sinan-estimate-push.ligugu69.workers.dev`
+- cron：`30 6 * * 1-5`，即北京时间 14:30
+- Gist 状态文件继续使用 `sinan-estimate-state.json`，与旧脚本共享去重状态
+- GitHub Actions `estimate-push` 只保留手动应急入口，不再定时执行
+
+旧 Render Cron 配置仍在 `render.yaml` 中作为历史参考；启用 Cloudflare Worker 后不要同时启用 Render Cron。
+
+原 Render 配置：
 
 - `fund-compass-estimate-push`
 - cron：`30 6 * * 1-5`，即北京时间 14:30
