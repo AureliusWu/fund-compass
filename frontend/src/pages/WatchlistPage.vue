@@ -169,7 +169,15 @@ onMounted(refresh)
       </div>
     </van-pull-refresh>
 
-    <van-popup v-model:show="showSync" position="bottom" round :style="{ padding: '18px', paddingBottom: '30px' }">
+    <van-popup
+      v-model:show="showSync"
+      class="sync-popup"
+      position="bottom"
+      round
+      :z-index="3000"
+      :safe-area-inset-bottom="true"
+      :style="{ padding: '18px', paddingBottom: 'calc(78px + env(safe-area-inset-bottom))', maxHeight: '80vh', overflowY: 'auto' }"
+    >
       <div class="popup-title">同步自选</div>
       <van-field v-model="token" type="password" label="Token" placeholder="GitHub Gist Token" />
       <div class="sync-status">{{ watch.syncing ? '同步中' : watch.lastSync ? '上次同步 ' + new Date(watch.lastSync).toLocaleString() : '尚未同步' }}</div>

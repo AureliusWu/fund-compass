@@ -217,5 +217,12 @@ def build_decision(
         "position_rule": build_position_rule(holding, action),
         "next_check": NEXT_CHECK,
         "disclaimer": DISCLAIMER,
+        "methodology": {
+            "score_version": score.get("score_version") or "unknown",
+            "signal_version": signal.get("signal_version") or "unknown",
+            "score_coverage": score.get("coverage"),
+            "signal_coverage": signal.get("coverage"),
+            "evidence_strength": signal.get("evidence_strength") or confidence,
+        },
         "raw": {"score": score, "signal": signal, "backtest": bt},
     }

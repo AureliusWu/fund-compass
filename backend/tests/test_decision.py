@@ -11,10 +11,12 @@ def _pack(sample_detail, monkeypatch=None):
 
 def test_decision_fields(sample_detail, monkeypatch):
     d = _pack(sample_detail, monkeypatch)
-    for k in ("action", "confidence", "summary", "reasons", "risks", "position_rule", "next_check", "disclaimer", "raw"):
+    for k in ("action", "confidence", "summary", "reasons", "risks", "position_rule", "next_check", "disclaimer", "methodology", "raw"):
         assert k in d
     assert d["action"] in ("分批买入", "继续定投", "持有观望", "停止加仓", "部分观察", "考虑替换", "观察")
     assert d["confidence"] in ("高", "中", "低")
+    assert d["methodology"]["score_version"] == "v3-risk-adjusted"
+    assert d["methodology"]["signal_version"] == "v3-coverage-gated"
 
 
 def test_decision_buy_action(sample_detail, monkeypatch):

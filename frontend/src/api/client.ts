@@ -201,6 +201,11 @@ export interface DecisionResp {
   position_rule: string
   next_check: string
   disclaimer?: string
+  methodology?: {
+    score_version: string; signal_version: string
+    score_coverage?: number | null; signal_coverage?: number | null
+    evidence_strength: string
+  }
 }
 export const getDecision = (code: string, p?: { target_weight?: number; current_weight?: number }) => {
   const u = new URLSearchParams()

@@ -10,6 +10,7 @@ import {
   estimateFreshness,
   estimateTrustText,
   freshnessFromTime,
+  marketDataFreshness,
   groupDecisions,
   sourceFreshness,
   visibleUnreadAlerts,
@@ -50,7 +51,7 @@ describe('freshness and QDII evidence', () => {
 
   it('hides an expired precise estimate but keeps a fresh model estimate', () => {
     const fresh = { ...baseEstimate, generatedAt: '2026-07-10T06:30:00Z' }
-    const expired = { ...baseEstimate, generatedAt: '2026-07-08T06:30:00Z' }
+    const expired = { ...baseEstimate, generatedAt: '2026-07-06T06:30:00Z' }
     expect(estimateFreshness(fresh, now)).toBe('fresh')
     expect(estimateChangeForDisplay(fresh, now)).toBe(2)
     expect(estimateFreshness(expired, now)).toBe('expired')
@@ -71,6 +72,12 @@ describe('freshness and QDII evidence', () => {
     expect(freshnessFromTime('2026-07-10T06:30:00Z', now)).toBe('fresh')
     expect(sourceFreshness({ id: 'x', label: 'x', ok: true, lastCheck: now - 20 * 60 * 1000, failures: 0, consecutive: 0 }, now)).toBe('stale')
     expect(sourceFreshness({ id: 'x', label: 'x', ok: false, lastCheck: now, failures: 3, consecutive: 3 }, now)).toBe('expired')
+  })
+
+  it('does not expire Friday market data over the weekend', () => {
+    expect(marketDataFreshness('2026-07-10 15:00', Date.parse('2026-07-12T08:00:00+08:00'))).toBe('fresh')
+    expect(marketDataFreshness('2026-07-10 15:00', Date.parse('2026-07-13T16:00:00+08:00'))).toBe('stale')
+    expect(marketDataFreshness('2026-07-10 15:00', Date.parse('2026-07-16T16:00:00+08:00'))).toBe('expired')
   })
 })
 

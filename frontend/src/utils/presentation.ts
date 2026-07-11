@@ -49,9 +49,29 @@ export function freshnessFromTime(
 
 export function estimateFreshness(estimate: Estimate | null | undefined, now = Date.now()): Freshness {
   if (!estimate) return 'expired'
-  if (estimate.kind === 'overseas_model') return freshnessFromTime(estimate.generatedAt, now)
+  if (estimate.kind === 'overseas_model') return marketDataFreshness(estimate.generatedAt || estimate.estTime, now)
   if (estimate.kind === 'overseas') return 'stale'
-  return freshnessFromTime(estimate.estTime, now)
+  return marketDataFreshness(estimate.estTime || (estimate.navDate ? `${estimate.navDate} 15:00` : null), now)
+}
+
+export function marketDataFreshness(value: string | null | undefined, now = Date.now()): Freshness {
+  const timestamp = parseTime(value)
+  if (timestamp == null) return 'expired'
+  if (timestamp > now) return 'fresh'
+
+  const observed = new Date(timestamp)
+  const current = new Date(now)
+  const cursor = new Date(observed.getFullYear(), observed.getMonth(), observed.getDate())
+  const end = new Date(current.getFullYear(), current.getMonth(), current.getDate())
+  let tradingDays = 0
+  while (cursor < end && tradingDays <= 3) {
+    cursor.setDate(cursor.getDate() + 1)
+    const day = cursor.getDay()
+    if (day !== 0 && day !== 6) tradingDays++
+  }
+  if (tradingDays === 0) return 'fresh'
+  if (tradingDays <= 2) return 'stale'
+  return 'expired'
 }
 
 export function estimateChangeForDisplay(estimate: Estimate | null | undefined, now = Date.now()): number | null {
