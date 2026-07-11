@@ -15,6 +15,7 @@ import os
 import re
 
 import requests
+from static_chunks import write_chunks
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "frontend", "public", "data", "managers.json")
@@ -66,9 +67,11 @@ def main():
             "days": x[6], "ret": x[7], "scale": x[10] if len(x) > 10 else "",
         })
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
+    updated = datetime.date.today().isoformat()
     with open(OUT, "w", encoding="utf-8") as f:
-        json.dump({"updated": datetime.date.today().isoformat(), "managers": out},
+        json.dump({"updated": updated, "managers": out},
                   f, ensure_ascii=False, separators=(",", ":"))
+    write_chunks(OUT, "managers", out, updated, size=500)
     print("managers total", len(out))
 
 

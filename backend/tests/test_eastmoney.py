@@ -1,5 +1,5 @@
 """天天基金 pingzhongdata JS 文本的解析函数单测（用内联样本，绝不打网络）。"""
-from service.eastmoney import _json_var, _num, _str_var
+from service.eastmoney import _build_primary_nav_history, _json_var, _num, _str_var
 
 JS = """
 var fS_name = "测试基金A";
@@ -34,6 +34,14 @@ def test_num():
     assert _num("abc") is None
     assert _num(None) is None
     assert _num("") is None
+
+
+def test_primary_daily_returns_are_compounded_into_cumulative_return():
+    points = _json_var(JS, "Data_netWorthTrend", [])
+    history = _build_primary_nav_history(points)
+    assert history[0]["ac_return"] == 0.5
+    assert history[1]["ac_return"] == 2.309
+    assert history[1]["ac_return"] != points[1]["equityReturn"]
 
 
 def test_source_health_tracks_primary(monkeypatch):

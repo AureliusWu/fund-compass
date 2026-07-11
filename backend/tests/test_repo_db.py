@@ -90,3 +90,18 @@ def test_get_detail_falls_back_to_stale_cache_with_log(temp_db, monkeypatch, cap
     assert d["cached"] is True
     assert d["stale"] is True
     assert any("退回陈旧缓存" in r.getMessage() for r in caplog.records)
+
+
+def test_get_detail_rejects_cache_older_than_seven_days(temp_db, monkeypatch):
+    from service import repo
+    monkeypatch.setattr(repo, "fetch_detail", lambda code: {
+        "code": code, "name": "过期基金", "source": "primary", "latest_nav": 1,
+        "latest_nav_date": "2024-01-01", "nav_history": [{"date": "2024-01-01", "nav": 1}],
+    })
+    repo.get_detail("000003", force=True)
+    conn = temp_db.get_conn()
+    conn.execute("UPDATE fund_detail SET updated_at='2000-01-01T00:00:00+08:00' WHERE code='000003'")
+    conn.commit(); conn.close()
+    monkeypatch.setattr(repo, "fetch_detail", lambda code: (_ for _ in ()).throw(RuntimeError("全挂")))
+    with pytest.raises(RuntimeError, match="全挂"):
+        repo.get_detail("000003", force=True)

@@ -28,9 +28,23 @@ let cache: { funds: ScreenFund[]; updated: string } | null = null
 
 export async function loadScreener(): Promise<{ funds: ScreenFund[]; updated: string }> {
   if (cache) return cache
-  const r = await fetch(`${import.meta.env.BASE_URL}data/screener.json`)
-  if (!r.ok) throw new Error('暂无排行数据')
-  const d = (await r.json()) as { updated: string; funds: ScreenFund[] }
+  const base = `${import.meta.env.BASE_URL}data/screener`
+  const manifestResponse = await fetch(`${base}/manifest.json`)
+  if (manifestResponse.ok) {
+    const manifest = await manifestResponse.json() as { updated: string; chunks: string[] }
+    if (Array.isArray(manifest.chunks)) {
+      const chunks = await Promise.all(manifest.chunks.map(async (file) => {
+        const response = await fetch(`${base}/${file}`)
+        if (!response.ok) throw new Error('排行数据分片加载失败')
+        return (await response.json() as { funds: ScreenFund[] }).funds || []
+      }))
+      cache = { funds: chunks.flat(), updated: manifest.updated || '' }
+      return cache
+    }
+  }
+  const legacy = await fetch(`${import.meta.env.BASE_URL}data/screener.json`)
+  if (!legacy.ok) throw new Error('暂无排行数据')
+  const d = (await legacy.json()) as { updated: string; funds: ScreenFund[] }
   cache = { funds: d.funds || [], updated: d.updated || '' }
   return cache
 }

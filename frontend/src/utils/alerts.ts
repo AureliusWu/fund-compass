@@ -2,7 +2,7 @@
 // 检查项：信号变级、净值异动、回撤阈值、定期再平衡提醒。
 // 数据存 localStorage，前端定时检查（每次开首页 / 轮询）。
 
-import { fetchEstimate } from './estimate'
+import { fetchEstimate, type Estimate } from './estimate'
 import { getSignal, type SignalResp } from '@/api/client'
 
 // ── 提醒定义 ──────────────────────────────────────────
@@ -65,10 +65,10 @@ function notify(a: Alert): void {
 
 /** 信号变级检查 */
 export async function checkSignalChange(
-  code: string, name: string, prevSignal: string | null,
+  code: string, name: string, prevSignal: string | null, currentSignal?: SignalResp,
 ): Promise<Alert | null> {
   try {
-    const sig: SignalResp = await getSignal(code)
+    const sig: SignalResp = currentSignal ?? await getSignal(code)
     if (!prevSignal || sig.signal === prevSignal) return null
 
     const level: Alert['level'] =
@@ -87,10 +87,10 @@ export async function checkSignalChange(
 
 /** 净值异动检查（单日涨跌 > 阈值） */
 export async function checkNavSpike(
-  code: string, name: string, threshold = 3,
+  code: string, name: string, threshold = 3, estimate?: Estimate | null,
 ): Promise<Alert | null> {
   try {
-    const est = await fetchEstimate(code)
+    const est = estimate === undefined ? await fetchEstimate(code) : estimate
     if (!est || est.estChange == null) return null
     const chg = Math.abs(est.estChange)
     if (chg < threshold) return null
@@ -127,7 +127,13 @@ export function checkRebalance(): Alert | null {
 }
 
 // ── 批量检查 ──────────────────────────────────────────
-export interface WatchItemForAlert { code: string; name: string; prevSignal?: string | null }
+export interface WatchItemForAlert {
+  code: string
+  name: string
+  prevSignal?: string | null
+  currentSignal?: SignalResp
+  estimate?: Estimate | null
+}
 
 export async function runAllChecks(items: WatchItemForAlert[]): Promise<Alert[]> {
   const results: (Alert | null)[] = []
@@ -135,8 +141,8 @@ export async function runAllChecks(items: WatchItemForAlert[]): Promise<Alert[]>
   // 并行执行所有检查
   const tasks: Promise<Alert | null>[] = []
   for (const it of items) {
-    tasks.push(checkSignalChange(it.code, it.name, it.prevSignal ?? null))
-    tasks.push(checkNavSpike(it.code, it.name))
+    tasks.push(checkSignalChange(it.code, it.name, it.prevSignal ?? null, it.currentSignal))
+    tasks.push(checkNavSpike(it.code, it.name, 3, it.estimate))
   }
   tasks.push(Promise.resolve(checkRebalance()))
 

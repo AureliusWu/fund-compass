@@ -6,6 +6,7 @@
 
 export interface TempSource { label: string; value: number; color: string; detail: string }
 export interface MarketTemp {
+  status: 'fresh' | 'stale' | 'unavailable'
   score: number // 0–100，越高越热/越贵
   label: string // 极寒 / 偏冷 / 适中 / 偏热 / 过热
   color: string
@@ -93,11 +94,13 @@ const heatColor = (s: number) => {
 }
 
 export async function fetchMarketTemp(): Promise<MarketTemp> {
+  let previous: (MarketTemp & { _ts: number }) | null = null
   try {
     const raw = localStorage.getItem(LS)
     if (raw) {
       const c = JSON.parse(raw) as MarketTemp & { _ts: number }
-      if (Date.now() - c._ts < TTL) return c
+      previous = c
+      if (Date.now() - c._ts < TTL) return { ...c, status: 'fresh' }
     }
   } catch { /* ignore */ }
 
@@ -140,12 +143,26 @@ export async function fetchMarketTemp(): Promise<MarketTemp> {
     scoreSum += vs * 0.15; weightSum += 0.15
   }
 
-  const finalScore = weightSum > 0 ? Math.round(scoreSum / weightSum) : 50
+  if (weightSum === 0) {
+    if (previous && typeof previous.score === 'number') {
+      return { ...previous, status: 'stale' }
+    }
+    return {
+      score: 50,
+      label: '不可用',
+      color: '#969799',
+      sources: [{ label: '数据源不可用', value: 0, color: '#969799', detail: '本次未取得有效市场数据' }],
+      updated: new Date().toISOString(),
+      status: 'unavailable',
+    }
+  }
+
+  const finalScore = Math.round(scoreSum / weightSum)
   const { label, color } = toLabel(finalScore)
   const result: MarketTemp & { _ts: number } = {
     score: finalScore, label, color,
     sources: sources.length ? sources : [{ label: '暂无数据', value: 50, color: '#969799', detail: '数据源暂不可用，显示中性温度' }],
-    updated: new Date().toISOString(),
+    updated: new Date().toISOString(), status: 'fresh',
     _ts: Date.now(),
   }
   try { localStorage.setItem(LS, JSON.stringify(result)) } catch { /* quota */ }
@@ -157,7 +174,9 @@ export function cachedMarketTemp(): MarketTemp | null {
     const raw = localStorage.getItem(LS)
     if (!raw) return null
     const obj = JSON.parse(raw)
-    if (obj && typeof obj.score === 'number') return obj as MarketTemp
+    if (obj && typeof obj.score === 'number') {
+      return { ...obj, status: Date.now() - obj._ts < TTL ? 'fresh' : 'stale' } as MarketTemp
+    }
   } catch { /* ignore */ }
   return null
 }

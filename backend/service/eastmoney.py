@@ -16,7 +16,7 @@ log = logging.getLogger(__name__)
 
 CST = timezone(timedelta(hours=8))
 _HEADERS = {"User-Agent": "Mozilla/5.0", "Referer": "http://fund.eastmoney.com/"}
-_TIMEOUT = 15
+_TIMEOUT = (4, 10)
 
 
 def _get(url: str) -> str:
@@ -64,6 +64,26 @@ def _num(s):
         return None
 
 
+def _build_primary_nav_history(points: list[dict]) -> list[dict]:
+    """把主源每日涨跌连乘为累计总收益，统一 ac_return 的跨源语义。"""
+    history = []
+    total_return_index = 1.0
+    for point in points:
+        ts, nav = point.get("x"), _num(point.get("y"))
+        if ts is None or nav is None or nav <= 0:
+            continue
+        daily_return = _num(point.get("equityReturn"))
+        if daily_return is not None:
+            total_return_index *= 1 + daily_return / 100
+        date = datetime.fromtimestamp(ts / 1000, tz=CST).strftime("%Y-%m-%d")
+        history.append({
+            "date": date,
+            "nav": nav,
+            "ac_return": round((total_return_index - 1) * 100, 6),
+        })
+    return history
+
+
 def _fetch_detail_pingzhong(code: str) -> dict:
     """主源：单只基金详情 + 净值历史（pingzhongdata，字段最全）。"""
     txt = _get(f"http://fund.eastmoney.com/pingzhongdata/{code}.js")
@@ -104,13 +124,7 @@ def _fetch_detail_pingzhong(code: str) -> dict:
             rank_total = None
 
     # 单位净值走势 → 历史 + 最新
-    nav_history = []
-    for p in _json_var(txt, "Data_netWorthTrend", []) or []:
-        ts, y = p.get("x"), p.get("y")
-        if ts is None or y is None:
-            continue
-        d = datetime.fromtimestamp(ts / 1000, tz=CST).strftime("%Y-%m-%d")
-        nav_history.append({"date": d, "nav": y, "ac_return": p.get("equityReturn")})
+    nav_history = _build_primary_nav_history(_json_var(txt, "Data_netWorthTrend", []) or [])
     latest_nav = nav_history[-1]["nav"] if nav_history else None
     latest_nav_date = nav_history[-1]["date"] if nav_history else None
 

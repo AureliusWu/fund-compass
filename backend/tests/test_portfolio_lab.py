@@ -25,13 +25,14 @@ def test_portfolio_lab_returns_backtest_risk_and_bounded_rebalance(make_navs):
     assert result["stress"][-1]["return"] < 0
 
 
-def test_alignment_forward_fills_only_past_values(make_navs):
+def test_alignment_uses_only_common_observation_dates(make_navs):
     a = make_navs(n=80)
     b = [row for index, row in enumerate(make_navs(n=80, r=0.0003)) if index != 20]
     dates, series = align_navs([{"code": "A", "nav_history": a}, {"code": "B", "nav_history": b}])
     missing_date = a[20]["date"]
-    index = dates.index(missing_date)
-    assert series[1][index] == series[1][index - 1]
+    assert missing_date not in dates
+    assert len(dates) == 79
+    assert all(len(values) == 79 for values in series)
 
 
 def test_invalid_weights_and_short_history_are_rejected(make_navs):

@@ -14,6 +14,7 @@ import os
 import re
 
 import requests
+from static_chunks import write_chunks
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "frontend", "public", "data", "screener.json")
@@ -72,9 +73,11 @@ def main():
                 "fee": num(f[20]),
             })
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
+    updated = datetime.date.today().isoformat()
     with open(OUT, "w", encoding="utf-8") as fp:
-        json.dump({"updated": datetime.date.today().isoformat(), "funds": rows},
+        json.dump({"updated": updated, "funds": rows},
                   fp, ensure_ascii=False, separators=(",", ":"))
+    write_chunks(OUT, "funds", rows, updated)
     print("screener total", len(rows))
 
 

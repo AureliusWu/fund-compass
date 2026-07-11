@@ -194,8 +194,8 @@ const fp = (n: number | null | undefined, d = 2) => n != null ? (n >= 0 ? '+' : 
           </div>
           <div class="friction-grid">
             <span>无摩擦 {{ fp(bt.strategy_gross?.total_return) }}</span>
-            <span>摩擦损耗 {{ fp(-(bt.friction_cost ?? 0)) }}</span>
-            <span>高成本下降 {{ fp(-(bt.stress?.return_drop ?? 0)) }}</span>
+            <span>摩擦损耗 {{ bt.friction_cost == null ? '--' : fp(-bt.friction_cost) }}</span>
+            <span>高成本下降 {{ bt.stress?.return_drop == null ? '--' : fp(-bt.stress.return_drop) }}</span>
           </div>
           <div class="note">
             申购 {{ (bt.assumptions.buy_fee * 100).toFixed(2) }}% ·

@@ -1,4 +1,13 @@
-from strategy.calibration import WEIGHT, calibrate
+from strategy.calibration import WEIGHT, _objective, calibrate
+
+
+def test_objective_rejects_missing_metrics():
+    assert _objective({
+        "available": True,
+        "outperform": None,
+        "strategy": {"max_drawdown": -8.0},
+        "benchmark": {"max_drawdown": -10.0},
+    }) == float("-inf")
 
 
 def test_calibration_requires_enough_history(make_navs):

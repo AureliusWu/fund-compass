@@ -17,9 +17,14 @@ CANDIDATES = [
 def _objective(result: dict) -> float:
     if not result.get("available"):
         return float("-inf")
-    excess = float(result.get("outperform") or 0)
-    strategy_dd = float((result.get("strategy") or {}).get("max_drawdown") or 0)
-    benchmark_dd = float((result.get("benchmark") or {}).get("max_drawdown") or 0)
+    excess = result.get("outperform")
+    strategy_dd = (result.get("strategy") or {}).get("max_drawdown")
+    benchmark_dd = (result.get("benchmark") or {}).get("max_drawdown")
+    if excess is None or strategy_dd is None or benchmark_dd is None:
+        return float("-inf")
+    excess = float(excess)
+    strategy_dd = float(strategy_dd)
+    benchmark_dd = float(benchmark_dd)
     return round(excess + 0.3 * (strategy_dd - benchmark_dd), 4)
 
 
@@ -47,6 +52,13 @@ def calibrate(detail: dict, train_ratio: float = 0.7) -> dict:
             "max_drawdown": (result.get("strategy") or {}).get("max_drawdown"),
         })
     best = max(train_rows, key=lambda row: row["objective"])
+    if best["objective"] == float("-inf"):
+        return {
+            "available": False,
+            "accepted": False,
+            "reason": "训练区间关键回测指标缺失",
+            "train": train_rows,
+        }
     current = active_weights()
     baseline = backtest(validation_detail, current)
     candidate = backtest(validation_detail, best["weights"])
@@ -58,10 +70,21 @@ def calibrate(detail: dict, train_ratio: float = 0.7) -> dict:
             "train": train_rows,
         }
 
-    candidate_excess = float(candidate.get("outperform") or 0)
-    baseline_excess = float(baseline.get("outperform") or 0)
-    candidate_dd = float(candidate["strategy"]["max_drawdown"])
-    baseline_dd = float(baseline["strategy"]["max_drawdown"])
+    candidate_excess = candidate.get("outperform")
+    baseline_excess = baseline.get("outperform")
+    candidate_dd = (candidate.get("strategy") or {}).get("max_drawdown")
+    baseline_dd = (baseline.get("strategy") or {}).get("max_drawdown")
+    if None in (candidate_excess, baseline_excess, candidate_dd, baseline_dd):
+        return {
+            "available": False,
+            "accepted": False,
+            "reason": "验证区间关键回测指标缺失",
+            "train": train_rows,
+        }
+    candidate_excess = float(candidate_excess)
+    baseline_excess = float(baseline_excess)
+    candidate_dd = float(candidate_dd)
+    baseline_dd = float(baseline_dd)
     accepted = (
         best["weights"] != current
         and candidate_excess >= baseline_excess

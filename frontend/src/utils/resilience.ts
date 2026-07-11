@@ -14,7 +14,7 @@ export interface SourceStatus {
 export type SourceId = 'backend' | 'tiantian' | 'eastmoney' | 'tencent'
 
 const STATUS_KEY = 'sinan_source_status'
-const SWR_KEY_PREFIX = 'sinan_swr_'
+const SWR_KEY_PREFIX = 'sinan_swr_v2_'
 
 // ── 源状态追踪 ──
 function loadStatuses(): Map<string, SourceStatus> {
@@ -69,11 +69,12 @@ export function allSourcesOk(): boolean {
 // ── SWR（stale-while-revalidate）缓存 ──
 interface CacheEntry<T> { data: T; ts: number }
 
-export function swrGet<T>(key: string): T | null {
+export function swrGet<T>(key: string, maxAgeMs = Number.POSITIVE_INFINITY): T | null {
   try {
     const raw = localStorage.getItem(SWR_KEY_PREFIX + key)
     if (!raw) return null
     const entry: CacheEntry<T> = JSON.parse(raw)
+    if (!Number.isFinite(entry.ts) || Date.now() - entry.ts > maxAgeMs) return null
     return entry.data
   } catch { return null }
 }
@@ -91,16 +92,16 @@ export async function withSWR<T>(
   fetcher: () => Promise<T>,
   maxAgeMs = 300_000, // 默认 5 分钟
 ): Promise<T> {
-  const cached = swrGet<{ data: T; ts: number }>(key + '_v2')
+  const cached = swrGet<T>(key, maxAgeMs)
 
   try {
     const fresh = await fetcher()
-    swrSet(key + '_v2', { data: fresh, ts: Date.now() })
+    swrSet(key, fresh)
     return fresh
   } catch (e) {
     if (cached) {
-      console.warn(`[resilience] SWR fallback for ${key}, age=${cached ? Math.round((Date.now() - cached.ts) / 1000) : 0}s`)
-      return cached.data
+      console.warn(`[resilience] SWR fallback for ${key}`)
+      return cached
     }
     throw e // 无缓存时原样抛出
   }

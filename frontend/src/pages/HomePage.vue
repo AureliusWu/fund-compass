@@ -10,6 +10,8 @@ import { fetchTaskStatuses, type TaskStatus } from '@/utils/taskStatus'
 import { loadAlerts, runAllChecks, markRead, markAllRead, dismissAlert, requestNotifyPermission, type Alert } from '@/utils/alerts'
 import { APP_VERSION } from '@/version'
 import { combineTemperature, sourceFreshness, visibleUnreadAlerts } from '@/utils/presentation'
+import { fetchEstimates } from '@/utils/estimate'
+import type { SignalResp } from '@/api/client'
 
 const app = useAppStore()
 const watch = useWatchlistStore()
@@ -22,6 +24,12 @@ const taskLoading = ref(false)
 const sigs = ref<Record<string, string>>({})
 const alerts = ref<Alert[]>(loadAlerts())
 const refreshing = ref(false)
+const SIGNAL_SNAPSHOT_KEY = 'sinan_signal_snapshot_v1'
+
+function loadSignalSnapshot(): Record<string, string> {
+  try { return JSON.parse(localStorage.getItem(SIGNAL_SNAPSHOT_KEY) || '{}') }
+  catch { return {} }
+}
 
 const SIG_WEIGHT: Record<string, number> = { 买入: 100, 定投: 70, 持有: 45, 减仓: 15 }
 
@@ -39,7 +47,7 @@ const dist = computed(() => {
 })
 
 const combinedTemp = computed(() => {
-  return combineTemperature(app.marketTemp?.score, watchTemp.value)
+  return combineTemperature(app.marketTemp?.status === 'unavailable' ? null : app.marketTemp?.score, watchTemp.value)
 })
 
 const tempLabel = computed(() => {
@@ -77,16 +85,29 @@ const statusLights = computed<{ label: string; state: Light; text: string; detai
 })
 
 async function loadWatchSignals() {
+  const previous = loadSignalSnapshot()
+  const current: Record<string, SignalResp> = {}
   try {
     await watch.load(false)
     await Promise.all(watch.items.map(async (item) => {
-      try { sigs.value[item.code] = (await funds.signal(item.code)).signal } catch { /* skip */ }
+      try {
+        const signal = await funds.signal(item.code)
+        current[item.code] = signal
+        sigs.value[item.code] = signal.signal
+      } catch { /* skip */ }
     }))
   } catch { /* skip */ }
 
+  try { localStorage.setItem(SIGNAL_SNAPSHOT_KEY, JSON.stringify(sigs.value)) } catch { /* ignore */ }
+  const estimates = await fetchEstimates(watch.items.map((item) => item.code))
+
   requestNotifyPermission()
   runAllChecks(watch.items.map((item) => ({
-    code: item.code, name: item.name || item.code, prevSignal: sigs.value[item.code],
+    code: item.code,
+    name: item.name || item.code,
+    prevSignal: previous[item.code],
+    currentSignal: current[item.code],
+    estimate: estimates.get(item.code) ?? null,
   }))).then((newAlerts) => {
     if (newAlerts.length) alerts.value = loadAlerts()
   })
@@ -154,7 +175,7 @@ onMounted(refreshHome)
           </div>
           <div class="gauge-track"><i :class="tempTone" :style="{ width: (combinedTemp ?? 50) + '%' }"></i></div>
           <div class="climate-grid">
-            <div><span>市场</span><b>{{ app.marketTemp?.score ?? '—' }}</b><em>{{ app.marketTemp?.label || '计算中' }}</em></div>
+            <div><span>市场</span><b>{{ app.marketTemp?.status === 'unavailable' ? '—' : app.marketTemp?.score ?? '—' }}</b><em>{{ app.marketTemp?.label || '计算中' }}</em></div>
             <div><span>自选</span><b>{{ watchTemp ?? '—' }}</b><em>{{ watch.items.length }} 只基金</em></div>
           </div>
           <div class="signal-strip" v-if="watchTemp != null">
@@ -169,7 +190,9 @@ onMounted(refreshHome)
               <span>{{ source.label }}</span><b>{{ source.value }}</b><em>{{ source.detail }}</em>
             </div>
           </div>
-          <div class="updated" v-if="app.marketTemp?.updated">{{ new Date(app.marketTemp.updated).toLocaleString('zh-CN') }}</div>
+          <div class="updated" v-if="app.marketTemp?.updated">
+            {{ app.marketTemp.status === 'stale' ? '旧数据 · ' : app.marketTemp.status === 'unavailable' ? '数据不可用 · ' : '' }}{{ new Date(app.marketTemp.updated).toLocaleString('zh-CN') }}
+          </div>
         </section>
 
         <template v-if="visibleAlerts.length">

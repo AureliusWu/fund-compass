@@ -12,6 +12,10 @@ initTheme()
 // Vant 组件由 unplugin-vue-components + VantResolver 按需自动引入（见 vite.config），
 // 不再 app.use(Vant) 全量注册，首屏 JS 大幅减小。
 const app = createApp(App)
+app.config.errorHandler = (error, _instance, info) => {
+  console.error('Unhandled Vue error:', info, error)
+  window.dispatchEvent(new CustomEvent('fund-compass-error'))
+}
 app.use(createPinia())
 app.use(router)
 app.mount('#app')

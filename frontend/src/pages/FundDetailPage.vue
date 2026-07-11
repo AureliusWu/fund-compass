@@ -210,6 +210,7 @@ async function toggleWatch() {
         <van-button round type="primary" size="small" @click="loadData">重试</van-button>
       </van-empty>
       <template v-else-if="detail">
+        <div v-if="detail.stale" class="data-warning">数据源暂不可用，当前展示 {{ detail.updated_at || detail.latest_nav_date }} 的历史缓存；评分与决策已降级。</div>
         <div class="est card">
           <div class="est-head">
             <span class="est-label">{{ primaryMove?.label === '净' ? '最新净值涨跌' : (est?.label || '盘中估值') }}</span>
@@ -316,10 +317,12 @@ async function toggleWatch() {
                 <div class="rank" v-if="score.rank_in_type">同类 {{ score.rank_in_type }}/{{ score.rank_total }}</div>
               </div>
             </div>
+            <div class="score-trace">数据覆盖 {{ Math.round(score.coverage * 100) }}% · {{ score.score_version }}</div>
             <div class="comp" v-for="(c, k) in score.components" :key="k">
-              <span class="cn">{{ COMP_NAMES[k] }} <em>{{ c.weight * 100 }}%</em></span>
-              <van-progress :percentage="Math.round(c.score ?? 0)" :show-pivot="false"
+              <span class="cn">{{ COMP_NAMES[k] }} <em>{{ Math.round(c.effective_weight * 100) }}%</em></span>
+              <van-progress v-if="c.score != null" :percentage="Math.round(c.score)" :show-pivot="false"
                 color="#4C7E67" track-color="var(--border)" style="flex:1;margin:0 10px" />
+              <span v-else class="score-missing">数据不足</span>
               <span class="cv">{{ c.score ?? '--' }}</span>
             </div>
           </div>
@@ -346,7 +349,7 @@ async function toggleWatch() {
             <div class="bt-row">
               <div><div class="k">择时策略</div><div class="v" :style="{ color: colorOf(bt.strategy.total_return) }">{{ pct(bt.strategy.total_return) }}</div><div class="kk">回撤 {{ bt.strategy.max_drawdown }}%</div></div>
               <div><div class="k">一直持有</div><div class="v" :style="{ color: colorOf(bt.benchmark.total_return) }">{{ pct(bt.benchmark.total_return) }}</div><div class="kk">回撤 {{ bt.benchmark.max_drawdown }}%</div></div>
-              <div><div class="k">超额/胜率</div><div class="v" :style="{ color: colorOf(bt.outperform ?? 0) }">{{ pct(bt.outperform ?? 0) }}</div><div class="kk">胜率 {{ bt.win_rate }}%</div></div>
+               <div><div class="k">超额/胜率</div><div class="v" :style="{ color: colorOf(bt.outperform) }">{{ pct(bt.outperform) }}</div><div class="kk">胜率 {{ bt.win_rate == null ? '--' : bt.win_rate + '%' }}</div></div>
             </div>
             <Chart :option="btOption" height="200px" />
             <div class="bt-note">{{ bt.start }} ~ {{ bt.end }} · 月度调仓 {{ bt.rebalances }} 次。简化回测、不计费用，仅供参考。</div>
@@ -374,7 +377,7 @@ async function toggleWatch() {
               {{ signal.disclaimer || '择时信号仅为风险 / 时机参考，非买卖指令。' }}
               <template v-if="bt && bt.available && bt.strategy && bt.benchmark">
                 本基金回测：择时 {{ pct(bt.strategy.total_return) }} vs 一直持有 {{ pct(bt.benchmark.total_return) }}
-                <em :style="{ color: colorOf((bt.outperform ?? 0)) }">（{{ (bt.outperform ?? 0) >= 0 ? '择时跑赢' : '择时跑输' }} {{ Math.abs(bt.outperform ?? 0).toFixed(2) }}%）</em>。
+                 <em v-if="bt.outperform != null" :style="{ color: colorOf(bt.outperform) }">（{{ bt.outperform >= 0 ? '择时跑赢' : '择时跑输' }} {{ Math.abs(bt.outperform).toFixed(2) }}%）</em><em v-else>（超额数据不足）</em>。
                 优质基金长期持有 / 定投通常更优，勿据此轻易卖出。
               </template>
             </div>
@@ -430,6 +433,7 @@ async function toggleWatch() {
 .scorehead { display: flex; align-items: center; gap: 16px; margin-bottom: 12px; }
 .bigscore { font-size: 34px; font-weight: 600; color: #4C7E67; }
 .rank { font-size: 11px; color: #5A6A60; margin-top: 2px; }
+.score-trace { color: var(--text-hint); font-size: 10px; margin: -5px 0 10px; }
 .comp { display: flex; align-items: center; font-size: 12px; margin: 8px 0; }
 .comp .cn { width: 64px; color: #5A6A60; }
 .comp .cn em { color: #A8B2A8; font-style: normal; font-size: 10px; }
@@ -478,5 +482,6 @@ async function toggleWatch() {
 .sim-fee { width: 64px; text-align: right; color: #5A6A60; }
 .sim-note { font-size: 11px; color: #A8B2A8; margin-top: 8px; line-height: 1.5; }
 .detail-skeleton { display: flex; flex-direction: column; gap: 12px; }
+.data-warning { margin-bottom: 10px; padding: 9px 11px; border: 1px solid var(--gold); border-radius: 8px; color: var(--gold); background: var(--gold-soft); font-size: 11px; line-height: 1.5; }
 .detail-skeleton .van-skeleton { background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px 12px; }
 </style>

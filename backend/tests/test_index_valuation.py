@@ -1,14 +1,17 @@
 """指数估值加载器测试：lookup 命中 / 未映射 / PE缺失 / 数据为空 / 降级说明。"""
+from datetime import date, timedelta
+
 import pytest
 
+TODAY = date.today().isoformat()
 
 # 人造估值数据（与 index-valuation.json 结构一致）
 SAMPLE_VALUATION = {
-    "updated": "2026-06-29",
+    "updated": TODAY,
     "source": "legulegu",
     "indices": [
-        {"name": "沪深300", "pe": 13.76, "pe_pct": 66.2, "pb": 1.44, "pb_pct": 31.2, "date": "2026-06-29"},
-        {"name": "中证500", "pe": 33.19, "pe_pct": 71.0, "pb": 2.73, "pb_pct": 64.7, "date": "2026-06-29"},
+        {"name": "沪深300", "pe": 13.76, "pe_pct": 66.2, "pb": 1.44, "pb_pct": 31.2, "date": TODAY},
+        {"name": "中证500", "pe": 33.19, "pe_pct": 71.0, "pb": 2.73, "pb_pct": 64.7, "date": TODAY},
         # 创业板指：有映射但 PE 分位缺失 → lookup 应返回 None
         {"name": "创业板指", "pe": None, "pe_pct": None, "pb": None, "pb_pct": None, "date": None},
     ],
@@ -45,7 +48,7 @@ class TestLookupHit:
         assert r["pb"] == 1.44
         assert r["pb_pct"] == 31.2
         assert r["source"] == "legulegu"
-        assert r["updated"] == "2026-06-29"
+        assert r["updated"] == TODAY
 
     def test_zz500_etf(self, seeded_lookup):
         """中证500 ETF 找到估值数据"""
@@ -68,6 +71,16 @@ class TestLookupHit:
 
 
 class TestLookupFallback:
+    def test_stale_data_is_rejected(self, monkeypatch):
+        import strategy.index_valuation as iv
+
+        stale = {**SAMPLE_VALUATION, "updated": (date.today() - timedelta(days=8)).isoformat()}
+        monkeypatch.setattr(iv, "_valuation_data", stale)
+        monkeypatch.setattr(iv, "_index_map", SAMPLE_MAP)
+
+        assert iv.lookup("510300") is None
+        assert "已过期" in iv.unavailable_reason("510300")
+
     def test_empty_data(self, monkeypatch):
         """估值数据为空时所有 lookup 返回 None"""
         import strategy.index_valuation as iv

@@ -149,7 +149,8 @@ async function share() {
           <div class="r-sec">评分四维</div>
           <div class="r-comp" v-for="(c, k) in score?.components" :key="k">
             <span class="cn">{{ COMP[k] }}</span>
-            <span class="bar"><i :style="{ width: Math.round(c.score ?? 0) + '%' }"></i></span>
+            <span v-if="c.score != null" class="bar"><i :style="{ width: Math.round(c.score) + '%' }"></i></span>
+            <span v-else class="bar-missing">数据不足</span>
             <span class="cv">{{ c.score ?? '--' }}</span>
           </div>
 
@@ -176,7 +177,7 @@ async function share() {
             <div class="r-grid">
               <div><span class="gk">策略收益</span><span class="gv" :style="{ color: colorOf(bt.strategy.total_return) }">{{ pct(bt.strategy.total_return) }}</span></div>
               <div><span class="gk">持有收益</span><span class="gv" :style="{ color: colorOf(bt.benchmark.total_return) }">{{ pct(bt.benchmark.total_return) }}</span></div>
-              <div><span class="gk">超额</span><span class="gv" :style="{ color: colorOf(bt.outperform ?? 0) }">{{ pct(bt.outperform ?? 0) }}</span></div>
+              <div><span class="gk">超额</span><span class="gv" :style="{ color: colorOf(bt.outperform) }">{{ pct(bt.outperform) }}</span></div>
               <div><span class="gk">胜率</span><span class="gv">{{ bt.win_rate }}%</span></div>
             </div>
           </template>

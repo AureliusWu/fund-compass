@@ -4,7 +4,6 @@ import { useRouter } from 'vue-router'
 import { showToast } from 'vant'
 import { getFunds, postPortfolioDecisions, type DecisionResp, type FundListItem } from '@/api/client'
 import { useWatchlistStore } from '@/stores/watchlist'
-import { useFundsStore } from '@/stores/funds'
 import { fetchEstimates, type Estimate } from '@/utils/estimate'
 import { colorOf, pct } from '@/utils/format'
 import { getToken } from '@/utils/gist'
@@ -15,7 +14,6 @@ interface Row { name: string; type: string | null }
 
 const router = useRouter()
 const watch = useWatchlistStore()
-const funds = useFundsStore()
 const rows = reactive<Record<string, Row>>({})
 const estimates = reactive<Record<string, Estimate | null>>({})
 const decisions = reactive<Record<string, DecisionResp>>({})
@@ -44,28 +42,34 @@ async function loadDecisions() {
   decisionsLoading.value = true
   try {
     const response = await postPortfolioDecisions(watch.items.map((item) => ({ code: item.code })))
-    response.decisions.forEach((decision) => { decisions[decision.code] = decision })
+    response.decisions.forEach((decision) => {
+      decisions[decision.code] = decision
+      rows[decision.code] = { name: decision.name || decision.code, type: decision.type ?? null }
+    })
   } catch { /* 后端不可用时保留估值 */ }
   finally { decisionsLoading.value = false }
 }
 
 async function loadOne(code: string, fallbackName: string | null) {
   rows[code] = { name: fallbackName || code, type: null }
-  try {
-    const detail = await funds.detail(code)
-    rows[code] = { name: detail.name || fallbackName || code, type: detail.type }
-  } catch { /* 保留名称 */ }
 }
 
 async function refresh() {
   loading.value = true
-  await watch.load(true)
-  const estimateMap = await fetchEstimates(watch.items.map((item) => item.code))
-  estimateMap.forEach((value, code) => { estimates[code] = value })
-  await Promise.all(watch.items.map((item) => loadOne(item.code, item.name)))
-  await loadDecisions()
-  loading.value = false
-  refreshing.value = false
+  try {
+    await watch.load(true)
+    watch.items.forEach((item) => loadOne(item.code, item.name))
+    const estimatePromise = fetchEstimates(watch.items.map((item) => item.code))
+    await Promise.all([
+      estimatePromise.then((estimateMap) => {
+        estimateMap.forEach((value, code) => { estimates[code] = value })
+      }),
+      loadDecisions(),
+    ])
+  } finally {
+    loading.value = false
+    refreshing.value = false
+  }
 }
 
 function estimateText(code: string) {

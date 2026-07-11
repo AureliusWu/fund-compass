@@ -10,6 +10,8 @@ import re
 
 _TRADING_DAYS = 252
 _RISK_FREE = 0.02
+SCORE_VERSION = "v2-coverage-gated"
+MIN_SCORE_COVERAGE = 0.7
 
 
 def _scale(x, lo, hi):
@@ -112,13 +114,20 @@ def score_fund(detail):
     # 成本：申购费率（越低越好）
     cost_score = _scale(d.get("buy_rate"), 1.5, 0)
 
-    composite = _wavg([
-        (return_score, 0.4),
-        (risk_score, 0.3),
-        (mgmt_score, 0.2),
-        (cost_score, 0.1),
-    ])
+    dimensions = {
+        "return": (return_score, 0.4),
+        "risk": (risk_score, 0.3),
+        "management": (mgmt_score, 0.2),
+        "cost": (cost_score, 0.1),
+    }
+    coverage = round(sum(weight for value, weight in dimensions.values() if value is not None), 2)
+    eligible = return_score is not None and risk_score is not None and coverage >= MIN_SCORE_COVERAGE
+    composite = _wavg(list(dimensions.values())) if eligible else None
     score = round(composite, 1) if composite is not None else None
+
+    def effective_weight(name):
+        value, weight = dimensions[name]
+        return round(weight / coverage, 4) if value is not None and coverage > 0 else 0.0
 
     def r(s):
         return round(s, 1) if s is not None else None
@@ -126,15 +135,18 @@ def score_fund(detail):
     return {
         "score": score,
         "star": _star(score),
+        "score_version": SCORE_VERSION,
+        "coverage": coverage,
+        "eligible": eligible,
         "rank_in_type": d.get("rank_in_type"),
         "rank_total": d.get("rank_total"),
         "components": {
-            "return": {"weight": 0.4, "score": r(return_score),
+            "return": {"weight": 0.4, "effective_weight": effective_weight("return"), "score": r(return_score),
                        "detail": {"rank_pct": rank_pct, "ret_1y": d.get("ret_1y"), "ret_3y": d.get("ret_3y")}},
-            "risk": {"weight": 0.3, "score": r(risk_score), "detail": rm},
-            "management": {"weight": 0.2, "score": r(mgmt_score),
+            "risk": {"weight": 0.3, "effective_weight": effective_weight("risk"), "score": r(risk_score), "detail": rm},
+            "management": {"weight": 0.2, "effective_weight": effective_weight("management"), "score": r(mgmt_score),
                            "detail": {"manager": d.get("manager"), "tenure_years": tenure}},
-            "cost": {"weight": 0.1, "score": r(cost_score),
+            "cost": {"weight": 0.1, "effective_weight": effective_weight("cost"), "score": r(cost_score),
                      "detail": {"buy_rate": d.get("buy_rate")}},
         },
     }

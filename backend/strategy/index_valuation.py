@@ -8,12 +8,25 @@ V3-5 步骤2：步骤1 产出的 index-valuation.json + fund_index_map.json 在�
 import json
 import logging
 import os
+from datetime import date, datetime
 
 log = logging.getLogger(__name__)
 
 # ── 模块级缓存（导入时初始化，此后只读）──
 _valuation_data: dict | None = None
 _index_map: dict[str, str] | None = None
+MAX_VALUATION_AGE_DAYS = 7
+
+
+def _is_fresh(raw_date: str | None, today: date | None = None) -> bool:
+    if not raw_date:
+        return False
+    try:
+        observed = datetime.strptime(raw_date[:10], "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return False
+    age = ((today or date.today()) - observed).days
+    return 0 <= age <= MAX_VALUATION_AGE_DAYS
 
 INDEX_ALIASES = {
     "创业板指数": "创业板指",
@@ -88,6 +101,8 @@ def lookup(fund_code: str) -> dict | None:
     """
     if not _valuation_data or not _index_map:
         return None
+    if not _is_fresh(_valuation_data.get("updated")):
+        return None
     index_name = _canonical_index_name(_index_map.get(fund_code))
     if not index_name:
         return None
@@ -119,6 +134,8 @@ def unavailable_reason(fund_code: str) -> str | None:
         return None
     if not _valuation_data:
         return f"已映射至 {index_name}，但指数估值数据尚未加载"
+    if not _is_fresh(_valuation_data.get("updated")):
+        return f"已映射至 {index_name}，但指数估值数据已过期"
 
     for item in _valuation_data.get("unsupported", []) or []:
         if _canonical_index_name(item.get("name")) == index_name:

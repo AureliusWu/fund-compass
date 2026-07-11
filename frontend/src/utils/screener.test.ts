@@ -41,7 +41,7 @@ describe('loadScreener and findSimilar', () => {
     expect(first.updated).toBe('2026-07-01')
     expect(first.funds).toHaveLength(1)
     expect(second).toBe(first)
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
   it('throws readable error when screener source is unavailable', async () => {

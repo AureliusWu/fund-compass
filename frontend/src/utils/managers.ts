@@ -15,9 +15,23 @@ let cache: Manager[] | null = null
 
 export async function loadManagers(): Promise<Manager[]> {
   if (cache) return cache
-  const r = await fetch(`${import.meta.env.BASE_URL}data/managers.json`)
-  if (!r.ok) throw new Error('暂无基金经理数据')
-  const d = (await r.json()) as { managers: Manager[] }
+  const base = `${import.meta.env.BASE_URL}data/managers`
+  const manifestResponse = await fetch(`${base}/manifest.json`)
+  if (manifestResponse.ok) {
+    const manifest = await manifestResponse.json() as { chunks: string[] }
+    if (Array.isArray(manifest.chunks)) {
+      const chunks = await Promise.all(manifest.chunks.map(async (file) => {
+        const response = await fetch(`${base}/${file}`)
+        if (!response.ok) throw new Error('基金经理数据分片加载失败')
+        return (await response.json() as { managers: Manager[] }).managers || []
+      }))
+      cache = chunks.flat()
+      return cache
+    }
+  }
+  const legacy = await fetch(`${import.meta.env.BASE_URL}data/managers.json`)
+  if (!legacy.ok) throw new Error('暂无基金经理数据')
+  const d = (await legacy.json()) as { managers: Manager[] }
   cache = d.managers || []
   return cache
 }

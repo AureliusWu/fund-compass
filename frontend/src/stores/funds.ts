@@ -6,48 +6,67 @@ import {
 import { cacheGet, cacheSet } from '@/utils/cache'
 
 const TTL = 30 * 60 * 1000 // 30 分钟
+type Timed<T> = { value: T; storedAt: number }
+
+function memGet<T>(cache: Map<string, Timed<T>>, code: string): T | null {
+  const entry = cache.get(code)
+  if (!entry) return null
+  if (Date.now() - entry.storedAt > TTL) {
+    cache.delete(code)
+    return null
+  }
+  return entry.value
+}
+
+function memSet<T>(cache: Map<string, Timed<T>>, code: string, value: T): void {
+  cache.set(code, { value, storedAt: Date.now() })
+}
 
 // 详情/评分/信号带缓存的获取，避免页面间重复请求。
 export const useFundsStore = defineStore('funds', () => {
-  const detailMem = new Map<string, FundDetail>()
-  const scoreMem = new Map<string, ScoreResp>()
-  const signalMem = new Map<string, SignalResp>()
-  const btMem = new Map<string, BacktestResp>()
-  const decisionMem = new Map<string, DecisionResp>()
+  const detailMem = new Map<string, Timed<FundDetail>>()
+  const scoreMem = new Map<string, Timed<ScoreResp>>()
+  const signalMem = new Map<string, Timed<SignalResp>>()
+  const btMem = new Map<string, Timed<BacktestResp>>()
+  const decisionMem = new Map<string, Timed<DecisionResp>>()
 
   async function detail(code: string): Promise<FundDetail> {
-    if (detailMem.has(code)) return detailMem.get(code)!
+    const memory = memGet(detailMem, code)
+    if (memory) return memory
     const cached = cacheGet<FundDetail>('detail_' + code, TTL)
-    if (cached) { detailMem.set(code, cached); return cached }
+    if (cached) { memSet(detailMem, code, cached); return cached }
     const d = await getFundDetail(code)
-    detailMem.set(code, d); cacheSet('detail_' + code, d)
+    memSet(detailMem, code, d); cacheSet('detail_' + code, d)
     return d
   }
 
   async function score(code: string): Promise<ScoreResp> {
-    if (scoreMem.has(code)) return scoreMem.get(code)!
+    const memory = memGet(scoreMem, code)
+    if (memory) return memory
     const cached = cacheGet<ScoreResp>('score_' + code, TTL)
-    if (cached) { scoreMem.set(code, cached); return cached }
+    if (cached) { memSet(scoreMem, code, cached); return cached }
     const s = await getScore(code)
-    scoreMem.set(code, s); cacheSet('score_' + code, s)
+    memSet(scoreMem, code, s); cacheSet('score_' + code, s)
     return s
   }
 
   async function signal(code: string): Promise<SignalResp> {
-    if (signalMem.has(code)) return signalMem.get(code)!
+    const memory = memGet(signalMem, code)
+    if (memory) return memory
     const cached = cacheGet<SignalResp>('signal_' + code, TTL)
-    if (cached) { signalMem.set(code, cached); return cached }
+    if (cached) { memSet(signalMem, code, cached); return cached }
     const s = await getSignal(code)
-    signalMem.set(code, s); cacheSet('signal_' + code, s)
+    memSet(signalMem, code, s); cacheSet('signal_' + code, s)
     return s
   }
 
   async function backtest(code: string): Promise<BacktestResp> {
-    if (btMem.has(code)) return btMem.get(code)!
+    const memory = memGet(btMem, code)
+    if (memory) return memory
     const cached = cacheGet<BacktestResp>('bt_' + code, TTL)
-    if (cached) { btMem.set(code, cached); return cached }
+    if (cached) { memSet(btMem, code, cached); return cached }
     const b = await getBacktest(code)
-    btMem.set(code, b); cacheSet('bt_' + code, b)
+    memSet(btMem, code, b); cacheSet('bt_' + code, b)
     return b
   }
 
@@ -56,22 +75,22 @@ export const useFundsStore = defineStore('funds', () => {
   async function analyze(code: string): Promise<{
     detail: FundDetail; score: ScoreResp; signal: SignalResp; backtest: BacktestResp; decision: DecisionResp
   }> {
-    const cd = detailMem.get(code) ?? cacheGet<FundDetail>('detail_' + code, TTL)
-    const cs = scoreMem.get(code) ?? cacheGet<ScoreResp>('score_' + code, TTL)
-    const cg = signalMem.get(code) ?? cacheGet<SignalResp>('signal_' + code, TTL)
-    const cb = btMem.get(code) ?? cacheGet<BacktestResp>('bt_' + code, TTL)
-    const cdec = decisionMem.get(code) ?? cacheGet<DecisionResp>('decision_' + code, TTL)
+    const cd = memGet(detailMem, code) ?? cacheGet<FundDetail>('detail_' + code, TTL)
+    const cs = memGet(scoreMem, code) ?? cacheGet<ScoreResp>('score_' + code, TTL)
+    const cg = memGet(signalMem, code) ?? cacheGet<SignalResp>('signal_' + code, TTL)
+    const cb = memGet(btMem, code) ?? cacheGet<BacktestResp>('bt_' + code, TTL)
+    const cdec = memGet(decisionMem, code) ?? cacheGet<DecisionResp>('decision_' + code, TTL)
     if (cd && cs && cg && cb && cdec) {
-      detailMem.set(code, cd); scoreMem.set(code, cs); signalMem.set(code, cg)
-      btMem.set(code, cb); decisionMem.set(code, cdec)
+      memSet(detailMem, code, cd); memSet(scoreMem, code, cs); memSet(signalMem, code, cg)
+      memSet(btMem, code, cb); memSet(decisionMem, code, cdec)
       return { detail: cd, score: cs, signal: cg, backtest: cb, decision: cdec }
     }
     const a = await getAnalyze(code)
-    detailMem.set(code, a.detail); cacheSet('detail_' + code, a.detail)
-    scoreMem.set(code, a.score); cacheSet('score_' + code, a.score)
-    signalMem.set(code, a.signal); cacheSet('signal_' + code, a.signal)
-    btMem.set(code, a.backtest); cacheSet('bt_' + code, a.backtest)
-    decisionMem.set(code, a.decision); cacheSet('decision_' + code, a.decision)
+    memSet(detailMem, code, a.detail); cacheSet('detail_' + code, a.detail)
+    memSet(scoreMem, code, a.score); cacheSet('score_' + code, a.score)
+    memSet(signalMem, code, a.signal); cacheSet('signal_' + code, a.signal)
+    memSet(btMem, code, a.backtest); cacheSet('bt_' + code, a.backtest)
+    memSet(decisionMem, code, a.decision); cacheSet('decision_' + code, a.decision)
     return { detail: a.detail, score: a.score, signal: a.signal, backtest: a.backtest, decision: a.decision }
   }
 

@@ -47,7 +47,9 @@ def compute_confidence(
     issues: list[str],
 ) -> str:
     """高 / 中 / 低：综合数据质量、估值来源、回测可用性。"""
-    if quality is None or any("数据不足" in x for x in issues):
+    if quality is None or any(
+        "数据不足" in issue or "已过期" in issue for issue in issues
+    ):
         return "低"
 
     val = layers.get("valuation") or {}
@@ -167,7 +169,7 @@ def build_risks(
     return out
 
 
-def collect_issues(score: dict, signal: dict, bt: dict) -> list[str]:
+def collect_issues(score: dict, signal: dict, bt: dict, detail: dict | None = None) -> list[str]:
     issues: list[str] = []
     if score.get("score") is None:
         issues.append("综合评分数据不足")
@@ -178,6 +180,8 @@ def collect_issues(score: dict, signal: dict, bt: dict) -> list[str]:
         issues.append("估值使用净值代理，非真实 PE/PB")
     if not bt.get("available"):
         issues.append("回测区间不足")
+    if (detail or {}).get("stale"):
+        issues.append("基金数据已过期")
     return issues
 
 
@@ -192,10 +196,12 @@ def build_decision(
     layers = signal.get("layers") or {}
     quality = score.get("score")
     sig = signal.get("signal") or "持有"
-    issues = collect_issues(score, signal, bt)
+    issues = collect_issues(score, signal, bt, detail)
     bt_ok = bool(bt.get("available") and bt.get("outperform") is not None)
 
     action = map_action(quality, sig, layers)
+    if detail.get("stale"):
+        action = "观察"
     confidence = compute_confidence(quality, layers, bt_ok, issues)
 
     return {

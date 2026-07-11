@@ -68,3 +68,25 @@ def test_score_fund_structure(sample_detail):
     assert set(s["components"]) == {"return", "risk", "management", "cost"}
     assert s["components"]["return"]["weight"] == 0.4
     assert s["components"]["management"]["detail"]["tenure_years"] == 8.0
+    assert s["coverage"] == 1.0
+    assert s["eligible"] is True
+    assert s["score_version"] == "v2-coverage-gated"
+
+
+def test_score_rejects_risk_only_five_star_false_positive(uptrend):
+    result = score_fund({"nav_history": uptrend})
+    assert result["coverage"] == 0.3
+    assert result["eligible"] is False
+    assert result["score"] is None
+    assert result["star"] is None
+    assert result["components"]["risk"]["effective_weight"] == 1.0
+
+
+def test_score_allows_return_and_risk_with_70_percent_coverage(sample_detail):
+    sample_detail["manager_worktime"] = None
+    sample_detail["buy_rate"] = None
+    result = score_fund(sample_detail)
+    assert result["coverage"] == 0.7
+    assert result["eligible"] is True
+    assert result["score"] is not None
+    assert result["components"]["return"]["effective_weight"] == 0.5714

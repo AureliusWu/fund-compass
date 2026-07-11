@@ -11,6 +11,7 @@ log = logging.getLogger(__name__)
 
 CST = timezone(timedelta(hours=8))
 DETAIL_TTL = timedelta(hours=12)
+STALE_MAX_AGE = timedelta(days=7)
 HIST_KEEP = 800   # 入库保留的净值条数（≈3年，供 MA120 / 估值分位）
 
 # 冷启动兜底种子：只覆盖常用指数/ETF，避免空库时选基页完全空白。
@@ -122,6 +123,7 @@ def _load_history(conn, code, limit=HIST_KEEP):
 
 
 def _save_detail(conn, d):
+    saved_at = _now().isoformat(timespec="seconds")
     conn.execute(
         """INSERT OR REPLACE INTO fund_detail
         (code,name,type,scale,buy_rate,source_rate,ret_1m,ret_6m,ret_1y,ret_3y,
@@ -131,13 +133,14 @@ def _save_detail(conn, d):
          d.get("source_rate"), d.get("ret_1m"), d.get("ret_6m"), d.get("ret_1y"),
          d.get("ret_3y"), d.get("rank_in_type"), d.get("rank_total"), d.get("manager"),
          d.get("manager_worktime"), d.get("latest_nav"), d.get("latest_nav_date"),
-         d.get("source"), _now().isoformat(timespec="seconds")),
+         d.get("source"), saved_at),
     )
     hist = (d.get("nav_history") or [])[-HIST_KEEP:]
     conn.executemany(
         "INSERT OR REPLACE INTO nav_history(code,date,nav,ac_return) VALUES (?,?,?,?)",
         [(d["code"], h["date"], h["nav"], h.get("ac_return")) for h in hist],
     )
+    d["updated_at"] = saved_at
 
 
 def get_detail(code: str, force=False) -> dict:
@@ -161,11 +164,19 @@ def get_detail(code: str, force=False) -> dict:
         except Exception:
             # 容灾末层：主源+备源都失败时，退回 DB 里上次成功缓存的陈旧数据，避免整页 404
             if row:
+                try:
+                    stale_age = _now() - datetime.fromisoformat(row["updated_at"])
+                except Exception:
+                    stale_age = STALE_MAX_AGE + timedelta(seconds=1)
+                if stale_age > STALE_MAX_AGE:
+                    log.error("缓存超过最大兜底期限 code=%s age=%s", code, stale_age, exc_info=True)
+                    raise
                 log.warning("主源+备源均失败，退回陈旧缓存 code=%s", code, exc_info=True)
                 d = dict(row)
                 d["nav_history"] = _load_history(conn, code)
                 d["cached"] = True
                 d["stale"] = True
+                d["data_age_hours"] = round(stale_age.total_seconds() / 3600, 1)
                 return d
             log.error("主源+备源均失败且无缓存，详情不可用 code=%s", code, exc_info=True)
             raise
@@ -174,6 +185,8 @@ def get_detail(code: str, force=False) -> dict:
         _save_detail(conn, detail)
         conn.commit()
         detail["cached"] = False
+        detail["stale"] = False
+        detail["data_age_hours"] = 0.0
         return detail
     finally:
         conn.close()

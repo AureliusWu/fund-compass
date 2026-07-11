@@ -1,12 +1,46 @@
 // 后端基址：开发走 Vite 代理 /api → localhost:8000；
 // 生产用环境变量 VITE_API_BASE 指向已部署后端（Railway/Render）。
 const BASE = (import.meta.env.VITE_API_BASE as string) || '/api'
+const REQUEST_TIMEOUT_MS = 12_000
 
-async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(BASE + path, init)
-  if (!res.ok) throw new Error('HTTP ' + res.status)
-  return res.json() as Promise<T>
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly kind: 'timeout' | 'network' | 'http',
+    readonly status?: number,
+  ) {
+    super(message)
+    this.name = 'ApiError'
+  }
 }
+
+export async function request<T>(
+  path: string,
+  init?: RequestInit,
+  timeoutMs = REQUEST_TIMEOUT_MS,
+): Promise<T> {
+  const controller = new AbortController()
+  const forwardAbort = () => controller.abort(init?.signal?.reason)
+  init?.signal?.addEventListener('abort', forwardAbort, { once: true })
+  const timer = globalThis.setTimeout(() => controller.abort('timeout'), timeoutMs)
+
+  try {
+    const res = await fetch(BASE + path, { ...init, signal: controller.signal })
+    if (!res.ok) throw new ApiError(`HTTP ${res.status}`, 'http', res.status)
+    return res.json() as Promise<T>
+  } catch (error) {
+    if (error instanceof ApiError) throw error
+    if (controller.signal.aborted && !init?.signal?.aborted) {
+      throw new ApiError('请求超时，请稍后重试', 'timeout')
+    }
+    throw new ApiError('网络连接失败，请稍后重试', 'network')
+  } finally {
+    globalThis.clearTimeout(timer)
+    init?.signal?.removeEventListener('abort', forwardAbort)
+  }
+}
+
+const req = request
 
 export interface Health { status: string; service: string; version: string; universe: number }
 export interface FundListItem { code: string; name: string; type: string }
@@ -21,14 +55,17 @@ export interface FundDetail {
   manager: string | null; manager_worktime: string | null
   latest_nav: number | null; latest_nav_date: string | null
   nav_history: NavPoint[]
+  source?: string | null; updated_at?: string | null; cached?: boolean; stale?: boolean; data_age_hours?: number
 }
 
-export interface Component { weight: number; score: number | null; detail: Record<string, unknown> }
+export interface Component { weight: number; effective_weight: number; score: number | null; detail: Record<string, unknown> }
 export interface ScoreResp {
   code: string; name: string; type: string | null
   score: number | null; star: number | null
+  score_version: string; coverage: number; eligible: boolean
   rank_in_type: number | null; rank_total: number | null
   components: { return: Component; risk: Component; management: Component; cost: Component }
+  data_source?: string | null; data_updated_at?: string | null; data_stale?: boolean; data_age_hours?: number; as_of_date?: string | null
 }
 
 export interface Layer {
@@ -57,6 +94,7 @@ export interface SignalResp {
   code: string; name: string; type: string | null
   signal: string; advice: string; composite: number; disclaimer?: string
   layers: { valuation: Layer; trend: Layer; sentiment: Layer }
+  data_source?: string | null; data_updated_at?: string | null; data_stale?: boolean; data_age_hours?: number; as_of_date?: string | null
 }
 
 export interface WatchItem { code: string; name: string | null; type: string | null; added_at: string }

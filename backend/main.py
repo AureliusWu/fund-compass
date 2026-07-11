@@ -40,7 +40,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="司南基金 API", version="0.6.0", lifespan=lifespan)
+app = FastAPI(title="司南基金 API", version="0.7.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -67,7 +67,12 @@ def fund_detail_dep(code: str) -> dict:
 
 
 def _meta(d: dict) -> dict:
-    return {"code": d["code"], "name": d.get("name"), "type": d.get("type")}
+    return {
+        "code": d["code"], "name": d.get("name"), "type": d.get("type"),
+        "data_source": d.get("source"), "data_updated_at": d.get("updated_at"),
+        "data_stale": bool(d.get("stale")), "data_age_hours": d.get("data_age_hours", 0),
+        "as_of_date": d.get("latest_nav_date"),
+    }
 
 
 @app.get("/api/health")

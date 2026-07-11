@@ -38,7 +38,7 @@ def capped_weights(values: list[float], max_weight: float) -> tuple[list[float],
 
 
 def align_navs(details: list[dict]) -> tuple[list[str], list[list[float]]]:
-    """在共同历史区间按日期向前填充，只使用当日及之前已知净值。"""
+    """仅在所有基金都有净值的共同交易日对齐，避免跨市场日期错位。"""
     histories = []
     for detail in details:
         points = {
@@ -49,23 +49,11 @@ def align_navs(details: list[dict]) -> tuple[list[str], list[list[float]]]:
         if not points:
             raise ValueError(f"{detail.get('code') or '基金'} 缺少净值历史")
         histories.append(points)
-    start = max(min(history) for history in histories)
-    end = min(max(history) for history in histories)
-    dates = sorted({date for history in histories for date in history if start <= date <= end})
-    aligned = [[] for _ in histories]
-    last = [None] * len(histories)
-    usable_dates = []
-    for date in dates:
-        for index, history in enumerate(histories):
-            if date in history:
-                last[index] = history[date]
-        if all(value is not None for value in last):
-            usable_dates.append(date)
-            for index, value in enumerate(last):
-                aligned[index].append(float(value))
-    if len(usable_dates) < 60:
+    common_dates = sorted(set.intersection(*(set(history) for history in histories)))
+    if len(common_dates) < 60:
         raise ValueError("共同历史不足 60 个观测点")
-    return usable_dates, aligned
+    aligned = [[history[day] for day in common_dates] for history in histories]
+    return common_dates, aligned
 
 
 def _returns(series: list[float]) -> list[float]:

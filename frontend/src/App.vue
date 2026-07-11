@@ -1,10 +1,23 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { getTheme, toggleTheme, type Theme } from './utils/theme'
 import Icon from '@/components/Icon.vue'
 import { MAIN_NAV_ITEMS } from '@/utils/presentation'
 
 const theme = ref<Theme>(getTheme())
+const appError = ref(false)
+
+function showAppError() {
+  appError.value = true
+}
+
+function reloadPage() {
+  window.location.reload()
+}
+
+onMounted(() => window.addEventListener('fund-compass-error', showAppError))
+onBeforeUnmount(() => window.removeEventListener('fund-compass-error', showAppError))
+
 function onToggleTheme() {
   theme.value = toggleTheme()
 }
@@ -51,6 +64,11 @@ function onToggleTheme() {
 
     <router-view class="app-main" />
 
+    <div v-if="appError" class="app-error" role="alert">
+      <span>页面运行异常，请刷新后重试</span>
+      <button type="button" @click="reloadPage">刷新</button>
+    </div>
+
     <van-tabbar route :safe-area-inset-bottom="true">
       <van-tabbar-item v-for="item in MAIN_NAV_ITEMS" :key="item.to" :to="item.to">
         <template #icon>
@@ -69,6 +87,33 @@ function onToggleTheme() {
 
 <style scoped>
 .app { position: relative; min-height: 100%; }
+
+.app-error {
+  position: fixed;
+  left: 50%;
+  bottom: 76px;
+  z-index: 120;
+  width: min(420px, calc(100% - 32px));
+  transform: translateX(-50%);
+  padding: 10px 12px;
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  background: var(--card-bg);
+  box-shadow: var(--shadow-sm);
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.app-error button {
+  flex: none;
+  border: 0;
+  background: transparent;
+  color: var(--danger);
+  cursor: pointer;
+}
 
 .theme-btn {
   position: fixed;

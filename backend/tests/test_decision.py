@@ -110,6 +110,19 @@ def test_confidence_high_with_pe_pb():
     assert compute_confidence(75, layers, True, []) == "高"
 
 
+def test_stale_detail_forces_observe_and_low_confidence(sample_detail):
+    sample_detail["stale"] = True
+    decision = build_decision(
+        sample_detail,
+        {"score": 80},
+        {"signal": "买入", "layers": {"valuation": {"label": "低估", "source": "index_pe_pb"}}},
+        {"available": True, "outperform": 2},
+    )
+    assert decision["action"] == "观察"
+    assert decision["confidence"] == "低"
+    assert "基金数据已过期" in decision["risks"]
+
+
 def test_backtest_passes_code_to_timing(uptrend, monkeypatch):
     """回测切片应透传 fund code，使估值层可走 PE/PB。"""
     import importlib
