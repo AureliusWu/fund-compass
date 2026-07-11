@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { showToast } from 'vant'
-import { getFunds, postPortfolioDecisions, type DecisionResp, type FundListItem } from '@/api/client'
+import { getDecision, getFunds, type DecisionResp, type FundListItem } from '@/api/client'
 import { useWatchlistStore } from '@/stores/watchlist'
 import { fetchEstimates, type Estimate } from '@/utils/estimate'
 import { colorOf, pct } from '@/utils/format'
@@ -41,8 +41,10 @@ async function loadDecisions() {
   if (!watch.items.length) return
   decisionsLoading.value = true
   try {
-    const response = await postPortfolioDecisions(watch.items.map((item) => ({ code: item.code })))
-    response.decisions.forEach((decision) => {
+    const settled = await Promise.allSettled(watch.items.map((item) => getDecision(item.code)))
+    settled.forEach((result) => {
+      if (result.status !== 'fulfilled') return
+      const decision = result.value
       decisions[decision.code] = decision
       rows[decision.code] = { name: decision.name || decision.code, type: decision.type ?? null }
     })
