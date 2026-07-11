@@ -259,6 +259,12 @@ def strategy_portfolio_outcomes() -> dict:
     return repo.portfolio_decision_outcomes()
 
 
+@app.get("/api/strategy/version-comparison")
+def strategy_version_comparison() -> dict:
+    """冻结模型的新旧实盘结果比较；只读且样本不足时拒绝下结论。"""
+    return repo.version_comparison()
+
+
 @app.post("/api/portfolio/lab")
 def portfolio_lab(payload: dict, _role: str = Depends(require_admin)) -> dict:
     """组合历史回测、风险贡献与受约束再平衡建议。"""

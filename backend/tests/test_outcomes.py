@@ -72,3 +72,23 @@ def test_decision_outcomes_are_forward_only(monkeypatch, tmp_path):
     assert result["pending"] == 0
     assert result["breakdowns"]["confidence"][0]["horizon"] == 5
     assert all(row["hit_rate"] == 100.0 for row in result["summary"])
+
+
+def test_version_comparison_is_read_only_and_sample_gated(monkeypatch, tmp_path):
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "comparison.db"))
+    monkeypatch.setattr(repo, "get_conn", db.get_conn)
+    db.init_db()
+    repo.record_decisions([{
+        "code": "000001", "name": "新模型基金", "type": "混合型",
+        "as_of_date": "2026-01-01", "as_of_nav": 1.0,
+        "action": "观察", "confidence": "低",
+        "methodology": {
+            "score_version": "v3-risk-adjusted", "signal_version": "v3-coverage-gated",
+            "score_coverage": 0.8, "signal_coverage": 0.75, "evidence_strength": "中",
+        },
+    }], "registry-v1")
+    result = repo.version_comparison()
+    assert result["frozen"] is True
+    assert result["accepted"] is False
+    assert result["guardrails"]["auto_tuning"] is False
+    assert any("样本不足" in reason for reason in result["reasons"])

@@ -259,10 +259,15 @@ def record_decisions(decisions: list[dict], strategy_version: str) -> int:
         date = decision.get("as_of_date")
         if not code_is_valid(decision.get("code")) or not date or not nav:
             continue
+        methodology = decision.get("methodology") or {}
+        fund_type = str(decision.get("type") or "")
+        region = "overseas" if "QDII" in fund_type.upper() or "海外" in fund_type else "domestic"
         rows.append((
             decision["code"], decision.get("name"), decision.get("type"), date,
             float(nav), decision.get("action") or "观察", decision.get("confidence"),
-            strategy_version, now,
+            strategy_version, methodology.get("score_version"), methodology.get("signal_version"),
+            methodology.get("score_coverage"), methodology.get("signal_coverage"),
+            methodology.get("evidence_strength"), region, now,
         ))
     if not rows:
         return 0
@@ -271,8 +276,9 @@ def record_decisions(decisions: list[dict], strategy_version: str) -> int:
         before = conn.total_changes
         conn.executemany(
             """INSERT OR IGNORE INTO decision_history
-            (code,name,type,decision_date,base_nav,action,confidence,strategy_version,created_at)
-            VALUES (?,?,?,?,?,?,?,?,?)""",
+            (code,name,type,decision_date,base_nav,action,confidence,strategy_version,
+             score_version,signal_version,score_coverage,signal_coverage,evidence_strength,region,created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             rows,
         )
         conn.commit()
@@ -314,6 +320,11 @@ def decision_outcomes(horizons=(5, 20, 60)) -> dict:
                 (decision["code"], decision["decision_date"]),
             ).fetchall()
             outcome = {**decision, "returns": {}}
+            coverage = decision.get("signal_coverage")
+            outcome["coverage_band"] = (
+                "unknown" if coverage is None else "high" if coverage >= 0.9
+                else "medium" if coverage >= 0.7 else "low"
+            )
             for horizon in horizons:
                 if len(future) >= horizon:
                     point = future[horizon - 1]
@@ -431,7 +442,72 @@ def decision_outcomes(horizons=(5, 20, 60)) -> dict:
             "action": breakdown("action"),
             "confidence": breakdown("confidence"),
             "type": breakdown("type"),
+            "score_version": breakdown("score_version"),
+            "signal_version": breakdown("signal_version"),
+            "evidence_strength": breakdown("evidence_strength"),
+            "region": breakdown("region"),
+            "coverage_band": breakdown("coverage_band"),
         },
+    }
+
+
+def version_comparison() -> dict:
+    """Read-only, sample-gated comparison. It never changes registry or historical rows."""
+    outcomes = decision_outcomes()
+    positive_actions = {"分批买入", "继续定投"}
+    defensive_actions = {"停止加仓", "部分观察", "考虑替换"}
+    buckets: dict[tuple[str, int], list[tuple[dict, dict]]] = {}
+    cutoff = None
+    for row in outcomes["items"]:
+        score_version = row.get("score_version") or "legacy"
+        signal_version = row.get("signal_version") or "legacy"
+        version = f"{score_version} / {signal_version}"
+        for horizon, result in row["returns"].items():
+            buckets.setdefault((version, int(horizon)), []).append((row, result))
+            cutoff = max(cutoff or result["date"], result["date"])
+
+    metrics = []
+    for (version, horizon), values in sorted(buckets.items()):
+        returns = [result["return"] for _, result in values]
+        excess = [result["excess_return"] for _, result in values if result.get("excess_return") is not None]
+        drawdowns = [result["max_drawdown"] for _, result in values]
+        hits = 0
+        for row, result in values:
+            action, value = row["action"], result["return"]
+            hits += value > 0 if action in positive_actions else value <= 0 if action in defensive_actions else value >= 0
+        metrics.append({
+            "version": version, "horizon": horizon, "samples": len(values),
+            "average_return": round(statistics.fmean(returns), 2),
+            "median_return": round(statistics.median(returns), 2),
+            "average_excess": round(statistics.fmean(excess), 2) if excess else None,
+            "average_drawdown": round(statistics.fmean(drawdowns), 2),
+            "worst_drawdown": round(min(drawdowns), 2),
+            "positive_rate": round(sum(value > 0 for value in returns) / len(values) * 100, 1),
+            "direction_hit_rate": round(hits / len(values) * 100, 1),
+            "observe_rate": round(sum(row["action"] in {"观察", "持有观望"} for row, _ in values) / len(values) * 100, 1),
+        })
+
+    new_name = "v3-risk-adjusted / v3-coverage-gated"
+    new_rows = [row for row in metrics if row["version"] == new_name]
+    total_new = sum(row["samples"] for row in new_rows)
+    reasons = []
+    if total_new < 100:
+        reasons.append(f"新模型成熟样本 {total_new}/100，样本不足")
+    type_breakdowns = outcomes["breakdowns"]["type"]
+    if not any(row["samples"] >= 30 for row in type_breakdowns):
+        reasons.append("主要基金类型成熟样本不足 30")
+    if not any(row["horizon"] in (20, 60) for row in new_rows):
+        reasons.append("20/60 日样本尚未成熟")
+    return {
+        "baseline_version": "legacy score/signal",
+        "candidate_version": new_name,
+        "frozen": True,
+        "accepted": not reasons,
+        "reasons": reasons,
+        "data_cutoff": cutoff,
+        "metrics": metrics,
+        "breakdowns": outcomes["breakdowns"],
+        "guardrails": {"minimum_total": 100, "minimum_primary_type": 30, "auto_tuning": False},
     }
 
 

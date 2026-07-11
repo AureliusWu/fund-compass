@@ -62,6 +62,12 @@ CREATE TABLE IF NOT EXISTS decision_history (
   action           TEXT NOT NULL,
   confidence       TEXT,
   strategy_version TEXT NOT NULL,
+  score_version    TEXT,
+  signal_version   TEXT,
+  score_coverage   REAL,
+  signal_coverage  REAL,
+  evidence_strength TEXT,
+  region           TEXT,
   created_at       TEXT NOT NULL,
   UNIQUE(code, decision_date, strategy_version)
 );
@@ -98,6 +104,14 @@ def _migrate(conn) -> None:
         conn.execute("ALTER TABLE fund_detail ADD COLUMN source TEXT")
     if "manager_id" not in cols:
         conn.execute("ALTER TABLE fund_detail ADD COLUMN manager_id TEXT")
+    decision_cols = {r["name"] for r in conn.execute("PRAGMA table_info(decision_history)")}
+    for name, sql_type in (
+        ("score_version", "TEXT"), ("signal_version", "TEXT"),
+        ("score_coverage", "REAL"), ("signal_coverage", "REAL"),
+        ("evidence_strength", "TEXT"), ("region", "TEXT"),
+    ):
+        if name not in decision_cols:
+            conn.execute(f"ALTER TABLE decision_history ADD COLUMN {name} {sql_type}")
 
 
 def init_db() -> None:
