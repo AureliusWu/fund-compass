@@ -11,31 +11,7 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.7
-
-  - type: cron
-    name: fund-compass-estimate-push
-    runtime: python
-    rootDir: .
-    plan: starter
-    schedule: "30 6 * * 1-5" # UTC 06:30 = Beijing 14:30, Monday-Friday
-    buildCommand: "python --version"
-    startCommand: "python tools/estimate_push.py"
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.12.7
-      - key: PUSH_SLOT
-        value: "14:30"
-      - key: GIST_TOKEN
+      - key: ADMIN_TOKEN
         sync: false
-      - key: PUSHPLUS_TOKEN
-        sync: false
-      - key: PUSHPLUS_TOPIC
-        sync: false
-      - key: WECHAT_SENDKEY
-        sync: false
-      - key: SC_SENDKEY
-        sync: false
-      - key: NOTIFY_WEBHOOK_URL
-        sync: false
-      - key: FUND_API_BASE
+      - key: WORKER_TOKEN
         sync: false
