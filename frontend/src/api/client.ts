@@ -93,6 +93,7 @@ export interface Layer {
 export interface SignalResp {
   code: string; name: string; type: string | null
   signal: string; advice: string; composite: number; disclaimer?: string
+  signal_version?: string; coverage?: number; evidence_strength?: '高' | '中' | '低'
   layers: { valuation: Layer; trend: Layer; sentiment: Layer }
   data_source?: string | null; data_updated_at?: string | null; data_stale?: boolean; data_age_hours?: number; as_of_date?: string | null
 }

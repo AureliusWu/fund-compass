@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fetchMarketTemp } from './market-temp'
+import { directionalVolumeScore, fetchMarketTemp } from './market-temp'
 
 const storage = new Map<string, string>()
 
@@ -42,5 +42,16 @@ describe('market temperature failure semantics', () => {
     expect(result.status).toBe('stale')
     expect(result.score).toBe(67)
     expect(result.updated).toBe('2026-07-10T01:00:00.000Z')
+  })
+})
+
+describe('directional volume temperature', () => {
+  it('treats rising volume as hotter and falling volume as colder', () => {
+    expect(directionalVolumeScore(1.5, 2)).toBeGreaterThan(50)
+    expect(directionalVolumeScore(1.5, -2)).toBeLessThan(50)
+  })
+
+  it('keeps weak volume close to neutral', () => {
+    expect(directionalVolumeScore(0.8, 2)).toBe(50)
   })
 })

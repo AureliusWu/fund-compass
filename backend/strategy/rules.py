@@ -20,7 +20,7 @@ def _overextended(layers: dict) -> bool:
 def map_action(quality: float | None, signal: str, layers: dict) -> str:
     """择时信号 + 综合分 → 决策动作。"""
     val = layers.get("valuation") or {}
-    if quality is None or val.get("label") == "数据不足":
+    if quality is None or signal == "观察" or val.get("label") == "数据不足":
         return "观察"
 
     if quality >= 75 and signal == "买入":
@@ -113,22 +113,22 @@ def build_reasons(score: dict, signal: dict, bt: dict, bt_ok: bool) -> list[str]
     reasons: list[str] = []
     q = score.get("score")
     if q is not None:
-        reasons.append(f"综合评分 {q}")
+        reasons.append(f"综合评分 {q}（数据覆盖率 {score.get('coverage', 0) * 100:.0f}%）")
     sig = signal.get("signal")
     if sig:
-        reasons.append(f"择时信号 {sig}")
+        reasons.append(f"择时信号 {sig}（证据强度 {signal.get('evidence_strength', '低')}）")
     layers = signal.get("layers") or {}
     val = layers.get("valuation") or {}
     if val.get("label"):
         src = "真实 PE/PB" if val.get("source") == "index_pe_pb" else "净值代理"
-        reasons.append(f"估值 {val['label']}（{src}）")
+        reasons.append(f"估值分位 {val['label']}（{src}）")
     tr = layers.get("trend") or {}
     if tr.get("label"):
-        reasons.append(f"趋势 {tr['label']}")
+        reasons.append(f"趋势状态 {tr['label']}")
     se = layers.get("sentiment") or {}
     if se.get("label"):
         rsi = se.get("rsi")
-        reasons.append(f"情绪 {se['label']}" + (f" RSI {rsi}" if rsi is not None else ""))
+        reasons.append(f"动量状态 {se['label']}" + (f"（RSI14 {rsi}）" if rsi is not None else ""))
     if bt_ok and bt.get("outperform") is not None:
         op = bt["outperform"]
         tag = "跑赢" if op >= 0 else "跑输"
@@ -173,6 +173,8 @@ def collect_issues(score: dict, signal: dict, bt: dict, detail: dict | None = No
     issues: list[str] = []
     if score.get("score") is None:
         issues.append("综合评分数据不足")
+    if signal.get("coverage", 1) < 0.6:
+        issues.append("择时证据覆盖不足")
     val = (signal.get("layers") or {}).get("valuation") or {}
     if val.get("label") == "数据不足":
         issues.append("估值层数据不足")

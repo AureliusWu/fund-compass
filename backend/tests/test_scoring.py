@@ -51,14 +51,20 @@ def test_star_thresholds():
 
 def test_risk_metrics_uptrend(uptrend):
     rm = risk_metrics(uptrend)
-    assert set(rm) == {"max_drawdown", "volatility", "sharpe"}
+    assert set(rm) == {"max_drawdown", "volatility", "sharpe", "annualized_return", "calmar"}
     assert rm["max_drawdown"] <= 0      # 单调上涨，回撤≈0
     assert rm["volatility"] >= 0
 
 
 def test_risk_metrics_insufficient(make_navs):
     rm = risk_metrics(make_navs(n=10))
-    assert rm == {"max_drawdown": None, "volatility": None, "sharpe": None}
+    assert rm == {
+        "max_drawdown": None,
+        "volatility": None,
+        "sharpe": None,
+        "annualized_return": None,
+        "calmar": None,
+    }
 
 
 def test_score_fund_structure(sample_detail):
@@ -70,7 +76,7 @@ def test_score_fund_structure(sample_detail):
     assert s["components"]["management"]["detail"]["tenure_years"] == 8.0
     assert s["coverage"] == 1.0
     assert s["eligible"] is True
-    assert s["score_version"] == "v2-coverage-gated"
+    assert s["score_version"] == "v3-risk-adjusted"
 
 
 def test_score_rejects_risk_only_five_star_false_positive(uptrend):

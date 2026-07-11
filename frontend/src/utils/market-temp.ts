@@ -70,12 +70,11 @@ function rsi(vals: number[], period = 14): number | null {
   return Math.round((100 - 100 / (1 + g / l)) * 10) / 10
 }
 
-function volScore(ratio: number): number {
-  if (ratio > 1.5) return 85
-  if (ratio > 1.2) return 65
-  if (ratio > 0.9) return 50
-  if (ratio > 0.7) return 35
-  return 20
+export function directionalVolumeScore(ratio: number, dailyChange: number): number {
+  // 放量本身没有冷热方向：上涨放量升温，下跌放量降温；缩量保持接近中性。
+  const strength = Math.max(0, Math.min(1, (ratio - 0.8) / 0.7))
+  const direction = Math.max(-1, Math.min(1, dailyChange / 2))
+  return Math.round(50 + 35 * strength * direction)
 }
 // 山峦色阶：深松→青绿→墨→琥珀→朱砂（对应《千里江山图》色系，Canvas 必须用 hex）
 function toLabel(score: number): { label: string; color: string } {
@@ -137,9 +136,12 @@ export async function fetchMarketTemp(): Promise<MarketTemp> {
   }
 
   // 4. 量能（量比，权重 15%）
-  if (volRatio != null) {
-    const vs = volScore(volRatio)
-    sources.push({ label: '量能', value: vs, color: heatColor(vs), detail: `沪深300 量比 ${volRatio.toFixed(2)}` })
+  if (volRatio != null && closes.length >= 2) {
+    const current = closes[closes.length - 1]
+    const previousClose = closes[closes.length - 2]
+    const dailyChange = (current / previousClose - 1) * 100
+    const vs = directionalVolumeScore(volRatio, dailyChange)
+    sources.push({ label: '量价确认', value: vs, color: heatColor(vs), detail: `量比 ${volRatio.toFixed(2)} · 当日 ${dailyChange >= 0 ? '+' : ''}${dailyChange.toFixed(2)}%` })
     scoreSum += vs * 0.15; weightSum += 0.15
   }
 

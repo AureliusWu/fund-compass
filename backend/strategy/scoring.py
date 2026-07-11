@@ -10,7 +10,7 @@ import re
 
 _TRADING_DAYS = 252
 _RISK_FREE = 0.02
-SCORE_VERSION = "v2-coverage-gated"
+SCORE_VERSION = "v3-risk-adjusted"
 MIN_SCORE_COVERAGE = 0.7
 
 
@@ -50,7 +50,13 @@ def risk_metrics(nav_history, window=_TRADING_DAYS):
     navs = [h["nav"] for h in (nav_history or []) if h.get("nav")]
     navs = navs[-window:]
     if len(navs) < 20:
-        return {"max_drawdown": None, "volatility": None, "sharpe": None}
+        return {
+            "max_drawdown": None,
+            "volatility": None,
+            "sharpe": None,
+            "annualized_return": None,
+            "calmar": None,
+        }
 
     rets = [navs[i] / navs[i - 1] - 1 for i in range(1, len(navs)) if navs[i - 1]]
     n = len(rets)
@@ -58,7 +64,8 @@ def risk_metrics(nav_history, window=_TRADING_DAYS):
     var = sum((r - mean) ** 2 for r in rets) / (n - 1) if n > 1 else 0.0
     sd = math.sqrt(var)
     vol_annual = sd * math.sqrt(_TRADING_DAYS)
-    ann_return = mean * _TRADING_DAYS
+    total_return = navs[-1] / navs[0] - 1
+    ann_return = (1 + total_return) ** (_TRADING_DAYS / max(1, len(navs) - 1)) - 1
     sharpe = (ann_return - _RISK_FREE) / vol_annual if vol_annual > 0 else None
 
     peak = navs[0]
@@ -74,6 +81,8 @@ def risk_metrics(nav_history, window=_TRADING_DAYS):
         "max_drawdown": round(mdd * 100, 2),       # 负值，越接近 0 越好
         "volatility": round(vol_annual * 100, 2),  # 年化波动率 %
         "sharpe": round(sharpe, 2) if sharpe is not None else None,
+        "annualized_return": round(ann_return * 100, 2),
+        "calmar": round(ann_return / abs(mdd), 2) if mdd < 0 else None,
     }
 
 
@@ -105,7 +114,8 @@ def score_fund(detail):
     rm = risk_metrics(d.get("nav_history"))
     dd_score = _scale(rm["max_drawdown"], -50, 0)
     vol_score = _scale(rm["volatility"], 40, 5)
-    risk_score = _wavg([(dd_score, 0.6), (vol_score, 0.4)])
+    sharpe_score = _scale(rm["sharpe"], -0.5, 2.0)
+    risk_score = _wavg([(dd_score, 0.5), (vol_score, 0.3), (sharpe_score, 0.2)])
 
     # 管理：经理任期（8 年以上满分）
     tenure = parse_tenure_years(d.get("manager_worktime"))

@@ -157,10 +157,21 @@ def timing_signal(detail):
     val = valuation_layer(nh, fund_code=detail.get("code"))
     tr = trend_layer(nh)
     se = sentiment_layer(nh)
-    composite = round(0.4 * val["value"] + 0.35 * tr["value"] + 0.25 * se["value"], 3)
+    layers = {"valuation": val, "trend": tr, "sentiment": se}
+    weights = {"valuation": 0.4, "trend": 0.35, "sentiment": 0.25}
+    available = {
+        "valuation": val.get("label") != "数据不足",
+        "trend": tr.get("label") != "数据不足",
+        "sentiment": se.get("label") != "数据不足",
+    }
+    coverage = round(sum(weights[name] for name, ok in available.items() if ok), 2)
+    weighted = sum(weights[name] * layers[name]["value"] for name, ok in available.items() if ok)
+    composite = round(weighted / coverage, 3) if coverage else 0.0
     # 措辞如实化：择时是「风险/时机参考」，不是买卖指令。回测显示对多数基金长期持有/定投
     # 优于择时（见详情页「策略回测」），故避免「卖出/落袋」这类指令式表述。
-    if composite >= 0.5:
+    if coverage < 0.6:
+        signal, advice = "观察", "数据覆盖不足 · 暂不形成方向性判断"
+    elif composite >= 0.5:
         signal, advice = "买入", "偏多 · 可作分批建仓 / 定投的时机参考"
     elif composite >= 0.15:
         signal, advice = "定投", "温和偏多 · 适合持续定投"
@@ -172,6 +183,9 @@ def timing_signal(detail):
         "signal": signal,
         "advice": advice,
         "composite": composite,
+        "signal_version": "v3-coverage-gated",
+        "coverage": coverage,
+        "evidence_strength": "高" if coverage >= 0.9 and val.get("source") == "index_pe_pb" else "中" if coverage >= 0.75 else "低",
         "disclaimer": "择时信号仅为风险 / 时机参考，非买卖指令。回测显示对多数基金，长期持有 / 定投优于择时。",
-        "layers": {"valuation": val, "trend": tr, "sentiment": se},
+        "layers": layers,
     }

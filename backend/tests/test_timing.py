@@ -68,11 +68,14 @@ def test_timing_signal_full(uptrend):
     assert sig["signal"] in ("买入", "定投", "持有", "减仓")
     assert "disclaimer" in sig
     assert set(sig["layers"]) == {"valuation", "trend", "sentiment"}
+    assert sig["coverage"] == 1.0
+    assert sig["signal_version"] == "v3-coverage-gated"
 
 
 def test_timing_signal_insufficient_degrades(make_navs):
     sig = timing_signal({"nav_history": make_navs(n=10)})
-    assert sig["signal"] in ("买入", "定投", "持有", "减仓")   # 降级但仍给出信号
+    assert sig["signal"] == "观察"
+    assert sig["coverage"] == 0
 
 
 # ── V3-5 真实 PE/PB 估值测试 ──

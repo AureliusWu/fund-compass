@@ -12,6 +12,7 @@ import { APP_VERSION } from '@/version'
 import { combineTemperature, sourceFreshness, visibleUnreadAlerts } from '@/utils/presentation'
 import { fetchEstimates } from '@/utils/estimate'
 import type { SignalResp } from '@/api/client'
+import { temperatureLabel, TEMPERATURE_DEFINITION } from '@/utils/terminology'
 
 const app = useAppStore()
 const watch = useWatchlistStore()
@@ -31,7 +32,8 @@ function loadSignalSnapshot(): Record<string, string> {
   catch { return {} }
 }
 
-const SIG_WEIGHT: Record<string, number> = { 买入: 100, 定投: 70, 持有: 45, 减仓: 15 }
+// 温度统一表示“拥挤/回撤风险”：越高越热。偏多动作对应较低温，减仓信号对应高温。
+const SIG_WEIGHT: Record<string, number> = { 买入: 20, 定投: 40, 持有: 55, 减仓: 85, 观察: 50 }
 
 const watchTemp = computed(() => {
   const values = Object.values(sigs.value)
@@ -51,13 +53,7 @@ const combinedTemp = computed(() => {
 })
 
 const tempLabel = computed(() => {
-  const score = combinedTemp.value
-  if (score == null) return '计算中'
-  if (score <= 20) return '清冷'
-  if (score <= 40) return '偏冷'
-  if (score <= 60) return '适中'
-  if (score <= 80) return '偏热'
-  return '过热'
+  return temperatureLabel(combinedTemp.value)
 })
 
 const tempTone = computed(() => {
@@ -166,7 +162,7 @@ onMounted(refreshHome)
     <van-pull-refresh v-model="refreshing" @refresh="refreshHome">
       <div class="page-body">
         <div class="sec">市场与持仓温度</div>
-        <section class="card climate-card" @click="app.loadMarketTemp()">
+        <section class="card climate-card" :title="TEMPERATURE_DEFINITION" @click="app.loadMarketTemp()">
           <div class="climate-head">
             <div class="climate-score" :class="tempTone">
               <strong>{{ combinedTemp ?? '—' }}</strong><span>/100</span>
