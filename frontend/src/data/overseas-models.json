@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated_at": "2026-07-10T18:03:27+08:00",
+  "updated_at": "2026-07-13T17:56:51+08:00",
   "models": {
     "539002": {
       "name": "建信新兴市场混合(QDII)A",
@@ -74,8 +74,8 @@
         }
       },
       "candidate": {
-        "version": "candidate-20260710",
-        "created_at": "2026-07-10T18:03:27+08:00",
+        "version": "candidate-20260713",
+        "created_at": "2026-07-13T17:56:51+08:00",
         "status": "collecting",
         "samples": 0,
         "required": 20
@@ -163,8 +163,8 @@
         }
       },
       "candidate": {
-        "version": "candidate-20260710",
-        "created_at": "2026-07-10T18:03:27+08:00",
+        "version": "candidate-20260713",
+        "created_at": "2026-07-13T17:56:51+08:00",
         "status": "collecting",
         "samples": 0,
         "required": 20
@@ -252,8 +252,8 @@
         }
       },
       "candidate": {
-        "version": "candidate-20260710",
-        "created_at": "2026-07-10T18:03:27+08:00",
+        "version": "candidate-20260713",
+        "created_at": "2026-07-13T17:56:51+08:00",
         "status": "collecting",
         "samples": 0,
         "required": 20

@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated_at": "2026-07-10T18:02:58+08:00",
+  "updated_at": "2026-07-13T17:56:12+08:00",
   "summary": {
     "539002": {
       "samples": 0,
@@ -17,7 +17,7 @@
       },
       "rolling_5": null,
       "rolling_20": null,
-      "pending": 1,
+      "pending": 2,
       "stale": 0,
       "model_version": "v1-2026q1-holdings"
     },
@@ -36,7 +36,7 @@
       },
       "rolling_5": null,
       "rolling_20": null,
-      "pending": 1,
+      "pending": 2,
       "stale": 0,
       "model_version": "v1-2026q1-style"
     },
@@ -55,7 +55,7 @@
       },
       "rolling_5": null,
       "rolling_20": null,
-      "pending": 1,
+      "pending": 2,
       "stale": 0,
       "model_version": "v1-2026q1-holdings"
     }
@@ -112,7 +112,7 @@
       },
       "model_label": "2026Q1重仓穿透模型",
       "fallback_used": false,
-      "waiting_days": 0,
+      "waiting_days": 3,
       "settlement_note": "等待同一归属日净值公布"
     },
     {
@@ -136,7 +136,7 @@
       },
       "model_label": "2026Q1风格因子模型",
       "fallback_used": false,
-      "waiting_days": 0,
+      "waiting_days": 3,
       "settlement_note": "等待同一归属日净值公布"
     },
     {
@@ -166,14 +166,98 @@
       },
       "model_label": "2026Q1重仓穿透模型",
       "fallback_used": false,
+      "waiting_days": 3,
+      "settlement_note": "等待同一归属日净值公布"
+    },
+    {
+      "code": "539002",
+      "name": "建信新兴市场混合(QDII)A",
+      "prediction_date": "2026-07-13",
+      "target_nav_date": "2026-07-13",
+      "base_nav_date": "2026-07-09",
+      "base_nav": 2.544,
+      "predicted_nav": 2.5591,
+      "model_version": "v1-2026q1-holdings",
+      "quote_time": "2026-07-13T17:56:12+08:00",
+      "status": "pending",
+      "raw_change": 0.595029,
+      "predicted_change": 0.595,
+      "coverage": 64.33,
+      "features": {
+        "usTSM": -0.65,
+        "usNVDA": 4.03,
+        "usEWY": -0.67,
+        "usAVGO": -0.28,
+        "usSNDK": 3.1,
+        "usGLW": -0.77,
+        "usWDC": 0.78,
+        "usLITE": 2.07,
+        "usMPWR": -1.56
+      },
+      "model_label": "2026Q1重仓穿透模型",
+      "fallback_used": false,
+      "waiting_days": 0,
+      "settlement_note": "等待同一归属日净值公布"
+    },
+    {
+      "code": "012920",
+      "name": "易方达全球成长精选混合(QDII)人民币A",
+      "prediction_date": "2026-07-13",
+      "target_nav_date": "2026-07-13",
+      "base_nav_date": "2026-07-09",
+      "base_nav": 4.6407,
+      "predicted_nav": 4.6195,
+      "model_version": "v1-2026q1-style",
+      "quote_time": "2026-07-13T17:56:12+08:00",
+      "status": "pending",
+      "raw_change": -0.326,
+      "predicted_change": -0.4564,
+      "coverage": 100.0,
+      "features": {
+        "usQQQ": 0.31,
+        "usSOXX": -0.06,
+        "sh000300": -1.79
+      },
+      "model_label": "2026Q1风格因子模型",
+      "fallback_used": false,
+      "waiting_days": 0,
+      "settlement_note": "等待同一归属日净值公布"
+    },
+    {
+      "code": "018147",
+      "name": "建信新兴市场混合(QDII)C",
+      "prediction_date": "2026-07-13",
+      "target_nav_date": "2026-07-13",
+      "base_nav_date": "2026-07-09",
+      "base_nav": 2.504,
+      "predicted_nav": 2.5189,
+      "model_version": "v1-2026q1-holdings",
+      "quote_time": "2026-07-13T17:56:12+08:00",
+      "status": "pending",
+      "raw_change": 0.595029,
+      "predicted_change": 0.595,
+      "coverage": 64.33,
+      "features": {
+        "usTSM": -0.65,
+        "usNVDA": 4.03,
+        "usEWY": -0.67,
+        "usAVGO": -0.28,
+        "usSNDK": 3.1,
+        "usGLW": -0.77,
+        "usWDC": 0.78,
+        "usLITE": 2.07,
+        "usMPWR": -1.56
+      },
+      "model_label": "2026Q1重仓穿透模型",
+      "fallback_used": false,
       "waiting_days": 0,
       "settlement_note": "等待同一归属日净值公布"
     }
   ],
   "pipeline": {
-    "last_run_at": "2026-07-10T18:02:58+08:00",
+    "last_run_at": "2026-07-13T17:56:12+08:00",
     "quotes_count": 21,
     "details_count": 3,
-    "last_prediction_at": "2026-07-10T14:07:53+08:00"
+    "last_prediction_at": "2026-07-13T17:56:12+08:00"
   }
 }
