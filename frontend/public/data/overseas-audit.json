@@ -3,11 +3,12 @@
   "errors": [],
   "warnings": [],
   "stats": {
-    "records": 8,
+    "records": 10,
     "statuses": {
       "observed_only": 2,
-      "pending": 6
+      "settled": 3,
+      "pending": 5
     }
   },
-  "updated_at": "2026-07-13T17:56:51+08:00"
+  "updated_at": "2026-07-14T16:41:31+08:00"
 }
