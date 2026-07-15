@@ -1,12 +1,27 @@
-"""SQLite 连接与建表。M1：基金universe、详情缓存、净值历史。"""
+"""SQLite connection management and schema initialization.
+
+Connections are short-lived and configured consistently so concurrent FastAPI
+worker threads fail predictably instead of immediately raising ``database is
+locked``. Startup remains local-only and never performs network I/O.
+"""
+from __future__ import annotations
+
+import logging
 import os
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Iterator
+
+log = logging.getLogger(__name__)
 
 DB_PATH = os.environ.get(
     "FUND_DB",
     str(Path(__file__).resolve().parent.parent / "fund_compass.db"),
 )
+
+DEFAULT_TIMEOUT_SECONDS = 8.0
+MAX_TIMEOUT_SECONDS = 60.0
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS funds (
@@ -21,21 +36,21 @@ CREATE TABLE IF NOT EXISTS fund_detail (
   code             TEXT PRIMARY KEY,
   name             TEXT,
   type             TEXT,
-  scale            REAL,   -- 最新规模（亿元）
-  buy_rate         REAL,   -- 申购费率（%）
-  source_rate      REAL,   -- 原费率（%）
-  ret_1m           REAL,   -- 近1月收益（%）
-  ret_6m           REAL,   -- 近6月收益（%）
-  ret_1y           REAL,   -- 近1年收益（%）
-  ret_3y           REAL,   -- 近3年收益（%）
-  rank_in_type     INTEGER,-- 同类排名
-  rank_total       INTEGER,-- 同类总数
+  scale            REAL,
+  buy_rate         REAL,
+  source_rate      REAL,
+  ret_1m           REAL,
+  ret_6m           REAL,
+  ret_1y           REAL,
+  ret_3y           REAL,
+  rank_in_type     INTEGER,
+  rank_total       INTEGER,
   manager          TEXT,
   manager_id       TEXT,
-  manager_worktime TEXT,   -- 任职时长文本，如「14年又199天」
+  manager_worktime TEXT,
   latest_nav       REAL,
   latest_nav_date  TEXT,
-  source           TEXT,   -- 取数来源：primary（pingzhong）/ fallback（f10 lsjz）
+  source           TEXT,
   updated_at       TEXT
 );
 
@@ -91,14 +106,54 @@ CREATE TABLE IF NOT EXISTS idempotency_requests (
 """
 
 
+def _timeout_seconds() -> float:
+    raw = os.environ.get("FUND_DB_TIMEOUT_SECONDS", str(DEFAULT_TIMEOUT_SECONDS))
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        log.warning("invalid FUND_DB_TIMEOUT_SECONDS=%r; using %.1fs", raw, DEFAULT_TIMEOUT_SECONDS)
+        return DEFAULT_TIMEOUT_SECONDS
+    return min(MAX_TIMEOUT_SECONDS, max(0.1, value))
+
+
+def _ensure_parent_directory(path: str) -> None:
+    if path == ":memory:" or path.startswith("file:"):
+        return
+    Path(path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
+
+
 def get_conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
+    """Return a consistently configured SQLite connection.
+
+    ``busy_timeout`` makes short write bursts wait instead of failing
+    immediately. Foreign keys are enabled per connection because SQLite does
+    not persist that setting in the database file.
+    """
+    _ensure_parent_directory(DB_PATH)
+    timeout = _timeout_seconds()
+    conn = sqlite3.connect(DB_PATH, timeout=timeout, uri=DB_PATH.startswith("file:"))
     conn.row_factory = sqlite3.Row
+    conn.execute(f"PRAGMA busy_timeout = {int(timeout * 1000)}")
+    conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
 
-def _migrate(conn) -> None:
-    """轻量迁移：给已存在的旧库补齐后加的列（CREATE TABLE IF NOT EXISTS 不会改老表）。"""
+@contextmanager
+def transaction() -> Iterator[sqlite3.Connection]:
+    """Commit on success and always roll back an incomplete write on failure."""
+    conn = get_conn()
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Lightweight additive migrations for databases created by old versions."""
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(fund_detail)")}
     if "source" not in cols:
         conn.execute("ALTER TABLE fund_detail ADD COLUMN source TEXT")
@@ -115,10 +170,23 @@ def _migrate(conn) -> None:
 
 
 def init_db() -> None:
-    conn = get_conn()
-    try:
+    """Initialize schema and durable SQLite settings.
+
+    WAL allows readers to continue while a writer commits. If the environment
+    cannot enable WAL, initialization continues with SQLite's current journal
+    mode and logs the degradation.
+    """
+    with transaction() as conn:
+        try:
+            journal_mode = conn.execute("PRAGMA journal_mode = WAL").fetchone()[0]
+            if str(journal_mode).lower() != "wal":
+                log.warning("SQLite WAL unavailable; journal_mode=%s", journal_mode)
+        except sqlite3.DatabaseError as exc:
+            log.warning("SQLite WAL setup failed; continuing with current mode: %s", exc)
+        conn.execute("PRAGMA synchronous = NORMAL")
         conn.executescript(SCHEMA)
         _migrate(conn)
-        conn.commit()
-    finally:
-        conn.close()
+        check = conn.execute("PRAGMA quick_check(1)").fetchone()[0]
+        if check != "ok":
+            raise sqlite3.DatabaseError(f"SQLite quick_check failed: {check}")
+        conn.execute("PRAGMA optimize")
