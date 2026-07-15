@@ -1,4 +1,7 @@
-"""Minimal bearer authentication and in-process rate limiting for write endpoints."""
+"""Bearer authentication and bounded in-process rate limiting for write endpoints."""
+from __future__ import annotations
+
+import hashlib
 import hmac
 import os
 import threading
@@ -13,10 +16,22 @@ _lock = threading.Lock()
 _requests: dict[str, deque[float]] = defaultdict(deque)
 
 
+def _unauthorized(detail: str) -> HTTPException:
+    return HTTPException(
+        status_code=401,
+        detail=detail,
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
 def _bearer(authorization: str | None) -> str:
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="需要 Bearer 凭证")
-    return authorization[7:].strip()
+    if not authorization:
+        raise _unauthorized("需要 Bearer 凭证")
+    scheme, separator, value = authorization.partition(" ")
+    token = value.strip() if separator else ""
+    if scheme.lower() != "bearer" or not token:
+        raise _unauthorized("需要 Bearer 凭证")
+    return token
 
 
 def _matches(value: str, env_name: str) -> bool:
@@ -24,22 +39,40 @@ def _matches(value: str, env_name: str) -> bool:
     return bool(expected) and hmac.compare_digest(value, expected)
 
 
+def _identity(role: str, token: str) -> str:
+    """Use a one-way token fingerprint so secrets never become dictionary keys."""
+    fingerprint = hashlib.sha256(token.encode("utf-8")).hexdigest()[:20]
+    return f"{role}:{fingerprint}"
+
+
 def _rate_limit(identity: str) -> None:
     now = time.monotonic()
     with _lock:
+        # Remove expired identities as well as timestamps, keeping memory bounded
+        # after token rotation or test traffic using many identities.
+        for key in list(_requests):
+            bucket = _requests[key]
+            while bucket and now - bucket[0] >= WINDOW_SECONDS:
+                bucket.popleft()
+            if not bucket:
+                del _requests[key]
+
         bucket = _requests[identity]
-        while bucket and now - bucket[0] >= WINDOW_SECONDS:
-            bucket.popleft()
         if len(bucket) >= MAX_REQUESTS:
-            raise HTTPException(status_code=429, detail="写接口请求过于频繁")
+            retry_after = max(1, int(WINDOW_SECONDS - (now - bucket[0])))
+            raise HTTPException(
+                status_code=429,
+                detail="写接口请求过于频繁",
+                headers={"Retry-After": str(retry_after)},
+            )
         bucket.append(now)
 
 
 def require_admin(authorization: str | None = Header(None)) -> str:
     token = _bearer(authorization)
     if not _matches(token, "ADMIN_TOKEN"):
-        raise HTTPException(status_code=401, detail="管理员凭证无效")
-    _rate_limit("admin:" + token)
+        raise _unauthorized("管理员凭证无效")
+    _rate_limit(_identity("admin", token))
     return "admin"
 
 
@@ -50,8 +83,8 @@ def require_worker_or_admin(authorization: str | None = Header(None)) -> str:
     elif _matches(token, "ADMIN_TOKEN"):
         role = "admin"
     else:
-        raise HTTPException(status_code=401, detail="Worker 或管理员凭证无效")
-    _rate_limit(role + ":" + token)
+        raise _unauthorized("Worker 或管理员凭证无效")
+    _rate_limit(_identity(role, token))
     return role
 
 
