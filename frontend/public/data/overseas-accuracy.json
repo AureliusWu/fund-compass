@@ -1,59 +1,59 @@
 {
   "schema": 1,
-  "updated_at": "2026-07-16T16:57:55+08:00",
+  "updated_at": "2026-07-17T16:38:44+08:00",
   "summary": {
     "539002": {
-      "samples": 3,
+      "samples": 4,
       "status": "collecting",
       "confidence": "样本积累中",
-      "mae": 3.085,
-      "bias": 0.823,
-      "direction_accuracy": 66.7,
+      "mae": 2.741,
+      "bias": 1.045,
+      "direction_accuracy": 75.0,
       "error_band": 5.862,
       "error_percentiles": {
-        "p50": 2.081,
-        "p80": 4.35,
-        "p95": 5.484
+        "p50": 1.895,
+        "p80": 3.593,
+        "p95": 5.295
       },
       "rolling_5": {
-        "samples": 3,
-        "mae": 3.085,
-        "bias": 0.823,
-        "direction_accuracy": 66.7
+        "samples": 4,
+        "mae": 2.741,
+        "bias": 1.045,
+        "direction_accuracy": 75.0
       },
       "rolling_20": {
-        "samples": 3,
-        "mae": 3.085,
-        "bias": 0.823,
-        "direction_accuracy": 66.7
+        "samples": 4,
+        "mae": 2.741,
+        "bias": 1.045,
+        "direction_accuracy": 75.0
       },
       "pending": 2,
       "stale": 0,
       "model_version": "v1-2026q1-holdings"
     },
     "012920": {
-      "samples": 2,
+      "samples": 3,
       "status": "collecting",
       "confidence": "样本积累中",
-      "mae": 4.038,
-      "bias": 4.038,
+      "mae": 3.005,
+      "bias": 2.379,
       "direction_accuracy": 100.0,
       "error_band": 7.594,
       "error_percentiles": {
-        "p50": 4.038,
-        "p80": 6.172,
-        "p95": 7.238
+        "p50": 0.938,
+        "p80": 4.932,
+        "p95": 6.929
       },
       "rolling_5": {
-        "samples": 2,
-        "mae": 4.038,
-        "bias": 4.038,
+        "samples": 3,
+        "mae": 3.005,
+        "bias": 2.379,
         "direction_accuracy": 100.0
       },
       "rolling_20": {
-        "samples": 2,
-        "mae": 4.038,
-        "bias": 4.038,
+        "samples": 3,
+        "mae": 3.005,
+        "bias": 2.379,
         "direction_accuracy": 100.0
       },
       "pending": 2,
@@ -61,29 +61,29 @@
       "model_version": "v1-2026q1-style"
     },
     "018147": {
-      "samples": 3,
+      "samples": 4,
       "status": "collecting",
       "confidence": "样本积累中",
-      "mae": 3.089,
-      "bias": 0.822,
-      "direction_accuracy": 66.7,
+      "mae": 2.748,
+      "bias": 1.048,
+      "direction_accuracy": 75.0,
       "error_band": 5.867,
       "error_percentiles": {
-        "p50": 2.065,
-        "p80": 4.346,
-        "p95": 5.486
+        "p50": 1.896,
+        "p80": 3.586,
+        "p95": 5.296
       },
       "rolling_5": {
-        "samples": 3,
-        "mae": 3.089,
-        "bias": 0.822,
-        "direction_accuracy": 66.7
+        "samples": 4,
+        "mae": 2.748,
+        "bias": 1.048,
+        "direction_accuracy": 75.0
       },
       "rolling_20": {
-        "samples": 3,
-        "mae": 3.089,
-        "bias": 0.822,
-        "direction_accuracy": 66.7
+        "samples": 4,
+        "mae": 2.748,
+        "bias": 1.048,
+        "direction_accuracy": 75.0
       },
       "pending": 2,
       "stale": 0,
@@ -393,7 +393,7 @@
       "predicted_nav": 2.4912,
       "model_version": "v1-2026q1-holdings",
       "quote_time": "2026-07-15T16:57:15+08:00",
-      "status": "pending",
+      "status": "settled",
       "raw_change": 3.36996,
       "predicted_change": 3.37,
       "coverage": 64.33,
@@ -411,7 +411,12 @@
       "model_label": "2026Q1重仓穿透模型",
       "fallback_used": false,
       "waiting_days": 1,
-      "settlement_note": "等待同一归属日净值公布"
+      "settlement_note": "按预测目标日精确匹配已公布净值",
+      "actual_nav": 2.45,
+      "actual_change": 1.6598,
+      "error": 1.7102,
+      "absolute_error": 1.7102,
+      "direction_hit": true
     },
     {
       "code": "012920",
@@ -423,7 +428,7 @@
       "predicted_nav": 4.3405,
       "model_version": "v1-2026q1-style",
       "quote_time": "2026-07-15T16:57:15+08:00",
-      "status": "pending",
+      "status": "settled",
       "raw_change": 1.228,
       "predicted_change": 1.7192,
       "coverage": 100.0,
@@ -435,7 +440,12 @@
       "model_label": "2026Q1风格因子模型",
       "fallback_used": false,
       "waiting_days": 1,
-      "settlement_note": "等待同一归属日净值公布"
+      "settlement_note": "按预测目标日精确匹配已公布净值",
+      "actual_nav": 4.3805,
+      "actual_change": 2.6575,
+      "error": -0.9383,
+      "absolute_error": 0.9383,
+      "direction_hit": true
     },
     {
       "code": "018147",
@@ -447,7 +457,7 @@
       "predicted_nav": 2.4519,
       "model_version": "v1-2026q1-holdings",
       "quote_time": "2026-07-15T16:57:15+08:00",
-      "status": "pending",
+      "status": "settled",
       "raw_change": 3.36996,
       "predicted_change": 3.37,
       "coverage": 64.33,
@@ -465,7 +475,12 @@
       "model_label": "2026Q1重仓穿透模型",
       "fallback_used": false,
       "waiting_days": 1,
-      "settlement_note": "等待同一归属日净值公布"
+      "settlement_note": "按预测目标日精确匹配已公布净值",
+      "actual_nav": 2.411,
+      "actual_change": 1.6442,
+      "error": 1.7258,
+      "absolute_error": 1.7258,
+      "direction_hit": true
     },
     {
       "code": "539002",
@@ -494,7 +509,7 @@
       },
       "model_label": "2026Q1重仓穿透模型",
       "fallback_used": false,
-      "waiting_days": 0,
+      "waiting_days": 1,
       "settlement_note": "等待同一归属日净值公布"
     },
     {
@@ -518,7 +533,7 @@
       },
       "model_label": "2026Q1风格因子模型",
       "fallback_used": false,
-      "waiting_days": 0,
+      "waiting_days": 1,
       "settlement_note": "等待同一归属日净值公布"
     },
     {
@@ -548,15 +563,99 @@
       },
       "model_label": "2026Q1重仓穿透模型",
       "fallback_used": false,
+      "waiting_days": 1,
+      "settlement_note": "等待同一归属日净值公布"
+    },
+    {
+      "code": "539002",
+      "name": "建信新兴市场混合(QDII)A",
+      "prediction_date": "2026-07-17",
+      "target_nav_date": "2026-07-17",
+      "base_nav_date": "2026-07-15",
+      "base_nav": 2.45,
+      "predicted_nav": 2.3225,
+      "model_version": "v1-2026q1-holdings",
+      "quote_time": "2026-07-17T16:38:44+08:00",
+      "status": "pending",
+      "raw_change": -5.204202,
+      "predicted_change": -5.2042,
+      "coverage": 64.33,
+      "features": {
+        "usTSM": -2.32,
+        "usNVDA": -2.4,
+        "usEWY": -4.82,
+        "usAVGO": -5.03,
+        "usSNDK": -12.63,
+        "usGLW": -9.19,
+        "usWDC": -9.15,
+        "usLITE": -6.09,
+        "usMPWR": -3.48
+      },
+      "model_label": "2026Q1重仓穿透模型",
+      "fallback_used": false,
+      "waiting_days": 0,
+      "settlement_note": "等待同一归属日净值公布"
+    },
+    {
+      "code": "012920",
+      "name": "易方达全球成长精选混合(QDII)人民币A",
+      "prediction_date": "2026-07-17",
+      "target_nav_date": "2026-07-17",
+      "base_nav_date": "2026-07-15",
+      "base_nav": 4.3805,
+      "predicted_nav": 4.198,
+      "model_version": "v1-2026q1-style",
+      "quote_time": "2026-07-17T16:38:44+08:00",
+      "status": "pending",
+      "raw_change": -2.976,
+      "predicted_change": -4.1664,
+      "coverage": 100.0,
+      "features": {
+        "usQQQ": -1.64,
+        "usSOXX": -4.46,
+        "sh000300": -3.6
+      },
+      "model_label": "2026Q1风格因子模型",
+      "fallback_used": false,
+      "waiting_days": 0,
+      "settlement_note": "等待同一归属日净值公布"
+    },
+    {
+      "code": "018147",
+      "name": "建信新兴市场混合(QDII)C",
+      "prediction_date": "2026-07-17",
+      "target_nav_date": "2026-07-17",
+      "base_nav_date": "2026-07-15",
+      "base_nav": 2.411,
+      "predicted_nav": 2.2855,
+      "model_version": "v1-2026q1-holdings",
+      "quote_time": "2026-07-17T16:38:44+08:00",
+      "status": "pending",
+      "raw_change": -5.204202,
+      "predicted_change": -5.2042,
+      "coverage": 64.33,
+      "features": {
+        "usTSM": -2.32,
+        "usNVDA": -2.4,
+        "usEWY": -4.82,
+        "usAVGO": -5.03,
+        "usSNDK": -12.63,
+        "usGLW": -9.19,
+        "usWDC": -9.15,
+        "usLITE": -6.09,
+        "usMPWR": -3.48
+      },
+      "model_label": "2026Q1重仓穿透模型",
+      "fallback_used": false,
       "waiting_days": 0,
       "settlement_note": "等待同一归属日净值公布"
     }
   ],
   "pipeline": {
-    "last_run_at": "2026-07-16T16:57:55+08:00",
+    "last_run_at": "2026-07-17T16:38:44+08:00",
     "quotes_count": 21,
     "details_count": 3,
-    "last_prediction_at": "2026-07-16T16:57:55+08:00",
-    "last_settlement_at": "2026-07-16T16:57:55+08:00"
+    "last_prediction_at": "2026-07-17T16:38:44+08:00",
+    "last_settlement_at": "2026-07-17T16:38:44+08:00"
   }
 }
