@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-07-13T12:27:38+08:00",
+  "updated_at": "2026-07-20T12:33:27+08:00",
   "active": {
     "version": "v1-default",
     "weights": {
@@ -11,8 +11,8 @@
     "source": "built-in baseline"
   },
   "candidate": {
-    "version": "candidate-20260713",
-    "created_at": "2026-07-13T12:27:38+08:00",
+    "version": "candidate-20260720",
+    "created_at": "2026-07-20T12:33:27+08:00",
     "weights": {
       "买入": 0.85,
       "减仓": 0.3,
@@ -22,11 +22,11 @@
     "status": "rejected",
     "evidence": {
       "sampled": 30,
-      "valid": 26,
+      "valid": 25,
       "accepted": 1,
       "winner_votes": 1,
-      "required_votes": 11,
-      "median_validation_improvement": 1.71,
+      "required_votes": 10,
+      "median_validation_improvement": 0.04,
       "type_distribution": {
         "FOF": 5,
         "QDII": 5,
@@ -36,25 +36,25 @@
         "股票型": 5
       },
       "valid_type_distribution": {
-        "QDII": 4,
-        "债券型": 4,
+        "QDII": 5,
         "指数型": 4,
         "混合型": 5,
         "股票型": 5,
-        "FOF": 4
+        "FOF": 4,
+        "债券型": 2
       },
-      "max_type_share": 0.192,
+      "max_type_share": 0.2,
       "type_balance_ok": true,
       "passed": false
     }
   },
   "summary": {
     "sampled": 30,
-    "valid": 26,
+    "valid": 25,
     "accepted": 1,
     "winner_votes": 1,
-    "required_votes": 11,
-    "median_validation_improvement": 1.71,
+    "required_votes": 10,
+    "median_validation_improvement": 0.04,
     "type_distribution": {
       "FOF": 5,
       "QDII": 5,
@@ -64,14 +64,14 @@
       "股票型": 5
     },
     "valid_type_distribution": {
-      "QDII": 4,
-      "债券型": 4,
+      "QDII": 5,
       "指数型": 4,
       "混合型": 5,
       "股票型": 5,
-      "FOF": 4
+      "FOF": 4,
+      "债券型": 2
     },
-    "max_type_share": 0.192,
+    "max_type_share": 0.2,
     "type_balance_ok": true,
     "passed": false,
     "weights": {
@@ -83,49 +83,49 @@
   },
   "funds": [
     {
-      "code": "024058",
+      "code": "025131",
       "type": "FOF",
       "available": false,
       "accepted": false,
       "reason": "至少需要 360 个净值点才能划分训练与验证区间"
     },
     {
-      "code": "016199",
+      "code": "008367",
       "type": "QDII",
       "available": true,
       "accepted": false,
       "reason": "验证段未跑赢当前参数"
     },
     {
-      "code": "000674",
+      "code": "024387",
       "type": "债券型",
-      "available": true,
+      "available": false,
       "accepted": false,
-      "reason": "验证段未跑赢一直持有"
+      "reason": "至少需要 360 个净值点才能划分训练与验证区间"
     },
     {
-      "code": "018104",
+      "code": "017516",
       "type": "指数型",
       "available": true,
       "accepted": false,
       "reason": "验证段未跑赢当前参数"
     },
     {
-      "code": "011712",
+      "code": "015604",
       "type": "混合型",
       "available": true,
       "accepted": false,
       "reason": "验证段未跑赢当前参数；验证段未跑赢一直持有"
     },
     {
-      "code": "020142",
+      "code": "004851",
       "type": "股票型",
       "available": true,
       "accepted": false,
-      "reason": "验证段未跑赢当前参数；验证段最大回撤恶化超过 2 个百分点"
+      "reason": "验证段未跑赢当前参数"
     },
     {
-      "code": "005216",
+      "code": "012283",
       "type": "FOF",
       "available": true,
       "accepted": false,
@@ -139,133 +139,133 @@
       "reason": "验证段未跑赢一直持有"
     },
     {
-      "code": "003384",
+      "code": "025596",
       "type": "债券型",
-      "available": true,
+      "available": false,
       "accepted": false,
-      "reason": "验证段未跑赢当前参数；验证段最大回撤恶化超过 2 个百分点"
+      "reason": "至少需要 360 个净值点才能划分训练与验证区间"
     },
     {
-      "code": "021750",
+      "code": "020873",
       "type": "指数型",
       "available": true,
       "accepted": false,
       "reason": "验证段未跑赢一直持有"
     },
     {
-      "code": "009548",
+      "code": "010386",
       "type": "混合型",
+      "available": true,
+      "accepted": false,
+      "reason": "验证段未跑赢一直持有"
+    },
+    {
+      "code": "011384",
+      "type": "股票型",
       "available": true,
       "accepted": false,
       "reason": "验证段未跑赢当前参数；验证段未跑赢一直持有"
     },
     {
-      "code": "016551",
-      "type": "股票型",
-      "available": true,
-      "accepted": false,
-      "reason": "验证段未跑赢一直持有"
-    },
-    {
-      "code": "017386",
+      "code": "008754",
       "type": "FOF",
       "available": true,
       "accepted": false,
-      "reason": "验证段未跑赢一直持有"
+      "reason": "验证段未跑赢当前参数；验证段未跑赢一直持有"
     },
     {
-      "code": "270023",
+      "code": "016742",
       "type": "QDII",
       "available": true,
       "accepted": false,
-      "reason": "验证段未跑赢一直持有；验证段最大回撤恶化超过 2 个百分点"
+      "reason": "验证段未跑赢当前参数；验证段未跑赢一直持有"
     },
     {
-      "code": "020427",
+      "code": "015727",
       "type": "债券型",
-      "available": true,
-      "accepted": false,
-      "reason": "验证段未跑赢一直持有"
-    },
-    {
-      "code": "011983",
-      "type": "指数型",
       "available": true,
       "accepted": false,
       "reason": "验证段未跑赢当前参数"
     },
     {
-      "code": "014381",
+      "code": "501005",
+      "type": "指数型",
+      "available": true,
+      "accepted": false,
+      "reason": "验证段未跑赢一直持有；验证段最大回撤恶化超过 2 个百分点"
+    },
+    {
+      "code": "002703",
       "type": "混合型",
       "available": true,
       "accepted": false,
       "reason": "验证段未跑赢当前参数；验证段未跑赢一直持有"
     },
     {
-      "code": "020459",
+      "code": "011125",
       "type": "股票型",
       "available": true,
       "accepted": false,
-      "reason": "验证段未跑赢当前参数；验证段最大回撤恶化超过 2 个百分点"
+      "reason": "训练段仍选择当前参数；验证段未跑赢一直持有"
     },
     {
-      "code": "020340",
+      "code": "015793",
       "type": "FOF",
       "available": true,
       "accepted": false,
-      "reason": "验证段未跑赢当前参数；验证段未跑赢一直持有"
+      "reason": "验证段未跑赢当前参数"
     },
     {
-      "code": "026358",
+      "code": "050030",
       "type": "QDII",
-      "available": false,
-      "accepted": false,
-      "reason": "至少需要 360 个净值点才能划分训练与验证区间"
-    },
-    {
-      "code": "011920",
-      "type": "债券型",
       "available": true,
       "accepted": false,
       "reason": "验证段未跑赢一直持有"
     },
     {
-      "code": "024073",
+      "code": "012611",
+      "type": "债券型",
+      "available": true,
+      "accepted": true,
+      "reason": "通过留出验证，可进入候选版本"
+    },
+    {
+      "code": "027166",
       "type": "指数型",
       "available": false,
       "accepted": false,
       "reason": "至少需要 360 个净值点才能划分训练与验证区间"
     },
     {
-      "code": "014313",
+      "code": "013079",
       "type": "混合型",
       "available": true,
       "accepted": false,
-      "reason": "验证段未跑赢一直持有"
+      "reason": "训练段仍选择当前参数；验证段未跑赢一直持有"
     },
     {
-      "code": "005662",
+      "code": "011418",
       "type": "股票型",
       "available": true,
       "accepted": false,
-      "reason": "验证段未跑赢一直持有"
+      "reason": "验证段未跑赢当前参数；验证段未跑赢一直持有"
     },
     {
-      "code": "017236",
+      "code": "016739",
       "type": "FOF",
       "available": true,
       "accepted": false,
       "reason": "验证段未跑赢一直持有"
     },
     {
-      "code": "017431",
+      "code": "006309",
       "type": "QDII",
       "available": true,
-      "accepted": true,
-      "reason": "通过留出验证，可进入候选版本"
+      "accepted": false,
+      "reason": "验证段未跑赢当前参数"
     },
     {
-      "code": "023485",
+      "code": "022393",
       "type": "债券型",
       "available": false,
       "accepted": false,
@@ -279,18 +279,18 @@
       "reason": "验证段未跑赢一直持有"
     },
     {
-      "code": "002594",
+      "code": "001352",
       "type": "混合型",
       "available": true,
       "accepted": false,
       "reason": "验证段未跑赢一直持有；验证段最大回撤恶化超过 2 个百分点"
     },
     {
-      "code": "017480",
+      "code": "018861",
       "type": "股票型",
       "available": true,
       "accepted": false,
-      "reason": "验证段未跑赢当前参数；验证段最大回撤恶化超过 2 个百分点"
+      "reason": "验证段未跑赢当前参数"
     }
   ]
 }

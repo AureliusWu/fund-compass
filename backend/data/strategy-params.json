@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated_at": "2026-07-13T12:27:38+08:00",
+  "updated_at": "2026-07-20T12:33:27+08:00",
   "active": {
     "version": "v1-default",
     "weights": {
@@ -13,8 +13,8 @@
   },
   "history": [],
   "candidate": {
-    "version": "candidate-20260713",
-    "created_at": "2026-07-13T12:27:38+08:00",
+    "version": "candidate-20260720",
+    "created_at": "2026-07-20T12:33:27+08:00",
     "weights": {
       "买入": 0.85,
       "减仓": 0.3,
@@ -24,11 +24,11 @@
     "status": "rejected",
     "evidence": {
       "sampled": 30,
-      "valid": 26,
+      "valid": 25,
       "accepted": 1,
       "winner_votes": 1,
-      "required_votes": 11,
-      "median_validation_improvement": 1.71,
+      "required_votes": 10,
+      "median_validation_improvement": 0.04,
       "type_distribution": {
         "FOF": 5,
         "QDII": 5,
@@ -38,14 +38,14 @@
         "股票型": 5
       },
       "valid_type_distribution": {
-        "QDII": 4,
-        "债券型": 4,
+        "QDII": 5,
         "指数型": 4,
         "混合型": 5,
         "股票型": 5,
-        "FOF": 4
+        "FOF": 4,
+        "债券型": 2
       },
-      "max_type_share": 0.192,
+      "max_type_share": 0.2,
       "type_balance_ok": true,
       "passed": false
     }
