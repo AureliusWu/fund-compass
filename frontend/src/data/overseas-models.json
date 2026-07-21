@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated_at": "2026-07-20T17:44:25+08:00",
+  "updated_at": "2026-07-21T17:13:56+08:00",
   "models": {
     "539002": {
       "name": "建信新兴市场混合(QDII)A",
@@ -74,10 +74,10 @@
         }
       },
       "candidate": {
-        "version": "candidate-20260720",
-        "created_at": "2026-07-20T17:44:25+08:00",
+        "version": "candidate-20260721",
+        "created_at": "2026-07-21T17:13:56+08:00",
         "status": "collecting",
-        "samples": 5,
+        "samples": 6,
         "required": 20
       },
       "history": [],
@@ -86,7 +86,7 @@
         "min_samples": 20,
         "poor_cycles": 0,
         "drift_evidence": {
-          "samples": 5,
+          "samples": 6,
           "reason": "insufficient"
         }
       }
@@ -163,10 +163,10 @@
         }
       },
       "candidate": {
-        "version": "candidate-20260720",
-        "created_at": "2026-07-20T17:44:25+08:00",
+        "version": "candidate-20260721",
+        "created_at": "2026-07-21T17:13:56+08:00",
         "status": "collecting",
-        "samples": 4,
+        "samples": 5,
         "required": 20
       },
       "history": [],
@@ -175,7 +175,7 @@
         "min_samples": 20,
         "poor_cycles": 0,
         "drift_evidence": {
-          "samples": 4,
+          "samples": 5,
           "reason": "insufficient"
         }
       }
@@ -252,10 +252,10 @@
         }
       },
       "candidate": {
-        "version": "candidate-20260720",
-        "created_at": "2026-07-20T17:44:25+08:00",
+        "version": "candidate-20260721",
+        "created_at": "2026-07-21T17:13:56+08:00",
         "status": "collecting",
-        "samples": 5,
+        "samples": 6,
         "required": 20
       },
       "history": [],
@@ -264,7 +264,7 @@
         "min_samples": 20,
         "poor_cycles": 0,
         "drift_evidence": {
-          "samples": 5,
+          "samples": 6,
           "reason": "insufficient"
         }
       }
