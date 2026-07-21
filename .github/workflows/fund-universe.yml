@@ -16,7 +16,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: pip install -r backend/requirements.txt
+      - run: python -m pip install -r backend/requirements.txt -r backend/requirements-dev.txt
       - run: python tools/build_universe.py
       - run: python -m pytest tests/test_universe_artifact.py
         working-directory: backend
