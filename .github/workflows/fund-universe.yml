@@ -1,6 +1,14 @@
 name: fund-universe
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fund-universe.yml'
+      - 'tools/build_universe.py'
+      - 'backend/tests/test_universe_artifact.py'
+      - 'backend/requirements.txt'
+      - 'backend/requirements-dev.txt'
   schedule:
     - cron: '20 2 * * 1'
   workflow_dispatch:
