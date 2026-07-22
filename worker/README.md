@@ -33,4 +33,4 @@ curl -X POST "https://sinan-estimate-push.<subdomain>.workers.dev/test" \
   -H "Authorization: Bearer <ADMIN_TOKEN>"
 ```
 
-确认 Worker 正常推送后，禁用 `.github/workflows/estimate-push.yml` 的 `schedule`，保留手动触发作为应急兜底。
+正式推送由 Worker Cron 承担；`.github/workflows/manual-estimate-push.yml` 仅保留手动应急入口。

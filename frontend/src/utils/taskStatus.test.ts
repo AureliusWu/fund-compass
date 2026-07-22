@@ -5,8 +5,8 @@ import { normalizeTaskStatus, type TaskConfig } from './taskStatus'
 const cfg: TaskConfig = {
   id: 'estimate-push',
   label: '估值推送',
-  workflow: 'estimate-push.yml',
-  cadence: '交易日 14:30',
+  workflow: 'manual-estimate-push.yml',
+  cadence: '人工应急',
   staleHours: 72,
 }
 
@@ -54,5 +54,12 @@ describe('normalizeTaskStatus', () => {
     expect(s.ok).toBe(false)
     expect(s.stale).toBe(true)
     expect(s.note).toBe('暂无运行记录')
+  })
+
+  it('人工工作流不因长时间未运行而误报过期', () => {
+    const manual = { ...cfg, staleHours: 0, manual: true }
+    const s = normalizeTaskStatus(manual, null, NOW)
+    expect(s.stale).toBe(false)
+    expect(s.note).toBe('按需手动运行')
   })
 })

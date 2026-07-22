@@ -56,6 +56,16 @@ describe('normalizeEstimate', () => {
     expect(e.estChange).toBeCloseTo(2)
   })
 
+  it('does not present date-only estimate-table data as realtime', () => {
+    const e = normalizeEstimate({
+      fundcode: '000001', name: '测试基金', dwjz: '1', gsz: '1.01', gszzl: '1',
+      jzrq: '2026-07-21', gztime: '2026-07-22', sourcePrecision: 'date',
+    })
+    expect(e.isRealtime).toBe(false)
+    expect(e.label).toBe('延迟估值')
+    expect(e.sourceNote).toContain('未提供精确分钟')
+  })
+
   it('replaces target QDII stale valuation with holdings-through overseas model', () => {
     const e = normalizeEstimate({
       fundcode: '012920',

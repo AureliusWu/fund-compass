@@ -1,0 +1,54 @@
+name: enrich-holdings
+
+# 司南基金 · AKShare 离线富集（持仓+行业）。
+# 季度披露，故每周一跑一次足矣 + 可手动触发。抓 tools/enrich_funds.txt ∪ Gist 自选，
+# 输出 frontend/public/data/enrich/*.json 并提交（随 Pages 部署）。
+on:
+  schedule:
+    - cron: '0 1 * * 1' # 每周一 UTC 01:00 ≈ CST 09:00
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: enrich-holdings
+  cancel-in-progress: false
+
+jobs:
+  enrich:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20 # akshare 抓取若卡住，最多 20 分钟自动终止，不空耗
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 安装 akshare
+        run: pip install -r tools/requirements-enrich.txt
+      - name: 富集持仓（akshare）
+        env:
+          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+          PYTHONUNBUFFERED: '1' # 日志实时输出，能看到「抓取 X …」进度
+        run: python tools/enrich.py
+      - name: 富集指数估值（akshare · 乐咕乐股）· V3-5
+        continue-on-error: true # 第三方源，失败不阻断持仓/排行/经理富集
+        env:
+          PYTHONUNBUFFERED: '1'
+        run: python tools/enrich_index_valuation.py
+      - name: 富集排行（东财排行，requests）
+        env:
+          PYTHONUNBUFFERED: '1'
+        run: python tools/screener.py
+      - name: 提交数据
+        run: |
+          if [[ -n "$(git status --porcelain frontend/public/data/enrich frontend/public/data/index-valuation.json frontend/public/data/screener.json frontend/public/data/screener)" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add frontend/public/data/enrich frontend/public/data/index-valuation.json frontend/public/data/screener.json frontend/public/data/screener
+            git commit -m "chore: 富集持仓+排行数据"
+            git pull --rebase origin main
+            git push origin main
+          else
+            echo "无变化"
+          fi

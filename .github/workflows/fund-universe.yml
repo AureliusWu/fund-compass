@@ -16,14 +16,23 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: fund-universe
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
       - run: python -m pip install -r backend/requirements.txt -r backend/requirements-dev.txt
       - run: python tools/build_universe.py
       - run: python -m pytest tests/test_universe_artifact.py

@@ -1,4 +1,4 @@
-name: estimate-push
+name: manual-estimate-push
 
 # 司南基金 · 自选实时估值推送人工应急入口。
 # 交易日北京时间 14:30 的正式定时任务已迁移到 Cloudflare Worker。
@@ -22,6 +22,9 @@ jobs:
   push:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    concurrency:
+      group: manual-estimate-push
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

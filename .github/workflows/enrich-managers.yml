@@ -1,0 +1,42 @@
+name: enrich-managers
+
+on:
+  schedule:
+    - cron: '20 1 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: enrich-managers
+  cancel-in-progress: false
+
+jobs:
+  managers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install locked manager dependencies
+        run: pip install -r tools/requirements-enrich.txt
+      - name: Enrich fund managers
+        env:
+          PYTHONUNBUFFERED: '1'
+        run: python tools/managers.py
+      - name: Commit manager data when changed
+        shell: bash
+        run: |
+          if [[ -n "$(git status --porcelain frontend/public/data/managers.json frontend/public/data/managers)" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add frontend/public/data/managers.json frontend/public/data/managers
+            git commit -m "chore: enrich fund managers"
+            git pull --rebase origin main
+            git push origin main
+          else
+            echo "No manager changes"
+          fi

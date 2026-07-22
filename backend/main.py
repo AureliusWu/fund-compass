@@ -11,7 +11,7 @@ r"""司南基金 后端入口（FastAPI）。
 """
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Query
@@ -49,7 +49,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="司南基金 API", version="0.11.0", lifespan=lifespan)
+app = FastAPI(title="司南基金 API", version="6.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -63,14 +63,14 @@ app.add_middleware(
 )
 
 
-def fund_detail_dep(code: str) -> dict:
+def fund_detail_dep(code: str, force: bool = Query(False)) -> dict:
     """统一的详情取数依赖：命中缓存或抓取，失败转 404。
 
     四个基金端点此前各自重复一遍 try/except，收口到这里后端点只声明
     `detail: dict = Depends(fund_detail_dep)` 即可，详情逻辑只有一处。
     """
     try:
-        return repo.get_detail(code)
+        return repo.get_detail(code, force=force)
     except Exception as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -82,6 +82,73 @@ def _meta(d: dict) -> dict:
         "data_stale": bool(d.get("stale")), "data_age_hours": d.get("data_age_hours", 0),
         "as_of_date": d.get("latest_nav_date"),
     }
+
+
+def _market_kind(detail: dict) -> str:
+    text = f"{detail.get('type') or ''} {detail.get('name') or ''}".upper()
+    if any(marker in text for marker in ("黄金", "白银", "贵金属")):
+        return "gold"
+    if any(marker in text for marker in ("港股", "恒生", "香港")):
+        return "hk"
+    if any(marker in text for marker in ("QDII", "全球", "海外", "纳斯达克", "标普", "美元", "国际")):
+        return "overseas"
+    return "cn"
+
+
+def _estimate_context(detail: dict) -> dict:
+    """Build traceable live-data context; never disguise request time as quote time."""
+    fetched_at = datetime.now(timezone.utc).isoformat()
+    try:
+        estimate = eastmoney.fetch_estimate(detail["code"])
+    except Exception as error:
+        log.warning("盘中估值不可用 code=%s: %s", detail.get("code"), error)
+        return {
+            "source_time": detail.get("latest_nav_date"),
+            "fetched_at": fetched_at,
+            "calculated_at": None,
+            "age_seconds": None,
+            "status": "latest_official" if detail.get("latest_nav_date") else "unavailable",
+            "source": detail.get("source") or "official_nav_cache",
+            "is_fallback": True,
+            "fallback_reason": str(error),
+            "market": _market_kind(detail),
+            "estimate_change": None,
+            "estimate_nav": None,
+        }
+
+    source_time = estimate.get("source_time")
+    age_seconds = None
+    status = "delayed" if estimate.get("source_time_precision") == "date" else "fresh"
+    if source_time:
+        try:
+            quote_time = datetime.strptime(source_time, "%Y-%m-%d %H:%M").replace(tzinfo=timezone(timedelta(hours=8)))
+            age_seconds = max(0, int((datetime.now(timezone.utc) - quote_time.astimezone(timezone.utc)).total_seconds()))
+        except ValueError:
+            try:
+                quote_date = datetime.strptime(source_time, "%Y-%m-%d").date()
+                china_today = datetime.now(timezone(timedelta(hours=8))).date()
+                status = "delayed" if quote_date == china_today else "stale"
+            except ValueError:
+                status = "stale"
+    if source_time is None:
+        status = "stale"
+    elif age_seconds is not None and age_seconds > 24 * 3600:
+        status = "stale"
+    elif age_seconds is not None and age_seconds > 10 * 60:
+        status = "delayed"
+    return {
+        **estimate,
+        "calculated_at": datetime.now(timezone.utc).isoformat(),
+        "age_seconds": age_seconds,
+        "status": status,
+        "is_fallback": False,
+        "fallback_reason": None,
+        "market": _market_kind(detail),
+    }
+
+
+def _decision_detail(detail: dict) -> dict:
+    return {**detail, "decision_context": _estimate_context(detail)}
 
 
 @app.get("/api/health", response_model=HealthResponse)
@@ -165,19 +232,20 @@ def strategy_registry() -> dict:
 @app.get("/api/fund/{code}/decision")
 def fund_decision(
     detail: dict = Depends(fund_detail_dep),
+    held: bool = Query(False),
     target_weight: float | None = Query(None, ge=0, le=100),
     current_weight: float | None = Query(None, ge=0, le=100),
 ) -> dict:
     """决策卡片：综合评分 + 择时 + 回测 → 可执行动作（V6-P0）。"""
-    holding = None
-    if target_weight is not None and current_weight is not None:
-        holding = {"target_weight": target_weight, "current_weight": current_weight}
-    return {**_meta(detail), **decide_fund(detail, holding)}
+    holding = {"is_held": held, "target_weight": target_weight, "current_weight": current_weight}
+    decision_detail = _decision_detail(detail)
+    return {**_meta(detail), **decide_fund(decision_detail, holding)}
 
 
 @app.get("/api/fund/{code}/analyze")
 def fund_analyze(
     detail: dict = Depends(fund_detail_dep),
+    held: bool = Query(False),
     target_weight: float | None = Query(None, ge=0, le=100),
     current_weight: float | None = Query(None, ge=0, le=100),
 ) -> dict:
@@ -188,13 +256,11 @@ def fund_analyze(
     """
     meta = _meta(detail)
     nav = (detail.get("nav_history") or [])[-NAV_TAIL:]
-    holding = None
-    if target_weight is not None and current_weight is not None:
-        holding = {"target_weight": target_weight, "current_weight": current_weight}
+    holding = {"is_held": held, "target_weight": target_weight, "current_weight": current_weight}
     score = score_fund(detail)
     signal = timing_signal(detail)
     bt = backtest(detail)
-    decision = decide_fund(detail, holding, score=score, signal=signal, backtest_result=bt)
+    decision = decide_fund(_decision_detail(detail), holding, score=score, signal=signal, backtest_result=bt)
     return {
         **meta,
         "detail": {**detail, "nav_history": nav},

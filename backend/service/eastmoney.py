@@ -8,6 +8,8 @@ AKShare 作为备源（M1 暂未接入，后续在此模块加 fallback）。
 import json
 import logging
 import re
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 
 import requests
@@ -17,6 +19,10 @@ log = logging.getLogger(__name__)
 CST = timezone(timedelta(hours=8))
 _HEADERS = {"User-Agent": "Mozilla/5.0", "Referer": "http://fund.eastmoney.com/"}
 _TIMEOUT = (4, 10)
+_ESTIMATE_TTL_SECONDS = 30
+_estimate_table_cache: dict[str, dict] = {}
+_estimate_table_cached_at = 0.0
+_estimate_table_lock = threading.Lock()
 
 
 def _get(url: str) -> str:
@@ -35,6 +41,58 @@ def fetch_universe() -> list[dict]:
         if len(x) >= 4 and x[0]:
             out.append({"code": x[0], "name": x[2], "type": x[3], "pinyin": x[1]})
     return out
+
+
+def fetch_estimate(code: str) -> dict:
+    """Fetch one estimate from Eastmoney's current sorted estimate table.
+
+    The retired ``fundgz`` per-fund JSONP endpoint now returns an HTML 404 page.
+    The replacement table exposes only a quote date, not a minute timestamp; callers
+    must therefore label it delayed instead of inventing a source time.
+    """
+    api = "https://api.fund.eastmoney.com/FundGuZhi/GetFundGZList"
+    def load_table() -> dict[str, dict]:
+        global _estimate_table_cache, _estimate_table_cached_at
+        now = time.monotonic()
+        if _estimate_table_cache and now - _estimate_table_cached_at < _ESTIMATE_TTL_SECONDS:
+            return _estimate_table_cache
+        with _estimate_table_lock:
+            now = time.monotonic()
+            if _estimate_table_cache and now - _estimate_table_cached_at < _ESTIMATE_TTL_SECONDS:
+                return _estimate_table_cache
+            response = requests.get(
+                api,
+                params={
+                    "type": "0", "sort": "1", "orderType": "asc", "canbuy": "0",
+                    "pageIndex": 1, "pageSize": 30000,
+                },
+                headers=_HEADERS,
+                timeout=_TIMEOUT,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            if payload.get("ErrCode") != 0 or not isinstance((payload.get("Data") or {}).get("list"), list):
+                raise ValueError(payload.get("ErrMsg") or "估值表响应无效")
+            rows = payload["Data"]["list"]
+            _estimate_table_cache = {str(row.get("bzdm")): row for row in rows if row.get("bzdm")}
+            _estimate_table_cached_at = time.monotonic()
+            return _estimate_table_cache
+
+    raw = load_table().get(code)
+    if raw is None:
+        raise ValueError(f"估值表暂无该基金：{code}")
+    return {
+        "code": code,
+        "name": raw.get("jjjc"),
+        "last_nav": _num(raw.get("dwjz")),
+        "estimate_nav": _num(raw.get("gsz")),
+        "estimate_change": _num(str(raw.get("gszzl") or "").replace("%", "")),
+        "nav_date": raw.get("gzrq") or None,
+        "source_time": raw.get("gxrq") or None,
+        "source_time_precision": "date",
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+        "source": "eastmoney_estimate_table",
+    }
 
 
 def _raw_var(text: str, name: str):
@@ -145,11 +203,9 @@ def _fetch_detail_pingzhong(code: str) -> dict:
 
 
 def _fallback_name(code: str) -> str | None:
-    """备源辅助：从天天基金估值接口（另一主机）取基金名。"""
+    """备源辅助：从当前天天基金估值表取基金名。"""
     try:
-        txt = _get(f"https://fundgz.1234567.com.cn/js/{code}.js?rt={int(datetime.now().timestamp() * 1000)}")
-        m = re.search(r"jsonpgz\((.*)\)", txt)
-        return json.loads(m.group(1)).get("name") if m else None
+        return fetch_estimate(code).get("name")
     except Exception:
         log.debug("备源取名失败 code=%s", code, exc_info=True)
         return None

@@ -1,10 +1,12 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { attachAccuracy, loadOverseasAccuracy } from './overseasAccuracy'
 import type { Estimate } from './estimate'
 
 describe('overseas accuracy metadata', () => {
   beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-10T16:00:00Z'))
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({
@@ -19,6 +21,8 @@ describe('overseas accuracy metadata', () => {
       }),
     }))
   })
+
+  afterEach(() => vi.useRealTimers())
 
   it('attaches sample-backed confidence to a modeled estimate', async () => {
     await loadOverseasAccuracy(true)

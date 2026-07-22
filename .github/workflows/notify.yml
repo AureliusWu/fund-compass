@@ -1,11 +1,8 @@
-name: signal-notify
+name: manual-signal-notify
 
-# 司南基金 · 信号推送 + 后端保活
-# 交易时段每 10 分钟：从 Gist 读自选 → 查信号 → 变化推 Server酱 → 顺带 ping 后端免冷启动。
-# 仅在配置了 GIST_TOKEN / SC_SENDKEY 两个 Secret 后才真正生效。
+# 司南基金 · 信号通知人工应急入口。
+# 盘中实时决策由页面直连后端 API 完成，不再使用 GitHub Actions 定时轮询或保活。
 on:
-  schedule:
-    - cron: '*/10 1-7 * * 1-5' # UTC 01:00–07:59 周一~五 ≈ CST 09:00–15:59（脚本内再按交易时段精确门控）
   workflow_dispatch:
     inputs:
       force:
@@ -16,12 +13,16 @@ on:
 jobs:
   notify:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: manual-signal-notify
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: 信号检查 & 推送 & 保活
+      - name: 人工信号检查与推送
         env:
           API_BASE: ${{ vars.VITE_API_BASE || 'https://fund-compass-api.onrender.com/api' }}
           GIST_TOKEN: ${{ secrets.GIST_TOKEN }}

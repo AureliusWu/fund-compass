@@ -29,10 +29,11 @@ function fakeNetwork(sendStatuses = [200], options: {
       state = JSON.parse(body.files['sinan-estimate-state.json'].content)
       return Response.json({ ok: true })
     }
-    if (url.includes('fundgz.1234567.com.cn')) {
-      if (options.missingSecond && url.includes('000002')) return new Response('', { status: 404 })
-      const code = url.includes('000002') ? '000002' : '000001'
-      return new Response(`jsonpgz({"fundcode":"${code}","name":"基金${code}","dwjz":"1","gsz":"1.01","gszzl":"1","gztime":"2026-07-13 14:30"})`)
+    if (url.includes('/FundGuZhi/GetFundGZList')) {
+      const list = ['000001', ...(options.missingSecond ? [] : ['000002'])].map((code) => ({
+        bzdm: code, jjjc: `基金${code}`, dwjz: '1', gsz: '1.01', gszzl: '1%', gxrq: '2026-07-13',
+      }))
+      return Response.json({ ErrCode: 0, Data: { list } })
     }
     if (url.includes('sctapi.ftqq.com')) {
       const status = sendStatuses[Math.min(sends++, sendStatuses.length - 1)]

@@ -2,7 +2,7 @@ name: post-deploy-smoke
 
 on:
   workflow_run:
-    workflows: ["CI"]
+    workflows: ["Deploy frontend to GitHub Pages"]
     types: [completed]
   workflow_dispatch:
 

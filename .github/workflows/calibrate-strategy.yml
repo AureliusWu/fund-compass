@@ -1,0 +1,58 @@
+name: calibrate-strategy
+
+on:
+  schedule:
+    - cron: '40 1 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: calibrate-strategy
+  cancel-in-progress: false
+
+jobs:
+  calibrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Require backend URL
+        env:
+          FUND_API_BASE: ${{ secrets.FUND_API_BASE }}
+        shell: bash
+        run: test -n "$FUND_API_BASE" || { echo "FUND_API_BASE secret is required"; exit 1; }
+      - name: Calibrate strategy candidate
+        env:
+          AUTO_PROMOTE_STRATEGY: 'true'
+          CALIBRATION_MIN_VALID: '12'
+          CALIBRATION_MAX_FUNDS: '30'
+          FUND_API_BASE: ${{ secrets.FUND_API_BASE }}
+          PYTHONUNBUFFERED: '1'
+        run: python tools/calibrate_strategy.py
+      - name: Upload calibration evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: strategy-calibration-${{ github.run_number }}
+          path: |
+            frontend/public/data/strategy-calibration.json
+            backend/data/strategy-params.json
+          retention-days: 90
+      - name: Commit accepted calibration when changed
+        shell: bash
+        run: |
+          if [[ -n "$(git status --porcelain frontend/public/data/strategy-calibration.json backend/data/strategy-params.json)" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add frontend/public/data/strategy-calibration.json backend/data/strategy-params.json
+            git commit -m "chore: calibrate strategy"
+            git pull --rebase origin main
+            git push origin main
+          else
+            echo "No calibration changes"
+          fi

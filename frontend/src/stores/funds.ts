@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import {
   getFundDetail, getScore, getSignal, getBacktest, getAnalyze,
-  type FundDetail, type ScoreResp, type SignalResp, type BacktestResp, type DecisionResp,
+  type FundDetail, type ScoreResp, type SignalResp, type BacktestResp, type DecisionResp, type DecisionContextParams,
 } from '@/api/client'
 import { cacheGet, cacheSet } from '@/utils/cache'
 
@@ -72,25 +72,26 @@ export const useFundsStore = defineStore('funds', () => {
 
   // 聚合获取：详情页一次往返取齐详情/评分/信号/回测。四块若都已在缓存内则直接拼装、
   // 不再请求；否则单次 getAnalyze 取回后回填四个缓存，使后续单项获取（回测页/对比页等）命中。
-  async function analyze(code: string): Promise<{
+  async function analyze(code: string, context?: DecisionContextParams): Promise<{
     detail: FundDetail; score: ScoreResp; signal: SignalResp; backtest: BacktestResp; decision: DecisionResp
   }> {
     const cd = memGet(detailMem, code) ?? cacheGet<FundDetail>('detail_' + code, TTL)
     const cs = memGet(scoreMem, code) ?? cacheGet<ScoreResp>('score_' + code, TTL)
     const cg = memGet(signalMem, code) ?? cacheGet<SignalResp>('signal_' + code, TTL)
     const cb = memGet(btMem, code) ?? cacheGet<BacktestResp>('bt_' + code, TTL)
-    const cdec = memGet(decisionMem, code) ?? cacheGet<DecisionResp>('decision_' + code, TTL)
-    if (cd && cs && cg && cb && cdec) {
+    const contextual = context?.held != null || context?.force
+    const cdec = contextual ? null : (memGet(decisionMem, code) ?? cacheGet<DecisionResp>('decision_' + code, TTL))
+    if (!context?.force && cd && cs && cg && cb && cdec) {
       memSet(detailMem, code, cd); memSet(scoreMem, code, cs); memSet(signalMem, code, cg)
       memSet(btMem, code, cb); memSet(decisionMem, code, cdec)
       return { detail: cd, score: cs, signal: cg, backtest: cb, decision: cdec }
     }
-    const a = await getAnalyze(code)
+    const a = await getAnalyze(code, context)
     memSet(detailMem, code, a.detail); cacheSet('detail_' + code, a.detail)
     memSet(scoreMem, code, a.score); cacheSet('score_' + code, a.score)
     memSet(signalMem, code, a.signal); cacheSet('signal_' + code, a.signal)
     memSet(btMem, code, a.backtest); cacheSet('bt_' + code, a.backtest)
-    memSet(decisionMem, code, a.decision); cacheSet('decision_' + code, a.decision)
+    if (!contextual) { memSet(decisionMem, code, a.decision); cacheSet('decision_' + code, a.decision) }
     return { detail: a.detail, score: a.score, signal: a.signal, backtest: a.backtest, decision: a.decision }
   }
 

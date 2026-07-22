@@ -11,9 +11,10 @@ def _pack(sample_detail, monkeypatch=None):
 
 def test_decision_fields(sample_detail, monkeypatch):
     d = _pack(sample_detail, monkeypatch)
-    for k in ("action", "confidence", "summary", "reasons", "risks", "position_rule", "next_check", "disclaimer", "methodology", "raw"):
+    for k in ("action", "strength", "data_status", "data_time", "position_level", "trend_state", "investment_method", "change_conditions", "confidence", "summary", "reasons", "risks", "position_rule", "next_check", "disclaimer", "methodology", "freshness", "raw"):
         assert k in d
-    assert d["action"] in ("分批买入", "继续定投", "持有观望", "停止加仓", "部分观察", "考虑替换", "观察")
+    assert d["action"] in ("买入", "分批定投", "观望", "加仓", "持有", "减仓", "卖出")
+    assert 0 <= d["strength"] <= 100
     assert d["confidence"] in ("高", "中", "低")
     assert d["methodology"]["score_version"] == "v3-risk-adjusted"
     assert d["methodology"]["signal_version"] == "v3-coverage-gated"
@@ -21,9 +22,9 @@ def test_decision_fields(sample_detail, monkeypatch):
 
 def test_decision_buy_action(sample_detail, monkeypatch):
     monkeypatch.setattr("strategy.timing._index_lookup", lambda code: None)
-    monkeypatch.setattr("strategy.rules.map_action", lambda q, s, l: "分批买入")
+    monkeypatch.setattr("strategy.rules.map_action", lambda q, s, l, h=None: "买入")
     d = decide_fund(sample_detail)
-    assert d["action"] == "分批买入"
+    assert d["action"] == "买入"
 
 
 def test_decision_dca_action(sample_detail, monkeypatch):
@@ -37,7 +38,7 @@ def test_decision_dca_action(sample_detail, monkeypatch):
 
     monkeypatch.setattr("strategy.decision.timing_signal", fake_signal)
     d = decide_fund(sample_detail)
-    assert d["action"] in ("继续定投", "观察")
+    assert d["action"] in ("分批定投", "观望")
 
 
 def test_decision_hold_action(sample_detail, monkeypatch):
@@ -48,8 +49,8 @@ def test_decision_hold_action(sample_detail, monkeypatch):
                 "trend": {"label": "横盘趋势"}, "sentiment": {"label": "中性"}}}
 
     monkeypatch.setattr("strategy.decision.timing_signal", fake_signal)
-    d = decide_fund(sample_detail)
-    assert d["action"] == "持有观望"
+    d = decide_fund(sample_detail, {"is_held": True})
+    assert d["action"] == "持有"
 
 
 def test_decision_reduce_low_score(sample_detail, monkeypatch):
@@ -64,8 +65,8 @@ def test_decision_reduce_low_score(sample_detail, monkeypatch):
 
     monkeypatch.setattr("strategy.decision.score_fund", fake_score)
     monkeypatch.setattr("strategy.decision.timing_signal", fake_signal)
-    d = decide_fund(sample_detail)
-    assert d["action"] == "考虑替换"
+    d = decide_fund(sample_detail, {"is_held": True})
+    assert d["action"] == "卖出"
 
 
 def test_decision_partial_observe(sample_detail, monkeypatch):
@@ -80,8 +81,8 @@ def test_decision_partial_observe(sample_detail, monkeypatch):
 
     monkeypatch.setattr("strategy.decision.score_fund", fake_score)
     monkeypatch.setattr("strategy.decision.timing_signal", fake_signal)
-    d = decide_fund(sample_detail)
-    assert d["action"] == "部分观察"
+    d = decide_fund(sample_detail, {"is_held": True})
+    assert d["action"] == "减仓"
 
 
 def test_decision_insufficient_data(make_navs, monkeypatch):
@@ -89,7 +90,7 @@ def test_decision_insufficient_data(make_navs, monkeypatch):
     detail = {"code": "000001", "name": "测试", "nav_history": make_navs(n=10)}
     d = decide_fund(detail)
     assert d["confidence"] == "低"
-    assert "缺少持仓" in d["position_rule"] or "缺少" in d["position_rule"]
+    assert d["action"] == "观望"
 
 
 def test_decision_with_holding(sample_detail, monkeypatch):
@@ -101,10 +102,11 @@ def test_decision_with_holding(sample_detail, monkeypatch):
 
 def test_map_action_rules():
     layers = {"valuation": {"label": "合理"}, "sentiment": {"rsi": 50}}
-    assert map_action(80, "买入", layers) == "分批买入"
-    assert map_action(70, "定投", layers) == "继续定投"
-    assert map_action(60, "持有", layers) == "持有观望"
-    assert map_action(40, "减仓", layers) == "考虑替换"
+    assert map_action(80, "买入", layers) == "买入"
+    assert map_action(70, "定投", layers) == "分批定投"
+    assert map_action(60, "持有", layers) == "观望"
+    assert map_action(70, "买入", layers, {"is_held": True}) == "加仓"
+    assert map_action(40, "减仓", layers, {"is_held": True}) == "减仓"
 
 
 def test_confidence_high_with_pe_pb():
@@ -120,9 +122,27 @@ def test_stale_detail_forces_observe_and_low_confidence(sample_detail):
         {"signal": "买入", "layers": {"valuation": {"label": "低估", "source": "index_pe_pb"}}},
         {"available": True, "outperform": 2},
     )
-    assert decision["action"] == "观察"
+    assert decision["action"] == "观望"
     assert decision["confidence"] == "低"
     assert "基金数据已过期" in decision["risks"]
+
+
+def test_same_inputs_are_deterministic(sample_detail, monkeypatch):
+    monkeypatch.setattr("strategy.timing._index_lookup", lambda code: None)
+    holding = {"is_held": True, "target_weight": 20, "current_weight": 10}
+    first = decide_fund(sample_detail, holding)
+    second = decide_fund(sample_detail, holding)
+    for key in ("action", "strength", "summary", "reasons", "change_conditions"):
+        assert first[key] == second[key]
+
+
+def test_unavailable_intraday_data_caps_strength_and_action(sample_detail, monkeypatch):
+    monkeypatch.setattr("strategy.timing._index_lookup", lambda code: None)
+    sample_detail["decision_context"] = {"status": "unavailable", "source_time": None, "source": "none", "is_fallback": True}
+    decision = decide_fund(sample_detail, {"is_held": False})
+    assert decision["action"] == "观望"
+    assert decision["strength"] <= 25
+    assert decision["data_status"] == "暂不可用"
 
 
 def test_backtest_passes_code_to_timing(uptrend, monkeypatch):

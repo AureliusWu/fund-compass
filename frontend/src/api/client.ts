@@ -25,7 +25,7 @@ export async function request<T>(
   const timer = globalThis.setTimeout(() => controller.abort('timeout'), timeoutMs)
 
   try {
-    const res = await fetch(BASE + path, { ...init, signal: controller.signal })
+    const res = await fetch(BASE + path, { cache: 'no-store', ...init, signal: controller.signal })
     if (!res.ok) throw new ApiError(`HTTP ${res.status}`, 'http', res.status)
     return res.json() as Promise<T>
   } catch (error) {
@@ -202,7 +202,15 @@ export const getStrategyOutcomes = () => req<StrategyOutcomesResp>('/strategy/ou
 export interface DecisionResp {
   code: string; name: string; type?: string | null
   action: string
+  strength: number
   confidence: '高' | '中' | '低'
+  data_status: '实时' | '延迟' | '旧数据' | '降级' | '最新正式净值' | '暂不可用'
+  data_time?: string | null
+  calculated_at?: string | null
+  position_level: string
+  trend_state: string
+  investment_method: string
+  change_conditions: string[]
   summary: string
   reasons: string[]
   risks: string[]
@@ -214,11 +222,24 @@ export interface DecisionResp {
     score_coverage?: number | null; signal_coverage?: number | null
     evidence_strength: string
   }
+  freshness?: {
+    sourceTime: string | null; fetchedAt: string | null; calculatedAt: string | null
+    ageSeconds: number | null; status: string; source: string; isFallback: boolean
+    fallbackReason?: string | null
+  }
 }
-export const getDecision = (code: string, p?: { target_weight?: number; current_weight?: number }) => {
+export interface DecisionContextParams {
+  held?: boolean
+  target_weight?: number
+  current_weight?: number
+  force?: boolean
+}
+export const getDecision = (code: string, p?: DecisionContextParams) => {
   const u = new URLSearchParams()
+  if (p?.held != null) u.set('held', String(p.held))
   if (p?.target_weight != null) u.set('target_weight', String(p.target_weight))
   if (p?.current_weight != null) u.set('current_weight', String(p.current_weight))
+  if (p?.force) u.set('force', 'true')
   const q = u.toString()
   return req<DecisionResp>(`/fund/${code}/decision` + (q ? '?' + q : ''))
 }
@@ -308,7 +329,15 @@ export interface AnalyzeResp {
   backtest: BacktestResp
   decision: DecisionResp
 }
-export const getAnalyze = (code: string) => req<AnalyzeResp>(`/fund/${code}/analyze`)
+export const getAnalyze = (code: string, p?: DecisionContextParams) => {
+  const u = new URLSearchParams()
+  if (p?.held != null) u.set('held', String(p.held))
+  if (p?.target_weight != null) u.set('target_weight', String(p.target_weight))
+  if (p?.current_weight != null) u.set('current_weight', String(p.current_weight))
+  if (p?.force) u.set('force', 'true')
+  const query = u.toString()
+  return req<AnalyzeResp>(`/fund/${code}/analyze${query ? '?' + query : ''}`)
+}
 
 export const getWatchlist = () => req<{ items: WatchItem[] }>('/watchlist')
 export const addWatch = (code: string) =>

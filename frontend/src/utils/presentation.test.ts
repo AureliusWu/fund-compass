@@ -84,11 +84,12 @@ describe('freshness and QDII evidence', () => {
 describe('decision summary', () => {
   it('keeps the action compact while exposing confidence and one reason', () => {
     const decision: DecisionResp = {
-      code: '012920', name: '全球成长', action: '继续定投', confidence: '中', summary: '保持节奏',
-      reasons: ['估值适中'], risks: [], position_rule: '', next_check: '',
+      code: '012920', name: '全球成长', action: '分批定投', strength: 68, confidence: '中', data_status: '实时',
+      data_time: '2026-07-10 14:30', position_level: '中位区域', trend_state: '中性', investment_method: '分批投入',
+      change_conditions: ['趋势转弱时停止投入'], summary: '保持节奏', reasons: ['估值适中'], risks: [], position_rule: '', next_check: '',
     }
     expect(groupDecisions([{ code: '012920', name: '全球成长' }], { '012920': decision })).toEqual([{
-      action: '继续定投', names: ['全球成长'], confidence: '中', reason: '估值适中',
+      action: '分批定投', names: ['全球成长'], confidence: '中', reason: '估值适中',
     }])
   })
 })

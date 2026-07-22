@@ -1,8 +1,5 @@
-// 盘中估值（天天基金 JSONP）。移植自蜉蝣基金（FundVal）的实现思路，
-// 司南前端用同一全局回调 window.jsonpgz —— 纯前端、不依赖后端，盘中实时。
-// 接口：https://fundgz.1234567.com.cn/js/{code}.js → jsonpgz({...})
-// 字段：dwjz=昨日单位净值, gsz=盘中估算净值, gszzl=估算涨跌%, jzrq=净值日期, gztime=估值时间。
-// 注意：gszzl 是百分比可为负/为 0，统一用 Number.isFinite 判断；QDII/全球基金常返回海外收盘后的估值时间。
+// 天天基金当前估值表。旧 fundgz 单基金 JSONP 已下线；新表仅给更新日期，
+// 不提供精确分钟，因此必须显示为延迟估值，不能伪装成实时行情。
 
 import { recordSource } from './resilience'
 import { getHoldings, type Holding } from './holdings'
@@ -18,7 +15,7 @@ export interface Estimate {
   navDate: string // 上一净值日期 jzrq
   estTime: string // 估值时间 gztime
   kind: 'intraday' | 'overseas' | 'overseas_model'
-  label: '盘中估值' | '海外估值' | '海外模型估算'
+  label: '盘中估值' | '延迟估值' | '海外估值' | '海外模型估算'
   isRealtime: boolean
   sourceNote: string
   modelWeight?: number
@@ -42,7 +39,7 @@ export interface NavMove {
 export interface DailyMove {
   change: number | null
   baseNav: number | null
-  label: '估' | '净' | '海外非实时'
+  label: '估' | '净' | '延迟估值' | '海外非实时'
   sourceNote: string
   date?: string
 }
@@ -50,19 +47,14 @@ export interface DailyMove {
 export interface Gz {
   fundcode?: string; name?: string
   dwjz?: string; gsz?: string; gszzl?: string; jzrq?: string; gztime?: string
+  sourcePrecision?: 'date' | 'datetime'
 }
 
-interface Pending { resolve: (e: Estimate | null) => void; timer: number; gen: number }
-
-declare global {
-  interface Window { jsonpgz?: (d: Gz) => void }
-}
-
-const pending = new Map<string, Pending>()
-const codeGen: Record<string, number> = {}
 const cache = new Map<string, { e: Estimate | null; t: number }>()
-const TTL = 60_000 // 盘中估值 1 分钟内复用，避免频繁注入
+const TTL = 60_000
 const TIMEOUT = 8000
+let tablePromise: Promise<Map<string, Gz>> | null = null
+let tableCache: { rows: Map<string, Gz>; t: number } | null = null
 
 interface ModelLeg { code: string; weight: number; note?: string }
 interface ModelAdjustment { scale?: number; bias?: number }
@@ -153,7 +145,7 @@ export function preferredDailyMove(
   return {
     change: estimate.estChange,
     baseNav: estimate.lastNav,
-    label: estimate.isRealtime ? '估' : '海外非实时',
+    label: estimate.isRealtime ? '估' : (estimate.kind === 'overseas' ? '海外非实时' : '延迟估值'),
     sourceNote: estimate.sourceNote,
     date: estimate.estTime || estimate.navDate,
   }
@@ -174,7 +166,8 @@ export function normalizeEstimate(d: Gz): Estimate {
   const name = d.name || d.fundcode || ''
   const estTime = d.gztime || ''
   const overseas = isOverseasEstimate(name, estTime)
-  const isRealtime = !overseas
+  const dateOnly = d.sourcePrecision === 'date'
+  const isRealtime = !overseas && !dateOnly
   return {
     code: d.fundcode || '',
     name,
@@ -184,11 +177,11 @@ export function normalizeEstimate(d: Gz): Estimate {
     navDate: d.jzrq || '',
     estTime,
     kind: overseas ? 'overseas' : 'intraday',
-    label: overseas ? '海外估值' : '盘中估值',
+    label: overseas ? '海外估值' : (dateOnly ? '延迟估值' : '盘中估值'),
     isRealtime,
     sourceNote: overseas
       ? '天天基金当前仅返回海外基金收盘后/延迟估值，未提供实时盘中估值'
-      : '天天基金盘中估值',
+      : dateOnly ? '天天基金估值表仅提供更新日期，未提供精确分钟' : '天天基金盘中估值',
   }
 }
 
@@ -344,60 +337,65 @@ async function enhanceOverseasEstimate(e: Estimate): Promise<Estimate> {
   return attachAccuracy(applyOverseasModelEstimate(e, quotes, holdingsModel))
 }
 
-// 全局 JSONP 回调（接口里写死的函数名，按 fundcode 调度到对应 Promise）。
-async function handleJsonpgz(d: Gz) {
-  if (!d || !d.fundcode) return
-  const code = d.fundcode
-  const p = pending.get(code)
-  if (!p) return
-  pending.delete(code)
-  clearTimeout(p.timer)
-  const e = await enhanceOverseasEstimate(normalizeEstimate(d))
-  cache.set(code, { e, t: Date.now() })
-  recordSource('tiantian', '天天基金', true)
-  p.resolve(e)
+function fetchEstimateTable(force = false): Promise<Map<string, Gz>> {
+  if (!force && tableCache && Date.now() - tableCache.t < TTL) return Promise.resolve(tableCache.rows)
+  if (tablePromise) return tablePromise
+  const request = new Promise<Map<string, Gz>>((resolve, reject) => {
+    const callback = `__sinanEstimate_${Date.now()}_${Math.random().toString(36).slice(2)}`
+    const script = document.createElement('script')
+    const globals = window as unknown as Record<string, unknown>
+    const cleanup = () => { clearTimeout(timer); script.remove(); delete globals[callback] }
+    const timer = window.setTimeout(() => { cleanup(); reject(new Error('估值表请求超时')) }, TIMEOUT)
+    globals[callback] = (payload: { ErrCode?: number; Data?: { list?: Array<Record<string, unknown>> } }) => {
+      try {
+        const list = payload?.Data?.list
+        if (payload?.ErrCode !== 0 || !Array.isArray(list)) throw new Error('估值表响应无效')
+        const rows = new Map<string, Gz>()
+        for (const row of list) {
+          const code = String(row.bzdm || '')
+          if (!code) continue
+          rows.set(code, {
+            fundcode: code,
+            name: String(row.jjjc || code),
+            dwjz: String(row.dwjz ?? ''),
+            gsz: String(row.gsz ?? ''),
+            gszzl: String(row.gszzl ?? '').replace('%', ''),
+            jzrq: String(row.gzrq || ''),
+            gztime: String(row.gxrq || ''),
+            sourcePrecision: 'date',
+          })
+        }
+        tableCache = { rows, t: Date.now() }
+        cleanup()
+        resolve(rows)
+      } catch (error) { cleanup(); reject(error) }
+    }
+    const params = new URLSearchParams({
+      type: '0', sort: '1', orderType: 'asc', canbuy: '0', pageIndex: '1', pageSize: '30000', callback,
+    })
+    script.onerror = () => { cleanup(); reject(new Error('估值表请求失败')) }
+    script.src = `https://api.fund.eastmoney.com/FundGuZhi/GetFundGZList?${params}`
+    document.head.appendChild(script)
+  }).finally(() => { tablePromise = null })
+  tablePromise = request
+  return request
 }
 
-if (typeof window !== 'undefined') {
-  window.jsonpgz = handleJsonpgz
-}
-
-// 抓单只盘中估值；失败/超时返回 null。force 跳过缓存。
-// V3-9：记录天天基金源状态。
-export function fetchEstimate(code: string, force = false): Promise<Estimate | null> {
+// 抓单只估值；失败/超时返回 null。force 跳过缓存。
+export async function fetchEstimate(code: string, force = false): Promise<Estimate | null> {
   const c = cache.get(code)
   if (!force && c && Date.now() - c.t < TTL) return Promise.resolve(c.e)
-  return new Promise((resolve) => {
-    codeGen[code] = (codeGen[code] || 0) + 1
-    const gen = codeGen[code]
-    let recorded = false
-    const fail = () => { if (!recorded) { recorded = true; recordSource('tiantian', '天天基金', false) } }
-    const script = document.createElement('script')
-    script.src = `https://fundgz.1234567.com.cn/js/${code}.js?rt=${Date.now()}`
-    const timer = window.setTimeout(() => {
-      const p = pending.get(code)
-      if (p && p.gen === gen) {
-        pending.delete(code)
-        script.remove()
-        cache.set(code, { e: null, t: Date.now() })
-        fail()
-        resolve(null)
-      }
-    }, TIMEOUT)
-    pending.set(code, { resolve, timer, gen })
-    script.onerror = () => {
-      const p = pending.get(code)
-      if (p && p.gen === gen) {
-        clearTimeout(p.timer)
-        pending.delete(code)
-        script.remove()
-        fail()
-        resolve(null)
-      }
-    }
-    script.onload = () => script.remove()
-    document.head.appendChild(script)
-  })
+  try {
+    const raw = (await fetchEstimateTable(force)).get(code)
+    const estimate = raw ? await enhanceOverseasEstimate(normalizeEstimate(raw)) : null
+    cache.set(code, { e: estimate, t: Date.now() })
+    recordSource('tiantian', '天天基金估值表', estimate != null)
+    return estimate
+  } catch {
+    recordSource('tiantian', '天天基金估值表', false)
+    cache.set(code, { e: null, t: Date.now() })
+    return null
+  }
 }
 
 // 批量并发抓取，返回 code → Estimate|null 映射。

@@ -19,7 +19,7 @@ def test_portfolio_decisions_batch(sample_detail, monkeypatch):
     assert len(r["decisions"]) == 2
     for d in r["decisions"]:
         assert "action" in d
-        assert d["action"] in ("分批买入", "继续定投", "持有观望", "停止加仓", "部分观察", "考虑替换", "观察")
+        assert d["action"] in ("买入", "分批定投", "观望", "加仓", "持有", "减仓", "卖出")
 
 
 def test_portfolio_decisions_with_holding(sample_detail, monkeypatch):

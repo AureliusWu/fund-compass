@@ -20,13 +20,7 @@ export default defineConfig({
         runtimeCaching: [
           {
             urlPattern: ({ url }) => url.pathname.startsWith('/api'),
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'fc-api-v2',
-              networkTimeoutSeconds: 4,
-              expiration: { maxEntries: 200, maxAgeSeconds: 60 * 60 },
-              cacheableResponse: { statuses: [0, 200] },
-            },
+            handler: 'NetworkOnly',
           },
           {
             // 排行/富集静态数据：StaleWhileRevalidate，首次后秒开 + 离线可用 + 后台更新
@@ -44,7 +38,7 @@ export default defineConfig({
       manifest: {
         name: '司南基金',
         short_name: '司南基金',
-        description: '个人基金选基与择时辅助工具',
+        description: '司南基金 v6.0.0 · 个人基金选基与择时辅助工具',
         theme_color: '#3F765C',
         background_color: '#F8F7F1',
         display: 'standalone',

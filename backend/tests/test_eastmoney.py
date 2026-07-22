@@ -36,6 +36,24 @@ def test_num():
     assert _num("") is None
 
 
+def test_live_estimate_keeps_upstream_quote_time(monkeypatch):
+    from service import eastmoney as em
+    class Response:
+        def raise_for_status(self):
+            return None
+        def json(self):
+            return {"ErrCode": 0, "TotalCount": 1, "Data": {"list": [{
+                "bzdm": "000001", "jjjc": "测试基金", "dwjz": "1.0", "gsz": "1.01",
+                "gszzl": "1.0%", "gzrq": "2026-07-21", "gxrq": "2026-07-22",
+            }]}}
+    monkeypatch.setattr(em.requests, "get", lambda *args, **kwargs: Response())
+    result = em.fetch_estimate("000001")
+    assert result["estimate_change"] == 1.0
+    assert result["source_time"] == "2026-07-22"
+    assert result["source_time_precision"] == "date"
+    assert result["fetched_at"] != result["source_time"]
+
+
 def test_primary_daily_returns_are_compounded_into_cumulative_return():
     points = _json_var(JS, "Data_netWorthTrend", [])
     history = _build_primary_nav_history(points)

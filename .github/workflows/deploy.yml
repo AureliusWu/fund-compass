@@ -20,6 +20,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: frontend
@@ -28,12 +29,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: npm install
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run type-check
+      - run: npm run test
       - run: npm run build
         env:
           # 在仓库 Settings → Actions → Variables 里设 VITE_API_BASE 为后端公网地址；
           # 未设时为空，前端回退 /api（GitHub Pages 上无后端会显示未连接，属正常）。
           VITE_API_BASE: ${{ vars.VITE_API_BASE }}
+      - name: Verify production artifact
+        run: test -f dist/index.html && test -f dist/manifest.webmanifest
       - uses: actions/upload-pages-artifact@v3
         with:
           path: frontend/dist
@@ -41,6 +48,7 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

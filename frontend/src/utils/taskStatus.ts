@@ -4,6 +4,7 @@ export interface TaskConfig {
   workflow: string
   cadence: string
   staleHours: number
+  manual?: boolean
 }
 
 export interface TaskStatus {
@@ -35,10 +36,10 @@ const TASK_CACHE_KEY = 'sinan_task_status_v1'
 const TASK_CACHE_TTL = 10 * 60 * 1000
 
 export const SCHEDULED_TASKS: TaskConfig[] = [
-  { id: 'enrich', label: '离线富集', workflow: 'enrich.yml', cadence: '每周一 09:00', staleHours: 8 * 24 },
-  { id: 'estimate-push', label: '估值推送', workflow: 'estimate-push.yml', cadence: '交易日 14:30', staleHours: 72 },
+  { id: 'enrich', label: '离线富集', workflow: 'enrich-holdings.yml', cadence: '每周一 09:00', staleHours: 8 * 24 },
+  { id: 'estimate-push', label: '估值推送', workflow: 'manual-estimate-push.yml', cadence: '人工应急', staleHours: 0, manual: true },
   { id: 'overseas-accuracy', label: '海外精度', workflow: 'overseas-accuracy.yml', cadence: '交易日 14:35', staleHours: 72 },
-  { id: 'signal-notify', label: '信号保活', workflow: 'notify.yml', cadence: '交易时段 10 分钟', staleHours: 72 },
+  { id: 'signal-notify', label: '信号通知', workflow: 'notify.yml', cadence: '人工应急', staleHours: 0, manual: true },
 ]
 
 function cacheGet(): TaskStatus[] | null {
@@ -68,14 +69,14 @@ export function normalizeTaskStatus(config: TaskConfig, run: WorkflowRun | null,
       updatedAt: null,
       ageMinutes: null,
       ok: false,
-      stale: true,
-      note: '暂无运行记录',
+      stale: !config.manual,
+      note: config.manual ? '按需手动运行' : '暂无运行记录',
     }
   }
 
   const updatedAt = run.updated_at || run.run_started_at || run.created_at || null
   const ageMinutes = updatedAt ? Math.max(0, Math.round((now - Date.parse(updatedAt)) / 60000)) : null
-  const stale = ageMinutes != null ? ageMinutes > config.staleHours * 60 : true
+  const stale = config.manual ? false : (ageMinutes != null ? ageMinutes > config.staleHours * 60 : true)
   const status = run.status || 'unknown'
   const conclusion = run.conclusion ?? null
   const completedOk = status === 'completed' && conclusion === 'success'

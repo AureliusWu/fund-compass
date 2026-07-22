@@ -63,7 +63,8 @@ export function normalizeEstimate(raw: Record<string, unknown>, code: string): E
   const hour = Number(/\s(\d{1,2}):\d{2}/.exec(time)?.[1])
   const overseas = /QDII|全球|海外|新兴市场|纳斯达克|标普|恒生|港股|美元|国际|日经|德国|越南|印度|香港/i.test(name)
     && Number.isFinite(hour) && (hour < 9 || hour >= 15)
-  return { code, name, lastNav, estNav, change, time, label: overseas ? '海外估值' : '盘中估值' }
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(time)
+  return { code, name, lastNav, estNav, change, time, label: overseas ? '海外估值' : (dateOnly ? '延迟估值' : '盘中估值') }
 }
 
 function beijingNow(now = new Date()): { date: string; iso: string; weekday: string } {
@@ -105,14 +106,27 @@ async function fileContent(file?: { content?: string; raw_url?: string; truncate
   return file.content ?? null
 }
 
-async function fetchEstimate(code: string): Promise<Estimate | null> {
-  const response = await fetch(`https://fundgz.1234567.com.cn/js/${code}.js?rt=${Date.now()}`, {
-    headers: { Referer: 'http://fund.eastmoney.com/' },
+async function fetchEstimates(codes: string[]): Promise<Map<string, Estimate>> {
+  const query = new URLSearchParams({
+    type: '0', sort: '1', orderType: 'asc', canbuy: '0', pageIndex: '1', pageSize: '30000',
   })
-  if (!response.ok) return null
-  const match = /jsonpgz\((.*)\)/.exec(await response.text())
-  if (!match) return null
-  return normalizeEstimate(JSON.parse(match[1]) as Record<string, unknown>, code)
+  const response = await fetch(`https://api.fund.eastmoney.com/FundGuZhi/GetFundGZList?${query}`, {
+    headers: { Referer: 'https://fund.eastmoney.com/fundguzhi.html' },
+  })
+  if (!response.ok) throw new Error(`估值表 HTTP ${response.status}`)
+  const payload = await response.json() as { ErrCode?: number; Data?: { list?: Array<Record<string, unknown>> } }
+  if (payload.ErrCode !== 0 || !Array.isArray(payload.Data?.list)) throw new Error('估值表响应无效')
+  const wanted = new Set(codes)
+  const estimates = new Map<string, Estimate>()
+  for (const row of payload.Data.list) {
+    const code = String(row.bzdm || '')
+    if (!wanted.has(code)) continue
+    estimates.set(code, normalizeEstimate({
+      name: row.jjjc, dwjz: row.dwjz, gsz: row.gsz,
+      gszzl: String(row.gszzl ?? '').replace('%', ''), gztime: row.gxrq,
+    }, code))
+  }
+  return estimates
 }
 
 function portfolioItems(entries: WatchEntry[], estimates: Map<string, Estimate>) {
@@ -242,8 +256,7 @@ export async function run(env: Env, force: boolean, clock = new Date()) {
 
   const unique = new Map<string, WatchEntry>()
   for (const entry of entries) if (!unique.has(entry.code)) unique.set(entry.code, entry)
-  const estimatePairs = await Promise.all([...unique].map(async ([code]) => [code, await fetchEstimate(code)] as const))
-  const estimates = new Map(estimatePairs.filter((pair): pair is [string, Estimate] => pair[1] != null))
+  const estimates = await fetchEstimates([...unique.keys()])
   if (!estimates.size) throw new Error('未取得任何估值数据')
   const fresh = [...estimates.values()].some((estimate) => estimate.time.startsWith(now.date))
   if (!force && !fresh) return { status: 'skipped', reason: 'no_fresh_estimate' }
@@ -297,7 +310,7 @@ export default {
       } catch (error) {
         runtime = { state_available: false, last_error: error instanceof Error ? error.message : String(error) }
       }
-      return Response.json({ status: 'ok', service: 'sinan-estimate-push', version: '1.1.0', runtime, configured: {
+      return Response.json({ status: 'ok', service: 'sinan-estimate-push', version: '6.0.0', runtime, configured: {
         gist_id: Boolean(env.GIST_ID), fund_api: Boolean(env.FUND_API_BASE),
         gist_token: Boolean(env.GIST_TOKEN), serverchan: Boolean(env.WECHAT_SENDKEY), admin: Boolean(env.ADMIN_TOKEN),
         worker: Boolean(env.WORKER_TOKEN),

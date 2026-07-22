@@ -116,11 +116,18 @@ async function loadData(showInitialLoading = true) {
   error.value = ''
   estDone.value = false
   holdingsDone.value = false
-  // 盘中估值独立于后端，立即并发抓取（不阻塞详情）
-  fetchEstimate(code).then((e) => { est.value = e }).finally(() => { estDone.value = true })
+  // 页面显示估值与后端决策并行取数；后端会独立获取盘中行情并写入可追溯决策上下文。
+  fetchEstimate(code, !showInitialLoading).then((e) => { est.value = e }).finally(() => { estDone.value = true })
   getHoldings(code).then((h) => { holdings.value = h }).finally(() => { holdingsDone.value = true })
   try {
-    const a = await funds.analyze(code)
+    await watch.load()
+    const userHoldings = watch.holdingsFor(code)
+    const targets = userHoldings.map((item) => item.target_weight).filter((value): value is number => value != null && Number.isFinite(value))
+    const a = await funds.analyze(code, {
+      held: userHoldings.length > 0,
+      target_weight: targets.length ? targets.reduce((sum, value) => sum + value, 0) : undefined,
+      force: !showInitialLoading,
+    })
     detail.value = a.detail
     score.value = a.score
     signal.value = a.signal
