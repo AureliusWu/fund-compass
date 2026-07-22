@@ -1,12 +1,47 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   applyOverseasModelEstimate,
+  fetchEstimate,
+  fetchEstimates,
   holdingsToOverseasModel,
   latestNavMove,
   normalizeEstimate,
   preferredDailyMove,
 } from './estimate'
+
+afterEach(() => vi.unstubAllGlobals())
+
+describe('estimate proxy', () => {
+  it('loads a batch through the Worker instead of browser-side Eastmoney JSONP', async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      expect(String(input)).toContain('/estimates?codes=123456')
+      return Response.json({ items: [{
+        code: '123456', name: '代理测试基金', last_nav: 1, est_nav: 1.01,
+        est_change: 1, nav_date: '2026-07-21', est_time: '2026-07-22',
+      }] })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const rows = await fetchEstimates(['123456'])
+    expect(rows.get('123456')).toMatchObject({ estChange: 1, isRealtime: false, label: '延迟估值' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the previous value and marks it stale when the proxy later fails', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ items: [{
+        code: '123457', name: '缓存测试基金', last_nav: 1, est_nav: 1.02,
+        est_change: 2, nav_date: '2026-07-21', est_time: '2026-07-22',
+      }] }))
+      .mockRejectedValueOnce(new Error('offline'))
+    vi.stubGlobal('fetch', fetchMock)
+
+    expect((await fetchEstimate('123457', true))?.estChange).toBe(2)
+    const stale = await fetchEstimate('123457', true)
+    expect(stale).toMatchObject({ estChange: 2, isRealtime: false })
+    expect(stale?.sourceNote).toContain('代理请求失败，保留上次数据')
+  })
+})
 
 describe('normalizeEstimate', () => {
   it('labels QDII early-morning valuation as overseas estimate', () => {

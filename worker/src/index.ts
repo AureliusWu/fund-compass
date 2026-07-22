@@ -28,6 +28,7 @@ export interface Estimate {
   estNav: number | null
   change: number | null
   time: string
+  navDate: string
   label: string
 }
 
@@ -64,7 +65,11 @@ export function normalizeEstimate(raw: Record<string, unknown>, code: string): E
   const overseas = /QDII|全球|海外|新兴市场|纳斯达克|标普|恒生|港股|美元|国际|日经|德国|越南|印度|香港/i.test(name)
     && Number.isFinite(hour) && (hour < 9 || hour >= 15)
   const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(time)
-  return { code, name, lastNav, estNav, change, time, label: overseas ? '海外估值' : (dateOnly ? '延迟估值' : '盘中估值') }
+  return {
+    code, name, lastNav, estNav, change, time,
+    navDate: String(raw.gzrq || ''),
+    label: overseas ? '海外估值' : (dateOnly ? '延迟估值' : '盘中估值'),
+  }
 }
 
 function beijingNow(now = new Date()): { date: string; iso: string; weekday: string } {
@@ -123,10 +128,68 @@ async function fetchEstimates(codes: string[]): Promise<Map<string, Estimate>> {
     if (!wanted.has(code)) continue
     estimates.set(code, normalizeEstimate({
       name: row.jjjc, dwjz: row.dwjz, gsz: row.gsz,
-      gszzl: String(row.gszzl ?? '').replace('%', ''), gztime: row.gxrq,
+      gszzl: String(row.gszzl ?? '').replace('%', ''), gztime: row.gxrq, gzrq: row.gzrq,
     }, code))
   }
   return estimates
+}
+
+const PUBLIC_ORIGINS = new Set([
+  'https://aureliuswu.github.io',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+])
+
+function publicHeaders(request: Request): HeadersInit {
+  const origin = request.headers.get('Origin') || ''
+  return {
+    'Access-Control-Allow-Origin': PUBLIC_ORIGINS.has(origin) ? origin : 'https://aureliuswu.github.io',
+    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Max-Age': '86400',
+    'Cache-Control': 'public, max-age=20',
+    'Vary': 'Origin',
+  }
+}
+
+async function publicEstimates(request: Request, url: URL): Promise<Response> {
+  const codes = [...new Set((url.searchParams.get('codes') || '').split(',').map((v) => v.trim()).filter(Boolean))]
+  if (!codes.length || codes.length > 50 || codes.some((code) => !/^\d{6}$/.test(code))) {
+    return Response.json({ error: 'codes must contain 1-50 six-digit fund codes' }, {
+      status: 400, headers: publicHeaders(request),
+    })
+  }
+  try {
+    const estimates = await fetchEstimates(codes)
+    const items = codes.map((code) => estimates.get(code)).filter((item): item is Estimate => Boolean(item))
+    return Response.json({
+      source: 'eastmoney_estimate_table',
+      source_time_precision: 'date',
+      fetched_at: new Date().toISOString(),
+      requested: codes.length,
+      returned: items.length,
+      items: items.map((item) => ({
+        code: item.code,
+        name: item.name,
+        last_nav: item.lastNav,
+        est_nav: item.estNav,
+        est_change: item.change,
+        nav_date: item.navDate,
+        est_time: item.time,
+        source_time_precision: 'date',
+        est_label: item.label,
+        est_kind: 'estimate',
+        est_realtime: false,
+        est_note: '东方财富盘中估算；上游仅提供行情日期，未提供精确分钟',
+        status: 'ok',
+        source: 'eastmoney_estimate_table',
+      })),
+    }, { headers: publicHeaders(request) })
+  } catch (error) {
+    return Response.json({ error: error instanceof Error ? error.message : String(error) }, {
+      status: 502, headers: publicHeaders(request),
+    })
+  }
 }
 
 function portfolioItems(entries: WatchEntry[], estimates: Map<string, Estimate>) {
@@ -295,6 +358,12 @@ export default {
   },
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
+    if (request.method === 'OPTIONS' && url.pathname === '/estimates') {
+      return new Response(null, { status: 204, headers: publicHeaders(request) })
+    }
+    if (request.method === 'GET' && url.pathname === '/estimates') {
+      return publicEstimates(request, url)
+    }
     if (url.pathname === '/health') {
       let runtime: Record<string, unknown> = { state_available: false }
       try {
@@ -310,7 +379,7 @@ export default {
       } catch (error) {
         runtime = { state_available: false, last_error: error instanceof Error ? error.message : String(error) }
       }
-      return Response.json({ status: 'ok', service: 'sinan-estimate-push', version: '6.0.0', runtime, configured: {
+      return Response.json({ status: 'ok', service: 'sinan-estimate-push', version: '6.0.1', runtime, configured: {
         gist_id: Boolean(env.GIST_ID), fund_api: Boolean(env.FUND_API_BASE),
         gist_token: Boolean(env.GIST_TOKEN), serverchan: Boolean(env.WECHAT_SENDKEY), admin: Boolean(env.ADMIN_TOKEN),
         worker: Boolean(env.WORKER_TOKEN),

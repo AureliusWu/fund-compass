@@ -53,8 +53,9 @@ export interface Gz {
 const cache = new Map<string, { e: Estimate | null; t: number }>()
 const TTL = 60_000
 const TIMEOUT = 8000
-let tablePromise: Promise<Map<string, Gz>> | null = null
 let tableCache: { rows: Map<string, Gz>; t: number } | null = null
+const ESTIMATE_PROXY = (import.meta.env.VITE_ESTIMATE_PROXY as string)
+  || 'https://sinan-estimate-push.ligugu69.workers.dev/estimates'
 
 interface ModelLeg { code: string; weight: number; note?: string }
 interface ModelAdjustment { scale?: number; bias?: number }
@@ -337,47 +338,39 @@ async function enhanceOverseasEstimate(e: Estimate): Promise<Estimate> {
   return attachAccuracy(applyOverseasModelEstimate(e, quotes, holdingsModel))
 }
 
-function fetchEstimateTable(force = false): Promise<Map<string, Gz>> {
-  if (!force && tableCache && Date.now() - tableCache.t < TTL) return Promise.resolve(tableCache.rows)
-  if (tablePromise) return tablePromise
-  const request = new Promise<Map<string, Gz>>((resolve, reject) => {
-    const callback = `__sinanEstimate_${Date.now()}_${Math.random().toString(36).slice(2)}`
-    const script = document.createElement('script')
-    const globals = window as unknown as Record<string, unknown>
-    const cleanup = () => { clearTimeout(timer); script.remove(); delete globals[callback] }
-    const timer = window.setTimeout(() => { cleanup(); reject(new Error('估值表请求超时')) }, TIMEOUT)
-    globals[callback] = (payload: { ErrCode?: number; Data?: { list?: Array<Record<string, unknown>> } }) => {
-      try {
-        const list = payload?.Data?.list
-        if (payload?.ErrCode !== 0 || !Array.isArray(list)) throw new Error('估值表响应无效')
-        const rows = new Map<string, Gz>()
-        for (const row of list) {
-          const code = String(row.bzdm || '')
-          if (!code) continue
-          rows.set(code, {
-            fundcode: code,
-            name: String(row.jjjc || code),
-            dwjz: String(row.dwjz ?? ''),
-            gsz: String(row.gsz ?? ''),
-            gszzl: String(row.gszzl ?? '').replace('%', ''),
-            jzrq: String(row.gzrq || ''),
-            gztime: String(row.gxrq || ''),
-            sourcePrecision: 'date',
-          })
-        }
-        tableCache = { rows, t: Date.now() }
-        cleanup()
-        resolve(rows)
-      } catch (error) { cleanup(); reject(error) }
-    }
-    const params = new URLSearchParams({
-      type: '0', sort: '1', orderType: 'asc', canbuy: '0', pageIndex: '1', pageSize: '30000', callback,
-    })
-    script.onerror = () => { cleanup(); reject(new Error('估值表请求失败')) }
-    script.src = `https://api.fund.eastmoney.com/FundGuZhi/GetFundGZList?${params}`
-    document.head.appendChild(script)
-  }).finally(() => { tablePromise = null })
-  tablePromise = request
+function fetchEstimateTable(codes: string[], force = false): Promise<Map<string, Gz>> {
+  if (!force && tableCache && Date.now() - tableCache.t < TTL && codes.every((code) => tableCache?.rows.has(code))) {
+    return Promise.resolve(tableCache.rows)
+  }
+  const request = (async () => {
+    const controller = new AbortController()
+    const timer = globalThis.setTimeout(() => controller.abort(), TIMEOUT)
+    try {
+      const query = new URLSearchParams({ codes: codes.join(',') })
+      if (force) query.set('_', String(Date.now()))
+      const response = await fetch(`${ESTIMATE_PROXY}?${query}`, { cache: 'no-store', signal: controller.signal })
+      if (!response.ok) throw new Error(`估值代理 HTTP ${response.status}`)
+      const payload = await response.json() as { items?: Array<Record<string, unknown>> }
+      if (!Array.isArray(payload.items)) throw new Error('估值代理响应无效')
+      const rows = new Map<string, Gz>()
+      for (const row of payload.items) {
+        const code = String(row.code || '')
+        if (!code) continue
+        rows.set(code, {
+          fundcode: code,
+          name: String(row.name || code),
+          dwjz: String(row.last_nav ?? ''),
+          gsz: String(row.est_nav ?? ''),
+          gszzl: String(row.est_change ?? ''),
+          jzrq: String(row.nav_date || ''),
+          gztime: String(row.est_time || ''),
+          sourcePrecision: 'date',
+        })
+      }
+      tableCache = { rows, t: Date.now() }
+      return rows
+    } finally { globalThis.clearTimeout(timer) }
+  })()
   return request
 }
 
@@ -386,21 +379,45 @@ export async function fetchEstimate(code: string, force = false): Promise<Estima
   const c = cache.get(code)
   if (!force && c && Date.now() - c.t < TTL) return Promise.resolve(c.e)
   try {
-    const raw = (await fetchEstimateTable(force)).get(code)
+    const raw = (await fetchEstimateTable([code], force)).get(code)
     const estimate = raw ? await enhanceOverseasEstimate(normalizeEstimate(raw)) : null
     cache.set(code, { e: estimate, t: Date.now() })
     recordSource('tiantian', '天天基金估值表', estimate != null)
     return estimate
   } catch {
-    recordSource('tiantian', '天天基金估值表', false)
-    cache.set(code, { e: null, t: Date.now() })
+    recordSource('tiantian', '司南估值代理', false)
+    if (c?.e) {
+      return { ...c.e, isRealtime: false, sourceNote: `${c.e.sourceNote} · 代理请求失败，保留上次数据` }
+    }
     return null
   }
 }
 
 // 批量并发抓取，返回 code → Estimate|null 映射。
 export async function fetchEstimates(codes: string[]): Promise<Map<string, Estimate | null>> {
-  const out = new Map<string, Estimate | null>()
-  await Promise.all(codes.map(async (c) => { out.set(c, await fetchEstimate(c)) }))
+  const unique = [...new Set(codes.filter((code) => /^\d{6}$/.test(code)))]
+  const out = new Map<string, Estimate | null>(unique.map((code) => [code, null]))
+  try {
+    const rows = await fetchEstimateTable(unique)
+    await Promise.all(unique.map(async (code) => {
+      const raw = rows.get(code)
+      const estimate = raw ? await enhanceOverseasEstimate(normalizeEstimate(raw)) : null
+      cache.set(code, { e: estimate, t: Date.now() })
+      out.set(code, estimate)
+    }))
+    recordSource('tiantian', '司南估值代理', [...out.values()].some(Boolean))
+  } catch {
+    recordSource('tiantian', '司南估值代理', false)
+    unique.forEach((code) => {
+      const previous = cache.get(code)?.e
+      if (previous) {
+        out.set(code, {
+          ...previous,
+          isRealtime: false,
+          sourceNote: `${previous.sourceNote} · 代理请求失败，保留上次数据`,
+        })
+      }
+    })
+  }
   return out
 }

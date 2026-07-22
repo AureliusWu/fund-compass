@@ -26,7 +26,11 @@ npm test
 npm run deploy
 ```
 
-部署后访问 `/health` 只能看到各变量是否存在，不会泄露值。手动测试：
+部署后访问 `/health` 只能看到各变量是否存在，不会泄露值。公开只读接口
+`GET /estimates?codes=000001,000002` 仅接受 1–50 个六位基金代码，并只为司南/蜉蝣
+GitHub Pages 与本地开发源开放浏览器跨域访问。它不会接收任意上游 URL，也不会返回 Secret。
+
+手动测试：
 
 ```bash
 curl -X POST "https://sinan-estimate-push.<subdomain>.workers.dev/test" \

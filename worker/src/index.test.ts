@@ -9,7 +9,7 @@ const monday1430 = new Date('2026-07-13T06:30:00Z')
 const monday1440 = new Date('2026-07-13T06:40:00Z')
 
 function fakeNetwork(sendStatuses = [200], options: {
-  patchFails?: boolean; missingSecond?: boolean; gistReadFails?: boolean
+  patchFails?: boolean; missingSecond?: boolean; gistReadFails?: boolean; estimateFails?: boolean
   backend?: 'success' | 'timeout'
 } = {}) {
   let state: Record<string, unknown> = {}
@@ -30,6 +30,7 @@ function fakeNetwork(sendStatuses = [200], options: {
       return Response.json({ ok: true })
     }
     if (url.includes('/FundGuZhi/GetFundGZList')) {
+      if (options.estimateFails) return new Response('upstream unavailable', { status: 503 })
       const list = ['000001', ...(options.missingSecond ? [] : ['000002'])].map((code) => ({
         bzdm: code, jjjc: `基金${code}`, dwjz: '1', gsz: '1.01', gszzl: '1%', gxrq: '2026-07-13',
       }))
@@ -60,7 +61,7 @@ describe('Cloudflare push worker', () => {
   it('normalizes and formats an estimate', () => {
     const result = normalizeEstimate({ name: '测试基金', dwjz: '1.0', gsz: '1.02', gztime: '2026-07-13 14:30' }, '000001')
     expect(result.change).toBeCloseTo(2)
-    const estimate: Estimate = { code: '000001', name: '测试基金', lastNav: 1, estNav: 1.02, change: 2, time: '2026-07-13 14:30', label: '盘中估值' }
+    const estimate: Estimate = { code: '000001', name: '测试基金', lastNav: 1, estNav: 1.02, change: 2, time: '2026-07-13 14:30', navDate: '2026-07-12', label: '盘中估值' }
     expect(formatMessage([{ code: '000001' }], new Map([['000001', estimate]]), null)).toContain('+2.00%')
   })
 
@@ -130,8 +131,33 @@ describe('Cloudflare push worker', () => {
     const body = await response.text()
     expect(response.status).toBe(200)
     expect(body).toContain('state_available')
+    expect(body).toContain('6.0.1')
     expect(body).not.toContain('gist-token')
     expect(body).not.toContain('send-key')
     expect(body).not.toContain('worker-token')
+  })
+
+  it('serves a bounded CORS estimate batch without exposing secrets', async () => {
+    fakeNetwork()
+    const response = await worker.fetch(new Request('https://worker.test/estimates?codes=000001,000002', {
+      headers: { Origin: 'https://aureliuswu.github.io' },
+    }), env)
+    const body = await response.json() as { returned: number; items: Array<Record<string, unknown>> }
+    expect(response.status).toBe(200)
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBe('https://aureliuswu.github.io')
+    expect(body.returned).toBe(2)
+    expect(body.items[0]).toMatchObject({ code: '000001', est_change: 1, source_time_precision: 'date' })
+  })
+
+  it('rejects invalid or oversized public estimate batches', async () => {
+    const response = await worker.fetch(new Request('https://worker.test/estimates?codes=bad'), env)
+    expect(response.status).toBe(400)
+  })
+
+  it('returns an explicit gateway failure when the estimate upstream is unavailable', async () => {
+    fakeNetwork([200], { estimateFails: true })
+    const response = await worker.fetch(new Request('https://worker.test/estimates?codes=000001'), env)
+    expect(response.status).toBe(502)
+    expect(await response.text()).toContain('HTTP 503')
   })
 })
