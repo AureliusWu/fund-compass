@@ -152,17 +152,22 @@ function publicHeaders(request: Request): HeadersInit {
   }
 }
 
-async function publicEstimates(request: Request, url: URL): Promise<Response> {
+async function publicEstimates(request: Request, url: URL, ctx?: ExecutionContext): Promise<Response> {
   const codes = [...new Set((url.searchParams.get('codes') || '').split(',').map((v) => v.trim()).filter(Boolean))]
   if (!codes.length || codes.length > 50 || codes.some((code) => !/^\d{6}$/.test(code))) {
     return Response.json({ error: 'codes must contain 1-50 six-digit fund codes' }, {
       status: 400, headers: publicHeaders(request),
     })
   }
+  const origin = request.headers.get('Origin') || 'none'
+  const cacheKey = new Request(`https://estimate-cache.internal/v1?codes=${encodeURIComponent([...codes].sort().join(','))}&origin=${encodeURIComponent(origin)}`)
+  const edgeCache = typeof caches === 'undefined' ? null : caches.default
+  const cached = edgeCache ? await edgeCache.match(cacheKey) : null
+  if (cached) return cached
   try {
     const estimates = await fetchEstimates(codes)
     const items = codes.map((code) => estimates.get(code)).filter((item): item is Estimate => Boolean(item))
-    return Response.json({
+    const response = Response.json({
       source: 'eastmoney_estimate_table',
       source_time_precision: 'date',
       fetched_at: new Date().toISOString(),
@@ -185,6 +190,8 @@ async function publicEstimates(request: Request, url: URL): Promise<Response> {
         source: 'eastmoney_estimate_table',
       })),
     }, { headers: publicHeaders(request) })
+    if (edgeCache && ctx) ctx.waitUntil(edgeCache.put(cacheKey, response.clone()))
+    return response
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : String(error) }, {
       status: 502, headers: publicHeaders(request),
@@ -356,13 +363,13 @@ export default {
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil(run(env, false).then(console.log).catch((error) => console.error(error)))
   },
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
     const url = new URL(request.url)
     if (request.method === 'OPTIONS' && url.pathname === '/estimates') {
       return new Response(null, { status: 204, headers: publicHeaders(request) })
     }
     if (request.method === 'GET' && url.pathname === '/estimates') {
-      return publicEstimates(request, url)
+      return publicEstimates(request, url, ctx)
     }
     if (url.pathname === '/health') {
       let runtime: Record<string, unknown> = { state_available: false }
