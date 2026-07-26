@@ -34,6 +34,17 @@ export interface Estimate {
   note?: string
 }
 
+export interface FundHolding {
+  code: string
+  name: string
+  ratio: number
+}
+
+export interface FundHoldings {
+  reportDate: string
+  items: FundHolding[]
+}
+
 interface PushState {
   date: string
   sent_slots: string[]
@@ -188,6 +199,50 @@ async function fetchOfficialNavs(codes: string[]): Promise<Map<string, Estimate>
   return output
 }
 
+function htmlText(value: string): string {
+  return value
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;|&#160;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .trim()
+}
+
+export function parseFundHoldings(payload: string): FundHoldings {
+  if (!/\bapidata\s*=/.test(payload)) throw new Error('重仓响应无效')
+  const reportDate = /截止至：\s*<font[^>]*>\s*(\d{4}-\d{2}-\d{2})/i.exec(payload)?.[1]
+    || /(\d{4}-\d{2}-\d{2})/.exec(payload)?.[1]
+    || ''
+  const items: FundHolding[] = []
+  const rows = payload.match(/<tr\b[\s\S]*?<\/tr>/gi) || []
+  for (const row of rows) {
+    const cells = [...row.matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gi)].map((match) => match[1])
+    if (cells.length < 7) continue
+    const code = htmlText(cells[1])
+    const name = htmlText(cells[2])
+    const ratio = numberOrNull(htmlText(cells[6]).replace('%', '').replace(/,/g, ''))
+    if (!code || !name || ratio == null) continue
+    items.push({ code, name, ratio })
+    if (items.length >= 10) break
+  }
+  return { reportDate, items }
+}
+
+async function fetchFundHoldings(code: string): Promise<FundHoldings> {
+  const query = new URLSearchParams({ type: 'jjcc', code, topline: '10' })
+  const response = await fetch(`https://fundf10.eastmoney.com/FundArchivesDatas.aspx?${query}`, {
+    headers: {
+      Referer: `https://fundf10.eastmoney.com/ccmx_${code}.html`,
+      'User-Agent': 'sinan-cloudflare-worker',
+    },
+  })
+  if (!response.ok) throw new Error(`重仓接口 HTTP ${response.status}`)
+  return parseFundHoldings(await response.text())
+}
+
 const PUBLIC_ORIGINS = new Set([
   'https://aureliuswu.github.io',
   'http://localhost:5173',
@@ -257,6 +312,40 @@ async function publicEstimates(request: Request, url: URL, ctx?: ExecutionContex
         source: item.kind === 'official_nav' ? 'eastmoney_official_nav' : 'eastmoney_estimate_table',
       })),
     }, { headers: publicHeaders(request) })
+    if (edgeCache && ctx) ctx.waitUntil(edgeCache.put(cacheKey, response.clone()))
+    return response
+  } catch (error) {
+    return Response.json({ error: error instanceof Error ? error.message : String(error) }, {
+      status: 502, headers: publicHeaders(request),
+    })
+  }
+}
+
+async function publicFundHoldings(request: Request, url: URL, ctx?: ExecutionContext): Promise<Response> {
+  const code = (url.searchParams.get('code') || '').trim()
+  if (!/^\d{6}$/.test(code)) {
+    return Response.json({ error: 'code must be a six-digit fund code' }, {
+      status: 400, headers: publicHeaders(request),
+    })
+  }
+  const origin = request.headers.get('Origin') || 'none'
+  const cacheKey = new Request(`https://holdings-cache.internal/v1?code=${code}&origin=${encodeURIComponent(origin)}`)
+  const edgeCache = typeof caches === 'undefined' ? null : caches.default
+  const cached = edgeCache ? await edgeCache.match(cacheKey) : null
+  if (cached) return cached
+  try {
+    const holdings = await fetchFundHoldings(code)
+    const headers = new Headers(publicHeaders(request))
+    headers.set('Cache-Control', 'public, max-age=1800')
+    const response = Response.json({
+      source: 'eastmoney_fund_archives',
+      fetched_at: new Date().toISOString(),
+      code,
+      report_date: holdings.reportDate,
+      status: holdings.items.length ? 'ok' : 'empty',
+      returned: holdings.items.length,
+      items: holdings.items,
+    }, { headers })
     if (edgeCache && ctx) ctx.waitUntil(edgeCache.put(cacheKey, response.clone()))
     return response
   } catch (error) {
@@ -432,11 +521,14 @@ export default {
   },
   async fetch(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
     const url = new URL(request.url)
-    if (request.method === 'OPTIONS' && url.pathname === '/estimates') {
+    if (request.method === 'OPTIONS' && (url.pathname === '/estimates' || url.pathname === '/holdings')) {
       return new Response(null, { status: 204, headers: publicHeaders(request) })
     }
     if (request.method === 'GET' && url.pathname === '/estimates') {
       return publicEstimates(request, url, ctx)
+    }
+    if (request.method === 'GET' && url.pathname === '/holdings') {
+      return publicFundHoldings(request, url, ctx)
     }
     if (url.pathname === '/health') {
       let runtime: Record<string, unknown> = { state_available: false }
@@ -453,7 +545,7 @@ export default {
       } catch (error) {
         runtime = { state_available: false, last_error: error instanceof Error ? error.message : String(error) }
       }
-      return Response.json({ status: 'ok', service: 'sinan-estimate-push', version: '6.0.2', runtime, configured: {
+      return Response.json({ status: 'ok', service: 'sinan-estimate-push', version: '6.0.3', runtime, configured: {
         gist_id: Boolean(env.GIST_ID), fund_api: Boolean(env.FUND_API_BASE),
         gist_token: Boolean(env.GIST_TOKEN), serverchan: Boolean(env.WECHAT_SENDKEY), admin: Boolean(env.ADMIN_TOKEN),
         worker: Boolean(env.WORKER_TOKEN),

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import worker, { formatMessage, normalizeEstimate, run, type Env, type Estimate } from './index'
+import worker, { formatMessage, normalizeEstimate, parseFundHoldings, run, type Env, type Estimate } from './index'
 
 const env: Env = {
   GIST_ID: 'gist', FUND_API_BASE: '', GIST_TOKEN: 'gist-token', WECHAT_SENDKEY: 'send-key',
@@ -10,7 +10,7 @@ const monday1440 = new Date('2026-07-13T06:40:00Z')
 
 function fakeNetwork(sendStatuses = [200], options: {
   patchFails?: boolean; missingSecond?: boolean; gistReadFails?: boolean
-  estimateFails?: boolean; officialFails?: boolean
+    estimateFails?: boolean; officialFails?: boolean; holdingsFails?: boolean
   backend?: 'success' | 'timeout'
 } = {}) {
   let state: Record<string, unknown> = {}
@@ -43,6 +43,13 @@ function fakeNetwork(sendStatuses = [200], options: {
         { FSRQ: '2026-07-24', DWJZ: '1.0200', JZZZL: '2.00' },
         { FSRQ: '2026-07-23', DWJZ: '1.0000', JZZZL: '0.50' },
       ] } })
+    }
+    if (url.includes('/FundArchivesDatas.aspx')) {
+      if (options.holdingsFails) return new Response('upstream unavailable', { status: 503 })
+      expect(new Headers(init?.headers).get('Referer')).toBe('https://fundf10.eastmoney.com/ccmx_005844.html')
+      return new Response(`var apidata={ content:"<h4>截止至：<font>2026-06-30</font></h4>
+        <table><tbody><tr><td>1</td><td><a>688361</a></td><td><a>中科飞测</a></td>
+        <td></td><td></td><td></td><td>9.55%</td></tr></tbody></table>" };`)
     }
     if (url.includes('sctapi.ftqq.com')) {
       const status = sendStatuses[Math.min(sends++, sendStatuses.length - 1)]
@@ -78,6 +85,14 @@ describe('Cloudflare push worker', () => {
     expect(result.lastNav).toBeNull()
     expect(result.estNav).toBeNull()
     expect(result.change).toBeNull()
+  })
+
+  it('parses the latest disclosed stock holdings and report date', () => {
+    const result = parseFundHoldings(`var apidata={ content:"<h4>截止至：<font>2026-06-30</font></h4>
+      <table><tbody><tr><td>1</td><td><a>688361</a></td><td><a>中科飞测</a></td>
+      <td></td><td></td><td></td><td>9.55%</td></tr></tbody></table>" };`)
+    expect(result.reportDate).toBe('2026-06-30')
+    expect(result.items).toEqual([{ code: '688361', name: '中科飞测', ratio: 9.55 }])
   })
 
   it('sends at 14:30 and skips the 14:40 compensation after success', async () => {
@@ -146,7 +161,7 @@ describe('Cloudflare push worker', () => {
     const body = await response.text()
     expect(response.status).toBe(200)
     expect(body).toContain('state_available')
-    expect(body).toContain('6.0.2')
+    expect(body).toContain('6.0.3')
     expect(body).not.toContain('gist-token')
     expect(body).not.toContain('send-key')
     expect(body).not.toContain('worker-token')
@@ -197,5 +212,35 @@ describe('Cloudflare push worker', () => {
       est_realtime: false,
       source: 'eastmoney_official_nav',
     })
+  })
+
+  it('serves fund holdings through the CORS proxy with disclosure metadata', async () => {
+    fakeNetwork()
+    const response = await worker.fetch(new Request('https://worker.test/holdings?code=005844', {
+      headers: { Origin: 'https://aureliuswu.github.io' },
+    }), env)
+    const body = await response.json() as {
+      status: string
+      report_date: string
+      items: Array<Record<string, unknown>>
+    }
+    expect(response.status).toBe(200)
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBe('https://aureliuswu.github.io')
+    expect(response.headers.get('Cache-Control')).toBe('public, max-age=1800')
+    expect(body.status).toBe('ok')
+    expect(body.report_date).toBe('2026-06-30')
+    expect(body.items[0]).toEqual({ code: '688361', name: '中科飞测', ratio: 9.55 })
+  })
+
+  it('rejects an invalid holdings fund code', async () => {
+    const response = await worker.fetch(new Request('https://worker.test/holdings?code=bad'), env)
+    expect(response.status).toBe(400)
+  })
+
+  it('reports an upstream holdings failure instead of returning an empty disclosure', async () => {
+    fakeNetwork([200], { holdingsFails: true })
+    const response = await worker.fetch(new Request('https://worker.test/holdings?code=005844'), env)
+    expect(response.status).toBe(502)
+    expect(await response.text()).toContain('HTTP 503')
   })
 })
