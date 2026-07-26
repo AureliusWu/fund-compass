@@ -5,9 +5,9 @@ import { useAppStore } from '@/stores/app'
 import { useWatchlistStore } from '@/stores/watchlist'
 import { useFundsStore } from '@/stores/funds'
 import IndexBar from '@/components/IndexBar.vue'
-import { checkBackend, getSourceSummary, type SourceStatus } from '@/utils/resilience'
+import { getSourceSummary, recordSource, type SourceStatus } from '@/utils/resilience'
 import { fetchTaskStatuses, type TaskStatus } from '@/utils/taskStatus'
-import { loadAlerts, runAllChecks, markRead, markAllRead, dismissAlert, requestNotifyPermission, type Alert } from '@/utils/alerts'
+import { loadAlerts, runAllChecks, markRead, markAllRead, dismissAlert, type Alert } from '@/utils/alerts'
 import { APP_VERSION } from '@/version'
 import { combineTemperature, sourceFreshness, visibleUnreadAlerts } from '@/utils/presentation'
 import { fetchEstimates } from '@/utils/estimate'
@@ -97,7 +97,6 @@ async function loadWatchSignals() {
   try { localStorage.setItem(SIGNAL_SNAPSHOT_KEY, JSON.stringify(sigs.value)) } catch { /* ignore */ }
   const estimates = await fetchEstimates(watch.items.map((item) => item.code))
 
-  requestNotifyPermission()
   runAllChecks(watch.items.map((item) => ({
     code: item.code,
     name: item.name || item.code,
@@ -109,22 +108,32 @@ async function loadWatchSignals() {
   })
 }
 
-async function refreshHome() {
-  backendOk.value = await checkBackend()
-  sources.value = getSourceSummary()
-  if (backendOk.value) {
-    await getHealth()
-      .then((result) => { healthText.value = `API ${result.version}` })
-      .catch(() => { healthText.value = '服务响应异常' })
-  } else {
+async function refreshBackend() {
+  try {
+    const result = await getHealth()
+    backendOk.value = true
+    healthText.value = `API ${result.version}`
+    recordSource('backend', '后端 API', true)
+  } catch {
+    backendOk.value = false
     healthText.value = '后端未连接'
+    recordSource('backend', '后端 API', false)
   }
-  await app.loadMarketTemp()
-  await loadWatchSignals()
-  sources.value = getSourceSummary()
+}
+
+async function refreshHome(force = false) {
   taskLoading.value = true
-  try { tasks.value = await fetchTaskStatuses(true) } catch { tasks.value = [] }
-  finally { taskLoading.value = false; refreshing.value = false }
+  await Promise.allSettled([
+    refreshBackend(),
+    app.loadMarketTemp(),
+    loadWatchSignals(),
+    fetchTaskStatuses(force)
+      .then((result) => { tasks.value = result })
+      .catch(() => { tasks.value = [] }),
+  ])
+  sources.value = getSourceSummary()
+  taskLoading.value = false
+  refreshing.value = false
 }
 
 function onMarkAllRead() {
@@ -144,7 +153,7 @@ function onDismiss(id: string) {
 
 const levelMark = (level: Alert['level']) => level === 'danger' ? '!' : level === 'warn' ? '!' : 'i'
 
-onMounted(refreshHome)
+onMounted(() => { void refreshHome(false) })
 </script>
 
 <template>
@@ -159,7 +168,7 @@ onMounted(refreshHome)
     </van-nav-bar>
     <IndexBar />
 
-    <van-pull-refresh v-model="refreshing" @refresh="refreshHome">
+    <van-pull-refresh v-model="refreshing" @refresh="refreshHome(true)">
       <div class="page-body">
         <div class="sec">市场与持仓温度</div>
         <section class="card climate-card" :title="TEMPERATURE_DEFINITION" @click="app.loadMarketTemp()">

@@ -1,6 +1,6 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
-import 'vant/lib/index.css' // 保留全量样式，避免按需引入时 Toast/Dialog 等缺样式
+import 'vant/es/toast/style'
 import App from './App.vue'
 import router from './router'
 import './styles.css'

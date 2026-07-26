@@ -10,13 +10,13 @@ export default defineConfig({
   base: '/fund-compass/',
   plugins: [
     vue(),
-    // Vant 组件按需自动引入；importStyle:false → 复用 main.ts 的全量 CSS，避免缺样式
-    Components({ resolvers: [VantResolver({ importStyle: false })] }),
+    // Vant 组件与样式均按页面需要自动引入，避免整套组件样式阻塞首屏。
+    Components({ resolvers: [VantResolver({ importStyle: true })] }),
     VitePWA({
       registerType: 'autoUpdate',
       workbox: {
         // 大的富集/排行数据不进安装期预缓存，改运行时按需缓存
-        globIgnores: ['**/data/**'],
+        globIgnores: ['**/data/**', '**/assets/echarts-*.js', '**/pwa-*.png'],
         runtimeCaching: [
           {
             urlPattern: ({ url }) => url.pathname.startsWith('/api'),
@@ -32,13 +32,24 @@ export default defineConfig({
               cacheableResponse: { statuses: [0, 200] },
             },
           },
+          {
+            // 大型图表引擎和安装图标按需下载，避免阻塞 Service Worker 首次安装。
+            urlPattern: ({ url }) => url.pathname.includes('/assets/echarts-')
+              || /\/pwa-\d+x\d+\.png$/.test(url.pathname),
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'fc-heavy-assets',
+              expiration: { maxEntries: 6, maxAgeSeconds: 60 * 60 * 24 * 30 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
         ],
       },
       includeAssets: ['favicon.png', 'apple-touch-icon.png'],
       manifest: {
         name: '司南基金',
         short_name: '司南基金',
-        description: '司南基金 v6.0.2 · 个人基金选基与择时辅助工具',
+        description: '司南基金 v6.0.3 · 个人基金选基与择时辅助工具',
         theme_color: '#3F765C',
         background_color: '#F8F7F1',
         display: 'standalone',
