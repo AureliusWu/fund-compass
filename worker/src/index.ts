@@ -30,6 +30,8 @@ export interface Estimate {
   time: string
   navDate: string
   label: string
+  kind?: 'estimate' | 'official_nav'
+  note?: string
 }
 
 interface PushState {
@@ -49,6 +51,7 @@ const SLOT = '14:30'
 const MAX_MESSAGE_LENGTH = 8000
 
 function numberOrNull(value: unknown): number | null {
+  if (value == null || String(value).trim() === '' || String(value).trim() === '--') return null
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : null
 }
@@ -69,6 +72,8 @@ export function normalizeEstimate(raw: Record<string, unknown>, code: string): E
     code, name, lastNav, estNav, change, time,
     navDate: String(raw.gzrq || ''),
     label: overseas ? '海外估值' : (dateOnly ? '延迟估值' : '盘中估值'),
+    kind: 'estimate',
+    note: '东方财富盘中估算；上游仅提供行情日期，未提供精确分钟',
   }
 }
 
@@ -134,6 +139,55 @@ async function fetchEstimates(codes: string[]): Promise<Map<string, Estimate>> {
   return estimates
 }
 
+async function fetchOfficialNav(code: string): Promise<Estimate | null> {
+  const query = new URLSearchParams({ fundCode: code, pageIndex: '1', pageSize: '2' })
+  const response = await fetch(`https://api.fund.eastmoney.com/f10/lsjz?${query}`, {
+    headers: { Referer: `https://fundf10.eastmoney.com/jjjz_${code}.html` },
+  })
+  if (!response.ok) throw new Error(`正式净值 HTTP ${response.status}`)
+  const payload = await response.json() as {
+    ErrCode?: number
+    Data?: { LSJZList?: Array<{ FSRQ?: string; DWJZ?: string; JZZZL?: string }> }
+  }
+  const rows = payload.ErrCode === 0 && Array.isArray(payload.Data?.LSJZList)
+    ? payload.Data.LSJZList
+    : []
+  if (rows.length < 2) return null
+  const latest = rows[0]
+  const previous = rows[1]
+  const estNav = numberOrNull(latest.DWJZ)
+  const lastNav = numberOrNull(previous.DWJZ)
+  let change = numberOrNull(latest.JZZZL)
+  if (change == null && estNav != null && lastNav != null && lastNav > 0) {
+    change = (estNav / lastNav - 1) * 100
+  }
+  if (estNav == null || lastNav == null || change == null) return null
+  return {
+    code,
+    name: code,
+    lastNav,
+    estNav,
+    change,
+    time: String(latest.FSRQ || ''),
+    navDate: String(previous.FSRQ || ''),
+    label: '最近净值',
+    kind: 'official_nav',
+    note: '盘中估值不可用；展示最近两个已公布正式净值的涨跌',
+  }
+}
+
+async function fetchOfficialNavs(codes: string[]): Promise<Map<string, Estimate>> {
+  const output = new Map<string, Estimate>()
+  for (let index = 0; index < codes.length; index += 8) {
+    const batch = codes.slice(index, index + 8)
+    const settled = await Promise.allSettled(batch.map((code) => fetchOfficialNav(code)))
+    settled.forEach((result, offset) => {
+      if (result.status === 'fulfilled' && result.value) output.set(batch[offset], result.value)
+    })
+  }
+  return output
+}
+
 const PUBLIC_ORIGINS = new Set([
   'https://aureliuswu.github.io',
   'http://localhost:5173',
@@ -160,15 +214,28 @@ async function publicEstimates(request: Request, url: URL, ctx?: ExecutionContex
     })
   }
   const origin = request.headers.get('Origin') || 'none'
-  const cacheKey = new Request(`https://estimate-cache.internal/v1?codes=${encodeURIComponent([...codes].sort().join(','))}&origin=${encodeURIComponent(origin)}`)
+  const cacheKey = new Request(`https://estimate-cache.internal/v2?codes=${encodeURIComponent([...codes].sort().join(','))}&origin=${encodeURIComponent(origin)}`)
   const edgeCache = typeof caches === 'undefined' ? null : caches.default
   const cached = edgeCache ? await edgeCache.match(cacheKey) : null
   if (cached) return cached
   try {
-    const estimates = await fetchEstimates(codes)
+    let estimates = new Map<string, Estimate>()
+    let estimateError: unknown = null
+    try {
+      estimates = await fetchEstimates(codes)
+    } catch (error) {
+      estimateError = error
+    }
+    const missing = codes.filter((code) => !estimates.has(code))
+    const official = missing.length ? await fetchOfficialNavs(missing) : new Map<string, Estimate>()
+    official.forEach((item, code) => estimates.set(code, item))
+    if (!estimates.size && estimateError) throw estimateError
     const items = codes.map((code) => estimates.get(code)).filter((item): item is Estimate => Boolean(item))
     const response = Response.json({
-      source: 'eastmoney_estimate_table',
+      source: official.size
+        ? (official.size === items.length ? 'eastmoney_official_nav' : 'eastmoney_mixed')
+        : 'eastmoney_estimate_table',
+      fallback: official.size ? 'official_nav' : null,
       source_time_precision: 'date',
       fetched_at: new Date().toISOString(),
       requested: codes.length,
@@ -183,11 +250,11 @@ async function publicEstimates(request: Request, url: URL, ctx?: ExecutionContex
         est_time: item.time,
         source_time_precision: 'date',
         est_label: item.label,
-        est_kind: 'estimate',
+        est_kind: item.kind || 'estimate',
         est_realtime: false,
-        est_note: '东方财富盘中估算；上游仅提供行情日期，未提供精确分钟',
+        est_note: item.note || '东方财富盘中估算；上游仅提供行情日期，未提供精确分钟',
         status: 'ok',
-        source: 'eastmoney_estimate_table',
+        source: item.kind === 'official_nav' ? 'eastmoney_official_nav' : 'eastmoney_estimate_table',
       })),
     }, { headers: publicHeaders(request) })
     if (edgeCache && ctx) ctx.waitUntil(edgeCache.put(cacheKey, response.clone()))
@@ -386,7 +453,7 @@ export default {
       } catch (error) {
         runtime = { state_available: false, last_error: error instanceof Error ? error.message : String(error) }
       }
-      return Response.json({ status: 'ok', service: 'sinan-estimate-push', version: '6.0.1', runtime, configured: {
+      return Response.json({ status: 'ok', service: 'sinan-estimate-push', version: '6.0.2', runtime, configured: {
         gist_id: Boolean(env.GIST_ID), fund_api: Boolean(env.FUND_API_BASE),
         gist_token: Boolean(env.GIST_TOKEN), serverchan: Boolean(env.WECHAT_SENDKEY), admin: Boolean(env.ADMIN_TOKEN),
         worker: Boolean(env.WORKER_TOKEN),

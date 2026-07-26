@@ -9,7 +9,8 @@ const monday1430 = new Date('2026-07-13T06:30:00Z')
 const monday1440 = new Date('2026-07-13T06:40:00Z')
 
 function fakeNetwork(sendStatuses = [200], options: {
-  patchFails?: boolean; missingSecond?: boolean; gistReadFails?: boolean; estimateFails?: boolean
+  patchFails?: boolean; missingSecond?: boolean; gistReadFails?: boolean
+  estimateFails?: boolean; officialFails?: boolean
   backend?: 'success' | 'timeout'
 } = {}) {
   let state: Record<string, unknown> = {}
@@ -35,6 +36,13 @@ function fakeNetwork(sendStatuses = [200], options: {
         bzdm: code, jjjc: `基金${code}`, dwjz: '1', gsz: '1.01', gszzl: '1%', gxrq: '2026-07-13',
       }))
       return Response.json({ ErrCode: 0, Data: { list } })
+    }
+    if (url.includes('/f10/lsjz')) {
+      if (options.officialFails) return new Response('official unavailable', { status: 503 })
+      return Response.json({ ErrCode: 0, Data: { LSJZList: [
+        { FSRQ: '2026-07-24', DWJZ: '1.0200', JZZZL: '2.00' },
+        { FSRQ: '2026-07-23', DWJZ: '1.0000', JZZZL: '0.50' },
+      ] } })
     }
     if (url.includes('sctapi.ftqq.com')) {
       const status = sendStatuses[Math.min(sends++, sendStatuses.length - 1)]
@@ -63,6 +71,13 @@ describe('Cloudflare push worker', () => {
     expect(result.change).toBeCloseTo(2)
     const estimate: Estimate = { code: '000001', name: '测试基金', lastNav: 1, estNav: 1.02, change: 2, time: '2026-07-13 14:30', navDate: '2026-07-12', label: '盘中估值' }
     expect(formatMessage([{ code: '000001' }], new Map([['000001', estimate]]), null)).toContain('+2.00%')
+  })
+
+  it('keeps null and blank upstream values missing instead of converting them to zero', () => {
+    const result = normalizeEstimate({ name: '缺失值基金', dwjz: null, gsz: '', gszzl: '--' }, '000003')
+    expect(result.lastNav).toBeNull()
+    expect(result.estNav).toBeNull()
+    expect(result.change).toBeNull()
   })
 
   it('sends at 14:30 and skips the 14:40 compensation after success', async () => {
@@ -131,7 +146,7 @@ describe('Cloudflare push worker', () => {
     const body = await response.text()
     expect(response.status).toBe(200)
     expect(body).toContain('state_available')
-    expect(body).toContain('6.0.1')
+    expect(body).toContain('6.0.2')
     expect(body).not.toContain('gist-token')
     expect(body).not.toContain('send-key')
     expect(body).not.toContain('worker-token')
@@ -155,9 +170,32 @@ describe('Cloudflare push worker', () => {
   })
 
   it('returns an explicit gateway failure when the estimate upstream is unavailable', async () => {
-    fakeNetwork([200], { estimateFails: true })
+    fakeNetwork([200], { estimateFails: true, officialFails: true })
     const response = await worker.fetch(new Request('https://worker.test/estimates?codes=000001'), env)
     expect(response.status).toBe(502)
     expect(await response.text()).toContain('HTTP 503')
+  })
+
+  it('falls back to the latest official NAV move when the estimate table closes', async () => {
+    fakeNetwork([200], { estimateFails: true })
+    const response = await worker.fetch(new Request('https://worker.test/estimates?codes=000001'), env)
+    const body = await response.json() as {
+      fallback: string
+      items: Array<Record<string, unknown>>
+    }
+    expect(response.status).toBe(200)
+    expect(body.fallback).toBe('official_nav')
+    expect(body.items[0]).toMatchObject({
+      code: '000001',
+      last_nav: 1,
+      est_nav: 1.02,
+      est_change: 2,
+      nav_date: '2026-07-23',
+      est_time: '2026-07-24',
+      est_label: '最近净值',
+      est_kind: 'official_nav',
+      est_realtime: false,
+      source: 'eastmoney_official_nav',
+    })
   })
 })

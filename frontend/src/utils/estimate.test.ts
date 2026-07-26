@@ -41,6 +41,29 @@ describe('estimate proxy', () => {
     expect(stale).toMatchObject({ estChange: 2, isRealtime: false })
     expect(stale?.sourceNote).toContain('代理请求失败，保留上次数据')
   })
+
+  it('shows the latest official NAV move when the market is closed', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ items: [{
+      code: '123458', name: '休市测试基金', last_nav: 1, est_nav: 1.02,
+      est_change: 2, nav_date: '2026-07-23', est_time: '2026-07-24',
+      est_kind: 'official_nav', est_label: '最近净值',
+      est_note: '盘中估值不可用；展示最近两个已公布正式净值的涨跌',
+    }] })))
+
+    const estimate = (await fetchEstimates(['123458'])).get('123458')
+    expect(estimate).toMatchObject({
+      kind: 'official_nav',
+      label: '最近净值',
+      estChange: 2,
+      estTime: '2026-07-24',
+      isRealtime: false,
+    })
+    expect(preferredDailyMove(estimate, null, '普通混合A')).toMatchObject({
+      change: 2,
+      label: '净',
+      date: '2026-07-24',
+    })
+  })
 })
 
 describe('normalizeEstimate', () => {

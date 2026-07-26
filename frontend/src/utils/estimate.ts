@@ -14,8 +14,8 @@ export interface Estimate {
   estChange: number | null // 估算涨跌% gszzl
   navDate: string // 上一净值日期 jzrq
   estTime: string // 估值时间 gztime
-  kind: 'intraday' | 'overseas' | 'overseas_model'
-  label: '盘中估值' | '延迟估值' | '海外估值' | '海外模型估算'
+  kind: 'intraday' | 'overseas' | 'overseas_model' | 'official_nav'
+  label: '盘中估值' | '延迟估值' | '海外估值' | '海外模型估算' | '最近净值'
   isRealtime: boolean
   sourceNote: string
   modelWeight?: number
@@ -48,6 +48,9 @@ export interface Gz {
   fundcode?: string; name?: string
   dwjz?: string; gsz?: string; gszzl?: string; jzrq?: string; gztime?: string
   sourcePrecision?: 'date' | 'datetime'
+  estKind?: 'estimate' | 'official_nav'
+  estLabel?: string
+  estNote?: string
 }
 
 const cache = new Map<string, { e: Estimate | null; t: number }>()
@@ -142,6 +145,15 @@ export function preferredDailyMove(
       date: navMove.date,
     }
   }
+  if (estimate?.kind === 'official_nav' && estimate.estChange != null) {
+    return {
+      change: estimate.estChange,
+      baseNav: estimate.lastNav,
+      label: '净',
+      sourceNote: estimate.sourceNote,
+      date: estimate.estTime || estimate.navDate,
+    }
+  }
   if (!estimate || estimate.estChange == null || estimate.lastNav == null) return null
   return {
     change: estimate.estChange,
@@ -168,6 +180,7 @@ export function normalizeEstimate(d: Gz): Estimate {
   const estTime = d.gztime || ''
   const overseas = isOverseasEstimate(name, estTime)
   const dateOnly = d.sourcePrecision === 'date'
+  const official = d.estKind === 'official_nav'
   const isRealtime = !overseas && !dateOnly
   return {
     code: d.fundcode || '',
@@ -177,12 +190,14 @@ export function normalizeEstimate(d: Gz): Estimate {
     estChange,
     navDate: d.jzrq || '',
     estTime,
-    kind: overseas ? 'overseas' : 'intraday',
-    label: overseas ? '海外估值' : (dateOnly ? '延迟估值' : '盘中估值'),
-    isRealtime,
-    sourceNote: overseas
+    kind: official ? 'official_nav' : (overseas ? 'overseas' : 'intraday'),
+    label: official ? '最近净值' : (overseas ? '海外估值' : (dateOnly ? '延迟估值' : '盘中估值')),
+    isRealtime: official ? false : isRealtime,
+    sourceNote: d.estNote || (official
+      ? '盘中估值不可用；展示最近两个已公布正式净值的涨跌'
+      : overseas
       ? '天天基金当前仅返回海外基金收盘后/延迟估值，未提供实时盘中估值'
-      : dateOnly ? '天天基金估值表仅提供更新日期，未提供精确分钟' : '天天基金盘中估值',
+      : dateOnly ? '天天基金估值表仅提供更新日期，未提供精确分钟' : '天天基金盘中估值'),
   }
 }
 
@@ -365,6 +380,9 @@ function fetchEstimateTable(codes: string[], force = false): Promise<Map<string,
           jzrq: String(row.nav_date || ''),
           gztime: String(row.est_time || ''),
           sourcePrecision: 'date',
+          estKind: row.est_kind === 'official_nav' ? 'official_nav' : 'estimate',
+          estLabel: String(row.est_label || ''),
+          estNote: String(row.est_note || ''),
         })
       }
       tableCache = { rows, t: Date.now() }
