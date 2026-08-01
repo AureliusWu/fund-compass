@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import { showToast } from 'vant'
 import { getDecision, getFunds, type DecisionResp, type FundListItem } from '@/api/client'
 import { useWatchlistStore } from '@/stores/watchlist'
-import { fetchEstimates, type Estimate } from '@/utils/estimate'
+import { fetchEstimates, loadCachedEstimates, type Estimate } from '@/utils/estimate'
 import { colorOf, pct } from '@/utils/format'
 import { getToken } from '@/utils/gist'
 import Icon from '@/components/Icon.vue'
@@ -17,9 +17,10 @@ const watch = useWatchlistStore()
 const rows = reactive<Record<string, Row>>({})
 const estimates = reactive<Record<string, Estimate | null>>({})
 const decisions = reactive<Record<string, DecisionResp>>({})
-const loading = ref(true)
+const loading = ref(watch.items.length === 0 && watch.hasToken)
 const refreshing = ref(false)
 const decisionsLoading = ref(false)
+const estimatesLoading = ref(false)
 
 const showSync = ref(false)
 const token = ref(getToken())
@@ -36,38 +37,65 @@ const decisionSummary = computed(() => {
   })), decisions)
 })
 
-async function loadDecisions() {
-  Object.keys(decisions).forEach((key) => delete decisions[key])
-  if (!watch.items.length) return
+async function loadDecisions(items = watch.items) {
+  const activeCodes = new Set(items.map((item) => item.code))
+  Object.keys(decisions).forEach((key) => { if (!activeCodes.has(key)) delete decisions[key] })
+  if (!items.length) return
   decisionsLoading.value = true
   try {
-    const settled = await Promise.allSettled(watch.items.map((item) => getDecision(item.code)))
-    settled.forEach((result) => {
-      if (result.status !== 'fulfilled') return
-      const decision = result.value
+    await Promise.allSettled(items.map(async (item) => {
+      const decision = await getDecision(item.code)
+      if (!watch.has(decision.code)) return
       decisions[decision.code] = decision
       rows[decision.code] = { name: decision.name || decision.code, type: decision.type ?? null }
-    })
+    }))
   } catch { /* 后端不可用时保留估值 */ }
   finally { decisionsLoading.value = false }
 }
 
-async function loadOne(code: string, fallbackName: string | null) {
+function loadOne(code: string, fallbackName: string | null) {
   rows[code] = { name: fallbackName || code, type: null }
 }
 
-async function refresh() {
-  loading.value = true
+function hydrateLocal(items = watch.items) {
+  items.forEach((item) => loadOne(item.code, item.name))
+  loadCachedEstimates(items.map((item) => item.code)).forEach((value, code) => {
+    if (estimates[code] == null) estimates[code] = value
+  })
+}
+
+async function loadEstimates(items = watch.items) {
+  const codes = items.map((item) => item.code)
+  if (!codes.length) return
+  estimatesLoading.value = true
   try {
-    await watch.load(true)
-    watch.items.forEach((item) => loadOne(item.code, item.name))
-    const estimatePromise = fetchEstimates(watch.items.map((item) => item.code))
-    await Promise.all([
-      estimatePromise.then((estimateMap) => {
-        estimateMap.forEach((value, code) => { estimates[code] = value })
-      }),
-      loadDecisions(),
-    ])
+    const estimateMap = await fetchEstimates(codes)
+    estimateMap.forEach((value, code) => {
+      if (watch.has(code) && value) estimates[code] = value
+    })
+  } finally { estimatesLoading.value = false }
+}
+
+async function refreshItems(items = watch.items) {
+  await Promise.allSettled([loadEstimates(items), loadDecisions(items)])
+}
+
+function itemKey(items = watch.items) {
+  return items.map((item) => item.code).sort().join(',')
+}
+
+async function refresh() {
+  const localItems = [...watch.items]
+  const localKey = itemKey(localItems)
+  hydrateLocal(localItems)
+  if (localItems.length || !watch.hasToken) loading.value = false
+  try {
+    // 与蜉蝣基金相同：本地数据先展示，云同步和行情/决策在后台并行更新。
+    await Promise.allSettled([refreshItems(localItems), watch.load(true)])
+    const syncedItems = [...watch.items]
+    hydrateLocal(syncedItems)
+    loading.value = false
+    if (itemKey(syncedItems) !== localKey) await refreshItems(syncedItems)
   } finally {
     loading.value = false
     refreshing.value = false
@@ -85,10 +113,11 @@ function displayChange(code: string) {
 
 function estimateMeta(code: string) {
   const estimate = estimates[code]
-  if (!estimate) return '暂无估值'
+  if (!estimate) return estimatesLoading.value ? '估值更新中' : '暂无估值'
   if (estimateFreshness(estimate) === 'expired') return '数据过期'
   const time = estimate.estTime ? estimate.estTime.slice(5) : ''
-  return `${estimate.label}${time ? ' · ' + time : ''}`
+  const label = estimate.cached ? '缓存估值' : estimate.label
+  return `${label}${time ? ' · ' + time : ''}`
 }
 
 async function remove(code: string) {
@@ -115,9 +144,9 @@ function onImportInput() {
 
 async function doImport(code: string, name: string) {
   watch.add(code, name)
-  await loadOne(code, name)
+  loadOne(code, name)
   estimates[code] = (await fetchEstimates([code])).get(code) || null
-  await loadDecisions()
+  await loadDecisions(watch.items.filter((item) => item.code === code))
   importResults.value = importResults.value.filter((fund) => fund.code !== code)
   showToast('已添加')
 }
@@ -126,6 +155,7 @@ async function saveToken() { watch.setToken(token.value); showToast(token.value 
 async function upload() { await watch.manualUpload(); showToast(watch.lastSync ? '已上传' : '上传失败') }
 async function download() { await watch.manualDownload(); await refresh(); showToast('已同步') }
 
+hydrateLocal()
 onMounted(refresh)
 </script>
 
@@ -142,13 +172,13 @@ onMounted(refresh)
       <div class="page-body">
         <div class="sec">{{ WATCH_SECTIONS[0] }}</div>
         <section class="card decision-card">
-          <div v-if="decisionsLoading" class="decision-loading"><van-loading size="15" /> 计算中</div>
-          <template v-else-if="decisionSummary.length">
+          <template v-if="decisionSummary.length">
             <div v-for="group in decisionSummary" :key="group.action" class="decision-row">
               <b>{{ group.action }}</b>
               <div><span>{{ group.names.join('、') }}</span><em>{{ group.confidence }}置信 · {{ group.reason }}</em></div>
             </div>
           </template>
+          <div v-else-if="decisionsLoading" class="decision-loading"><van-loading size="15" /> 计算中</div>
           <div v-else class="empty-line">暂无决策结果</div>
         </section>
 

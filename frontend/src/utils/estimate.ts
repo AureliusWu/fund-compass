@@ -26,6 +26,8 @@ export interface Estimate {
   errorBand?: number | null
   generatedAt?: string
   accuracyUpdatedAt?: string
+  cached?: boolean
+  cachedAt?: string
 }
 
 export interface NavMove {
@@ -56,9 +58,68 @@ export interface Gz {
 const cache = new Map<string, { e: Estimate | null; t: number }>()
 const TTL = 60_000
 const TIMEOUT = 8000
+const PERSISTENT_CACHE_KEY = 'sinan_estimates_v1'
+const PERSISTENT_CACHE_MAX_AGE = 7 * 864e5
 let tableCache: { rows: Map<string, Gz>; t: number } | null = null
 const ESTIMATE_PROXY = (import.meta.env.VITE_ESTIMATE_PROXY as string)
   || 'https://sinan-estimate-push.ligugu69.workers.dev/estimates'
+
+type EstimateCacheStorage = Pick<Storage, 'getItem' | 'setItem'>
+interface PersistedEstimate { estimate: Estimate; cachedAt: number }
+
+function browserStorage(): EstimateCacheStorage | null {
+  try { return typeof localStorage === 'undefined' ? null : localStorage }
+  catch { return null }
+}
+
+function readPersistentCache(storage: EstimateCacheStorage | null): Record<string, PersistedEstimate> {
+  if (!storage) return {}
+  try {
+    const value = JSON.parse(storage.getItem(PERSISTENT_CACHE_KEY) || '{}')
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+  } catch { return {} }
+}
+
+export function loadCachedEstimates(
+  codes: string[],
+  storage: EstimateCacheStorage | null = browserStorage(),
+): Map<string, Estimate> {
+  const stored = readPersistentCache(storage)
+  const now = Date.now()
+  const out = new Map<string, Estimate>()
+  for (const code of new Set(codes)) {
+    const entry = stored[code]
+    if (!entry || entry.estimate?.code !== code || !Number.isFinite(entry.cachedAt)) continue
+    if (now - entry.cachedAt > PERSISTENT_CACHE_MAX_AGE) continue
+    out.set(code, {
+      ...entry.estimate,
+      isRealtime: false,
+      cached: true,
+      cachedAt: new Date(entry.cachedAt).toISOString(),
+      sourceNote: `${entry.estimate.sourceNote} · 本地缓存，正在后台更新`,
+    })
+  }
+  return out
+}
+
+export function saveCachedEstimates(
+  estimates: Iterable<Estimate | null>,
+  storage: EstimateCacheStorage | null = browserStorage(),
+) {
+  if (!storage) return
+  const now = Date.now()
+  const stored = readPersistentCache(storage)
+  for (const [code, entry] of Object.entries(stored)) {
+    if (!entry || !Number.isFinite(entry.cachedAt) || now - entry.cachedAt > PERSISTENT_CACHE_MAX_AGE) delete stored[code]
+  }
+  for (const estimate of estimates) {
+    if (!estimate?.code) continue
+    const { cached: _cached, cachedAt: _cachedAt, ...fresh } = estimate
+    stored[estimate.code] = { estimate: fresh as Estimate, cachedAt: now }
+  }
+  try { storage.setItem(PERSISTENT_CACHE_KEY, JSON.stringify(stored)) }
+  catch { /* 缓存写入失败不影响实时刷新 */ }
+}
 
 interface ModelLeg { code: string; weight: number; note?: string }
 interface ModelAdjustment { scale?: number; bias?: number }
@@ -400,6 +461,7 @@ export async function fetchEstimate(code: string, force = false): Promise<Estima
     const raw = (await fetchEstimateTable([code], force)).get(code)
     const estimate = raw ? await enhanceOverseasEstimate(normalizeEstimate(raw)) : null
     cache.set(code, { e: estimate, t: Date.now() })
+    saveCachedEstimates([estimate])
     recordSource('tiantian', '天天基金估值表', estimate != null)
     return estimate
   } catch {
@@ -423,6 +485,7 @@ export async function fetchEstimates(codes: string[]): Promise<Map<string, Estim
       cache.set(code, { e: estimate, t: Date.now() })
       out.set(code, estimate)
     }))
+    saveCachedEstimates(out.values())
     recordSource('tiantian', '司南估值代理', [...out.values()].some(Boolean))
   } catch {
     recordSource('tiantian', '司南估值代理', false)

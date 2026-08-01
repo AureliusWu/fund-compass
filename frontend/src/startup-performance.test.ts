@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 function source(relativePath: string): string {
-  return readFileSync(fileURLToPath(new URL(relativePath, import.meta.url)), 'utf8')
+  return readFileSync(fileURLToPath(new URL(relativePath, import.meta.url)), 'utf8').replace(/\r\n/g, '\n')
 }
 
 describe('首屏性能约束', () => {
@@ -23,6 +23,23 @@ describe('首屏性能约束', () => {
     expect(home).toContain('refreshHome(false)')
     expect(home).toContain('fetchTaskStatuses(force)')
     expect(home).not.toContain('requestNotifyPermission')
+  })
+
+  it('自选首屏先展示本地数据，不等待云同步、估值和逐只决策', () => {
+    const watchlist = source('./pages/WatchlistPage.vue')
+
+    expect(watchlist).toContain('hydrateLocal()\nonMounted(refresh)')
+    expect(watchlist).toContain('Promise.allSettled([refreshItems(localItems), watch.load(true)])')
+    expect(watchlist).toContain("const loading = ref(watch.items.length === 0 && watch.hasToken)")
+    expect(watchlist).toContain("const label = estimate.cached ? '缓存估值' : estimate.label")
+  })
+
+  it('决策结果逐只写入，不再等待最慢基金后统一展示', () => {
+    const watchlist = source('./pages/WatchlistPage.vue')
+
+    expect(watchlist).toContain('await Promise.allSettled(items.map(async (item) => {')
+    expect(watchlist).toContain('decisions[decision.code] = decision')
+    expect(watchlist).not.toContain('const settled = await Promise.allSettled')
   })
 
   it('大型按需资源不进入 Service Worker 安装期预缓存', () => {

@@ -6,13 +6,33 @@ import {
   fetchEstimates,
   holdingsToOverseasModel,
   latestNavMove,
+  loadCachedEstimates,
   normalizeEstimate,
   preferredDailyMove,
+  saveCachedEstimates,
 } from './estimate'
 
 afterEach(() => vi.unstubAllGlobals())
 
 describe('estimate proxy', () => {
+  it('renders a safe local estimate snapshot before the network refresh', () => {
+    const values = new Map<string, string>()
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => { values.set(key, value) },
+    }
+    const estimate = normalizeEstimate({
+      fundcode: '123450', name: '首屏缓存基金', dwjz: '1', gsz: '1.01',
+      gszzl: '1', jzrq: '2026-07-31', gztime: '2026-08-01', sourcePrecision: 'date',
+    })
+
+    saveCachedEstimates([estimate], storage)
+    const cached = loadCachedEstimates(['123450'], storage).get('123450')
+
+    expect(cached).toMatchObject({ code: '123450', estChange: 1, cached: true, isRealtime: false })
+    expect(cached?.sourceNote).toContain('本地缓存，正在后台更新')
+  })
+
   it('loads a batch through the Worker instead of browser-side Eastmoney JSONP', async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       expect(String(input)).toContain('/estimates?codes=123456')
