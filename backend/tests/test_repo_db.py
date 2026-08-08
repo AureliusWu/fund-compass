@@ -4,6 +4,7 @@
 即可让每个用例用各自的临时 SQLite 文件，无需 reload 模块。
 """
 import sqlite3
+from datetime import timedelta
 
 import pytest
 
@@ -67,6 +68,36 @@ def test_get_detail_persists_and_reads_source(temp_db, monkeypatch):
     d2 = repo.get_detail("000001")                # 缓存命中，从 DB 读回（修复前这里会丢失 source）
     assert d2["source"] == "primary"
     assert d2["cached"] is True
+    assert d2["stale"] is False
+    assert d2["data_age_hours"] >= 0
+
+
+def test_fresh_cache_reports_real_data_age(temp_db, monkeypatch):
+    from service import repo
+
+    fake = {
+        "code": "000004", "name": "新鲜缓存基金", "source": "primary",
+        "latest_nav": 1.2, "latest_nav_date": "2026-08-08",
+        "nav_history": [{"date": "2026-08-08", "nav": 1.2}],
+    }
+    monkeypatch.setattr(repo, "fetch_detail", lambda code: dict(fake, code=code))
+    repo.get_detail("000004", force=True)
+    updated_at = (repo._now() - timedelta(hours=3, minutes=15)).isoformat(timespec="seconds")
+    conn = temp_db.get_conn()
+    conn.execute("UPDATE fund_detail SET updated_at=? WHERE code='000004'", (updated_at,))
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(
+        repo,
+        "fetch_detail",
+        lambda _code: (_ for _ in ()).throw(AssertionError("新鲜缓存不应重新抓取")),
+    )
+
+    detail = repo.get_detail("000004")
+
+    assert detail["cached"] is True
+    assert detail["stale"] is False
+    assert 3.2 <= detail["data_age_hours"] <= 3.3
 
 
 def test_infer_fund_type_from_name():

@@ -6,6 +6,7 @@ import { useFundsStore } from '@/stores/funds'
 import { pct } from '@/utils/format'
 import Chart from '@/components/Chart.vue'
 import type { FundDetail, ScoreResp } from '@/api/client'
+import { alignNavHistories } from '@/utils/diagnostics'
 
 const watch = useWatchlistStore()
 const funds = useFundsStore()
@@ -51,21 +52,25 @@ const rows = computed(() => {
   ]
 })
 
+const alignedNav = computed(() => alignNavHistories(
+  cols.value.map((code) => ({ code, points: data[code].d.nav_history })),
+))
+
 const navOption = computed(() => {
+  const aligned = alignedNav.value
   const series = cols.value.map((c) => {
-    const h = data[c].d.nav_history.slice(-250)
-    const base = h.length ? h[0].nav : 1
+    const values = aligned.values[c] || []
+    const base = values[0]
     return {
       name: data[c].d.name, type: 'line' as const, showSymbol: false,
-      data: h.map((p) => +(p.nav / base).toFixed(4)),
+      data: base ? values.map((value) => +(value / base).toFixed(4)) : [],
     }
   })
-  const dates = cols.value.length ? data[cols.value[0]].d.nav_history.slice(-250).map((p) => p.date) : []
   return {
     grid: { left: 40, right: 12, top: 32, bottom: 24 },
     tooltip: { trigger: 'axis' as const },
     legend: { top: 0, type: 'scroll' as const },
-    xAxis: { type: 'category' as const, data: dates, boundaryGap: false },
+    xAxis: { type: 'category' as const, data: aligned.dates, boundaryGap: false },
     yAxis: { type: 'value' as const, scale: true },
     series,
   }
@@ -87,7 +92,11 @@ const navOption = computed(() => {
 
       <template v-if="headers.length">
         <div class="sec">净值走势（首日归一）</div>
-        <div class="card"><Chart :option="navOption" height="240px" /></div>
+        <div class="card">
+          <Chart v-if="alignedNav.dates.length" :option="navOption" height="240px" />
+          <van-empty v-else description="所选基金暂无共同净值日期" image-size="55" />
+          <div class="nav-note">仅使用所选基金的共同净值日期，不前向填充 · {{ alignedNav.dates.length }} 个观测</div>
+        </div>
         <div class="sec">指标对比</div>
         <div class="card cmp">
           <table>
@@ -111,6 +120,7 @@ const navOption = computed(() => {
 .pick { font-size: 13px; padding: 6px 12px; border-radius: 14px; background: #F2F3EF; color: #5A6A60; }
 .pick.on { background: #4C7E67; color: #fff; }
 .card { background: #fff; border-radius: 10px; padding: 12px; }
+.nav-note { color: var(--text-hint); font-size: 10px; line-height: 1.5; margin-top: 5px; text-align: center; }
 .cmp { overflow-x: auto; }
 .cmp table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .cmp th, .cmp td { padding: 8px 6px; text-align: right; border-bottom: 1px solid #ECEFE9; white-space: nowrap; }

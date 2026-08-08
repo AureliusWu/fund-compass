@@ -50,7 +50,10 @@ export function freshnessFromTime(
 export function estimateFreshness(estimate: Estimate | null | undefined, now = Date.now()): Freshness {
   if (!estimate) return 'expired'
   if (estimate.kind === 'overseas_model') return marketDataFreshness(estimate.generatedAt || estimate.estTime, now)
-  if (estimate.kind === 'overseas') return 'stale'
+  if (estimate.kind === 'overseas') {
+    const freshness = marketDataFreshness(estimate.estTime || (estimate.navDate ? `${estimate.navDate} 15:00` : null), now)
+    return freshness === 'fresh' ? 'stale' : freshness
+  }
   return marketDataFreshness(estimate.estTime || (estimate.navDate ? `${estimate.navDate} 15:00` : null), now)
 }
 

@@ -8,7 +8,7 @@ V3-5 步骤2：步骤1 产出的 index-valuation.json + fund_index_map.json 在�
 import json
 import logging
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 
 log = logging.getLogger(__name__)
 
@@ -16,17 +16,62 @@ log = logging.getLogger(__name__)
 _valuation_data: dict | None = None
 _index_map: dict[str, str] | None = None
 MAX_VALUATION_AGE_DAYS = 7
+CST = timezone(timedelta(hours=8))
 
 
-def _is_fresh(raw_date: str | None, today: date | None = None) -> bool:
+def _beijing_today(now: datetime | None = None) -> date:
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    return current.astimezone(CST).date()
+
+
+def _age_days(raw_date: str | None, today: date | None = None) -> int | None:
     if not raw_date:
-        return False
+        return None
     try:
         observed = datetime.strptime(raw_date[:10], "%Y-%m-%d").date()
     except (TypeError, ValueError):
+        return None
+    return ((today or _beijing_today()) - observed).days
+
+
+def _is_fresh(raw_date: str | None, today: date | None = None) -> bool:
+    age = _age_days(raw_date, today)
+    if age is None:
         return False
-    age = ((today or date.today()) - observed).days
     return 0 <= age <= MAX_VALUATION_AGE_DAYS
+
+
+def status(today: date | None = None) -> dict:
+    """Expose whether the loaded snapshot is fresh enough for live signals."""
+    loaded = bool(_valuation_data)
+    updated = _valuation_data.get("updated") if _valuation_data else None
+    age_days = _age_days(updated, today)
+    stale = loaded and not _is_fresh(updated, today)
+    indices = (_valuation_data.get("indices") or []) if _valuation_data else []
+    mapped_names = {
+        _canonical_index_name(name)
+        for name in (_index_map or {}).values()
+        if _canonical_index_name(name)
+    }
+    usable_names = {
+        _canonical_index_name(item.get("name"))
+        for item in indices
+        if item.get("pe_pct") is not None and _canonical_index_name(item.get("name"))
+    }
+    mapped_usable_indices = mapped_names & usable_names
+    return {
+        "loaded": loaded,
+        "usable": bool(loaded and not stale and age_days is not None and mapped_usable_indices),
+        "stale": bool(stale),
+        "age_days": age_days,
+        "max_age_days": MAX_VALUATION_AGE_DAYS,
+        "updated": updated,
+        "indices": len(indices),
+        "mapped_usable_indices": len(mapped_usable_indices),
+        "source": _valuation_data.get("source") if _valuation_data else None,
+    }
 
 INDEX_ALIASES = {
     "创业板指数": "创业板指",

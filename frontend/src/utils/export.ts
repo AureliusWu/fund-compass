@@ -41,8 +41,8 @@ function dateStamp(): string {
 /** 导出持仓为 CSV */
 export function exportHoldingsCSV(holdings: {
   code: string; name: string; account: string; type: string
-  shares: number; cost: number; nav: number | null
-  value: number; profit: number
+  shares: number; cost: number | null; nav: number | null
+  value: number | null; profit: number | null
 }[]): void {
   const rows = holdings.map((h) => ({
     代码: h.code,
@@ -50,10 +50,10 @@ export function exportHoldingsCSV(holdings: {
     账户: h.account,
     类型: h.type,
     份额: h.shares.toFixed(2),
-    成本净值: h.cost.toFixed(4),
+    成本净值: h.cost != null ? h.cost.toFixed(4) : '',
     最新净值: h.nav != null ? h.nav.toFixed(4) : '',
-    市值: h.value.toFixed(2),
-    盈亏: h.profit.toFixed(2),
+    市值: h.value != null ? h.value.toFixed(2) : '',
+    盈亏: h.profit != null ? h.profit.toFixed(2) : '',
   }))
   download(`司南基金_持仓_${dateStamp()}.csv`, toCSV(rows))
 }

@@ -7,10 +7,10 @@ import { useFundsStore } from '@/stores/funds'
 import IndexBar from '@/components/IndexBar.vue'
 import { getSourceSummary, recordSource, type SourceStatus } from '@/utils/resilience'
 import { fetchTaskStatuses, type TaskStatus } from '@/utils/taskStatus'
-import { loadAlerts, runAllChecks, markRead, markAllRead, dismissAlert, type Alert } from '@/utils/alerts'
+import { alertFundTypeOrName, loadAlerts, runAllChecks, markRead, markAllRead, dismissAlert, type Alert } from '@/utils/alerts'
 import { APP_VERSION } from '@/version'
 import { combineTemperature, sourceFreshness, visibleUnreadAlerts } from '@/utils/presentation'
-import { fetchEstimates } from '@/utils/estimate'
+import { fetchEstimates, isOverseasLike, latestNavMove, type NavMove } from '@/utils/estimate'
 import type { SignalResp } from '@/api/client'
 import { temperatureLabel, TEMPERATURE_DEFINITION } from '@/utils/terminology'
 
@@ -96,6 +96,23 @@ async function loadWatchSignals() {
 
   try { localStorage.setItem(SIGNAL_SNAPSHOT_KEY, JSON.stringify(sigs.value)) } catch { /* ignore */ }
   const estimates = await fetchEstimates(watch.items.map((item) => item.code))
+  const navMoves: Record<string, NavMove | null> = {}
+  const typeNames: Record<string, string | null> = {}
+  await Promise.all(watch.items.map(async (item) => {
+    const estimate = estimates.get(item.code) ?? null
+    const typeOrName = alertFundTypeOrName(current[item.code]?.type, item.name, estimate)
+    typeNames[item.code] = typeOrName
+    if (!isOverseasLike(typeOrName, estimate)) return
+    try {
+      const detail = await funds.detail(item.code)
+      typeNames[item.code] = alertFundTypeOrName(
+        current[item.code]?.type,
+        detail.type || detail.name || item.name,
+        estimate,
+      )
+      navMoves[item.code] = latestNavMove(detail.nav_history)
+    } catch { navMoves[item.code] = null }
+  }))
 
   runAllChecks(watch.items.map((item) => ({
     code: item.code,
@@ -103,6 +120,8 @@ async function loadWatchSignals() {
     prevSignal: previous[item.code],
     currentSignal: current[item.code],
     estimate: estimates.get(item.code) ?? null,
+    navMove: navMoves[item.code] ?? null,
+    typeOrName: typeNames[item.code],
   }))).then((newAlerts) => {
     if (newAlerts.length) alerts.value = loadAlerts()
   })

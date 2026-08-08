@@ -57,7 +57,7 @@ def _rsi(vals, period=14):
     return round(100 - 100 / (1 + rs), 1)
 
 
-def valuation_layer(nav_history, window=504, fund_code=None):
+def valuation_layer(nav_history, window=504, fund_code=None, *, use_current_index_valuation=True):
     """估值层：优先用真实指数 PE/PB 分位，无数据时回退到去趋势净值分位。
 
     若 fund_code 能在 fund_index_map.json 中找到对应指数且该指数有 PE 分位数据，
@@ -65,7 +65,7 @@ def valuation_layer(nav_history, window=504, fund_code=None):
     否则回退到「对数线性回归去趋势分位」的代理方法。
     """
     # ── 真实 PE/PB 分位（优先） ──
-    if fund_code:
+    if fund_code and use_current_index_valuation:
         idx = _index_lookup(fund_code)
         if idx:
             pct = idx["pe_pct"]
@@ -110,7 +110,11 @@ def valuation_layer(nav_history, window=504, fund_code=None):
         label, value = "高估", -1
     else:
         label, value = "合理", 0
-    reason = _index_unavailable_reason(fund_code) if fund_code else None
+    reason = (
+        _index_unavailable_reason(fund_code)
+        if fund_code and use_current_index_valuation
+        else None
+    )
     note = f"去趋势分位 {pct}%（当前净值相对自身指数趋势的偏离，在历史中的位置；非真·PE/PB）"
     if reason:
         note = f"{reason}；{note}"
@@ -151,10 +155,14 @@ def sentiment_layer(nav_history):
     return {"label": label, "value": value, "rsi": rsi}
 
 
-def timing_signal(detail):
+def timing_signal(detail, *, use_current_index_valuation=True):
     """合成三层为最终信号。权重 估值0.4 / 趋势0.35 / 情绪0.25。"""
     nh = detail.get("nav_history")
-    val = valuation_layer(nh, fund_code=detail.get("code"))
+    val = valuation_layer(
+        nh,
+        fund_code=detail.get("code"),
+        use_current_index_valuation=use_current_index_valuation,
+    )
     tr = trend_layer(nh)
     se = sentiment_layer(nh)
     layers = {"valuation": val, "trend": tr, "sentiment": se}

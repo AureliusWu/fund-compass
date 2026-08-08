@@ -19,6 +19,10 @@ HIST_KEEP = 800   # 入库保留的净值条数（≈3年，供 MA120 / 估值�
 _detail_requests = 0
 _detail_cache_hits = 0
 
+POSITIVE_ACTIONS = {"买入", "分批定投", "加仓", "分批买入", "继续定投"}
+DEFENSIVE_ACTIONS = {"减仓", "卖出", "停止加仓", "部分观察", "考虑替换"}
+OBSERVE_ACTIONS = {"观望", "持有", "观察", "持有观望"}
+
 # 冷启动兜底种子：只覆盖常用指数/ETF，避免空库时选基页完全空白。
 # 完整 universe 不再启动时抓取；需要完整列表时手动 POST /api/admin/refresh-universe。
 SEED_FUNDS = [
@@ -39,6 +43,19 @@ UNIVERSE_META = Path(__file__).resolve().parent.parent / "data" / "fund-universe
 
 def _now():
     return datetime.now(CST)
+
+
+def _cache_age(updated_at: str | None) -> timedelta | None:
+    """Return a non-negative cache age, treating legacy naive times as CST."""
+    if not updated_at:
+        return None
+    try:
+        observed = datetime.fromisoformat(updated_at)
+    except (TypeError, ValueError):
+        return None
+    if observed.tzinfo is None:
+        observed = observed.replace(tzinfo=CST)
+    return max(timedelta(0), _now() - observed.astimezone(CST))
 
 
 def universe_count() -> int:
@@ -207,16 +224,16 @@ def get_detail(code: str, force=False) -> dict:
     try:
         row = conn.execute("SELECT * FROM fund_detail WHERE code=?", (code,)).fetchone()
         if row and not force:
-            try:
-                fresh = (_now() - datetime.fromisoformat(row["updated_at"])) < DETAIL_TTL
-            except Exception:
-                fresh = False
+            cache_age = _cache_age(row["updated_at"])
+            fresh = cache_age is not None and cache_age < DETAIL_TTL
             if fresh:
                 _detail_cache_hits += 1
                 d = dict(row)
                 _fill_detail_type(conn, d)
                 d["nav_history"] = _load_history(conn, code)
                 d["cached"] = True
+                d["stale"] = False
+                d["data_age_hours"] = round(cache_age.total_seconds() / 3600, 1)
                 return d
 
         try:
@@ -224,9 +241,8 @@ def get_detail(code: str, force=False) -> dict:
         except Exception:
             # 容灾末层：主源+备源都失败时，退回 DB 里上次成功缓存的陈旧数据，避免整页 404
             if row:
-                try:
-                    stale_age = _now() - datetime.fromisoformat(row["updated_at"])
-                except Exception:
+                stale_age = _cache_age(row["updated_at"])
+                if stale_age is None:
                     stale_age = STALE_MAX_AGE + timedelta(seconds=1)
                 if stale_age > STALE_MAX_AGE:
                     log.error("缓存超过最大兜底期限 code=%s age=%s", code, stale_age, exc_info=True)
@@ -344,6 +360,21 @@ def claim_request(request_id: str, endpoint: str) -> bool:
         conn.close()
 
 
+def release_request(request_id: str, endpoint: str) -> bool:
+    """Release a failed idempotency claim so a retry can finish durable writes."""
+    conn = get_conn()
+    try:
+        before = conn.total_changes
+        conn.execute(
+            "DELETE FROM idempotency_requests WHERE request_id=? AND endpoint=?",
+            (request_id, endpoint),
+        )
+        conn.commit()
+        return conn.total_changes > before
+    finally:
+        conn.close()
+
+
 def operations_status() -> dict:
     conn = get_conn()
     try:
@@ -437,8 +468,6 @@ def decision_outcomes(horizons=(5, 20, 60)) -> dict:
                 outcome["benchmark_method"] = "same-type ±7d leave-one-out"
 
     groups: dict[tuple[str, str, str], list[float]] = {}
-    positive_actions = {"分批买入", "继续定投"}
-    defensive_actions = {"停止加仓", "部分观察", "考虑替换"}
     for row in results:
         for horizon, outcome in row["returns"].items():
             groups.setdefault((row["strategy_version"], row["action"], horizon), []).append(outcome["return"])
@@ -446,9 +475,9 @@ def decision_outcomes(horizons=(5, 20, 60)) -> dict:
     for (version, action, horizon), returns in sorted(
         groups.items(), key=lambda item: (item[0][0], int(item[0][2]), item[0][1])
     ):
-        if action in positive_actions:
+        if action in POSITIVE_ACTIONS:
             hits = sum(value > 0 for value in returns)
-        elif action in defensive_actions:
+        elif action in DEFENSIVE_ACTIONS:
             hits = sum(value <= 0 for value in returns)
         else:
             hits = sum(value >= 0 for value in returns)
@@ -484,8 +513,8 @@ def decision_outcomes(horizons=(5, 20, 60)) -> dict:
         output = []
         for (label, horizon), values in sorted(buckets.items()):
             hits = sum(
-                value > 0 if action in positive_actions
-                else value <= 0 if action in defensive_actions
+                value > 0 if action in POSITIVE_ACTIONS
+                else value <= 0 if action in DEFENSIVE_ACTIONS
                 else value >= 0
                 for value, _, _, action in values
             )
@@ -525,8 +554,6 @@ def decision_outcomes(horizons=(5, 20, 60)) -> dict:
 def version_comparison() -> dict:
     """Read-only, sample-gated comparison. It never changes registry or historical rows."""
     outcomes = decision_outcomes()
-    positive_actions = {"分批买入", "继续定投"}
-    defensive_actions = {"停止加仓", "部分观察", "考虑替换"}
     buckets: dict[tuple[str, int], list[tuple[dict, dict]]] = {}
     cutoff = None
     for row in outcomes["items"]:
@@ -545,7 +572,7 @@ def version_comparison() -> dict:
         hits = 0
         for row, result in values:
             action, value = row["action"], result["return"]
-            hits += value > 0 if action in positive_actions else value <= 0 if action in defensive_actions else value >= 0
+            hits += value > 0 if action in POSITIVE_ACTIONS else value <= 0 if action in DEFENSIVE_ACTIONS else value >= 0
         metrics.append({
             "version": version, "horizon": horizon, "samples": len(values),
             "average_return": round(statistics.fmean(returns), 2),
@@ -555,7 +582,7 @@ def version_comparison() -> dict:
             "worst_drawdown": round(min(drawdowns), 2),
             "positive_rate": round(sum(value > 0 for value in returns) / len(values) * 100, 1),
             "direction_hit_rate": round(hits / len(values) * 100, 1),
-            "observe_rate": round(sum(row["action"] in {"观察", "持有观望"} for row, _ in values) / len(values) * 100, 1),
+            "observe_rate": round(sum(row["action"] in OBSERVE_ACTIONS for row, _ in values) / len(values) * 100, 1),
         })
 
     new_name = "v3-risk-adjusted / v3-coverage-gated"

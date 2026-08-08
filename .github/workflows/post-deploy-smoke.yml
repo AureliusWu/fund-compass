@@ -10,14 +10,77 @@ jobs:
   smoke:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     env:
       FUND_API_BASE: ${{ secrets.FUND_API_BASE }}
+      WORKER_BASE: https://sinan-estimate-push.ligugu69.workers.dev
     steps:
-      - name: 检查 GitHub Pages
-        run: curl --fail --show-error --retry 4 --retry-delay 10 https://aureliuswu.github.io/fund-compass/
-      - name: 检查后端健康与策略注册表
-        if: ${{ env.FUND_API_BASE != '' }}
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - name: 读取目标版本
+        id: release
+        shell: bash
         run: |
-          curl --fail --show-error --retry 4 --retry-delay 10 "$FUND_API_BASE/api/health"
-          curl --fail --show-error --retry 4 --retry-delay 10 "$FUND_API_BASE/api/strategy/registry"
+          version=$(sed -n 's/^[[:space:]]*"version": "\([^"]*\)",*$/\1/p' frontend/package.json | head -1)
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: 检查 GitHub Pages 版本
+        env:
+          EXPECTED_VERSION: ${{ steps.release.outputs.version }}
+        shell: bash
+        run: |
+          page=https://aureliuswu.github.io/fund-compass
+          curl --fail --show-error --retry 4 --retry-delay 10 "$page/"
+          for attempt in {1..24}; do
+            manifest=$(curl --fail --silent --show-error "$page/manifest.webmanifest?release=${GITHUB_SHA}" || true)
+            if jq -e --arg version "v$EXPECTED_VERSION" '.description | contains($version)' <<<"$manifest" >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Pages 未在时限内呈现 v$EXPECTED_VERSION" >&2
+          exit 1
+      - name: 检查后端版本、基金与策略注册表
+        env:
+          EXPECTED_VERSION: ${{ steps.release.outputs.version }}
+        shell: bash
+        run: |
+          api=${FUND_API_BASE:-https://fund-compass-api.onrender.com}
+          for attempt in {1..40}; do
+            health=$(curl --fail --silent --show-error "$api/api/health" || true)
+            if jq -e --arg version "$EXPECTED_VERSION" '.status == "ok" and .version == $version' <<<"$health" >/dev/null 2>&1; then
+              break
+            fi
+            if [ "$attempt" -eq 40 ]; then
+              echo "API 未在时限内呈现 v$EXPECTED_VERSION" >&2
+              exit 1
+            fi
+            sleep 15
+          done
+          curl --fail --silent --show-error "$api/api/fund/005844" | jq -e '.code == "005844"' >/dev/null
+          curl --fail --silent --show-error "$api/api/strategy/registry" | jq -e 'type == "object"' >/dev/null
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' "$api/api/fund/not-a-code")" = "404"
+      - name: 检查 Worker 版本与估值契约
+        env:
+          EXPECTED_VERSION: ${{ steps.release.outputs.version }}
+        shell: bash
+        run: |
+          for attempt in {1..40}; do
+            health=$(curl --fail --silent --show-error "$WORKER_BASE/health" || true)
+            if jq -e --arg version "$EXPECTED_VERSION" '.status == "ok" and .version == $version' <<<"$health" >/dev/null 2>&1; then
+              break
+            fi
+            if [ "$attempt" -eq 40 ]; then
+              echo "Worker 未在时限内呈现 v$EXPECTED_VERSION" >&2
+              exit 1
+            fi
+            sleep 15
+          done
+          estimates=$(curl --fail --silent --show-error "$WORKER_BASE/estimates?codes=005844,018147")
+          jq -e '
+            .requested == 2
+            and (.returned + .unavailable == .requested)
+            and all(.items[]; (.est_nav | type) == "number" and (.est_change | type) == "number")
+            and all(.unavailable_items[]; .status == "unavailable" and .est_nav == null and .est_change == null)
+          ' <<<"$estimates" >/dev/null

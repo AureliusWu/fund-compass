@@ -24,6 +24,18 @@ def test_backtest_accepts_custom_weights(uptrend):
     assert r["weights"] == custom
 
 
+def test_backtest_never_reads_current_index_valuation(uptrend, monkeypatch):
+    def fail_lookup(_code):
+        raise AssertionError("历史回测不得读取当前指数 PE/PB")
+
+    monkeypatch.setattr("strategy.timing._index_lookup", fail_lookup)
+    monkeypatch.setattr("strategy.timing._index_unavailable_reason", fail_lookup)
+
+    result = backtest({"code": "510300", "type": "指数型", "nav_history": uptrend})
+    assert result["available"] is True
+    assert all(action["signal"] for action in result["actions"])
+
+
 def test_backtest_includes_realistic_friction(uptrend):
     r = backtest({"nav_history": uptrend})
     assert r["strategy_gross"]["total_return"] >= r["strategy"]["total_return"]

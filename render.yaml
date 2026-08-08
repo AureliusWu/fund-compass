@@ -11,6 +11,8 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.7
+      - key: FUND_DB_PERSISTENCE
+        value: ephemeral
       - key: ADMIN_TOKEN
         sync: false
       - key: WORKER_TOKEN

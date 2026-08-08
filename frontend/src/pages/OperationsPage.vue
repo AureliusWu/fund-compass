@@ -38,6 +38,8 @@ onMounted(load)
         <div><span>API</span><b>{{ backend?.status || '不可用' }}</b><em>{{ backend?.version || '—' }}</em></div>
         <div><span>启动时间</span><b>{{ text(backend?.started_at) }}</b></div>
         <div><span>基金全集</span><b>{{ backend?.universe ?? '—' }}</b><em>{{ text(backend?.operations?.universe_artifact?.generated_at) }}</em></div>
+        <div><span>指数估值</span><b :class="{ bad: backend?.index_valuation?.usable === false }">{{ backend?.index_valuation ? (backend.index_valuation.usable ? '可用' : '已降级') : '未报告' }}</b><em>{{ text(backend?.index_valuation?.updated) }} · {{ backend?.index_valuation?.age_days ?? '—' }} 天</em></div>
+        <div><span>数据库</span><b :class="{ bad: backend?.database?.durable === false }">{{ backend?.database ? (backend.database.durable ? '持久盘' : '临时存储') : '未报告' }}</b><em>{{ backend?.database?.warning || backend?.database?.persistence || '未报告' }}</em></div>
         <div><span>缓存命中率</span><b>{{ backend?.operations?.cache?.hit_rate ?? '—' }}%</b><em>最旧 {{ backend?.operations?.cache?.oldest_age_hours ?? '—' }} 小时</em></div>
         <div><span>最近决策</span><b>{{ text(backend?.operations?.latest_decision_write) }}</b></div>
         <div><span>最近结算</span><b>{{ text(backend?.operations?.latest_result_settlement) }}</b></div>
@@ -48,6 +50,7 @@ onMounted(load)
         <div><span>最近触发</span><b>{{ text(worker?.runtime?.last_cron_at) }}</b></div>
         <div><span>最近成功</span><b>{{ text(worker?.runtime?.last_success_at) }}</b></div>
         <div><span>今日尝试</span><b>{{ worker?.runtime?.attempt_count ?? '—' }}</b><em>{{ worker?.runtime?.sent_today ? '已发送' : '未发送' }}</em></div>
+        <div v-if="worker?.runtime?.last_warning"><span>最近警示</span><b class="warn-text">{{ worker.runtime.last_warning }}</b><em>{{ worker?.runtime?.decision_status || '已降级' }}</em></div>
         <div v-if="worker?.runtime?.last_error"><span>最近错误</span><b class="bad">{{ worker.runtime.last_error }}</b></div>
       </section>
       <div class="sec">自动任务</div>
@@ -61,6 +64,6 @@ onMounted(load)
 <style scoped>
 .operations-page { padding-bottom: 90px; }.notice { padding: 10px 14px; color: var(--gold); background: var(--gold-soft); border-bottom: 1px solid var(--gold); font-size: 11px; }
 .status-band, .task-band { background: var(--card-bg); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }.status-band > div { display: grid; grid-template-columns: 100px minmax(0, 1fr) auto; gap: 10px; padding: 11px 14px; border-bottom: 1px solid var(--border); align-items: center; }.status-band > div:last-child, .task-band > div:last-child { border-bottom: 0; }
-span { color: var(--text-hint); font-size: 11px; }b { min-width: 0; color: var(--ink); font-size: 11px; font-weight: 500; overflow-wrap: anywhere; }em { color: var(--text-hint); font-size: 9px; font-style: normal; }.bad { color: var(--danger); }.task-band > div { display: grid; grid-template-columns: 10px 90px minmax(0, 1fr) auto; gap: 8px; padding: 11px 14px; border-bottom: 1px solid var(--border); align-items: center; }.task-band i { width: 7px; height: 7px; border-radius: 50%; }.task-band i.ok { background: var(--success); }.task-band i.warn { background: var(--gold); }
+  span { color: var(--text-hint); font-size: 11px; }b { min-width: 0; color: var(--ink); font-size: 11px; font-weight: 500; overflow-wrap: anywhere; }em { color: var(--text-hint); font-size: 9px; font-style: normal; }.bad { color: var(--danger); }.warn-text { color: var(--gold); }.task-band > div { display: grid; grid-template-columns: 10px 90px minmax(0, 1fr) auto; gap: 8px; padding: 11px 14px; border-bottom: 1px solid var(--border); align-items: center; }.task-band i { width: 7px; height: 7px; border-radius: 50%; }.task-band i.ok { background: var(--success); }.task-band i.warn { background: var(--gold); }
 @media (max-width: 480px) { .status-band > div { grid-template-columns: 82px minmax(0, 1fr); }.status-band em { grid-column: 2; }.task-band > div { grid-template-columns: 10px 72px minmax(0, 1fr); }.task-band em { grid-column: 3; } }
 </style>

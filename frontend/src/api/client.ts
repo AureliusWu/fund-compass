@@ -44,7 +44,15 @@ const req = request
 
 export interface Health {
   status: string; service: string; version: string; universe: number; started_at?: string
-  source?: Record<string, unknown>; index_valuation?: Record<string, unknown> | null
+  source?: Record<string, unknown>
+  index_valuation?: {
+    loaded?: boolean; usable?: boolean; stale?: boolean; age_days?: number | null
+    max_age_days?: number; updated?: string | null; indices?: number; source?: string | null
+  } | null
+  database?: {
+    engine?: string; persistence?: 'persistent_disk' | 'ephemeral' | 'unspecified'
+    durable?: boolean; warning?: string | null
+  }
   operations?: {
     universe_artifact?: Record<string, unknown> | null
     cache?: { requests: number; hits: number; hit_rate: number | null; oldest_age_hours: number | null }

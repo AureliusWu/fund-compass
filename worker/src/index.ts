@@ -53,7 +53,22 @@ interface PushState {
   last_pushed_at?: string
   attempt_count: number
   last_error?: string
+  last_warning?: string
+  decision_status?: 'ok' | 'disabled' | 'degraded'
   last_http_status?: number | null
+}
+
+interface DecisionOutcome {
+  result: Record<string, unknown> | null
+  status: 'ok' | 'disabled' | 'degraded'
+  warning?: string
+}
+
+class DecisionError extends Error {
+  constructor(message: string, readonly status: number | null = null) {
+    super(message)
+    this.name = 'DecisionError'
+  }
 }
 
 const WATCH_FILE = 'sinan-watchlist.json'
@@ -96,6 +111,34 @@ function beijingNow(now = new Date()): { date: string; iso: string; weekday: str
   const part = (type: string) => parts.find((item) => item.type === type)?.value || ''
   const date = `${part('year')}-${part('month')}-${part('day')}`
   return { date, weekday: part('weekday'), iso: `${date}T${part('hour')}:${part('minute')}:${part('second')}+08:00` }
+}
+
+function hasPublishableEstimateValues(estimate: Estimate): boolean {
+  return estimate.lastNav != null
+    && Number.isFinite(estimate.lastNav)
+    && estimate.lastNav > 0
+    && estimate.estNav != null
+    && Number.isFinite(estimate.estNav)
+    && estimate.estNav > 0
+    && estimate.change != null
+    && Number.isFinite(estimate.change)
+}
+
+function isEstimateFresh(estimate: Estimate, date: string): boolean {
+  return estimate.time.startsWith(date) && hasPublishableEstimateValues(estimate)
+}
+
+function hiddenEstimate(estimate: Estimate, date: string): Estimate {
+  const currentButIncomplete = estimate.time.startsWith(date) && !hasPublishableEstimateValues(estimate)
+  return {
+    ...estimate,
+    estNav: null,
+    change: null,
+    label: currentButIncomplete ? '数据不可用' : '数据过期',
+    note: currentButIncomplete
+      ? '今日盘中估值缺少有效净值或涨跌，已隐藏不完整数据'
+      : `盘中估值日期 ${estimate.time || '未知'} 非今日，已隐藏过期估值涨跌`,
+  }
 }
 
 async function github(env: Env, path: string, init: RequestInit = {}): Promise<Response> {
@@ -268,8 +311,9 @@ async function publicEstimates(request: Request, url: URL, ctx?: ExecutionContex
       status: 400, headers: publicHeaders(request),
     })
   }
+  const today = beijingNow().date
   const origin = request.headers.get('Origin') || 'none'
-  const cacheKey = new Request(`https://estimate-cache.internal/v2?codes=${encodeURIComponent([...codes].sort().join(','))}&origin=${encodeURIComponent(origin)}`)
+  const cacheKey = new Request(`https://estimate-cache.internal/v3?date=${today}&codes=${encodeURIComponent([...codes].sort().join(','))}&origin=${encodeURIComponent(origin)}`)
   const edgeCache = typeof caches === 'undefined' ? null : caches.default
   const cached = edgeCache ? await edgeCache.match(cacheKey) : null
   if (cached) return cached
@@ -281,21 +325,56 @@ async function publicEstimates(request: Request, url: URL, ctx?: ExecutionContex
     } catch (error) {
       estimateError = error
     }
-    const missing = codes.filter((code) => !estimates.has(code))
-    const official = missing.length ? await fetchOfficialNavs(missing) : new Map<string, Estimate>()
-    official.forEach((item, code) => estimates.set(code, item))
-    if (!estimates.size && estimateError) throw estimateError
-    const items = codes.map((code) => estimates.get(code)).filter((item): item is Estimate => Boolean(item))
-    const response = Response.json({
-      source: official.size
-        ? (official.size === items.length ? 'eastmoney_official_nav' : 'eastmoney_mixed')
-        : 'eastmoney_estimate_table',
-      fallback: official.size ? 'official_nav' : null,
-      source_time_precision: 'date',
-      fetched_at: new Date().toISOString(),
-      requested: codes.length,
-      returned: items.length,
-      items: items.map((item) => ({
+    const fallbackCodes = codes.filter((code) => {
+      const estimate = estimates.get(code)
+      return !estimate || !isEstimateFresh(estimate, today)
+    })
+    const official = fallbackCodes.length ? await fetchOfficialNavs(fallbackCodes) : new Map<string, Estimate>()
+    for (const [code, item] of official) {
+      const estimate = estimates.get(code)
+      if (estimate?.name) item.name = estimate.name
+    }
+    const resolved = new Map<string, Estimate>()
+    for (const code of codes) {
+      const estimate = estimates.get(code)
+      if (estimate && isEstimateFresh(estimate, today)) resolved.set(code, estimate)
+      else if (official.has(code)) resolved.set(code, official.get(code) as Estimate)
+    }
+    if (!resolved.size && estimateError && !estimates.size) throw estimateError
+    const unavailable = codes.filter((code) => !resolved.has(code))
+    const unavailableItems = unavailable.map((code) => {
+      const estimate = estimates.get(code)
+      return {
+        code,
+        name: estimate?.name || code,
+        last_nav: null,
+        est_nav: null,
+        est_change: null,
+        nav_date: estimate?.navDate || '',
+        est_time: estimate?.time || '',
+        source_time_precision: 'date',
+        est_label: '数据不可用',
+        est_kind: 'estimate',
+        est_realtime: false,
+        est_note: `盘中估值${estimate ? (estimate.time.startsWith(today) ? '数值不完整' : '已过期') : '缺失'}，最近正式净值回退也不可用`,
+        status: 'unavailable',
+        source: 'unavailable',
+        fallback_reason: estimate
+          ? (estimate.time.startsWith(today) ? 'estimate_incomplete' : 'estimate_stale')
+          : 'estimate_missing',
+      }
+    })
+    // Keep `items` backward compatible for existing clients: unavailable rows used
+    // to be absent, and some legacy consumers coerce null numeric fields to zero.
+    const items = codes.flatMap((code) => {
+      const item = resolved.get(code)
+      const estimate = estimates.get(code)
+      const fallbackReason = estimate
+        ? (estimate.time.startsWith(today) ? 'estimate_incomplete' : 'estimate_stale')
+        : 'estimate_missing'
+      if (!item) return []
+      const isOfficial = item.kind === 'official_nav'
+      return [{
         code: item.code,
         name: item.name,
         last_nav: item.lastNav,
@@ -308,9 +387,27 @@ async function publicEstimates(request: Request, url: URL, ctx?: ExecutionContex
         est_kind: item.kind || 'estimate',
         est_realtime: false,
         est_note: item.note || '东方财富盘中估算；上游仅提供行情日期，未提供精确分钟',
-        status: 'ok',
-        source: item.kind === 'official_nav' ? 'eastmoney_official_nav' : 'eastmoney_estimate_table',
-      })),
+        status: isOfficial ? 'latest_official' : 'fresh',
+        source: isOfficial ? 'eastmoney_official_nav' : 'eastmoney_estimate_table',
+        fallback_reason: isOfficial ? fallbackReason : null,
+      }]
+    })
+    const source = resolved.size === official.size
+      ? (resolved.size ? 'eastmoney_official_nav' : 'unavailable')
+      : (official.size ? 'eastmoney_mixed' : 'eastmoney_estimate_table')
+    const response = Response.json({
+      status: unavailable.length === codes.length ? 'unavailable' : (fallbackCodes.length ? 'degraded' : 'ok'),
+      source,
+      fallback: official.size ? 'official_nav' : null,
+      fallback_attempted: fallbackCodes.length ? 'official_nav' : null,
+      source_time_precision: 'date',
+      fetched_at: new Date().toISOString(),
+      requested: codes.length,
+      returned: resolved.size,
+      unavailable: unavailable.length,
+      unavailable_codes: unavailable,
+      unavailable_items: unavailableItems,
+      items,
     }, { headers: publicHeaders(request) })
     if (edgeCache && ctx) ctx.waitUntil(edgeCache.put(cacheKey, response.clone()))
     return response
@@ -364,10 +461,20 @@ function portfolioItems(entries: WatchEntry[], estimates: Map<string, Estimate>)
     grouped.set(entry.code, current)
   }
   const values = new Map<string, number>()
+  const missing: string[] = []
   for (const [code, row] of grouped) {
     const estimate = estimates.get(code)
-    const nav = estimate?.estNav || estimate?.lastNav || 0
-    values.set(code, row.shares * nav)
+    const nav = numberOrNull(estimate?.estNav ?? estimate?.lastNav)
+    if (row.shares > 0 && (nav == null || nav <= 0)) missing.push(code)
+    values.set(code, row.shares > 0 && nav != null && nav > 0 ? row.shares * nav : 0)
+  }
+  if (missing.length) {
+    return {
+      items: [...grouped.keys()].map((code) => ({ code })),
+      portfolioValue: 0,
+      complete: false,
+      missing,
+    }
   }
   const portfolioValue = [...values.values()].reduce((sum, value) => sum + value, 0)
   const explicit = [...grouped.values()].reduce((sum, row) => sum + (row.shares > 0 ? row.target || 0 : 0), 0)
@@ -381,12 +488,30 @@ function portfolioItems(entries: WatchEntry[], estimates: Map<string, Estimate>)
       target_weight: Number((row.target ?? defaultTarget).toFixed(2)),
     }
   })
-  return { items, portfolioValue: Number(portfolioValue.toFixed(2)) }
+  return {
+    items,
+    portfolioValue: Number(portfolioValue.toFixed(2)),
+    complete: missing.length === 0,
+    missing,
+  }
 }
 
-async function decisions(env: Env, entries: WatchEntry[], estimates: Map<string, Estimate>, requestId: string) {
-  if (!env.FUND_API_BASE) return null
+async function decisions(
+  env: Env,
+  entries: WatchEntry[],
+  estimates: Map<string, Estimate>,
+  requestId: string,
+): Promise<DecisionOutcome> {
+  if (!env.FUND_API_BASE) return { result: null, status: 'disabled' }
+  if (!env.WORKER_TOKEN) throw new DecisionError('组合决策未执行：WORKER_TOKEN 未配置')
   const payload = portfolioItems(entries, estimates)
+  if (!payload.complete) {
+    return {
+      result: null,
+      status: 'degraded',
+      warning: `组合决策未执行：持仓缺少可用净值（${payload.missing.join(',')}）`,
+    }
+  }
   const request: WorkerDecisionRequest = {
     request_id: requestId, items: payload.items, portfolio_value: payload.portfolioValue,
   }
@@ -399,9 +524,21 @@ async function decisions(env: Env, entries: WatchEntry[], estimates: Map<string,
       body: JSON.stringify(request),
       signal: AbortSignal.timeout(25_000),
     })
-    if (!response.ok) return null
-    return await response.json() as Record<string, unknown>
-  } catch { return null }
+    if (response.status === 401 || response.status === 403) {
+      throw new DecisionError(`组合决策鉴权失败: HTTP ${response.status}`, response.status)
+    }
+    if (!response.ok) {
+      return { result: null, status: 'degraded', warning: `组合决策暂不可用: HTTP ${response.status}` }
+    }
+    return { result: await response.json() as Record<string, unknown>, status: 'ok' }
+  } catch (error) {
+    if (error instanceof DecisionError) throw error
+    return {
+      result: null,
+      status: 'degraded',
+      warning: `组合决策暂不可用: ${error instanceof Error ? error.message : String(error)}`.slice(0, 240),
+    }
+  }
 }
 
 export function formatMessage(entries: WatchEntry[], estimates: Map<string, Estimate>, result: Record<string, unknown> | null) {
@@ -410,7 +547,7 @@ export function formatMessage(entries: WatchEntry[], estimates: Map<string, Esti
   const lines = entries.map((entry) => {
     const estimate = estimates.get(entry.code)
     if (!estimate) return null
-    const change = estimate.change == null ? '--' : `${estimate.change >= 0 ? '+' : ''}${estimate.change.toFixed(2)}%（${estimate.label}）`
+    const change = estimate.change == null ? `--（${estimate.label}）` : `${estimate.change >= 0 ? '+' : ''}${estimate.change.toFixed(2)}%（${estimate.label}）`
     const decision = byCode.get(entry.code)
     const action = decision ? ` → **${String(decision.action || '观察')}**` : ''
     const summary = decision?.summary ? `，${String(decision.summary)}` : ''
@@ -475,6 +612,7 @@ export async function run(env: Env, force: boolean, clock = new Date()) {
         date: now.date, sent_slots: state.sent_slots || [], last_slot: state.last_slot,
         last_attempt_at: state.last_attempt_at, last_pushed_at: state.last_pushed_at,
         attempt_count: state.attempt_count || 0, last_error: state.last_error,
+        last_warning: state.last_warning, decision_status: state.decision_status,
         last_http_status: state.last_http_status ?? null,
       }
     : { date: now.date, sent_slots: [], attempt_count: 0, last_http_status: null }
@@ -482,19 +620,37 @@ export async function run(env: Env, force: boolean, clock = new Date()) {
 
   const unique = new Map<string, WatchEntry>()
   for (const entry of entries) if (!unique.has(entry.code)) unique.set(entry.code, entry)
-  const estimates = await fetchEstimates([...unique.keys()])
-  if (!estimates.size) throw new Error('未取得任何估值数据')
-  const fresh = [...estimates.values()].some((estimate) => estimate.time.startsWith(now.date))
+  const rawEstimates = await fetchEstimates([...unique.keys()])
+  if (!rawEstimates.size) throw new Error('未取得任何估值数据')
+  const estimates = new Map([...rawEstimates].map(([code, estimate]) => [
+    code,
+    isEstimateFresh(estimate, now.date) ? estimate : hiddenEstimate(estimate, now.date),
+  ]))
+  const freshCount = [...rawEstimates.values()].filter((estimate) => isEstimateFresh(estimate, now.date)).length
+  const fresh = freshCount > 0
   if (!force && !fresh) return { status: 'skipped', reason: 'no_fresh_estimate' }
 
   const activeEntries = [...unique.values()].filter((entry) => estimates.has(entry.code))
-  const result = await decisions(env, activeEntries, estimates, `${now.date}-${SLOT}`)
-  const title = result ? `司南基金 · 自选决策摘要（${SLOT}）` : `司南基金 · 自选涨跌幅（${SLOT}）`
   current.last_slot = SLOT
   current.last_attempt_at = now.iso
   current.attempt_count += 1
   current.last_error = ''
+  current.last_warning = ''
   current.last_http_status = null
+  let decision: DecisionOutcome
+  try {
+    decision = await decisions(env, [...unique.values()], estimates, `${now.date}-${SLOT}`)
+  } catch (error) {
+    current.last_error = error instanceof Error ? error.message.slice(0, 240) : String(error).slice(0, 240)
+    current.last_http_status = error instanceof DecisionError ? error.status : null
+    current.decision_status = 'degraded'
+    if (!force) await writeState(env, current)
+    throw error
+  }
+  const result = decision.result
+  const title = result ? `司南基金 · 自选决策摘要（${SLOT}）` : `司南基金 · 自选涨跌幅（${SLOT}）`
+  current.decision_status = decision.status
+  current.last_warning = decision.warning || ''
   if (!force) await writeState(env, current)
   try {
     await sendWithOneRetry(env, title, formatMessage(activeEntries, estimates, result))
@@ -509,10 +665,19 @@ export async function run(env: Env, force: boolean, clock = new Date()) {
     current.last_slot = SLOT
     current.last_pushed_at = now.iso
     current.last_error = ''
+    current.last_warning = decision.warning || ''
     current.last_http_status = 200
     await writeState(env, current)
   }
-  return { status: 'sent', funds: activeEntries.length, fresh, force }
+  return {
+    status: decision.warning ? 'sent_with_warning' : 'sent',
+    funds: activeEntries.length,
+    fresh,
+    stale: estimates.size - freshCount,
+    decision_status: decision.status,
+    warning: decision.warning || null,
+    force,
+  }
 }
 
 export default {
@@ -537,15 +702,16 @@ export default {
         const state = JSON.parse(await fileContent(files[STATE_FILE]) || '{}') as PushState
         runtime = {
           state_available: true, last_cron_at: state.last_attempt_at || null,
-          last_result: state.last_error ? 'failed' : state.last_pushed_at ? 'sent' : 'not_sent',
+          last_result: state.last_error ? 'failed' : state.last_warning ? 'sent_with_warning' : state.last_pushed_at ? 'sent' : 'not_sent',
           last_error: state.last_error || null, last_success_at: state.last_pushed_at || null,
+          last_warning: state.last_warning || null, decision_status: state.decision_status || null,
           attempt_count: state.attempt_count || 0, sent_today: Boolean(state.sent_slots?.includes(SLOT)),
           state_date: state.date || null,
         }
       } catch (error) {
         runtime = { state_available: false, last_error: error instanceof Error ? error.message : String(error) }
       }
-      return Response.json({ status: 'ok', service: 'sinan-estimate-push', version: '6.0.3', runtime, configured: {
+      return Response.json({ status: 'ok', service: 'sinan-estimate-push', version: '6.0.5', runtime, configured: {
         gist_id: Boolean(env.GIST_ID), fund_api: Boolean(env.FUND_API_BASE),
         gist_token: Boolean(env.GIST_TOKEN), serverchan: Boolean(env.WECHAT_SENDKEY), admin: Boolean(env.ADMIN_TOKEN),
         worker: Boolean(env.WORKER_TOKEN),

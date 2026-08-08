@@ -1,5 +1,7 @@
 """V6-P1 批量决策测试。"""
-from strategy.portfolio import decide_portfolio
+import pytest
+
+from strategy.portfolio import _rebalance_plan, decide_portfolio
 
 
 def test_portfolio_decisions_empty():
@@ -50,6 +52,26 @@ def test_portfolio_rebalance_amount_and_overweight(sample_detail, monkeypatch):
     assert r["allocation"]["target_total"] == 110
     assert r["allocation"]["warnings"]
     assert {x["amount"] for x in r["rebalance"]} == {10_000, 20_000}
+
+
+@pytest.mark.parametrize(
+    ("action", "gap", "suggestion"),
+    [
+        ("买入", 10, "分批补仓"),
+        ("分批定投", 10, "分批补仓"),
+        ("加仓", 10, "分批补仓"),
+        ("持有", 10, "暂缓补仓"),
+        ("观望", 10, "暂缓补仓"),
+        ("减仓", -10, "逐步降仓"),
+        ("卖出", -10, "逐步降仓"),
+        ("持有", -10, "关注超配"),
+    ],
+)
+def test_rebalance_suggestion_uses_current_action_vocabulary(action, gap, suggestion):
+    item = {"code": "000001", "current_weight": 20, "target_weight": 20 + gap}
+    decision = {"code": "000001", "name": "测试基金", "action": action}
+
+    assert _rebalance_plan([item], [decision], None)[0]["suggestion"] == suggestion
 
 
 def test_portfolio_decisions_error(monkeypatch):

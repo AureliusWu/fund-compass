@@ -62,6 +62,25 @@ def test_primary_daily_returns_are_compounded_into_cumulative_return():
     assert history[1]["ac_return"] != points[1]["equityReturn"]
 
 
+def test_primary_universe_and_detail_sources_require_https(monkeypatch):
+    from service import eastmoney as em
+
+    requested = []
+
+    def fake_get(url):
+        requested.append(url)
+        if url.endswith("fundcode_search.js"):
+            return 'var r = [["000001","CSJZ","测试基金","混合型"]];'
+        return JS
+
+    monkeypatch.setattr(em, "_get", fake_get)
+
+    assert em.fetch_universe()[0]["code"] == "000001"
+    assert em._fetch_detail_pingzhong("000001")["name"] == "测试基金A"
+    assert requested and all(url.startswith("https://") for url in requested)
+    assert em._HEADERS["Referer"].startswith("https://")
+
+
 def test_source_health_tracks_primary(monkeypatch):
     """主源成功/失败计数与最近错误记录（用基线增量，规避模块级计数器跨用例污染）。"""
     from service import eastmoney as em

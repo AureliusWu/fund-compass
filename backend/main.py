@@ -17,7 +17,7 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
-from database.db import init_db
+from database.db import init_db, persistence_status
 from models.api import (
     HealthResponse, PortfolioDecisionRequest, PortfolioDecisionResponse,
     PortfolioLabRequest, WatchlistRequest,
@@ -26,6 +26,7 @@ from service import eastmoney, repo
 from service.security import require_admin, require_worker_or_admin
 from strategy import backtest, decide_fund, score_fund, timing_signal
 from strategy.calibration import calibrate
+from strategy.index_valuation import status as index_valuation_status
 from strategy.portfolio import decide_portfolio
 from strategy.portfolio_lab import analyze_portfolio
 from strategy.registry import registry_summary
@@ -49,7 +50,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="司南基金 API", version="6.0.4", lifespan=lifespan)
+app = FastAPI(title="司南基金 API", version="6.0.5", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -153,18 +154,6 @@ def _decision_detail(detail: dict) -> dict:
 
 @app.get("/api/health", response_model=HealthResponse)
 def health() -> dict:
-    # 指数估值数据新鲜度（V3-5）
-    iv_info = None
-    try:
-        from strategy.index_valuation import _valuation_data
-        if _valuation_data:
-            iv_info = {
-                "updated": _valuation_data.get("updated"),
-                "indices": len(_valuation_data.get("indices", [])),
-                "source": _valuation_data.get("source"),
-            }
-    except Exception:
-        pass
     universe = repo.universe_count()
     return {
         "status": "ok",
@@ -175,7 +164,8 @@ def health() -> dict:
         "universe_ready": universe > 0,
         "universe_import": {"mode": "manual", "running": False},
         "source": eastmoney.source_health(),
-        "index_valuation": iv_info,
+        "index_valuation": index_valuation_status(),
+        "database": persistence_status(),
         "strategy_registry": registry_summary(),
         "operations": repo.operations_status(),
     }
@@ -317,10 +307,18 @@ def portfolio_decisions(request: PortfolioDecisionRequest, _role: str = Depends(
             raise HTTPException(status_code=400, detail="portfolio_value 不能为负数")
     result = decide_portfolio(cleaned, portfolio_value)
     if request_id and not repo.claim_request(request_id, "portfolio_decisions"):
-        return {"decisions": [], "errors": [], "total": 0, "duplicate": True, "request_id": request_id}
-    version = (registry_summary().get("active") or {}).get("version") or "unknown"
-    repo.record_decisions(result["decisions"], version)
-    repo.record_portfolio_decision(cleaned, result["decisions"], version)
+        return {**result, "duplicate": True, "request_id": request_id}
+    try:
+        version = (registry_summary().get("active") or {}).get("version") or "unknown"
+        repo.record_decisions(result["decisions"], version)
+        repo.record_portfolio_decision(cleaned, result["decisions"], version)
+    except Exception:
+        if request_id:
+            try:
+                repo.release_request(request_id, "portfolio_decisions")
+            except Exception:
+                log.exception("request_id 释放失败 request_id=%s", request_id)
+        raise
     return {**result, "duplicate": False, "request_id": request_id or None}
 
 

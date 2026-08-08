@@ -2,6 +2,9 @@
 from service import repo
 from strategy.decision import decide_fund
 
+POSITIVE_ACTIONS = {"买入", "分批定投", "加仓"}
+DEFENSIVE_ACTIONS = {"减仓", "卖出"}
+
 
 def _allocation_summary(items: list[dict]) -> dict:
     current = round(sum(float(x.get("current_weight") or 0) for x in items), 2)
@@ -34,11 +37,11 @@ def _rebalance_plan(items: list[dict], decisions: list[dict], portfolio_value: f
         action = str(decision.get("action") or "观察")
         if abs(gap) < 0.5:
             suggestion = "维持"
-        elif gap > 0 and action in ("分批买入", "继续定投"):
+        elif gap > 0 and action in POSITIVE_ACTIONS:
             suggestion = "分批补仓"
         elif gap > 0:
             suggestion = "暂缓补仓"
-        elif action in ("停止加仓", "部分观察", "考虑替换"):
+        elif action in DEFENSIVE_ACTIONS:
             suggestion = "逐步降仓"
         else:
             suggestion = "关注超配"

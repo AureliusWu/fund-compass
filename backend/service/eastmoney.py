@@ -1,9 +1,9 @@
 """天天基金公开数据源（主源）。
 
-- 基金列表：http://fund.eastmoney.com/js/fundcode_search.js
-- 基金详情：http://fund.eastmoney.com/pingzhongdata/{code}.js（含费率/收益/经理/规模/净值走势）
+- 基金列表：https://fund.eastmoney.com/js/fundcode_search.js
+- 基金详情：https://fund.eastmoney.com/pingzhongdata/{code}.js（含费率/收益/经理/规模/净值走势）
 
-AKShare 作为备源（M1 暂未接入，后续在此模块加 fallback）。
+详情主源异常时回退东方财富正式净值 API；两条链路均强制 HTTPS。
 """
 import json
 import logging
@@ -17,7 +17,7 @@ import requests
 log = logging.getLogger(__name__)
 
 CST = timezone(timedelta(hours=8))
-_HEADERS = {"User-Agent": "Mozilla/5.0", "Referer": "http://fund.eastmoney.com/"}
+_HEADERS = {"User-Agent": "Mozilla/5.0", "Referer": "https://fund.eastmoney.com/"}
 _TIMEOUT = (4, 10)
 _ESTIMATE_TTL_SECONDS = 30
 _estimate_table_cache: dict[str, dict] = {}
@@ -34,7 +34,7 @@ def _get(url: str) -> str:
 
 def fetch_universe() -> list[dict]:
     """全部基金 [{code,name,type,pinyin}]。"""
-    txt = _get("http://fund.eastmoney.com/js/fundcode_search.js")
+    txt = _get("https://fund.eastmoney.com/js/fundcode_search.js")
     arr = json.loads(txt[txt.index("["): txt.rindex("]") + 1])
     out = []
     for x in arr:
@@ -144,7 +144,7 @@ def _build_primary_nav_history(points: list[dict]) -> list[dict]:
 
 def _fetch_detail_pingzhong(code: str) -> dict:
     """主源：单只基金详情 + 净值历史（pingzhongdata，字段最全）。"""
-    txt = _get(f"http://fund.eastmoney.com/pingzhongdata/{code}.js")
+    txt = _get(f"https://fund.eastmoney.com/pingzhongdata/{code}.js")
     name = _str_var(txt, "fS_name")
     if not name:
         raise ValueError(f"无效基金或无数据：{code}")
@@ -221,7 +221,7 @@ def _fetch_detail_fallback(code: str) -> dict:
         "https://api.fund.eastmoney.com/f10/lsjz",
         params={"fundCode": code, "pageIndex": 1, "pageSize": 1200,
                 "_": int(datetime.now().timestamp() * 1000)},
-        headers={"User-Agent": "Mozilla/5.0", "Referer": "http://fundf10.eastmoney.com/"},
+        headers={"User-Agent": "Mozilla/5.0", "Referer": "https://fundf10.eastmoney.com/"},
         timeout=_TIMEOUT,
     )
     r.raise_for_status()

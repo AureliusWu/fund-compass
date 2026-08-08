@@ -58,6 +58,15 @@ describe('freshness and QDII evidence', () => {
     expect(estimateChangeForDisplay(expired, now)).toBeNull()
   })
 
+  it('eventually expires legacy overseas estimates instead of keeping them stale forever', () => {
+    expect(estimateFreshness({
+      ...baseEstimate,
+      kind: 'overseas',
+      label: '海外估值',
+      estTime: '2026-07-01T07:00:00Z',
+    }, now)).toBe('expired')
+  })
+
   it('renders compact model coverage, sample confidence and P80 band', () => {
     const text = estimateTrustText({
       ...baseEstimate, modelWeight: 72, confidence: '中等', accuracySamples: 24, errorBand: 1.86,

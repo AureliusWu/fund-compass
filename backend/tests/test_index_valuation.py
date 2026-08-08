@@ -1,9 +1,10 @@
 """指数估值加载器测试：lookup 命中 / 未映射 / PE缺失 / 数据为空 / 降级说明。"""
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
-TODAY = date.today().isoformat()
+BEIJING_TODAY = datetime.now(timezone(timedelta(hours=8))).date()
+TODAY = BEIJING_TODAY.isoformat()
 
 # 人造估值数据（与 index-valuation.json 结构一致）
 SAMPLE_VALUATION = {
@@ -74,7 +75,7 @@ class TestLookupFallback:
     def test_stale_data_is_rejected(self, monkeypatch):
         import strategy.index_valuation as iv
 
-        stale = {**SAMPLE_VALUATION, "updated": (date.today() - timedelta(days=8)).isoformat()}
+        stale = {**SAMPLE_VALUATION, "updated": (BEIJING_TODAY - timedelta(days=8)).isoformat()}
         monkeypatch.setattr(iv, "_valuation_data", stale)
         monkeypatch.setattr(iv, "_index_map", SAMPLE_MAP)
 
@@ -147,3 +148,58 @@ class TestLookupFallback:
         finally:
             iv._valuation_data = orig_val
             iv._index_map = orig_map
+
+
+class TestStatus:
+    def test_fresh_snapshot_is_usable(self, monkeypatch):
+        import strategy.index_valuation as iv
+
+        monkeypatch.setattr(iv, "_valuation_data", SAMPLE_VALUATION)
+        monkeypatch.setattr(iv, "_index_map", SAMPLE_MAP)
+        result = iv.status()
+
+        assert result["usable"] is True
+        assert result["stale"] is False
+        assert result["age_days"] == 0
+
+    def test_stale_snapshot_reports_age_and_is_unusable(self, monkeypatch):
+        import strategy.index_valuation as iv
+
+        stale = {**SAMPLE_VALUATION, "updated": (BEIJING_TODAY - timedelta(days=8)).isoformat()}
+        monkeypatch.setattr(iv, "_valuation_data", stale)
+        monkeypatch.setattr(iv, "_index_map", SAMPLE_MAP)
+        result = iv.status()
+
+        assert result["usable"] is False
+        assert result["stale"] is True
+        assert result["age_days"] == 8
+
+    def test_missing_snapshot_is_explicitly_unavailable(self, monkeypatch):
+        import strategy.index_valuation as iv
+
+        monkeypatch.setattr(iv, "_valuation_data", None)
+        monkeypatch.setattr(iv, "_index_map", SAMPLE_MAP)
+        result = iv.status()
+
+        assert result["loaded"] is False
+        assert result["usable"] is False
+        assert result["stale"] is False
+        assert result["age_days"] is None
+
+    def test_fresh_snapshot_without_lookupable_mapping_is_unusable(self, monkeypatch):
+        import strategy.index_valuation as iv
+
+        monkeypatch.setattr(iv, "_valuation_data", SAMPLE_VALUATION)
+        monkeypatch.setattr(iv, "_index_map", {"588000": "科创50"})
+
+        result = iv.status()
+
+        assert result["usable"] is False
+        assert result["mapped_usable_indices"] == 0
+
+    def test_beijing_date_rolls_over_before_utc_date(self):
+        import strategy.index_valuation as iv
+
+        utc_boundary = datetime(2026, 8, 8, 16, 0, tzinfo=timezone.utc)
+
+        assert iv._beijing_today(utc_boundary) == date(2026, 8, 9)

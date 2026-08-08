@@ -1,52 +1,71 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { getFundDetail, postPortfolioLab, type PortfolioLabResp } from '@/api/client'
+import { postPortfolioLab, type PortfolioLabResp } from '@/api/client'
+import { useFundsStore } from '@/stores/funds'
 import { useWatchlistStore } from '@/stores/watchlist'
 import { colorOf, num, pct } from '@/utils/format'
 import Chart from '@/components/Chart.vue'
+import { completePortfolioWeights, holdingMarketValue, valuationCoverage } from '@/utils/portfolioCoverage'
 
-interface LabItem { code: string; name: string; current: number; target: number; value: number }
+interface LabItem { code: string; name: string; current: number | null; target: number; value: number | null; costComplete: boolean }
 
 const watch = useWatchlistStore()
+const funds = useFundsStore()
 const items = reactive<LabItem[]>([])
 const loading = ref(true)
 const running = ref(false)
 const error = ref('')
 const result = ref<PortfolioLabResp | null>(null)
-const portfolioValue = computed(() => items.reduce((sum, item) => sum + item.value, 0))
+const coverage = computed(() => valuationCoverage(items))
+const unpricedItems = computed(() => coverage.value.missing)
+const missingCostItems = computed(() => items.filter((item) => !item.costComplete))
+const portfolioReady = computed(() => coverage.value.complete && missingCostItems.value.length === 0)
+const portfolioValue = computed(() => coverage.value.complete ? coverage.value.pricedValue : null)
 const targetTotal = computed(() => items.reduce((sum, item) => sum + Number(item.target || 0), 0))
 
 onMounted(async () => {
   await watch.load(true)
-  const grouped = new Map<string, { code: string; name: string; shares: number; target?: number }>()
+  const grouped = new Map<string, { code: string; name: string; shares: number; target?: number; costComplete: boolean }>()
   for (const entry of watch.activeHoldings) {
     if (!(entry.shares && entry.shares > 0)) continue
-    const row = grouped.get(entry.code) || { code: entry.code, name: entry.name || entry.code, shares: 0, target: entry.target_weight }
+    const row = grouped.get(entry.code) || {
+      code: entry.code, name: entry.name || entry.code, shares: 0,
+      target: entry.target_weight, costComplete: true,
+    }
     row.shares += entry.shares
+    if (entry.cost == null || !Number.isFinite(entry.cost) || entry.cost < 0) row.costComplete = false
     if (entry.target_weight != null) row.target = entry.target_weight
     grouped.set(entry.code, row)
   }
   const loaded = await Promise.all([...grouped.values()].map(async (row) => {
     try {
-      const detail = await getFundDetail(row.code)
-      return { ...row, name: detail.name || row.name, value: row.shares * (detail.latest_nav || 0) }
-    } catch { return { ...row, value: 0 } }
+      const detail = await funds.detail(row.code)
+      return { ...row, name: detail.name || row.name, value: holdingMarketValue(row.shares, detail.latest_nav) }
+    } catch { return { ...row, value: null } }
   }))
-  const total = loaded.reduce((sum, row) => sum + row.value, 0)
+  const currentWeights = completePortfolioWeights(loaded)
   const explicit = loaded.reduce((sum, row) => sum + (row.target ?? 0), 0)
   const unset = loaded.filter((row) => row.target == null).length
   const fallback = unset ? Math.max(0, 100 - explicit) / unset : 0
-  loaded.forEach((row) => items.push({
+  loaded.forEach((row, index) => items.push({
     code: row.code, name: row.name, value: row.value,
-    current: total > 0 ? row.value / total * 100 : 0,
+    current: currentWeights?.[index] ?? null,
     target: row.target ?? fallback,
+    costComplete: row.costComplete,
   }))
   loading.value = false
-  if (items.length) await run()
+  if (!portfolioReady.value) {
+    error.value = '净值或成本覆盖不完整，请补齐后再计算'
+  } else if (items.length) await run()
 })
 
 async function run() {
   if (!items.length || running.value) return
+  if (!portfolioReady.value || portfolioValue.value == null || items.some((item) => item.current == null)) {
+    result.value = null
+    error.value = '存在未定价或成本缺失持仓，已停止权重、回测和再平衡计算'
+    return
+  }
   const totalTarget = items.reduce((sum, item) => sum + Number(item.target || 0), 0)
   if (totalTarget <= 0) { error.value = '目标权重合计需大于 0'; return }
   if (Math.abs(totalTarget - 100) > 0.01) {
@@ -55,7 +74,7 @@ async function run() {
   running.value = true; error.value = ''
   try {
     result.value = await postPortfolioLab(items.map((item) => ({
-      code: item.code, current_weight: item.current, target_weight: Number(item.target || 0),
+      code: item.code, current_weight: item.current as number, target_weight: Number(item.target || 0),
     })), portfolioValue.value)
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : '组合分析失败'
@@ -87,13 +106,19 @@ const curveOption = computed(() => {
       <van-loading v-if="loading" class="center" />
       <van-empty v-else-if="!items.length" description="持仓基金为空" />
       <template v-else>
+        <section v-if="!portfolioReady" class="coverage-error" role="alert">
+          <b>组合实验已暂停</b>
+          <span v-if="unpricedItems.length">净值覆盖 {{ coverage.pricedCount }}/{{ coverage.totalCount }} 只；未定价：{{ unpricedItems.map((item) => item.name).join('、') }}。</span>
+          <span v-if="missingCostItems.length">成本缺失：{{ missingCostItems.map((item) => item.name).join('、') }}。</span>
+          <span>缺失净值不会按 0 生成权重；净值或成本未完整时不会进入组合实验。</span>
+        </section>
         <section class="weights-band">
           <div class="band-head"><b>组合权重</b><span :class="{ warn: Math.abs(targetTotal - 100) > 0.1 }">目标 {{ targetTotal.toFixed(1) }}%</span></div>
           <div v-for="item in items" :key="item.code" class="weight-row">
-            <div class="fund"><b>{{ item.name }}</b><span>{{ item.code }} · 当前 {{ item.current.toFixed(1) }}%</span></div>
+            <div class="fund"><b>{{ item.name }}</b><span>{{ item.code }} · 当前 {{ item.current != null ? item.current.toFixed(1) + '%' : '--' }}</span></div>
             <van-stepper v-model="item.target" :min="0" :max="100" :step="1" decimal-length="1" input-width="48px" button-size="24px" />
           </div>
-          <van-button block type="primary" size="small" :loading="running" @click="run">重新计算</van-button>
+          <van-button block type="primary" size="small" :loading="running" :disabled="!portfolioReady" @click="run">重新计算</van-button>
           <div v-if="error" class="error">{{ error }}</div>
         </section>
 
@@ -155,6 +180,8 @@ const curveOption = computed(() => {
 .band-head b { color: var(--ink); font-size: 14px; }
 .band-head span { color: var(--text-hint); font-size: 10px; }
 .band-head span.warn, .error { color: var(--danger); }
+.coverage-error { display: flex; flex-direction: column; gap: 4px; margin: 0 14px 14px; padding: 11px 12px; border: 1px solid var(--danger); color: var(--text-secondary); font-size: 11px; line-height: 1.55; }
+.coverage-error b { color: var(--danger); font-size: 13px; }
 .weight-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 9px 0; border-top: 1px solid var(--border); }
 .fund { min-width: 0; }
 .fund b, .fund span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

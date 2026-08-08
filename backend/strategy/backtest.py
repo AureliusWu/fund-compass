@@ -53,13 +53,13 @@ def backtest(detail, weights=None, assumptions=None, include_stress=False):
     months_since_change = assumptions["min_hold_months"]
     for k in range(len(pts) - 1):
         i, j = pts[k], pts[k + 1]
-        # 透传 code/type，使回测中的估值层能用真实 PE/PB 映射（V6-P0）
+        # 当前 PE/PB 不是历史时点数据；回测只能使用截至该时点的净值代理。
         sig = timing_signal({
             "code": detail.get("code"),
             "type": detail.get("type"),
             "name": detail.get("name"),
             "nav_history": [{"date": d, "nav": n} for d, n in navs[:i + 1]],
-        })
+        }, use_current_index_valuation=False)
         target_weight = weights.get(sig["signal"], 0.5)
         if target_weight < previous_weight and months_since_change < assumptions["min_hold_months"]:
             w = previous_weight

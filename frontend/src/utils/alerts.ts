@@ -2,7 +2,14 @@
 // 检查项：信号变级、净值异动、回撤阈值、定期再平衡提醒。
 // 数据存 localStorage，前端定时检查（每次开首页 / 轮询）。
 
-import { fetchEstimate, type Estimate } from './estimate'
+import {
+  fetchEstimate,
+  isOverseasLike,
+  preferredDailyMove,
+  type Estimate,
+  type NavMove,
+} from './estimate'
+import { estimateFreshness, marketDataFreshness } from './presentation'
 import { getSignal, type SignalResp } from '@/api/client'
 
 // ── 提醒定义 ──────────────────────────────────────────
@@ -113,23 +120,53 @@ export async function checkSignalChange(
 }
 
 /** 净值异动检查（单日涨跌 > 阈值） */
+export interface NavSpikeObservation {
+  estimate?: Estimate | null
+  navMove?: NavMove | null
+  typeOrName?: string | null
+  now?: number
+}
+
+/** Signal/API fund type is authoritative; display names and estimate metadata are fallbacks. */
+export function alertFundTypeOrName(
+  signalType: string | null | undefined,
+  name: string | null | undefined,
+  estimate: Estimate | null | undefined,
+): string | null {
+  return signalType?.trim() || name?.trim() || estimate?.name?.trim() || null
+}
+
 export async function checkNavSpike(
-  code: string, name: string, threshold = 3, estimate?: Estimate | null,
+  code: string, name: string, threshold = 3, observation: NavSpikeObservation = {},
 ): Promise<Alert | null> {
   try {
-    const est = estimate === undefined ? await fetchEstimate(code) : estimate
-    if (!est || est.estChange == null) return null
-    const chg = Math.abs(est.estChange)
+    const hasEstimate = Object.prototype.hasOwnProperty.call(observation, 'estimate')
+    const est = hasEstimate ? observation.estimate : await fetchEstimate(code)
+    const move = preferredDailyMove(est, observation.navMove, observation.typeOrName || name)
+    if (!move || move.change == null) return null
+
+    const now = observation.now ?? Date.now()
+    const freshness = move.label === '净'
+      ? marketDataFreshness(move.date, now)
+      : estimateFreshness(est, now)
+    if (freshness === 'expired') return null
+
+    const chg = Math.abs(move.change)
     if (chg < threshold) return null
 
-    const direction = est.estChange > 0 ? '涨' : '跌'
+    const direction = move.change > 0 ? '涨' : '跌'
     const level: Alert['level'] = chg > 5 ? 'danger' : chg > 3 ? 'warn' : 'info'
+    const overseasEstimate = move.label !== '净' && isOverseasLike(observation.typeOrName || name, est)
+    const metric = move.label === '净' ? 'official_nav' : overseasEstimate ? 'next_nav_estimate' : 'estimate'
+    const metricLabel = move.label === '净' ? '最新公布净值' : overseasEstimate ? '下一净值估算' : move.label === '估' ? '盘中估值' : '延迟估值'
+    const titlePrefix = move.label === '净' ? '净值异动' : overseasEstimate ? '估算异动' : '估值异动'
+    const observedAt = move.date || est?.estTime || est?.navDate || ''
 
     const a = pushAlert({
       kind: 'nav_spike', code, name, level,
-      fingerprint: `nav_spike|${code}|${est.estTime || est.navDate}|${est.estChange.toFixed(4)}`,
-      title: `异动 · ${name || code}`,
-      body: `单日${direction} ${chg.toFixed(2)}%（${est.estTime || ''}）`,
+      fingerprint: `nav_spike|${code}|${metric}|${observedAt}|${move.change.toFixed(4)}`,
+      title: `${titlePrefix} · ${name || code}`,
+      body: `${metricLabel}${direction} ${chg.toFixed(2)}%（${observedAt}）`,
     })
     if (!a) return null
     notify(a)
@@ -163,6 +200,8 @@ export interface WatchItemForAlert {
   prevSignal?: string | null
   currentSignal?: SignalResp
   estimate?: Estimate | null
+  navMove?: NavMove | null
+  typeOrName?: string | null
 }
 
 export async function runAllChecks(items: WatchItemForAlert[]): Promise<Alert[]> {
@@ -172,7 +211,11 @@ export async function runAllChecks(items: WatchItemForAlert[]): Promise<Alert[]>
   const tasks: Promise<Alert | null>[] = []
   for (const it of items) {
     tasks.push(checkSignalChange(it.code, it.name, it.prevSignal ?? null, it.currentSignal))
-    tasks.push(checkNavSpike(it.code, it.name, 3, it.estimate))
+    tasks.push(checkNavSpike(it.code, it.name, 3, {
+      estimate: it.estimate,
+      navMove: it.navMove,
+      typeOrName: it.typeOrName,
+    }))
   }
   tasks.push(Promise.resolve(checkRebalance()))
 

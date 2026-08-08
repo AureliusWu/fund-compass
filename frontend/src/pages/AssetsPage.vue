@@ -3,6 +3,7 @@ import { reactive, ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useWatchlistStore } from '@/stores/watchlist'
 import { useFundsStore } from '@/stores/funds'
+import type { NavPoint } from '@/api/client'
 import { fetchEstimates, latestNavMove, preferredDailyMove, type Estimate, type NavMove } from '@/utils/estimate'
 import { pct, num, colorOf } from '@/utils/format'
 import Chart from '@/components/Chart.vue'
@@ -13,12 +14,18 @@ import { loadSnapshots, takeSnapshot, takeDailySnapshot, buildSnapChart } from '
 import { computeAssetClass, REFERENCE_ALLOCATION, CLASS_COLORS, type AssetClass } from '@/utils/assetclass'
 import { loadManualAssets, pullManualAssets, pushManualAssets, removeManualAsset, upsertManualAsset, MANUAL_ASSET_CLASSES, type ManualAsset } from '@/utils/manualAssets'
 import { stressTest, computeStyleBox, rebalancePlan, computeCorrelation, type StyleBoxItem, type StressResult, type RebalanceAction, type CorrMatrix } from '@/utils/diagnostics'
+import { completeFiniteSum, costBasisCoverage, holdingCostBasis, holdingMarketValue, valuationCoverage } from '@/utils/portfolioCoverage'
 
 const router = useRouter()
 const watch = useWatchlistStore()
 const funds = useFundsStore()
 
-const meta = reactive<Record<string, { nav: number | null; type: string; navMove: NavMove | null }>>({})
+const meta = reactive<Record<string, {
+  nav: number | null
+  type: string
+  navMove: NavMove | null
+  navHistory: NavPoint[]
+}>>({})
 const est = reactive<Record<string, Estimate | null>>({})
 const loading = ref(true)
 const dim = ref<'account' | 'type'>('account')
@@ -40,21 +47,28 @@ async function refresh() {
   const held = watch.activeHoldings.filter((e) => e.shares && e.shares > 0)
   const codes = [...new Set(held.map((e) => e.code))]
   fetchEstimates(codes).then((m) => m.forEach((v, k) => { est[k] = v }))
-  await Promise.all(held.map(async (e) => {
+  await Promise.all(codes.map(async (code) => {
     try {
-      const d = await funds.detail(e.code)
-      meta[e.code] = { nav: d.latest_nav, type: d.type || '其他', navMove: latestNavMove(d.nav_history) }
-    } catch { meta[e.code] = { nav: null, type: '其他', navMove: null } }
+      const d = await funds.detail(code)
+      meta[code] = {
+        nav: d.latest_nav,
+        type: d.type || '其他',
+        navMove: latestNavMove(d.nav_history),
+        navHistory: d.nav_history || [],
+      }
+    } catch { meta[code] = { nav: null, type: '其他', navMove: null, navHistory: [] } }
   }))
-  snaps.value = takeDailySnapshot(total.value.value, total.value.cost, new Date(), snapshotHoldings.value)
+  if (portfolioReady.value && total.value.value != null && total.value.cost != null) {
+    snaps.value = takeDailySnapshot(total.value.value, total.value.cost, new Date(), snapshotHoldings.value)
+  }
   loading.value = false
 }
 
 // 单只持仓的派生指标
 interface Holding {
   code: string; name: string; account: string; type: string
-  shares: number; cost: number; nav: number | null
-  value: number; profit: number; today: number | null
+  shares: number; cost: number | null; costBasis: number | null; nav: number | null
+  value: number | null; profit: number | null; today: number | null
 }
 const holdings = computed<Holding[]>(() => {
   const out: Holding[] = []
@@ -62,46 +76,81 @@ const holdings = computed<Holding[]>(() => {
   for (const e of watch.activeHoldings) {
     if (!(e.shares && e.shares > 0)) continue
     const m = meta[e.code]
-    const nav = m?.nav ?? null
-    const value = nav != null ? e.shares * nav : 0
-    const cost = e.shares * (e.cost ?? 0)
+    const nav = m?.nav != null && Number.isFinite(m.nav) && m.nav > 0 ? m.nav : null
+    const value = holdingMarketValue(e.shares, nav)
+    const cost = e.cost != null && Number.isFinite(e.cost) && e.cost >= 0 ? e.cost : null
+    const costBasis = holdingCostBasis(e.shares, cost)
     const move = preferredDailyMove(est[e.code], m?.navMove, m?.type || e.name)
     const today = move && move.change != null && move.baseNav != null
       ? e.shares * move.baseNav * move.change / 100 : null
     out.push({
       code: e.code, name: e.name || e.code, account: e.account?.trim() || UNGROUPED,
-      type: m?.type || '其他', shares: e.shares, cost: e.cost ?? 0, nav,
-      value, profit: nav != null ? value - cost : 0, today,
+      type: m?.type || '其他', shares: e.shares, cost, costBasis, nav,
+      value, profit: value != null && costBasis != null ? value - costBasis : null, today,
     })
   }
   return out
 })
+const codesForDiagnostics = computed(() => [...new Set(holdings.value.map((holding) => holding.code))])
+
+const valuation = computed(() => valuationCoverage(holdings.value))
+const costs = computed(() => costBasisCoverage(holdings.value.map((holding) => ({
+  code: holding.code,
+  name: holding.name,
+  basis: holding.costBasis,
+}))))
+const portfolioReady = computed(() => valuation.value.complete && costs.value.complete)
+const unpricedNames = computed(() => [...new Set(valuation.value.missing.map((holding) => holding.name))])
+const missingCostNames = computed(() => [...new Set(costs.value.missing.map((holding) => holding.name))])
+const todayCoverage = computed(() => {
+  const missingHoldings = holdings.value.filter((holding) => holding.today == null).map((holding) => holding.name)
+  const missing = [...missingHoldings, ...manualAssets.value.map((asset) => asset.name)]
+  return {
+    complete: holdings.value.length > 0 && missing.length === 0,
+    covered: holdings.value.filter((holding) => holding.today != null).length,
+    total: holdings.value.length + manualAssets.value.length,
+    missing: [...new Set(missing)],
+  }
+})
 
 const total = computed(() => {
-  let value = 0, cost = 0, today = 0, hasToday = false
-  for (const h of holdings.value) {
-    value += h.value
-    cost += h.shares * h.cost
-    if (h.today != null) { today += h.today; hasToday = true }
-  }
+  let manualValue = 0
   for (const a of manualAssets.value) {
-    value += a.value
-    cost += a.value
+    manualValue += a.value
   }
-  const profit = value - cost
-  return { value, cost, profit, rate: cost > 0 ? (profit / cost) * 100 : null, today: hasToday ? today : null }
+  const pricedValue = valuation.value.pricedValue + manualValue
+  const value = valuation.value.complete ? pricedValue : null
+  const knownCost = costs.value.knownCost + manualValue
+  const cost = costs.value.complete ? knownCost : null
+  const profit = value != null && cost != null ? value - cost : null
+  return {
+    value,
+    pricedValue,
+    cost,
+    profit,
+    knownCost,
+    rate: profit != null && cost != null && cost > 0 ? (profit / cost) * 100 : null,
+    today: completeFiniteSum([
+      ...holdings.value.map((holding) => holding.today),
+      ...manualAssets.value.map(() => null),
+    ]),
+  }
 })
 
 // V3-8 收益归因
 const attr = computed(() => {
-  const hl = holdings.value.filter((h) => h.value > 0)
+  if (!portfolioReady.value) return null
+  const hl = holdings.value.filter(
+    (h): h is Holding & { value: number; profit: number } => h.value != null && h.value > 0 && h.profit != null,
+  )
   if (!hl.length) return null
   return computeAttribution(hl.map((h) => {
     const move = preferredDailyMove(est[h.code], meta[h.code]?.navMove, h.type || h.name)
     return {
       code: h.code, name: h.name, account: h.account, type: h.type,
-      shares: h.shares, cost: h.cost, nav: h.nav, value: h.value, profit: h.profit, today: h.today,
-      todayPct: move?.change ?? null,
+      shares: h.shares, cost: h.cost as number, nav: h.nav, value: h.value, profit: h.profit,
+      today: todayCoverage.value.complete ? h.today : null,
+      todayPct: todayCoverage.value.complete ? move?.change ?? null : null,
     }
   }))
 })
@@ -110,33 +159,37 @@ const attrDim = ref<'account' | 'type'>('account')
 // V3-10 组合历史快照
 const snaps = ref(loadSnapshots())
 const snapChart = computed(() => buildSnapChart(snaps.value))
-const snapshotHoldings = computed(() => holdings.value.map((h) => ({
-  id: `${h.account}|${h.code}`,
-  code: h.code,
-  name: h.name,
-  account: h.account,
-  type: h.type,
-  value: h.value,
-  cost: h.shares * h.cost,
-})).concat(manualAssets.value.map((a) => ({
-  id: `manual|${a.id}`,
-  code: a.id,
-  name: a.name,
-  account: '手工资产',
-  type: a.cls,
-  value: a.value,
-  cost: a.value,
-}))))
+const snapshotHoldings = computed(() => {
+  if (!portfolioReady.value) return []
+  return holdings.value.map((h) => ({
+    id: `${h.account}|${h.code}`,
+    code: h.code,
+    name: h.name,
+    account: h.account,
+    type: h.type,
+    value: h.value as number,
+    cost: h.costBasis as number,
+  })).concat(manualAssets.value.map((a) => ({
+    id: `manual|${a.id}`,
+    code: a.id,
+    name: a.name,
+    account: '手工资产',
+    type: a.cls,
+    value: a.value,
+    cost: a.value,
+  })))
+})
 const periodAttr = computed(() => computePeriodAttribution(snaps.value, 30))
 function doSnap() {
+  if (!portfolioReady.value || total.value.value == null || total.value.cost == null) return
   snaps.value = takeSnapshot(total.value.value, total.value.cost, new Date(), snapshotHoldings.value)
 }
 
 // V3-13 大类资产
-const assetClass = computed(() => computeAssetClass([
-  ...holdings.value,
+const assetClass = computed(() => computeAssetClass(valuation.value.complete ? [
+  ...holdings.value.map((holding) => ({ ...holding, value: holding.value as number })),
   ...manualAssets.value.map((a) => ({ value: a.value, type: a.cls })),
-]))
+] : []))
 const classPieOption = computed(() => ({
   tooltip: { trigger: 'item', formatter: '{b}: {d}%' },
   legend: { bottom: 0, type: 'scroll', textStyle: { fontSize: 11 } },
@@ -158,14 +211,26 @@ const stressRes = ref<StressResult[]>([])
 const rebalance = ref<RebalanceAction[]>([])
 const corrMatrix = ref<CorrMatrix | null>(null)
 const diagErr = ref('')
+const rankedCorrPairs = computed(() => (corrMatrix.value?.pairs || []).slice().sort((a, b) => {
+  if (a.corr == null) return b.corr == null ? 0 : 1
+  if (b.corr == null) return -1
+  return b.corr - a.corr
+}))
+const unknownCorrCount = computed(() => corrMatrix.value?.pairs.filter((pair) => pair.corr == null).length || 0)
+const highCorrExists = computed(() => corrMatrix.value?.pairs.some((pair) => pair.corr != null && pair.corr > 0.8) || false)
 
 async function runDiagnostics() {
   if (diagLoading.value) return
+  const portfolioValue = total.value.value
+  if (!portfolioReady.value || portfolioValue == null) {
+    diagErr.value = '存在未定价或成本缺失持仓，不能计算组合诊断'
+    return
+  }
   diagLoading.value = true; diagErr.value = ''
   try {
     // 风格箱（同步，不需要额外数据）
     styleBox.value = computeStyleBox(
-      holdings.value.map((h) => ({ code: h.code, name: h.name, type: h.type, value: h.value })),
+      holdings.value.map((h) => ({ code: h.code, name: h.name, type: h.type, value: h.value as number })),
     )
 
     // 压力测试
@@ -176,19 +241,20 @@ async function runDiagnostics() {
     const ov = cls.find((c) => c.cls === '海外')?.pct || 0
     stressRes.value = stressTest({
       equityPct: eq, bondPct: bd, cashPct: ca, overseasPct: ov,
-      totalValue: total.value.value,
+      totalValue: portfolioValue,
     })
 
     // 再平衡
     rebalance.value = rebalancePlan(
       assetClass.value.classes.map((c) => ({ cls: c.cls, pct: c.pct, value: c.value })),
       REFERENCE_ALLOCATION as unknown as Record<string, number>,
-      total.value.value,
+      portfolioValue,
     )
 
-    // 相关性（异步，需拉净值）
+    // 相关性复用本页已经加载的详情历史，不再对每只基金重复请求。
     corrMatrix.value = await computeCorrelation(
       holdings.value.map((h) => ({ code: h.code, name: h.name })),
+      new Map(codesForDiagnostics.value.map((code) => [code, meta[code]?.navHistory || []])),
     )
   } catch (e) {
     diagErr.value = e instanceof Error ? e.message : '诊断失败'
@@ -196,25 +262,41 @@ async function runDiagnostics() {
 }
 
 // 按账户聚合
-interface Group { key: string; value: number; cost: number; profit: number; count: number; today: number | null }
+interface Group { key: string; value: number | null; cost: number | null; profit: number | null; count: number; today: number | null; todayComplete: boolean }
 function groupBy(field: 'account' | 'type'): Group[] {
-  const map = new Map<string, Group>()
+  const map = new Map<string, Group & { pricedValue: number; knownCost: number; valueComplete: boolean; costComplete: boolean; knownToday: number }>()
   for (const h of holdings.value) {
     const k = field === 'account' ? h.account : h.type
     let g = map.get(k)
-    if (!g) { g = { key: k, value: 0, cost: 0, profit: 0, count: 0, today: null }; map.set(k, g) }
-    g.value += h.value
-    g.cost += h.shares * h.cost
-    g.profit += h.profit
+    if (!g) {
+      g = {
+        key: k, value: null, cost: null, profit: null, count: 0, today: null, todayComplete: true,
+        pricedValue: 0, knownCost: 0, valueComplete: true, costComplete: true, knownToday: 0,
+      }
+      map.set(k, g)
+    }
+    if (h.value == null) g.valueComplete = false
+    else g.pricedValue += h.value
+    if (h.costBasis == null) g.costComplete = false
+    else g.knownCost += h.costBasis
     g.count++
-    if (h.today != null) g.today = (g.today ?? 0) + h.today
+    if (h.today == null) g.todayComplete = false
+    else g.knownToday += h.today
   }
-  return [...map.values()].sort((a, b) => b.value - a.value)
+  return [...map.values()].map((g) => ({
+    key: g.key,
+    value: g.valueComplete ? g.pricedValue : null,
+    cost: g.costComplete ? g.knownCost : null,
+    profit: g.valueComplete && g.costComplete ? g.pricedValue - g.knownCost : null,
+    count: g.count,
+    today: g.todayComplete ? g.knownToday : null,
+    todayComplete: g.todayComplete,
+  })).sort((a, b) => (b.value ?? -1) - (a.value ?? -1))
 }
 const byAccount = computed(() => groupBy('account'))
 
 const pieOption = computed(() => {
-  const groups = groupBy(dim.value)
+  const groups = groupBy(dim.value).filter((g): g is Group & { value: number } => g.value != null)
   return {
     tooltip: { trigger: 'item', formatter: '{b}: {d}%' },
     legend: { bottom: 0, type: 'scroll', textStyle: { fontSize: 11 } },
@@ -225,8 +307,18 @@ const pieOption = computed(() => {
   }
 })
 
-const rateOf = (g: Group) => (g.cost > 0 ? (g.profit / g.cost) * 100 : null)
-const share = (v: number) => (total.value.value > 0 ? (v / total.value.value) * 100 : 0)
+const rateOf = (g: Group) => (g.profit != null && g.cost != null && g.cost > 0 ? (g.profit / g.cost) * 100 : null)
+const share = (v: number | null) => (v != null && total.value.value != null && total.value.value > 0 ? (v / total.value.value) * 100 : null)
+const shareText = (value: number | null) => {
+  const percentage = share(value)
+  return percentage == null ? '--' : `${percentage.toFixed(1)}%`
+}
+const signedNum = (value: number | null, digits = 2) => value == null ? '--' : `${value >= 0 ? '+' : ''}${num(value, digits)}`
+
+function openPortfolioLab() {
+  if (!portfolioReady.value) return
+  router.push('/portfolio-lab')
+}
 
 function openManual(asset?: ManualAsset) {
   manualId.value = asset?.id || ''
@@ -273,7 +365,10 @@ onMounted(refresh)
 <template>
   <div class="page">
     <van-nav-bar title="资产">
-      <template #right><Icon name="trend" :size="18" @click="router.push('/portfolio-lab')" /></template>
+      <template #right>
+        <Icon name="trend" :size="18" :class="{ 'nav-disabled': !portfolioReady }"
+          :title="portfolioReady ? '打开组合实验室' : '存在未定价或成本缺失持仓，组合实验已暂停'" @click="openPortfolioLab" />
+      </template>
     </van-nav-bar>
     <div class="page-body">
       <van-loading v-if="loading" style="text-align:center;padding:40px" />
@@ -283,21 +378,25 @@ onMounted(refresh)
         <!-- 总资产 -->
         <div class="hero card">
           <div class="hero-inner">
-            <div class="k">总资产（估算市值）</div>
+            <div class="k">{{ valuation.complete ? '总资产（估算市值）' : '总资产（净值未完整）' }}</div>
             <div class="big">{{ num(total.value, 2) }}</div>
+            <div class="priced-subtotal" v-if="!valuation.complete">
+              已定价小计 {{ num(total.pricedValue, 2) }}，不代表组合总资产
+            </div>
             <div class="hero-row">
               <div>
-                <span class="kk">累计收益</span>
+                <span class="kk">累计收益<span v-if="!costs.complete">（成本未完整）</span></span>
                 <span class="vv" :style="{ color: colorOf(total.profit) }">
-                  {{ (total.profit >= 0 ? '+' : '') + num(total.profit, 2) }}
+                  {{ signedNum(total.profit) }}
                   <em :style="{ color: colorOf(total.rate) }">{{ pct(total.rate) }}</em>
                 </span>
               </div>
-              <div v-if="total.today != null" style="text-align:right">
-                <span class="kk">今日估算</span>
+              <div style="text-align:right">
+                <span class="kk">今日估算<span v-if="!todayCoverage.complete">（{{ todayCoverage.covered }}/{{ todayCoverage.total }}）</span></span>
                 <span class="vv" :style="{ color: colorOf(total.today) }">
-                  {{ (total.today >= 0 ? '+' : '') + num(total.today, 2) }}
+                  {{ signedNum(total.today) }}
                 </span>
+                <span class="coverage-mini" v-if="!todayCoverage.complete">数据未完整</span>
               </div>
             </div>
           </div>
@@ -308,20 +407,28 @@ onMounted(refresh)
           </svg>
         </div>
 
+        <div class="valuation-warning" role="alert" v-if="!portfolioReady">
+          <b v-if="!valuation.complete">净值覆盖 {{ valuation.pricedCount }}/{{ valuation.totalCount }} 笔持仓</b>
+          <span v-if="!valuation.complete">未定价：{{ unpricedNames.join('、') }}。缺失净值不会当成 0。</span>
+          <b v-if="!costs.complete">成本覆盖 {{ costs.knownCount }}/{{ costs.totalCount }} 笔持仓</b>
+          <span v-if="!costs.complete">成本缺失：{{ missingCostNames.join('、') }}。缺失成本不会当成 0。</span>
+          <span>已暂停累计盈亏、快照、组合诊断和组合实验。</span>
+        </div>
+
         <!-- V3-10 组合历史曲线 -->
         <div class="card">
           <div class="dim-head">
             <span class="sec-t">组合历史</span>
             <div class="snap-actions">
               <van-button size="mini" plain icon="down" :disabled="!snaps.length" @click="exportSnapshotsCSV(snaps)">导出</van-button>
-              <van-button size="mini" plain icon="photograph" @click="doSnap">拍快照</van-button>
+              <van-button size="mini" plain icon="photograph" :disabled="!portfolioReady" @click="doSnap">拍快照</van-button>
             </div>
           </div>
           <template v-if="snapChart">
             <Chart :option="snapChart" height="220px" />
-            <div class="snap-hint">共 {{ snaps.length }} 个快照 · {{ snaps[0].date.slice(0,10) }} ~ {{ snaps[snaps.length-1].date.slice(0,10) }}。每天打开资产页会自动记录一次，手动快照会覆盖当天数值。</div>
+            <div class="snap-hint">共 {{ snaps.length }} 个快照 · {{ snaps[0].date.slice(0,10) }} ~ {{ snaps[snaps.length-1].date.slice(0,10) }}。{{ portfolioReady ? '每天打开资产页会自动记录一次，手动快照会覆盖当天数值。' : '本次因净值或成本未完整，未自动写入快照。' }}</div>
           </template>
-          <van-empty v-else description="快照已开始记录，累计两天后显示组合曲线。" image-size="60" />
+          <van-empty v-else :description="portfolioReady ? '快照已开始记录，累计两天后显示组合曲线。' : '净值或成本未完整，本次不会写入自动快照。'" image-size="60" />
         </div>
 
         <div class="act-row">
@@ -340,7 +447,8 @@ onMounted(refresh)
               <span :class="{ on: dim === 'type' }" @click="dim = 'type'">按类型</span>
             </div>
           </div>
-          <Chart :option="pieOption" height="200px" />
+          <Chart v-if="valuation.complete" :option="pieOption" height="200px" />
+          <div v-else class="coverage-placeholder">净值覆盖完整后才计算账户和类型权重。</div>
         </div>
 
         <!-- V3-13 大类资产 -->
@@ -380,7 +488,7 @@ onMounted(refresh)
         <!-- V4-3 组合诊断 -->
         <div class="sec">组合诊断</div>
         <div class="card">
-          <van-button plain icon="gem-o" size="small" :loading="diagLoading" @click="runDiagnostics" block>
+          <van-button plain icon="gem-o" size="small" :loading="diagLoading" :disabled="!portfolioReady" @click="runDiagnostics" block>
             运行诊断（风格箱 · 压力测试 · 再平衡 · 相关性）
           </van-button>
           <div class="diag-err" v-if="diagErr">{{ diagErr }}</div>
@@ -434,20 +542,22 @@ onMounted(refresh)
           <template v-if="corrMatrix && corrMatrix.pairs.length">
             <div class="diag-sub">相关性矩阵</div>
             <div class="corr-pairs">
-              <div class="corr-pair" v-for="p in corrMatrix.pairs.sort((a, b) => b.corr - a.corr).slice(0, 10)" :key="p.a + p.b">
+              <div class="corr-pair" v-for="p in rankedCorrPairs.slice(0, 10)" :key="p.a + p.b">
                 <span class="cp-names">{{ p.aName }} ↔ {{ p.bName }}</span>
-                <van-progress :percentage="((p.corr + 1) / 2) * 100" :show-pivot="false"
+                <van-progress v-if="p.corr != null" :percentage="((p.corr + 1) / 2) * 100" :show-pivot="false"
                   :color="p.corr > 0.7 ? '#C44536' : p.corr > 0.4 ? '#C8963E' : '#4C7E67'"
                   track-color="var(--border)" style="flex:1;margin:0 8px" />
-                <span class="cp-val" :style="{
+                <span v-if="p.corr != null" class="cp-val" :style="{
                   color: p.corr > 0.7 ? '#C44536' : p.corr > 0.4 ? '#C8963E' : '#4C7E67',
                 }">{{ p.corr.toFixed(2) }}</span>
+                <span v-else class="cp-unknown">无法计算（共同 {{ p.samples }} 个日收益）</span>
               </div>
             </div>
-            <div class="corr-note" v-if="corrMatrix.pairs.some((p) => p.corr > 0.8)">
+            <div class="corr-note" v-if="highCorrExists">
               ⚠ 部分持仓相关性 &gt; 0.8，组合分散化效果较弱
             </div>
-            <div class="corr-note" v-else>组合内基金相关性在合理范围。</div>
+            <div class="corr-note" v-else-if="unknownCorrCount === corrMatrix.pairs.length">所有组合均因共同净值日期不足或序列无波动而无法计算。</div>
+            <div class="corr-note" v-else>已计算的基金相关性未超过 0.8<span v-if="unknownCorrCount">；另有 {{ unknownCorrCount }} 组为未知</span>。</div>
           </template>
         </div>
 
@@ -456,12 +566,12 @@ onMounted(refresh)
         <div class="acc card" v-for="g in byAccount" :key="g.key">
           <div class="acc-top">
             <span class="acc-name">{{ g.key }}</span>
-            <span class="acc-share">{{ share(g.value).toFixed(1) }}%</span>
+            <span class="acc-share">{{ shareText(g.value) }}</span>
           </div>
           <div class="acc-grid">
             <div><div class="kk">市值</div><div class="vg">{{ num(g.value, 2) }}</div></div>
-            <div><div class="kk">收益</div><div class="vg" :style="{ color: colorOf(g.profit) }">{{ (g.profit >= 0 ? '+' : '') + num(g.profit, 0) }}<em :style="{ color: colorOf(rateOf(g)) }">{{ pct(rateOf(g)) }}</em></div></div>
-            <div><div class="kk">今日</div><div class="vg" :style="{ color: colorOf(g.today) }">{{ g.today != null ? (g.today >= 0 ? '+' : '') + num(g.today, 0) : '--' }}</div></div>
+            <div><div class="kk">收益</div><div class="vg" :style="{ color: colorOf(g.profit) }">{{ signedNum(g.profit, 0) }}<em :style="{ color: colorOf(rateOf(g)) }">{{ pct(rateOf(g)) }}</em></div></div>
+            <div><div class="kk">今日<span v-if="!g.todayComplete">（未完整）</span></div><div class="vg" :style="{ color: colorOf(g.today) }">{{ signedNum(g.today, 0) }}</div></div>
             <div><div class="kk">持仓</div><div class="vg">{{ g.count }} 只</div></div>
           </div>
         </div>
@@ -476,7 +586,10 @@ onMounted(refresh)
                 <span :class="{ on: attrDim === 'type' }" @click="attrDim = 'type'">按类型</span>
               </div>
             </div>
-            <template v-if="attrDim === 'account'">
+            <div v-if="!todayCoverage.complete" class="atr-note" role="status">
+              今日涨跌仅覆盖 {{ todayCoverage.covered }}/{{ todayCoverage.total }}，贡献拆解已暂停，不以 0 补缺失值。
+            </div>
+            <template v-else-if="attrDim === 'account'">
               <div class="atr-row" v-for="g in attr.byAccount" :key="g.account">
                 <span class="atr-nm">{{ g.account }}</span>
                 <span class="atr-w">{{ g.weight.toFixed(1) }}%</span>
@@ -494,7 +607,7 @@ onMounted(refresh)
                 <span class="atr-d" :style="{ color: colorOf(g.dayContrib) }">{{ g.dayContrib != null ? (g.dayContrib >= 0 ? '+' : '') + g.dayContrib.toFixed(2) + 'bp' : '--' }}</span>
               </div>
             </template>
-            <div class="atr-note">bp = 基点（万分比），今日估算贡献</div>
+            <div v-if="todayCoverage.complete" class="atr-note">bp = 基点（万分比），今日估算贡献</div>
           </div>
 
           <div class="card">
@@ -569,7 +682,7 @@ onMounted(refresh)
             </div>
           </div>
         </template>
-        <div class="tip">同一只基金归属一个账户；在「自选」页编辑持仓时设置账户。市值用最新净值/盘中估算，仅供参考。</div>
+        <div class="tip">同一只基金归属一个账户；在「自选」页编辑持仓时设置账户。净值、成本或今日涨跌缺失时显示为 --，不用 0 代替。</div>
       </template>
     </div>
 
@@ -596,12 +709,14 @@ onMounted(refresh)
 .hero-inner { padding: 14px 14px 8px; }
 .hero .k { font-size: 12px; color: var(--text-muted); }
 .hero .big { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; margin: 2px 0 10px; color: var(--text); }
+.priced-subtotal { color: var(--text-muted); font-size: 11px; margin: -6px 0 8px; }
 .hero-ridge { display: block; width: 100%; height: 28px; }
 .hero-row { padding-bottom: 4px; }
 .hero-row { display: flex; justify-content: space-between; align-items: flex-end; }
 .kk { font-size: 11px; color: var(--text-muted); display: block; }
 .vv { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .vv em { font-style: normal; font-size: 12px; margin-left: 4px; }
+.coverage-mini { display: block; color: var(--text-hint); font-size: 9px; margin-top: 2px; }
 .dim-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
 .sec-t { font-size: 13px; color: var(--text-secondary); font-weight: 500; }
 .seg { display: flex; font-size: 12px; border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
@@ -615,6 +730,10 @@ onMounted(refresh)
 .vg { font-size: 14px; font-weight: 500; font-variant-numeric: tabular-nums; margin-top: 2px; }
 .vg em { font-style: normal; font-size: 10px; margin-left: 3px; }
 .tip { font-size: 11px; color: var(--text-hint); line-height: 1.6; padding: 0 4px; }
+.nav-disabled { cursor: not-allowed; opacity: 0.35; }
+.valuation-warning { display: flex; flex-direction: column; gap: 4px; margin: 0 0 12px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border)); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--danger) 7%, var(--card-bg)); color: var(--text-secondary); font-size: 11px; line-height: 1.55; }
+.valuation-warning b { color: var(--danger); font-size: 12px; }
+.coverage-placeholder { padding: 28px 12px; color: var(--text-hint); font-size: 12px; line-height: 1.6; text-align: center; }
 /* ── 归因 ── */
 .atr-row { display: flex; align-items: center; font-size: 12px; margin: 7px 0; }
 .atr-nm { width: 72px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -680,5 +799,6 @@ onMounted(refresh)
 .corr-pair { display: flex; align-items: center; gap: 6px; font-size: 11px; }
 .cp-names { width: 100px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-secondary); }
 .cp-val { width: 32px; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+.cp-unknown { flex: 1; color: var(--text-hint); font-size: 10px; text-align: right; }
 .corr-note { font-size: 11px; color: #C8963E; margin-top: 4px; }
 </style>

@@ -21,7 +21,29 @@ uvicorn main:app --host 0.0.0.0 --port $PORT
 2. Service 的 Root Directory 设为 `backend`；仓库内已含 `Dockerfile` 与 `Procfile`，Railway 会自动识别。
 3. 拿到公网域名。
 
-> 备注：免费档文件系统是临时的，重新部署后 SQLite 会重置（基金列表会在冷启动自动重新抓取；自选会丢失）。要持久化可挂载磁盘卷或换外部数据库，后续增强。
+> 重要：Render Free Web Service 的文件系统是临时的，实例休眠、重启或重新部署都会丢失 SQLite。免费档只适合临时体验，不能把自选、决策账本、组合快照或幂等记录视为耐久数据。
+
+### 生产持久化
+
+Render 持久盘仅支持付费 Web Service。确认费用后，把服务升级到付费实例，并在 Blueprint 中配置磁盘与数据库路径：
+
+```yaml
+services:
+  - type: web
+    name: fund-compass-api
+    plan: starter
+    disk:
+      name: fund-compass-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: FUND_DB
+        value: /var/data/fund_compass.db
+      - key: FUND_DB_PERSISTENCE
+        value: persistent_disk
+```
+
+只有 `/var/data` 下的文件会跨部署保留。配置完成后，应在 `/api/health` 与运行状态页确认数据库模式为 `persistent_disk`。继续使用 `plan: free` 时，健康接口会明确报告 `ephemeral`，不得宣称决策闭环已持久化。
 
 ## 二、让前端指向后端
 
@@ -35,15 +57,15 @@ uvicorn main:app --host 0.0.0.0 --port $PORT
 
 ## 本地联调
 
-```bash
-# 后端（建议 Python 3.12）
-
 生产环境必须生成并配置两个不同的高强度随机 Secret：
 
 - `ADMIN_TOKEN`：管理员写接口和重任务。
 - `WORKER_TOKEN`：Cloudflare Worker 调用组合决策接口。
 
 二者只存 Render/Cloudflare Secret，不得使用前端 `VITE_` 变量，也不得写入仓库。所有 GET 读取接口保持公开。
+
+```bash
+# 后端（建议 Python 3.12）
 cd backend
 python -m venv .venv && .venv\Scripts\activate   # Windows
 pip install -r requirements.txt

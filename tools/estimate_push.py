@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""司南基金 · 交易日 14:30 / 14:40 / 14:50 自选估值推送（V3）。
+"""司南基金 · 14:30 自选估值推送人工应急脚本（V3）。
 
-读 Gist 自选 → 抓天天基金盘中估值（涨跌%）→ 仅当日有估值（=交易日，自动避开周末/节假日）
+读 Gist 自选 → 调用 Worker 估值代理（涨跌%）→ 仅当日有估值（=交易日，自动避开周末/节假日）
 才推送微信。与 V2-6 的 notify.py 互不影响（独立脚本与工作流，复用同名 Secret）。
 
-定时可靠性：GitHub 免费定时任务"尽力而为"，可能延迟/跳过。
-工作流定义 14:30 / 14:40 / 14:50 三个 slot，脚本用 Gist 状态文件
-sinan-estimate-state.json 记「当天每个 slot 已推」做去重，保证每个 slot 最多推一条。
+该脚本仅作为 GitHub Actions 人工应急入口；正式 14:30/14:40 调度由 Cloudflare Worker 承担。
+脚本复用 Gist 状态文件 sinan-estimate-state.json，并只认 14:30 发送槽位，避免与 Worker 重复发送。
 
-环境变量：GIST_TOKEN、WECHAT_SENDKEY（兼容 SC_SENDKEY）、FUND_API_BASE、
+环境变量：GIST_TOKEN、WECHAT_SENDKEY（兼容 SC_SENDKEY）、FUND_API_BASE、WORKER_TOKEN、
+ESTIMATE_PROXY_URL、
 SCHEDULE_CRON、PUSH_SLOT、FORCE。
 纯 stdlib，无需 pip。
 """
@@ -16,6 +16,7 @@ import datetime
 import json
 import os
 import re
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -29,6 +30,12 @@ FORCE = os.environ.get("FORCE", "").lower() in ("1", "true", "yes")
 PUSH_SLOT = os.environ.get("PUSH_SLOT", "").strip()
 SCHEDULE_CRON = os.environ.get("SCHEDULE_CRON", "").strip()
 FUND_API_BASE = os.environ.get("FUND_API_BASE", "").strip().rstrip("/")
+WORKER_TOKEN = os.environ.get("WORKER_TOKEN", "").strip()
+ESTIMATE_PROXY_URL = (
+    os.environ.get("ESTIMATE_PROXY_URL")
+    or os.environ.get("ESTIMATE_PROXY")
+    or "https://sinan-estimate-push.ligugu69.workers.dev/estimates"
+).strip().rstrip("/")
 WATCH_FILE = "sinan-watchlist.json"
 STATE_FILE = "sinan-estimate-state.json"
 GH = "https://api.github.com"
@@ -125,46 +132,57 @@ def _to_float(value):
         return None
 
 
-def _normalize_estimate(d, code):
-    last_nav = _to_float(d.get("dwjz"))
-    est_nav = _to_float(d.get("gsz"))
-    est_change = _to_float(d.get("gszzl"))
-    if est_change is None and last_nav and est_nav:
-        est_change = (est_nav - last_nav) / last_nav * 100
-    if est_nav is None and last_nav and est_change is not None:
-        est_nav = last_nav * (1 + est_change / 100)
-
-    name = d.get("name") or code
-    gztime = d.get("gztime") or ""
-    hour = None
-    m = re.search(r"\s(\d{1,2}):\d{2}$", gztime)
-    if m:
-        hour = int(m.group(1))
-    overseas = (
-        re.search(r"QDII|全球|海外|新兴市场|纳斯达克|标普|恒生|港股|美元|国际|日经|德国|越南|印度|香港", name, re.I)
-        and hour is not None
-        and (hour < 9 or hour >= 15)
+def _normalize_proxy_estimate(d, code):
+    """Map the public Worker estimate contract to the legacy push shape."""
+    status = str(d.get("status") or "unavailable")
+    kind = str(d.get("est_kind") or "estimate")
+    default_label = "最近净值" if kind == "official_nav" else (
+        "数据不可用" if status == "unavailable" else "盘中估值"
     )
     return {
-        "name": name,
-        "last_nav": last_nav,
-        "est_nav": est_nav,
-        "gszzl": est_change,
-        "gztime": gztime,
-        "label": "海外估值" if overseas else "盘中估值",
+        "name": d.get("name") or code,
+        "last_nav": _to_float(d.get("last_nav")),
+        "est_nav": _to_float(d.get("est_nav")),
+        "gszzl": _to_float(d.get("est_change")),
+        "gztime": str(d.get("est_time") or ""),
+        "label": str(d.get("est_label") or default_label),
+        "kind": kind,
+        "status": status,
+        "source": str(d.get("source") or "unavailable"),
+        "note": str(d.get("est_note") or ""),
     }
 
 
+def fetch_estimates(codes):
+    """Fetch up to 50 codes per request from the configured Worker proxy."""
+    output = {}
+    normalized_codes = list(dict.fromkeys(str(code).strip() for code in codes if str(code).strip()))
+    for index in range(0, len(normalized_codes), 50):
+        batch = normalized_codes[index:index + 50]
+        query = urllib.parse.urlencode({"codes": ",".join(batch)})
+        raw = _req(
+            f"{ESTIMATE_PROXY_URL}?{query}",
+            headers={"Accept": "application/json"},
+        )
+        payload = json.loads(raw)
+        items = payload.get("items") if isinstance(payload, dict) else None
+        if not isinstance(items, list):
+            raise ValueError("估值代理响应无效")
+        unavailable_items = payload.get("unavailable_items") or []
+        if not isinstance(unavailable_items, list):
+            raise ValueError("估值代理不可用明细无效")
+        for item in [*items, *unavailable_items]:
+            if not isinstance(item, dict):
+                continue
+            code = str(item.get("code") or "").strip()
+            if code in batch:
+                output[code] = _normalize_proxy_estimate(item, code)
+    return output
+
+
 def estimate(code):
-    """天天基金估值：jsonpgz({...})。返回 name / gszzl(涨跌%) / gztime / label。"""
-    rt = int(datetime.datetime.now().timestamp() * 1000)
-    txt = _req(f"https://fundgz.1234567.com.cn/js/{code}.js?rt={rt}",
-               headers={"Referer": "http://fund.eastmoney.com/"})
-    m = re.search(r"jsonpgz\((.*)\)", txt)
-    if not m:
-        return None
-    d = json.loads(m.group(1))
-    return _normalize_estimate(d, code)
+    """Compatibility wrapper for callers that request one fund."""
+    return fetch_estimates([code]).get(code)
 
 
 def build_portfolio_payload(entries, estimates):
@@ -178,10 +196,17 @@ def build_portfolio_payload(entries, estimates):
             row["target_weight"] = _to_float(entry.get("target_weight"))
 
     values = {}
+    missing_nav_codes = []
     for code, row in by_code.items():
         est = estimates.get(code) or {}
-        nav = est.get("est_nav") or est.get("last_nav")
-        values[code] = row["shares"] * nav if nav and row["shares"] > 0 else 0
+        nav = _to_float(est.get("est_nav"))
+        if nav is None:
+            nav = _to_float(est.get("last_nav"))
+        if row["shares"] > 0 and (nav is None or nav <= 0):
+            missing_nav_codes.append(code)
+        values[code] = row["shares"] * nav if nav is not None and nav > 0 and row["shares"] > 0 else 0
+    if missing_nav_codes:
+        return [{"code": code} for code in by_code], None, missing_nav_codes
     portfolio_value = sum(values.values())
 
     explicit_total = sum(
@@ -204,34 +229,60 @@ def build_portfolio_payload(entries, estimates):
                 2,
             )
         items.append(item)
-    return items, round(portfolio_value, 2)
+    return items, round(portfolio_value, 2), missing_nav_codes
 
 
-def fetch_portfolio_decisions(items, portfolio_value):
-    """一次请求获取全部决策与组合校准；失败时调用方降级为纯估值。"""
+class DecisionAuthError(RuntimeError):
+    """Protected decision endpoint is configured but cannot be authenticated."""
+
+    def __init__(self, message, status=None):
+        super().__init__(message)
+        self.status = status
+
+
+def fetch_portfolio_decisions(items, portfolio_value, request_id=None):
+    """返回 (决策结果, 降级警告)；鉴权错误必须中止推送。"""
     if not FUND_API_BASE:
-        return None
+        return None, None
+    if not WORKER_TOKEN:
+        raise DecisionAuthError("组合决策未执行：WORKER_TOKEN 未配置")
     try:
-        body = json.dumps({
+        payload = {
             "items": items,
             "portfolio_value": portfolio_value,
-        }).encode("utf-8")
+        }
+        if request_id:
+            payload["request_id"] = request_id
+        body = json.dumps(payload).encode("utf-8")
         raw = _req(
             f"{FUND_API_BASE}/api/portfolio/decisions",
             data=body,
-            headers={"User-Agent": "sinan-bot", "Content-Type": "application/json"},
+            headers={
+                "User-Agent": "sinan-bot",
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {WORKER_TOKEN}",
+            },
         )
         data = json.loads(raw)
-        return data if isinstance(data, dict) and isinstance(data.get("decisions"), list) else None
+        if isinstance(data, dict) and isinstance(data.get("decisions"), list):
+            return data, None
+        return None, "组合决策响应无效，已降级为纯估值"
+    except urllib.error.HTTPError as ex:
+        if ex.code in (401, 403):
+            raise DecisionAuthError(f"组合决策鉴权失败: HTTP {ex.code}", ex.code) from ex
+        warning = f"组合决策暂不可用: HTTP {ex.code}"
+        print("portfolio decision fail", warning)
+        return None, warning
     except Exception as ex:
-        print("portfolio decision fail", ex)
-        return None
+        warning = f"组合决策暂不可用: {ex}"[:240]
+        print("portfolio decision fail", warning)
+        return None, warning
 
 
 def format_push_line(code, name, estimate_data, decision):
     """组合涨跌幅 + 决策动作为一行推送文案。"""
     nm = name or (estimate_data or {}).get("name") or code
-    chg_txt = "—"
+    chg_txt = "—（数据不可用）" if (estimate_data or {}).get("status") == "unavailable" else "—"
     if estimate_data and estimate_data.get("gszzl") is not None:
         try:
             chg = float(estimate_data["gszzl"])
@@ -343,7 +394,7 @@ def main():
     if not gid:
         print("未找到自选 Gist（请先在 App 配置云同步并上传自选）"); return
 
-    # slot 去重：每天 14:30 / 14:40 / 14:50 各最多发一次（FORCE 测试除外）。
+    # 与正式 Worker 共用 14:30 槽位；人工应急成功后也阻止同日重复发送。
     state = {}
     try:
         sraw = gist_file(gid, STATE_FILE)
@@ -365,17 +416,16 @@ def main():
         code = str(entry["code"]).strip()
         unique.setdefault(code, entry.get("name"))
 
-    estimates, fresh = {}, False
-    for code in unique:
-        try:
-            e = estimate(code)
-        except Exception as ex:
-            print("est fail", code, ex); continue
-        if not e:
-            continue
-        estimates[code] = e
-        if e["gztime"].startswith(today):
-            fresh = True
+    try:
+        estimates = fetch_estimates(unique.keys())
+    except Exception as ex:
+        print("estimate proxy fail; retired fundgz fallback is disabled:", ex)
+        return
+    fresh = any(
+        estimate_data.get("status") == "fresh"
+        and str(estimate_data.get("gztime") or "").startswith(today)
+        for estimate_data in estimates.values()
+    )
 
     if not estimates:
         print("无估值数据"); return
@@ -383,9 +433,37 @@ def main():
         print("今日无盘中估值（非交易日/休市），跳过"); return
 
     decision_result = None
+    decision_warning = None
+    decision_status = "disabled"
     if FUND_API_BASE:
-        items, portfolio_value = build_portfolio_payload(entries, estimates)
-        decision_result = fetch_portfolio_decisions(items, portfolio_value)
+        items, portfolio_value, missing_nav_codes = build_portfolio_payload(entries, estimates)
+        if missing_nav_codes:
+            decision_warning = f"组合决策未执行：持仓缺少可用净值（{','.join(missing_nav_codes)}）"
+            decision_status = "degraded"
+            print(decision_warning)
+        else:
+            try:
+                decision_result, decision_warning = fetch_portfolio_decisions(
+                    items,
+                    portfolio_value,
+                    request_id=f"{today}-{slot}",
+                )
+                decision_status = "degraded" if decision_warning else "ok"
+            except DecisionAuthError as ex:
+                print(ex)
+                if not FORCE:
+                    state["last_slot"] = slot
+                    state["last_attempt_at"] = now.isoformat()
+                    state["attempt_count"] = int(state.get("attempt_count") or 0) + 1
+                    state["last_error"] = str(ex)[:240]
+                    state["last_warning"] = ""
+                    state["decision_status"] = "degraded"
+                    state["last_http_status"] = ex.status
+                    try:
+                        write_state(gid, state)
+                    except Exception as write_ex:
+                        print("写鉴权失败状态失败:", write_ex)
+                return
     decisions = {
         str(row.get("code")): row
         for row in ((decision_result or {}).get("decisions") or [])
@@ -409,7 +487,13 @@ def main():
                     sent_slots.append(slot)
                 state["sent_slots"] = sorted(sent_slots)
                 state["last_slot"] = slot
+                state["last_attempt_at"] = now.isoformat()
                 state["last_pushed_at"] = now.isoformat()
+                state["attempt_count"] = int(state.get("attempt_count") or 0) + 1
+                state["last_error"] = ""
+                state["last_warning"] = decision_warning or ""
+                state["decision_status"] = decision_status
+                state["last_http_status"] = 200
                 write_state(gid, state)
             except Exception as ex:
                 print("写状态失败（下次可能重推）:", ex)

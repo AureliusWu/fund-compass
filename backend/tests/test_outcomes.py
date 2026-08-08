@@ -51,7 +51,7 @@ def test_decision_outcomes_are_forward_only(monkeypatch, tmp_path):
     repo.record_decisions([{
         "code": "000002", "name": "同类基金", "type": "混合型",
         "as_of_date": "2026-01-01", "as_of_nav": 1.0,
-        "action": "停止加仓", "confidence": "高",
+        "action": "减仓", "confidence": "高",
     }], "v1")
     repo.record_decisions([{
         "code": "000003", "name": "第二只同类", "type": "混合型",
@@ -92,3 +92,34 @@ def test_version_comparison_is_read_only_and_sample_gated(monkeypatch, tmp_path)
     assert result["accepted"] is False
     assert result["guardrails"]["auto_tuning"] is False
     assert any("样本不足" in reason for reason in result["reasons"])
+
+
+def test_version_comparison_supports_current_and_legacy_action_vocabulary(monkeypatch):
+    rows = []
+    for index, (action, value) in enumerate((
+        ("买入", 2.0),
+        ("减仓", -2.0),
+        ("停止加仓", -1.0),
+        ("观望", 0.0),
+        ("持有", 0.0),
+    ), start=1):
+        rows.append({
+            "id": index,
+            "action": action,
+            "score_version": "v3-risk-adjusted",
+            "signal_version": "v3-coverage-gated",
+            "returns": {"5": {
+                "date": "2026-01-06", "return": value,
+                "max_drawdown": min(0.0, value),
+            }},
+        })
+    monkeypatch.setattr(repo, "decision_outcomes", lambda: {
+        "items": rows,
+        "breakdowns": {"type": [{"samples": 30}]},
+    })
+
+    result = repo.version_comparison()
+    metric = next(row for row in result["metrics"] if row["horizon"] == 5)
+
+    assert metric["direction_hit_rate"] == 100.0
+    assert metric["observe_rate"] == 40.0

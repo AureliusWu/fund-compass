@@ -13,9 +13,7 @@
 - Gist 状态文件继续使用 `sinan-estimate-state.json`，与旧脚本共享去重状态
 - GitHub Actions `manual-estimate-push` 只保留手动应急入口，不再定时执行
 
-旧 Render Cron 配置仍在 `render.yaml` 中作为历史参考；启用 Cloudflare Worker 后不要同时启用 Render Cron。
-
-原 Render 配置：
+旧 Render Cron 已从 `render.yaml` 删除，避免与 Cloudflare Worker 重复发送。历史实现曾使用：
 
 - `fund-compass-estimate-push`
 - cron：`30 6 * * 1-5`，即北京时间 14:30
@@ -33,6 +31,7 @@ GitHub Actions 的 `manual-estimate-push` 仅用于人工应急；正式定时�
 |------|-------|
 | `GIST_TOKEN` | GitHub Personal Access Token，需勾选 `gist` 权限 |
 | `FUND_API_BASE` | 司南后端公网地址；配置后推送包含决策动作与组合校准 |
+| `WORKER_TOKEN` | 后端 Worker 写接口凭证；Cloudflare Worker 与人工应急 workflow 必须使用同一个值 |
 
 先在 App「自选 → 云同步」里上传一次，确保 Gist 中存在 `sinan-watchlist.json`。
 

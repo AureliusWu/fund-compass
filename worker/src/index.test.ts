@@ -11,7 +11,11 @@ const monday1440 = new Date('2026-07-13T06:40:00Z')
 function fakeNetwork(sendStatuses = [200], options: {
   patchFails?: boolean; missingSecond?: boolean; gistReadFails?: boolean
     estimateFails?: boolean; officialFails?: boolean; holdingsFails?: boolean
-  backend?: 'success' | 'timeout'
+  backend?: 'success' | 'timeout' | 'unauthorized'
+  estimateDates?: Record<string, string>
+  officialDates?: [string, string]
+  missingNav?: string[]
+  watchEntries?: Array<Record<string, unknown>>
 } = {}) {
   let state: Record<string, unknown> = {}
   let sends = 0
@@ -20,7 +24,7 @@ function fakeNetwork(sendStatuses = [200], options: {
     if (url.includes('/gists/gist') && (!init?.method || init.method === 'GET')) {
       if (options.gistReadFails) return new Response('failed', { status: 502 })
       return Response.json({ files: {
-        'sinan-watchlist.json': { content: JSON.stringify([{ code: '000001', name: '一号' }, { code: '000002', name: '二号' }]) },
+        'sinan-watchlist.json': { content: JSON.stringify(options.watchEntries || [{ code: '000001', name: '一号' }, { code: '000002', name: '二号' }]) },
         'sinan-estimate-state.json': { content: JSON.stringify(state) },
       } })
     }
@@ -33,15 +37,20 @@ function fakeNetwork(sendStatuses = [200], options: {
     if (url.includes('/FundGuZhi/GetFundGZList')) {
       if (options.estimateFails) return new Response('upstream unavailable', { status: 503 })
       const list = ['000001', ...(options.missingSecond ? [] : ['000002'])].map((code) => ({
-        bzdm: code, jjjc: `基金${code}`, dwjz: '1', gsz: '1.01', gszzl: '1%', gxrq: '2026-07-13',
+        bzdm: code, jjjc: `基金${code}`,
+        dwjz: options.missingNav?.includes(code) ? '' : '1',
+        gsz: options.missingNav?.includes(code) ? '' : '1.01',
+        gszzl: options.missingNav?.includes(code) ? '' : '1%',
+        gxrq: options.estimateDates?.[code] || '2026-07-13',
       }))
       return Response.json({ ErrCode: 0, Data: { list } })
     }
     if (url.includes('/f10/lsjz')) {
       if (options.officialFails) return new Response('official unavailable', { status: 503 })
+      const dates = options.officialDates || ['2026-07-24', '2026-07-23']
       return Response.json({ ErrCode: 0, Data: { LSJZList: [
-        { FSRQ: '2026-07-24', DWJZ: '1.0200', JZZZL: '2.00' },
-        { FSRQ: '2026-07-23', DWJZ: '1.0000', JZZZL: '0.50' },
+        { FSRQ: dates[0], DWJZ: '1.0200', JZZZL: '2.00' },
+        { FSRQ: dates[1], DWJZ: '1.0000', JZZZL: '0.50' },
       ] } })
     }
     if (url.includes('/FundArchivesDatas.aspx')) {
@@ -59,6 +68,7 @@ function fakeNetwork(sendStatuses = [200], options: {
     }
     if (url.includes('/api/portfolio/decisions')) {
       if (options.backend === 'timeout') throw new DOMException('timeout', 'AbortError')
+      if (options.backend === 'unauthorized') return new Response('unauthorized', { status: 401 })
       expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer worker-token')
       const body = JSON.parse(String(init?.body))
       expect(body.request_id).toBe('2026-07-13-14:30')
@@ -70,7 +80,10 @@ function fakeNetwork(sendStatuses = [200], options: {
   return { getState: () => state, getSends: () => sends, fetchMock }
 }
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  vi.unstubAllGlobals()
+  vi.useRealTimers()
+})
 
 describe('Cloudflare push worker', () => {
   it('normalizes and formats an estimate', () => {
@@ -124,6 +137,17 @@ describe('Cloudflare push worker', () => {
     expect(net.getSends()).toBe(1)
   })
 
+  it('redacts each stale fund instead of mixing its precise move into a fresh push', async () => {
+    const net = fakeNetwork([200], { estimateDates: { '000002': '2026-07-12' } })
+    const result = await run(env, false, monday1430)
+    const sendCall = net.fetchMock.mock.calls.find(([input]) => String(input).includes('sctapi.ftqq.com'))
+    const body = sendCall?.[1]?.body as URLSearchParams
+
+    expect(result).toMatchObject({ status: 'sent', fresh: true, stale: 1 })
+    expect(body.get('desp')).toContain('**二号** --（数据过期）')
+    expect(body.get('desp')).not.toContain('**二号** +1.00%')
+  })
+
   it('runs the mocked Gist to estimate to backend to ServerChan to state chain', async () => {
     const net = fakeNetwork([200], { backend: 'success' })
     const result = await run({ ...env, FUND_API_BASE: 'https://api.test' }, false, monday1430)
@@ -131,9 +155,46 @@ describe('Cloudflare push worker', () => {
     expect(net.getState().sent_slots).toEqual(['14:30'])
   })
 
-  it('degrades to estimate-only push when the backend times out', async () => {
+  it('reports a warning when it degrades to an estimate-only push after backend timeout', async () => {
     const net = fakeNetwork([200], { backend: 'timeout' })
-    expect((await run({ ...env, FUND_API_BASE: 'https://api.test' }, false, monday1430)).status).toBe('sent')
+    const result = await run({ ...env, FUND_API_BASE: 'https://api.test' }, false, monday1430)
+    expect(result.status).toBe('sent_with_warning')
+    expect(result.warning).toContain('组合决策暂不可用')
+    expect(net.getState()).toMatchObject({ decision_status: 'degraded' })
+    expect(net.getSends()).toBe(1)
+  })
+
+  it('does not send or mark the slot sent when WORKER_TOKEN is missing', async () => {
+    const net = fakeNetwork([200], { backend: 'success' })
+    await expect(run({ ...env, FUND_API_BASE: 'https://api.test', WORKER_TOKEN: '' }, false, monday1430))
+      .rejects.toThrow('WORKER_TOKEN 未配置')
+    expect(net.getSends()).toBe(0)
+    expect(net.getState()).toMatchObject({ decision_status: 'degraded', last_http_status: null })
+    expect(net.getState().sent_slots).toEqual([])
+  })
+
+  it('does not send or mark the slot sent when backend authentication fails', async () => {
+    const net = fakeNetwork([200], { backend: 'unauthorized' })
+    await expect(run({ ...env, FUND_API_BASE: 'https://api.test' }, false, monday1430))
+      .rejects.toThrow('鉴权失败')
+    expect(net.getSends()).toBe(0)
+    expect(net.getState()).toMatchObject({ decision_status: 'degraded', last_http_status: 401 })
+    expect(net.getState().sent_slots).toEqual([])
+  })
+
+  it('does not calculate partial portfolio weights when a held fund has no NAV', async () => {
+    const net = fakeNetwork([200], {
+      backend: 'success',
+      missingNav: ['000002'],
+      watchEntries: [
+        { code: '000001', name: '一号', shares: 100 },
+        { code: '000002', name: '二号', shares: 100 },
+      ],
+    })
+    const result = await run({ ...env, FUND_API_BASE: 'https://api.test' }, false, monday1430)
+    expect(result).toMatchObject({ status: 'sent_with_warning', decision_status: 'degraded' })
+    expect(result.warning).toContain('000002')
+    expect(net.fetchMock.mock.calls.some(([input]) => String(input).includes('/api/portfolio/decisions'))).toBe(false)
     expect(net.getSends()).toBe(1)
   })
 
@@ -161,22 +222,128 @@ describe('Cloudflare push worker', () => {
     const body = await response.text()
     expect(response.status).toBe(200)
     expect(body).toContain('state_available')
-    expect(body).toContain('6.0.3')
+    expect(body).toContain('6.0.5')
     expect(body).not.toContain('gist-token')
     expect(body).not.toContain('send-key')
     expect(body).not.toContain('worker-token')
   })
 
   it('serves a bounded CORS estimate batch without exposing secrets', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(monday1430)
     fakeNetwork()
     const response = await worker.fetch(new Request('https://worker.test/estimates?codes=000001,000002', {
       headers: { Origin: 'https://aureliuswu.github.io' },
     }), env)
-    const body = await response.json() as { returned: number; items: Array<Record<string, unknown>> }
+    const body = await response.json() as { status: string; returned: number; items: Array<Record<string, unknown>> }
     expect(response.status).toBe(200)
     expect(response.headers.get('Access-Control-Allow-Origin')).toBe('https://aureliuswu.github.io')
+    expect(body.status).toBe('ok')
     expect(body.returned).toBe(2)
-    expect(body.items[0]).toMatchObject({ code: '000001', est_change: 1, source_time_precision: 'date' })
+    expect(body.items[0]).toMatchObject({
+      code: '000001', est_change: 1, source_time_precision: 'date', status: 'fresh',
+      source: 'eastmoney_estimate_table',
+    })
+  })
+
+  it('falls back per fund when only one estimate row is stale', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(monday1430)
+    fakeNetwork([200], {
+      estimateDates: { '000002': '2026-07-12' },
+      officialDates: ['2026-07-11', '2026-07-10'],
+    })
+    const response = await worker.fetch(new Request('https://worker.test/estimates?codes=000001,000002'), env)
+    const body = await response.json() as {
+      status: string
+      source: string
+      items: Array<Record<string, unknown>>
+    }
+
+    expect(response.status).toBe(200)
+    expect(body.status).toBe('degraded')
+    expect(body.source).toBe('eastmoney_mixed')
+    expect(body.items[0]).toMatchObject({ code: '000001', status: 'fresh', est_change: 1 })
+    expect(body.items[1]).toMatchObject({
+      code: '000002', status: 'latest_official', source: 'eastmoney_official_nav',
+      fallback_reason: 'estimate_stale', est_time: '2026-07-11', est_change: 2,
+    })
+  })
+
+  it('falls back when an estimate is dated today but its numeric values are incomplete', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(monday1430)
+    fakeNetwork([200], { missingNav: ['000001'], missingSecond: true })
+    const response = await worker.fetch(new Request('https://worker.test/estimates?codes=000001'), env)
+    const body = await response.json() as { items: Array<Record<string, unknown>> }
+
+    expect(response.status).toBe(200)
+    expect(body.items[0]).toMatchObject({
+      code: '000001', status: 'latest_official', source: 'eastmoney_official_nav',
+      fallback_reason: 'estimate_incomplete', last_nav: 1, est_nav: 1.02, est_change: 2,
+    })
+  })
+
+  it('keeps a current but incomplete estimate out of legacy items if fallback also fails', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(monday1430)
+    fakeNetwork([200], { missingNav: ['000001'], missingSecond: true, officialFails: true })
+    const response = await worker.fetch(new Request('https://worker.test/estimates?codes=000001'), env)
+    const body = await response.json() as {
+      items: Array<Record<string, unknown>>
+      unavailable_items: Array<Record<string, unknown>>
+    }
+
+    expect(response.status).toBe(200)
+    expect(body.items).toEqual([])
+    expect(body.unavailable_items[0]).toMatchObject({
+      code: '000001', status: 'unavailable', fallback_reason: 'estimate_incomplete',
+      last_nav: null, est_nav: null, est_change: null,
+    })
+  })
+
+  it('does not present a weekend estimate table row as current data', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-11T06:30:00Z'))
+    fakeNetwork([200], {
+      estimateDates: { '000001': '2026-07-10' },
+      officialDates: ['2026-07-10', '2026-07-09'],
+    })
+    const response = await worker.fetch(new Request('https://worker.test/estimates?codes=000001'), env)
+    const body = await response.json() as { items: Array<Record<string, unknown>> }
+
+    expect(response.status).toBe(200)
+    expect(body.items[0]).toMatchObject({
+      status: 'latest_official', source: 'eastmoney_official_nav', est_time: '2026-07-10',
+    })
+  })
+
+  it('reports unavailable funds separately without putting null numerics in legacy items', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(monday1430)
+    fakeNetwork([200], {
+      estimateDates: { '000001': '2026-07-12' },
+      officialFails: true,
+      missingSecond: true,
+    })
+    const response = await worker.fetch(new Request('https://worker.test/estimates?codes=000001'), env)
+    const body = await response.json() as {
+      status: string
+      returned: number
+      unavailable: number
+      items: Array<Record<string, unknown>>
+      unavailable_codes: string[]
+      unavailable_items: Array<Record<string, unknown>>
+    }
+
+    expect(response.status).toBe(200)
+    expect(body).toMatchObject({ status: 'unavailable', returned: 0, unavailable: 1 })
+    expect(body.items).toEqual([])
+    expect(body.unavailable_codes).toEqual(['000001'])
+    expect(body.unavailable_items[0]).toMatchObject({
+      code: '000001', status: 'unavailable', source: 'unavailable',
+      est_nav: null, est_change: null, fallback_reason: 'estimate_stale',
+    })
   })
 
   it('rejects invalid or oversized public estimate batches', async () => {

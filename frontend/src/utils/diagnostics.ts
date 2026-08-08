@@ -4,10 +4,44 @@
 import { getFundDetail, type NavPoint } from '@/api/client'
 
 // ── 相关性矩阵 ─────────────────────────────────────────
-export interface CorrItem { a: string; b: string; aName: string; bName: string; corr: number }
-export interface CorrMatrix { funds: { code: string; name: string }[]; matrix: number[][]; pairs: CorrItem[] }
+export interface CorrItem { a: string; b: string; aName: string; bName: string; corr: number | null; samples: number }
+export interface CorrMatrix { funds: { code: string; name: string }[]; matrix: (number | null)[][]; pairs: CorrItem[] }
 
-/** 计算两只基金净值序列的皮尔逊相关系数 */
+export interface AlignedNavHistories {
+  dates: string[]
+  values: Record<string, number[]>
+}
+
+function usableNavPoints(points: NavPoint[]): Map<string, number> {
+  const values = new Map<string, number>()
+  for (const point of points) {
+    if (!point.date || !Number.isFinite(point.nav) || point.nav <= 0) continue
+    values.set(point.date, point.nav)
+  }
+  return values
+}
+
+/** Align multiple NAV histories to their shared dates; never forward-fill missing observations. */
+export function alignNavHistories(
+  histories: { code: string; points: NavPoint[] }[],
+  limit = 250,
+): AlignedNavHistories {
+  if (!histories.length) return { dates: [], values: {} }
+  const maps = histories.map((history) => ({ code: history.code, values: usableNavPoints(history.points) }))
+  const dates = [...maps[0].values.keys()]
+    .filter((date) => maps.every((history) => history.values.has(date)))
+    .sort((a, b) => a.localeCompare(b))
+    .slice(-Math.max(0, limit))
+  return {
+    dates,
+    values: Object.fromEntries(maps.map((history) => [
+      history.code,
+      dates.map((date) => history.values.get(date) as number),
+    ])),
+  }
+}
+
+/** 计算两只基金同期日收益率序列的皮尔逊相关系数 */
 function pearson(xs: number[], ys: number[]): number | null {
   const n = Math.min(xs.length, ys.length)
   if (n < 10) return null
@@ -23,14 +57,29 @@ function pearson(xs: number[], ys: number[]): number | null {
   return cov / Math.sqrt(vx * vy)
 }
 
+function dailyReturns(values: number[]): number[] {
+  const out: number[] = []
+  for (let index = 1; index < values.length; index++) {
+    const previous = values[index - 1]
+    const current = values[index]
+    if (!(previous > 0) || !Number.isFinite(current)) continue
+    out.push(current / previous - 1)
+  }
+  return out
+}
+
+export function uniqueFundsByCode<T extends { code: string }>(holdings: T[]): T[] {
+  return [...new Map(holdings.map((holding) => [holding.code, holding])).values()]
+}
+
 /** 从缓存或后端获取持有基金的净值 */
-async function fetchNavMap(holdings: { code: string }[]): Promise<Map<string, number[]>> {
-  const map = new Map<string, number[]>()
-  const tasks = holdings.map(async (h) => {
+async function fetchNavMap(holdings: { code: string }[]): Promise<Map<string, NavPoint[]>> {
+  const map = new Map<string, NavPoint[]>()
+  const tasks = uniqueFundsByCode(holdings).map(async (h) => {
     try {
       const d = await getFundDetail(h.code)
       if (d?.nav_history?.length) {
-        map.set(h.code, d.nav_history.map((p: NavPoint) => p.nav))
+        map.set(h.code, d.nav_history)
       }
     } catch { /* skip */ }
   })
@@ -38,32 +87,54 @@ async function fetchNavMap(holdings: { code: string }[]): Promise<Map<string, nu
   return map
 }
 
-export async function computeCorrelation(
+export function correlationFromNavHistories(
   holdings: { code: string; name: string }[],
-): Promise<CorrMatrix | null> {
-  if (holdings.length < 2) return null
+  navMap: Map<string, NavPoint[]>,
+): CorrMatrix | null {
+  const funds = uniqueFundsByCode(holdings)
+  if (funds.length < 2) return null
 
-  const navMap = await fetchNavMap(holdings)
-  const codes = holdings.filter((h) => navMap.has(h.code))
-  if (codes.length < 2) return null
+  // Every pair uses the same globally aligned window so 3+ fund comparisons are comparable.
+  const aligned = alignNavHistories(funds.map((fund) => ({
+    code: fund.code,
+    points: navMap.get(fund.code) || [],
+  })))
+  const returns = Object.fromEntries(funds.map((fund) => [
+    fund.code,
+    dailyReturns(aligned.values[fund.code] || []),
+  ])) as Record<string, number[]>
+  const samples = Math.max(0, aligned.dates.length - 1)
 
-  const matrix: number[][] = []
+  const matrix: (number | null)[][] = funds.map(() => Array<number | null>(funds.length).fill(null))
   const pairs: CorrItem[] = []
-
-  for (let i = 0; i < codes.length; i++) {
-    matrix[i] = []
+  for (let i = 0; i < funds.length; i++) {
     matrix[i][i] = 1
-    for (let j = i + 1; j < codes.length; j++) {
-      const c = pearson(navMap.get(codes[i].code)!, navMap.get(codes[j].code)!)
-      matrix[i][j] = c ?? 0
-      matrix[j][i] = c ?? 0
-      if (c != null) {
-        pairs.push({ a: codes[i].code, b: codes[j].code, aName: codes[i].name, bName: codes[j].name, corr: c })
-      }
+    for (let j = i + 1; j < funds.length; j++) {
+      const corr = pearson(returns[funds[i].code], returns[funds[j].code])
+      matrix[i][j] = corr
+      matrix[j][i] = corr
+      pairs.push({
+        a: funds[i].code,
+        b: funds[j].code,
+        aName: funds[i].name,
+        bName: funds[j].name,
+        corr,
+        samples,
+      })
     }
   }
+  return { funds, matrix, pairs }
+}
 
-  return { funds: codes.map((h) => ({ code: h.code, name: h.name })), matrix, pairs }
+export async function computeCorrelation(
+  holdings: { code: string; name: string }[],
+  providedNavMap?: Map<string, NavPoint[]>,
+): Promise<CorrMatrix | null> {
+  const funds = uniqueFundsByCode(holdings)
+  if (funds.length < 2) return null
+
+  const navMap = providedNavMap ?? await fetchNavMap(funds)
+  return correlationFromNavHistories(funds, navMap)
 }
 
 // ── 压力测试 ───────────────────────────────────────────

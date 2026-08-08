@@ -145,17 +145,17 @@ def test_unavailable_intraday_data_caps_strength_and_action(sample_detail, monke
     assert decision["data_status"] == "暂不可用"
 
 
-def test_backtest_passes_code_to_timing(uptrend, monkeypatch):
-    """回测切片应透传 fund code，使估值层可走 PE/PB。"""
+def test_backtest_marks_timing_as_historical(uptrend, monkeypatch):
+    """回测保留 fund code 作为追溯信息，但显式禁用当前 PE/PB。"""
     import importlib
     bt_mod = importlib.import_module("strategy.backtest")
 
     calls = []
 
-    def spy_timing(detail):
-        calls.append(detail.get("code"))
+    def spy_timing(detail, *, use_current_index_valuation=True):
+        calls.append((detail.get("code"), use_current_index_valuation))
         return {"signal": "持有"}
 
     monkeypatch.setattr(bt_mod, "timing_signal", spy_timing)
     bt_mod.backtest({"code": "510300", "type": "指数型", "nav_history": uptrend})
-    assert calls and all(c == "510300" for c in calls)
+    assert calls and all(code == "510300" and use_current is False for code, use_current in calls)

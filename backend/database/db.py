@@ -106,6 +106,31 @@ CREATE TABLE IF NOT EXISTS idempotency_requests (
 """
 
 
+def persistence_status() -> dict:
+    """Return non-sensitive durability metadata from explicit deployment config."""
+    mode = os.environ.get("FUND_DB_PERSISTENCE", "").strip().lower()
+    if mode == "persistent_disk":
+        return {
+            "engine": "sqlite",
+            "persistence": "persistent_disk",
+            "durable": True,
+            "warning": None,
+        }
+    if mode == "ephemeral":
+        return {
+            "engine": "sqlite",
+            "persistence": "ephemeral",
+            "durable": False,
+            "warning": "数据库位于临时存储，实例重建后数据可能丢失",
+        }
+    return {
+        "engine": "sqlite",
+        "persistence": "unspecified",
+        "durable": False,
+        "warning": "未声明 FUND_DB_PERSISTENCE，不能确认数据库可持久",
+    }
+
+
 def _timeout_seconds() -> float:
     raw = os.environ.get("FUND_DB_TIMEOUT_SECONDS", str(DEFAULT_TIMEOUT_SECONDS))
     try:
