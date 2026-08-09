@@ -39,11 +39,21 @@ services:
     envVars:
       - key: FUND_DB
         value: /var/data/fund_compass.db
+      - key: FUND_DB_MOUNT_PATH
+        value: /var/data
       - key: FUND_DB_PERSISTENCE
         value: persistent_disk
 ```
 
-只有 `/var/data` 下的文件会跨部署保留。配置完成后，应在 `/api/health` 与运行状态页确认数据库模式为 `persistent_disk`。继续使用 `plan: free` 时，健康接口会明确报告 `ephemeral`，不得宣称决策闭环已持久化。
+只有 `/var/data` 下的文件会跨部署保留。后端只有在以下条件全部满足时，才会在 `/api/health` 报告 `persistent_disk` 与 `durable: true`：
+
+- 显式配置了 `FUND_DB` 与 `FUND_DB_MOUNT_PATH`，且二者均为绝对路径；挂载目录不能直接声明为根文件系统；
+- 数据库文件位于声明的挂载目录内；
+- 挂载目录真实存在、是系统挂载点，并且对服务进程可写。
+
+任一检查失败时，健康接口会报告 `misconfigured` 与 `durable: false`，但不会暴露服务器路径。部署完成后，还应执行一次数据库写入与读取，并确认记录经过重启或再次部署后仍然存在；不能只依据环境变量或单次健康检查宣称持久化完成。
+
+挂载新磁盘不会自动迁移临时文件系统中的旧 SQLite 文件。若旧数据需要保留，必须在重启或重新部署前制作一致性备份并单独导入持久盘。继续使用 `plan: free` 时，健康接口会明确报告 `ephemeral`，不得宣称决策闭环已持久化。
 
 ## 二、让前端指向后端
 

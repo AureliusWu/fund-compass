@@ -198,6 +198,32 @@ def test_fetch_portfolio_decisions_returns_warning_on_timeout(monkeypatch):
     assert "timed out" in warning
 
 
+def test_rollover_daily_state_preserves_global_runtime_history():
+    state = estimate_push.rollover_daily_state(
+        {
+            "date": "2026-07-12",
+            "sent_slots": ["14:30"],
+            "attempt_count": 2,
+            "last_cron_at": "2026-07-12T14:40:00+08:00",
+            "last_cron_result": "skipped",
+            "last_cron_reason": "no_fresh_estimate",
+            "last_attempt_at": "2026-07-11T14:30:00+08:00",
+            "last_success_at": "2026-07-11T14:30:00+08:00",
+            "last_error": "",
+        },
+        "2026-07-13",
+    )
+
+    assert state["date"] == "2026-07-13"
+    assert state["sent_slots"] == []
+    assert state["attempt_count"] == 0
+    assert state["last_cron_at"] == "2026-07-12T14:40:00+08:00"
+    assert state["last_cron_result"] == "skipped"
+    assert state["last_cron_reason"] == "no_fresh_estimate"
+    assert state["last_attempt_at"] == "2026-07-11T14:30:00+08:00"
+    assert state["last_success_at"] == "2026-07-11T14:30:00+08:00"
+
+
 def _install_main_probe(monkeypatch, decision_call):
     real_datetime = datetime.datetime
 
@@ -254,6 +280,7 @@ def test_main_records_decision_timeout_as_sent_with_warning(monkeypatch):
     assert written[-1]["last_warning"] == "组合决策暂不可用: timed out"
     assert written[-1]["last_error"] == ""
     assert written[-1]["last_http_status"] == 200
+    assert written[-1]["last_success_at"] == "2026-07-13T14:30:00+08:00"
 
 
 def test_main_records_auth_failure_without_sending_or_marking_sent(monkeypatch):

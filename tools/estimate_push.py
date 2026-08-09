@@ -94,6 +94,19 @@ def write_state(gid, state):
     _gh(f"{GH}/gists/{gid}", data=body, method="PATCH")
 
 
+def rollover_daily_state(state, today):
+    """Reset daily deduplication without erasing Worker-wide runtime history."""
+    current = dict(state) if isinstance(state, dict) else {}
+    if current.get("date") != today:
+        current["date"] = today
+        current["sent_slots"] = []
+        current["attempt_count"] = 0
+    else:
+        current.setdefault("sent_slots", [])
+        current.setdefault("attempt_count", 0)
+    return current
+
+
 def slot_from_schedule():
     m = re.match(r"^\s*30\s+6\s+", SCHEDULE_CRON)
     if m:
@@ -401,8 +414,7 @@ def main():
         state = json.loads(sraw) if sraw else {}
     except Exception as ex:
         print("读状态失败（按未推过处理）:", ex)
-    if state.get("date") != today:
-        state = {"date": today, "sent_slots": []}
+    state = rollover_daily_state(state, today)
     sent_slots = state.setdefault("sent_slots", [])
     if slot in sent_slots and not FORCE:
         print(f"今日（{today}）{slot} 已推过，跳过"); return
@@ -489,6 +501,7 @@ def main():
                 state["last_slot"] = slot
                 state["last_attempt_at"] = now.isoformat()
                 state["last_pushed_at"] = now.isoformat()
+                state["last_success_at"] = now.isoformat()
                 state["attempt_count"] = int(state.get("attempt_count") or 0) + 1
                 state["last_error"] = ""
                 state["last_warning"] = decision_warning or ""

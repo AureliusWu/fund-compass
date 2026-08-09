@@ -77,6 +77,13 @@ jobs:
             fi
             sleep 15
           done
+          jq -e '
+            .runtime
+            | has("last_cron_at")
+              and has("last_cron_result")
+              and has("last_cron_reason")
+              and has("last_attempt_at")
+          ' <<<"$health" >/dev/null
           estimates=$(curl --fail --silent --show-error "$WORKER_BASE/estimates?codes=005844,018147")
           jq -e '
             .requested == 2

@@ -59,6 +59,67 @@ export interface Health {
     latest_decision_write?: string | null; latest_result_settlement?: string | null
   }
 }
+
+export type WorkerCronResult = 'sent' | 'sent_with_warning' | 'skipped' | 'failed'
+export type WorkerCronReason = 'weekend' | 'empty_watchlist' | 'already_sent' | 'no_fresh_estimate'
+
+export interface WorkerHealthRuntime {
+  state_available?: boolean
+  last_cron_at?: string | null
+  last_cron_result?: WorkerCronResult | null
+  last_cron_reason?: WorkerCronReason | null
+  last_attempt_at?: string | null
+  /** Legacy send outcome retained for older Worker deployments. */
+  last_result?: WorkerCronResult | 'not_sent' | null
+  last_success_at?: string | null
+  last_error?: string | null
+  last_warning?: string | null
+  decision_status?: 'ok' | 'disabled' | 'degraded' | null
+  last_http_status?: number | null
+  attempt_count?: number
+  sent_today?: boolean
+  state_date?: string | null
+}
+
+export interface WorkerHealth {
+  status: string
+  service?: string
+  version?: string
+  runtime?: WorkerHealthRuntime | null
+  configured?: Record<string, boolean>
+}
+
+export interface NormalizedWorkerRuntime {
+  lastCronAt: string | null
+  lastCronResult: WorkerCronResult | 'not_sent' | null
+  lastCronReason: WorkerCronReason | null
+  lastAttemptAt: string | null
+  legacyCronContract: boolean
+}
+
+/** Preserve explicit nulls from the new cron contract; only absent fields use legacy aliases. */
+export function normalizeWorkerRuntime(
+  runtime: WorkerHealthRuntime | null | undefined,
+): NormalizedWorkerRuntime {
+  if (!runtime) {
+    return {
+      lastCronAt: null,
+      lastCronResult: null,
+      lastCronReason: null,
+      lastAttemptAt: null,
+      legacyCronContract: false,
+    }
+  }
+  const has = (field: keyof WorkerHealthRuntime) => Object.prototype.hasOwnProperty.call(runtime, field)
+  return {
+    lastCronAt: has('last_cron_at') ? runtime.last_cron_at ?? null : runtime.last_attempt_at ?? null,
+    lastCronResult: has('last_cron_result') ? runtime.last_cron_result ?? null : runtime.last_result ?? null,
+    lastCronReason: has('last_cron_reason') ? runtime.last_cron_reason ?? null : null,
+    lastAttemptAt: has('last_attempt_at') ? runtime.last_attempt_at ?? null : runtime.last_cron_at ?? null,
+    legacyCronContract: !has('last_cron_result'),
+  }
+}
+
 export interface FundListItem { code: string; name: string; type: string }
 export interface FundsResp { total: number; page: number; page_size: number; items: FundListItem[] }
 export interface NavPoint { date: string; nav: number; ac_return: number | null }

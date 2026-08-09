@@ -106,16 +106,83 @@ CREATE TABLE IF NOT EXISTS idempotency_requests (
 """
 
 
+def _misconfigured_persistence(warning: str) -> dict:
+    """Return a path-free persistent-disk configuration warning."""
+    return {
+        "engine": "sqlite",
+        "persistence": "misconfigured",
+        "durable": False,
+        "warning": warning,
+    }
+
+
+def _persistent_disk_status() -> dict:
+    """Verify that SQLite is configured on a real, writable mount point."""
+    raw_db_path = os.environ.get("FUND_DB", "").strip()
+    raw_mount_path = os.environ.get("FUND_DB_MOUNT_PATH", "").strip()
+    if not raw_db_path:
+        return _misconfigured_persistence(
+            "持久盘模式缺少显式数据库文件配置，无法确认数据库可持久化",
+        )
+    if not raw_mount_path:
+        return _misconfigured_persistence(
+            "持久盘模式缺少显式挂载目录配置，无法确认数据库可持久化",
+        )
+
+    try:
+        db_path = Path(raw_db_path).expanduser()
+        mount_path = Path(raw_mount_path).expanduser()
+        if not db_path.is_absolute() or not mount_path.is_absolute():
+            return _misconfigured_persistence(
+                "持久盘路径必须使用绝对路径，无法确认数据库可持久化",
+            )
+        db_path = db_path.resolve(strict=False)
+        mount_path = mount_path.resolve(strict=False)
+    except (OSError, RuntimeError, ValueError):
+        return _misconfigured_persistence(
+            "持久盘路径配置无效，无法确认数据库可持久化",
+        )
+
+    if mount_path == Path(mount_path.anchor):
+        return _misconfigured_persistence(
+            "根文件系统不能作为持久盘挂载目录，无法确认数据库可持久化",
+        )
+    if db_path == mount_path or mount_path not in db_path.parents:
+        return _misconfigured_persistence(
+            "数据库文件未位于声明的持久盘内，无法确认数据库可持久化",
+        )
+
+    try:
+        if not mount_path.exists() or not mount_path.is_dir():
+            return _misconfigured_persistence(
+                "声明的持久盘当前不可用，无法确认数据库可持久化",
+            )
+        if not os.path.ismount(mount_path):
+            return _misconfigured_persistence(
+                "声明的持久盘目录不是系统挂载点，无法确认数据库可持久化",
+            )
+        if not os.access(mount_path, os.W_OK | os.X_OK):
+            return _misconfigured_persistence(
+                "声明的持久盘不可写，无法确认数据库可持久化",
+            )
+    except OSError:
+        return _misconfigured_persistence(
+            "无法验证持久盘状态，无法确认数据库可持久化",
+        )
+
+    return {
+        "engine": "sqlite",
+        "persistence": "persistent_disk",
+        "durable": True,
+        "warning": None,
+    }
+
+
 def persistence_status() -> dict:
-    """Return non-sensitive durability metadata from explicit deployment config."""
+    """Return verified, non-sensitive SQLite durability metadata."""
     mode = os.environ.get("FUND_DB_PERSISTENCE", "").strip().lower()
     if mode == "persistent_disk":
-        return {
-            "engine": "sqlite",
-            "persistence": "persistent_disk",
-            "durable": True,
-            "warning": None,
-        }
+        return _persistent_disk_status()
     if mode == "ephemeral":
         return {
             "engine": "sqlite",

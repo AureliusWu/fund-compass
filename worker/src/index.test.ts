@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import worker, { formatMessage, normalizeEstimate, parseFundHoldings, run, type Env, type Estimate } from './index'
+import worker, { formatMessage, normalizeEstimate, parseFundHoldings, run, runScheduled, type Env, type Estimate } from './index'
 
 const env: Env = {
   GIST_ID: 'gist', FUND_API_BASE: '', GIST_TOKEN: 'gist-token', WECHAT_SENDKEY: 'send-key',
@@ -16,8 +16,9 @@ function fakeNetwork(sendStatuses = [200], options: {
   officialDates?: [string, string]
   missingNav?: string[]
   watchEntries?: Array<Record<string, unknown>>
+  initialState?: Record<string, unknown>
 } = {}) {
-  let state: Record<string, unknown> = {}
+  let state: Record<string, unknown> = { ...(options.initialState || {}) }
   let sends = 0
   const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input)
@@ -137,6 +138,59 @@ describe('Cloudflare push worker', () => {
     expect(net.getSends()).toBe(1)
   })
 
+  it('records a scheduled no-fresh skip without claiming a send attempt', async () => {
+    const net = fakeNetwork([200], {
+      estimateDates: { '000001': '2026-07-12', '000002': '2026-07-12' },
+    })
+    const result = await runScheduled(env, monday1430)
+
+    expect(result).toMatchObject({ status: 'skipped', reason: 'no_fresh_estimate' })
+    expect(net.getState()).toMatchObject({
+      last_cron_at: '2026-07-13T14:30:00+08:00',
+      last_cron_result: 'skipped',
+      last_cron_reason: 'no_fresh_estimate',
+    })
+    expect(net.getState().last_attempt_at).toBeUndefined()
+    expect(net.getSends()).toBe(0)
+  })
+
+  it('records and rethrows a scheduled upstream failure', async () => {
+    const net = fakeNetwork([200], {
+      estimateFails: true,
+      initialState: {
+        date: '2026-07-12', sent_slots: ['14:30'], attempt_count: 2,
+        last_success_at: '2026-07-11T14:30:00+08:00',
+      },
+    })
+
+    await expect(runScheduled(env, monday1430)).rejects.toThrow('HTTP 503')
+    expect(net.getState()).toMatchObject({
+      date: '2026-07-13',
+      sent_slots: [],
+      attempt_count: 0,
+      last_success_at: '2026-07-11T14:30:00+08:00',
+      last_cron_at: '2026-07-13T14:30:00+08:00',
+      last_cron_result: 'failed',
+    })
+    expect(String(net.getState().last_error)).toContain('HTTP 503')
+    expect(net.getSends()).toBe(0)
+  })
+
+  it('lets a scheduled rejection reach the Cloudflare execution context', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(monday1430)
+    fakeNetwork([200], { estimateFails: true })
+    const pending: Promise<unknown>[] = []
+    const ctx = {
+      waitUntil(promise: Promise<unknown>) { pending.push(promise) },
+    } as unknown as ExecutionContext
+
+    await worker.scheduled({} as ScheduledController, env, ctx)
+
+    expect(pending).toHaveLength(1)
+    await expect(pending[0]).rejects.toThrow('HTTP 503')
+  })
+
   it('redacts each stale fund instead of mixing its precise move into a fresh push', async () => {
     const net = fakeNetwork([200], { estimateDates: { '000002': '2026-07-12' } })
     const result = await run(env, false, monday1430)
@@ -217,15 +271,41 @@ describe('Cloudflare push worker', () => {
   })
 
   it('health exposes runtime state without secret values', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(monday1430)
     fakeNetwork()
+    await runScheduled(env, monday1430)
     const response = await worker.fetch(new Request('https://worker.test/health'), env)
-    const body = await response.text()
+    const body = await response.json() as { runtime: Record<string, unknown>; version: string }
     expect(response.status).toBe(200)
-    expect(body).toContain('state_available')
-    expect(body).toContain('6.0.5')
-    expect(body).not.toContain('gist-token')
-    expect(body).not.toContain('send-key')
-    expect(body).not.toContain('worker-token')
+    expect(body.version).toBe('6.0.6')
+    expect(body.runtime).toMatchObject({
+      state_available: true,
+      last_cron_at: '2026-07-13T14:30:00+08:00',
+      last_cron_result: 'sent',
+      last_cron_reason: null,
+      last_attempt_at: '2026-07-13T14:30:00+08:00',
+      sent_today: true,
+    })
+    const serialized = JSON.stringify(body)
+    expect(serialized).not.toContain('gist-token')
+    expect(serialized).not.toContain('send-key')
+    expect(serialized).not.toContain('worker-token')
+
+    const tuesday1430 = new Date('2026-07-14T06:30:00Z')
+    vi.setSystemTime(tuesday1430)
+    await expect(runScheduled(env, tuesday1430)).resolves.toMatchObject({
+      status: 'skipped', reason: 'no_fresh_estimate',
+    })
+    const nextDay = await (await worker.fetch(new Request('https://worker.test/health'), env)).json() as {
+      runtime: Record<string, unknown>
+    }
+    expect(nextDay.runtime.sent_today).toBe(false)
+    expect(nextDay.runtime.state_date).toBe('2026-07-14')
+    expect(nextDay.runtime.attempt_count).toBe(0)
+    expect(nextDay.runtime.last_success_at).toBe('2026-07-13T14:30:00+08:00')
+    expect(nextDay.runtime.last_cron_at).toBe('2026-07-14T14:30:00+08:00')
+    expect(nextDay.runtime.last_cron_result).toBe('skipped')
   })
 
   it('serves a bounded CORS estimate batch without exposing secrets', async () => {

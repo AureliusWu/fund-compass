@@ -1,14 +1,54 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { getHealth, type Health } from '@/api/client'
+import { computed, onMounted, ref } from 'vue'
+import {
+  getHealth,
+  normalizeWorkerRuntime,
+  type Health,
+  type WorkerCronReason,
+  type WorkerCronResult,
+  type WorkerHealth,
+} from '@/api/client'
 import { fetchTaskStatuses, type TaskStatus } from '@/utils/taskStatus'
 
 const backend = ref<Health | null>(null)
-const worker = ref<Record<string, any> | null>(null)
+const worker = ref<WorkerHealth | null>(null)
 const tasks = ref<TaskStatus[]>([])
 const error = ref('')
 const WORKER_HEALTH = (import.meta.env.VITE_WORKER_HEALTH as string) || 'https://sinan-estimate-push.ligugu69.workers.dev/health'
 const text = (value: unknown) => value == null || value === '' ? '暂无记录' : String(value)
+
+const CRON_RESULT_LABELS: Record<WorkerCronResult, string> = {
+  sent: '已发送',
+  sent_with_warning: '已发送（有警示）',
+  skipped: '已跳过',
+  failed: '失败',
+}
+const CRON_REASON_LABELS: Record<WorkerCronReason, string> = {
+  weekend: '非交易日',
+  empty_watchlist: '自选为空',
+  already_sent: '今日已发送',
+  no_fresh_estimate: '无新鲜估值',
+}
+
+const normalizedWorkerRuntime = computed(() => normalizeWorkerRuntime(worker.value?.runtime))
+const lastCronAt = computed(() => normalizedWorkerRuntime.value.lastCronAt)
+const lastCronResult = computed(() => normalizedWorkerRuntime.value.lastCronResult)
+const lastAttemptAt = computed(() => normalizedWorkerRuntime.value.lastAttemptAt)
+const legacyCronContract = computed(() => normalizedWorkerRuntime.value.legacyCronContract)
+const cronResultText = computed(() => {
+  const result = lastCronResult.value
+  if (!result) return '暂无自然调度记录'
+  return result === 'not_sent' ? '尚未发送' : CRON_RESULT_LABELS[result] ?? result
+})
+const cronReasonText = computed(() => {
+  const runtime = normalizedWorkerRuntime.value
+  if (legacyCronContract.value) return '兼容旧 Worker 字段'
+  const reason = runtime.lastCronReason
+  if (reason) return CRON_REASON_LABELS[reason] ?? reason
+  if (runtime.lastCronResult === 'failed') return '详情见最近错误'
+  if (runtime.lastCronResult === 'sent_with_warning') return '详情见最近警示'
+  return ''
+})
 
 async function load() {
   error.value = ''
@@ -16,7 +56,7 @@ async function load() {
     getHealth(),
     fetch(WORKER_HEALTH, { signal: AbortSignal.timeout(8000) }).then((response) => {
       if (!response.ok) throw new Error(`Worker HTTP ${response.status}`)
-      return response.json()
+      return response.json() as Promise<WorkerHealth>
     }),
     fetchTaskStatuses(true),
   ])
@@ -46,8 +86,14 @@ onMounted(load)
       </section>
       <div class="sec">推送 Worker</div>
       <section class="status-band">
-        <div><span>状态</span><b>{{ worker?.runtime?.last_result || worker?.status || '不可用' }}</b><em>v{{ worker?.version || '—' }}</em></div>
-        <div><span>最近触发</span><b>{{ text(worker?.runtime?.last_cron_at) }}</b></div>
+        <div><span>服务状态</span><b>{{ worker?.status || '不可用' }}</b><em>v{{ worker?.version || '—' }}</em></div>
+        <div><span>最近调度</span><b>{{ text(lastCronAt) }}</b></div>
+        <div>
+          <span>调度结果</span>
+          <b :class="{ bad: lastCronResult === 'failed', 'warn-text': lastCronResult === 'skipped' || lastCronResult === 'sent_with_warning' }">{{ cronResultText }}</b>
+          <em v-if="cronReasonText">{{ cronReasonText }}</em>
+        </div>
+        <div><span>发送尝试</span><b>{{ text(lastAttemptAt) }}</b></div>
         <div><span>最近成功</span><b>{{ text(worker?.runtime?.last_success_at) }}</b></div>
         <div><span>今日尝试</span><b>{{ worker?.runtime?.attempt_count ?? '—' }}</b><em>{{ worker?.runtime?.sent_today ? '已发送' : '未发送' }}</em></div>
         <div v-if="worker?.runtime?.last_warning"><span>最近警示</span><b class="warn-text">{{ worker.runtime.last_warning }}</b><em>{{ worker?.runtime?.decision_status || '已降级' }}</em></div>

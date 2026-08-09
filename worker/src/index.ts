@@ -48,9 +48,13 @@ export interface FundHoldings {
 interface PushState {
   date: string
   sent_slots: string[]
+  last_cron_at?: string
+  last_cron_result?: 'sent' | 'sent_with_warning' | 'skipped' | 'failed'
+  last_cron_reason?: string
   last_slot?: string
   last_attempt_at?: string
   last_pushed_at?: string
+  last_success_at?: string
   attempt_count: number
   last_error?: string
   last_warning?: string
@@ -598,6 +602,31 @@ async function writeState(env: Env, state: PushState): Promise<void> {
   if (!response.ok) throw new Error(`Gist 状态写入失败: HTTP ${response.status}`)
 }
 
+async function recordCronObservation(
+  env: Env,
+  now: ReturnType<typeof beijingNow>,
+  result: NonNullable<PushState['last_cron_result']>,
+  reason?: string,
+  error?: unknown,
+): Promise<void> {
+  const files = await readGist(env)
+  const state = JSON.parse(await fileContent(files[STATE_FILE]) || '{}') as Partial<PushState>
+  const sameDay = state.date === now.date
+  const current: PushState = {
+    ...state,
+    date: now.date,
+    sent_slots: sameDay ? (state.sent_slots || []) : [],
+    attempt_count: sameDay ? (state.attempt_count || 0) : 0,
+    last_cron_at: now.iso,
+    last_cron_result: result,
+    last_cron_reason: result === 'skipped' ? reason : undefined,
+  }
+  if (result === 'failed') {
+    current.last_error = error instanceof Error ? error.message.slice(0, 240) : String(error).slice(0, 240)
+  }
+  await writeState(env, current)
+}
+
 export async function run(env: Env, force: boolean, clock = new Date()) {
   if (!env.GIST_ID || !env.GIST_TOKEN || !env.WECHAT_SENDKEY) throw new Error('Worker 密钥配置不完整')
   const now = beijingNow(clock)
@@ -611,11 +640,15 @@ export async function run(env: Env, force: boolean, clock = new Date()) {
     ? {
         date: now.date, sent_slots: state.sent_slots || [], last_slot: state.last_slot,
         last_attempt_at: state.last_attempt_at, last_pushed_at: state.last_pushed_at,
+        last_success_at: state.last_success_at || state.last_pushed_at,
         attempt_count: state.attempt_count || 0, last_error: state.last_error,
         last_warning: state.last_warning, decision_status: state.decision_status,
         last_http_status: state.last_http_status ?? null,
       }
-    : { date: now.date, sent_slots: [], attempt_count: 0, last_http_status: null }
+    : {
+        date: now.date, sent_slots: [], attempt_count: 0, last_http_status: null,
+        last_success_at: state.last_success_at || state.last_pushed_at,
+      }
   if (!force && current.sent_slots.includes(SLOT)) return { status: 'skipped', reason: 'already_sent' }
 
   const unique = new Map<string, WatchEntry>()
@@ -664,6 +697,7 @@ export async function run(env: Env, force: boolean, clock = new Date()) {
     current.sent_slots = [...new Set([...current.sent_slots, SLOT])].sort()
     current.last_slot = SLOT
     current.last_pushed_at = now.iso
+    current.last_success_at = now.iso
     current.last_error = ''
     current.last_warning = decision.warning || ''
     current.last_http_status = 200
@@ -680,9 +714,31 @@ export async function run(env: Env, force: boolean, clock = new Date()) {
   }
 }
 
+export async function runScheduled(env: Env, clock = new Date()) {
+  const now = beijingNow(clock)
+  try {
+    const result = await run(env, false, clock)
+    const reason = 'reason' in result ? String(result.reason) : undefined
+    await recordCronObservation(
+      env,
+      now,
+      result.status as NonNullable<PushState['last_cron_result']>,
+      reason,
+    )
+    return result
+  } catch (error) {
+    try {
+      await recordCronObservation(env, now, 'failed', undefined, error)
+    } catch (stateError) {
+      console.error('failed to persist cron observation', stateError)
+    }
+    throw error
+  }
+}
+
 export default {
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(run(env, false).then(console.log).catch((error) => console.error(error)))
+    ctx.waitUntil(runScheduled(env).then(console.log))
   },
   async fetch(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
     const url = new URL(request.url)
@@ -700,18 +756,24 @@ export default {
       try {
         const files = await readGist(env)
         const state = JSON.parse(await fileContent(files[STATE_FILE]) || '{}') as PushState
+        const today = beijingNow().date
         runtime = {
-          state_available: true, last_cron_at: state.last_attempt_at || null,
+          state_available: true, last_cron_at: state.last_cron_at || null,
+          last_cron_result: state.last_cron_result || null,
+          last_cron_reason: state.last_cron_reason || null,
+          last_attempt_at: state.last_attempt_at || null,
           last_result: state.last_error ? 'failed' : state.last_warning ? 'sent_with_warning' : state.last_pushed_at ? 'sent' : 'not_sent',
-          last_error: state.last_error || null, last_success_at: state.last_pushed_at || null,
+          last_error: state.last_error || null,
+          last_success_at: state.last_success_at || state.last_pushed_at || null,
           last_warning: state.last_warning || null, decision_status: state.decision_status || null,
-          attempt_count: state.attempt_count || 0, sent_today: Boolean(state.sent_slots?.includes(SLOT)),
+          attempt_count: state.attempt_count || 0,
+          sent_today: state.date === today && Boolean(state.sent_slots?.includes(SLOT)),
           state_date: state.date || null,
         }
       } catch (error) {
         runtime = { state_available: false, last_error: error instanceof Error ? error.message : String(error) }
       }
-      return Response.json({ status: 'ok', service: 'sinan-estimate-push', version: '6.0.5', runtime, configured: {
+      return Response.json({ status: 'ok', service: 'sinan-estimate-push', version: '6.0.6', runtime, configured: {
         gist_id: Boolean(env.GIST_ID), fund_api: Boolean(env.FUND_API_BASE),
         gist_token: Boolean(env.GIST_TOKEN), serverchan: Boolean(env.WECHAT_SENDKEY), admin: Boolean(env.ADMIN_TOKEN),
         worker: Boolean(env.WORKER_TOKEN),

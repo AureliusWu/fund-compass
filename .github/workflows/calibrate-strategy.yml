@@ -23,7 +23,7 @@ jobs:
           python-version: '3.12'
       - name: Require backend URL
         env:
-          FUND_API_BASE: ${{ secrets.FUND_API_BASE }}
+          FUND_API_BASE: ${{ secrets.FUND_API_BASE || 'https://fund-compass-api.onrender.com' }}
         shell: bash
         run: test -n "$FUND_API_BASE" || { echo "FUND_API_BASE secret is required"; exit 1; }
       - name: Calibrate strategy candidate
@@ -31,7 +31,7 @@ jobs:
           AUTO_PROMOTE_STRATEGY: 'true'
           CALIBRATION_MIN_VALID: '12'
           CALIBRATION_MAX_FUNDS: '30'
-          FUND_API_BASE: ${{ secrets.FUND_API_BASE }}
+          FUND_API_BASE: ${{ secrets.FUND_API_BASE || 'https://fund-compass-api.onrender.com' }}
           PYTHONUNBUFFERED: '1'
         run: python tools/calibrate_strategy.py
       - name: Upload calibration evidence
