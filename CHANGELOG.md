@@ -11,6 +11,7 @@
 - 部署后烟测绑定源提交中的统一版本，校验 Pages、API、Worker、正式净值与盘中模型/降级联合契约；烟测只调用公开 GET，不要求非交易时段出现 `holdings_model`，也不触发通知。
 - 前端、API、Worker、PWA 描述与锁文件统一升级为 7.0.0。Render 免费实例仍为临时 SQLite，生产预期保持 `ephemeral / durable=false`；自然 Cron 成功仍需在部署后的工作日 14:30/14:40 观测。
 - 安全配置收紧：`GIST_ID` 不再写入公开的 `wrangler.toml`，改由 Cloudflare/GitHub Secret 注入。历史中曾出现的 Gist ID 必须在生产切换前轮换；GitHub secret Gist 不等同于真正私有存储。
+- Gist 轮换恢复采用失败关闭：浏览器命中已删除的旧 ID 后只读重绑定，必须先成功下载并完成 schema 校验/本地合并，才允许再次上传；自选与手工资产分别加写锁，避免旧设备整文件覆盖新 Gist。
 
 ## 6.0.6 - 2026-08-09
 

@@ -1,6 +1,7 @@
 ﻿<script setup lang="ts">
 import { reactive, ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { showToast } from 'vant'
 import { useWatchlistStore } from '@/stores/watchlist'
 import { useFundsStore } from '@/stores/funds'
 import type { NavPoint } from '@/api/client'
@@ -346,7 +347,10 @@ function delManual(id: string) {
 async function uploadManual() {
   if (!watch.hasToken || manualSyncing.value) return
   manualSyncing.value = true
-  try { await pushManualAssets(manualAssets.value) }
+  try {
+    const success = await pushManualAssets(manualAssets.value)
+    showToast(success ? '手工资产已上传' : '上传失败，请先下载合并后重试')
+  }
   finally { manualSyncing.value = false }
 }
 
@@ -355,7 +359,10 @@ async function downloadManual() {
   manualSyncing.value = true
   try {
     const cloud = await pullManualAssets()
-    if (cloud) manualAssets.value = cloud
+    if (cloud) {
+      manualAssets.value = cloud
+      showToast('手工资产已同步')
+    } else showToast('手工资产同步失败')
   } finally { manualSyncing.value = false }
 }
 

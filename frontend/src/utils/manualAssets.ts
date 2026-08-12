@@ -1,5 +1,5 @@
 import type { AssetClass } from './assetclass'
-import { pullJsonFile, pushJsonFile } from './gist'
+import { confirmPulledFile, pullJsonFile, pushJsonFile } from './gist'
 
 const KEY = 'sinan_manual_assets_v1'
 const CLOUD_FILE = 'sinan-manual-assets.json'
@@ -24,10 +24,13 @@ export function loadManualAssets(): ManualAsset[] {
   } catch { return [] }
 }
 
-function saveManualAssets(items: ManualAsset[]): ManualAsset[] {
+function saveManualAssets(items: ManualAsset[]): ManualAsset[] | null {
   const cleaned = items.filter((a) => a.value >= 0).sort((a, b) => b.value - a.value)
-  try { localStorage.setItem(KEY, JSON.stringify(cleaned)) } catch { /* ignore */ }
-  return cleaned
+  try {
+    const serialized = JSON.stringify(cleaned)
+    localStorage.setItem(KEY, serialized)
+    return localStorage.getItem(KEY) === serialized ? cleaned : null
+  } catch { return null }
 }
 
 export function upsertManualAsset(
@@ -46,18 +49,25 @@ export function upsertManualAsset(
   }
   const idx = items.findIndex((a) => a.id === id)
   const out = idx >= 0 ? [...items.slice(0, idx), next, ...items.slice(idx + 1)] : [...items, next]
-  return saveManualAssets(out)
+  return saveManualAssets(out) ?? items
 }
 
 export function removeManualAsset(items: ManualAsset[], id: string): ManualAsset[] {
-  return saveManualAssets(items.filter((a) => a.id !== id))
+  return saveManualAssets(items.filter((a) => a.id !== id)) ?? items
 }
 
 export async function pullManualAssets(): Promise<ManualAsset[] | null> {
   const arr = await pullJsonFile<ManualAsset[]>(CLOUD_FILE)
   if (!Array.isArray(arr)) return null
-  const cleaned = arr.filter((a) => a?.id && a.name && typeof a.value === 'number' && a.value >= 0)
-  saveManualAssets(cleaned)
+  const valid = (a: ManualAsset) => Boolean(
+    a?.id && a.name && MANUAL_ASSET_CLASSES.includes(a.cls)
+    && typeof a.value === 'number' && Number.isFinite(a.value) && a.value >= 0
+    && typeof a.updated_at === 'string',
+  )
+  if (!arr.every(valid)) return null
+  const cleaned = arr.filter(valid)
+  if (!saveManualAssets(cleaned)) return null
+  confirmPulledFile(CLOUD_FILE)
   return cleaned
 }
 

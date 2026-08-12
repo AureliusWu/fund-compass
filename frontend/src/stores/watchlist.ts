@@ -69,24 +69,33 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     persist()
   }
 
-  async function pull() {
-    if (!gist.hasConfig()) return
+  async function pull(): Promise<boolean> {
+    if (!gist.hasConfig()) return false
     syncing.value = true
     try {
       const cloud = await gist.pullEntries()
-      if (cloud) merge(cloud)
+      if (cloud === null) return false
+      merge(cloud)
+      gist.confirmEntriesApplied()
       lastSync.value = gist.getSyncTime()
-    } catch { /* 静默 */ } finally {
+      return true
+    } catch {
+      return false
+    } finally {
       syncing.value = false
     }
   }
 
-  async function push() {
-    if (!gist.hasConfig()) return
+  async function push(): Promise<boolean> {
+    if (!gist.hasConfig()) return false
     syncing.value = true
     try {
-      if (await gist.pushEntries(entries.value)) lastSync.value = gist.getSyncTime()
-    } catch { /* 静默 */ } finally {
+      const success = await gist.pushEntries(entries.value)
+      if (success) lastSync.value = gist.getSyncTime()
+      return success
+    } catch {
+      return false
+    } finally {
       syncing.value = false
     }
   }

@@ -153,8 +153,15 @@ async function doImport(code: string, name: string) {
 }
 
 async function saveToken() { watch.setToken(token.value); showToast(token.value ? '已保存 Token' : '已清空') }
-async function upload() { await watch.manualUpload(); showToast(watch.lastSync ? '已上传' : '上传失败') }
-async function download() { await watch.manualDownload(); await refresh(); showToast('已同步') }
+async function upload() {
+  const success = await watch.manualUpload()
+  showToast(success ? '已上传' : '上传失败，请先下载合并后重试')
+}
+async function download() {
+  const success = await watch.manualDownload()
+  if (success) await refresh()
+  showToast(success ? '已同步' : '同步失败')
+}
 
 hydrateLocal()
 onMounted(refresh)
