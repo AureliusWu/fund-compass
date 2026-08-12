@@ -50,7 +50,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="司南基金 API", version="6.0.6", lifespan=lifespan)
+app = FastAPI(title="司南基金 API", version="7.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -96,11 +96,17 @@ def _market_kind(detail: dict) -> str:
     return "cn"
 
 
-def _estimate_context(detail: dict) -> dict:
+def _estimate_context(detail: dict, now_utc: datetime | None = None) -> dict:
     """Build traceable live-data context; never disguise request time as quote time."""
-    fetched_at = datetime.now(timezone.utc).isoformat()
+    current_utc = now_utc or datetime.now(timezone.utc)
+    current_utc = (
+        current_utc.replace(tzinfo=timezone.utc)
+        if current_utc.tzinfo is None
+        else current_utc.astimezone(timezone.utc)
+    )
+    fetched_at = current_utc.isoformat()
     try:
-        estimate = eastmoney.fetch_estimate(detail["code"])
+        estimate = eastmoney.fetch_resolved_estimate(detail["code"])
     except Exception as error:
         log.warning("盘中估值不可用 code=%s: %s", detail.get("code"), error)
         return {
@@ -119,33 +125,64 @@ def _estimate_context(detail: dict) -> dict:
 
     source_time = estimate.get("source_time")
     age_seconds = None
-    status = "delayed" if estimate.get("source_time_precision") == "date" else "fresh"
-    if source_time:
+    status = str(estimate.get("status") or "unavailable")
+    def quote_age(value) -> float | None:
+        if not value:
+            return None
+        text = str(value).strip().replace("Z", "+00:00")
+        if "T" not in text and " " in text:
+            text = text.replace(" ", "T", 1)
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?", text):
+            text += "+08:00"
         try:
-            quote_time = datetime.strptime(source_time, "%Y-%m-%d %H:%M").replace(tzinfo=timezone(timedelta(hours=8)))
-            age_seconds = max(0, int((datetime.now(timezone.utc) - quote_time.astimezone(timezone.utc)).total_seconds()))
+            parsed = datetime.fromisoformat(text)
         except ValueError:
-            try:
-                quote_date = datetime.strptime(source_time, "%Y-%m-%d").date()
-                china_today = datetime.now(timezone(timedelta(hours=8))).date()
-                status = "delayed" if quote_date == china_today else "stale"
-            except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            return None
+        return (current_utc - parsed.astimezone(timezone.utc)).total_seconds()
+
+    precision = estimate.get("source_time_precision")
+    hard_expired = False
+    if precision == "datetime" and estimate.get("kind") in {"estimate", "holdings_model"}:
+        times = [source_time]
+        if estimate.get("kind") == "holdings_model":
+            times.extend((
+                estimate.get("model_oldest_quote_time"),
+                estimate.get("model_newest_quote_time"),
+            ))
+        ages = [quote_age(value) for value in times]
+        hard_expired = any(age is None or age < -5 * 60 or age > 90 * 60 for age in ages)
+        if ages and ages[0] is not None:
+            age_seconds = max(0, int(ages[0]))
+    elif source_time:
+        try:
+            quote_date = datetime.strptime(str(source_time)[:10], "%Y-%m-%d").date()
+            china_today = current_utc.astimezone(timezone(timedelta(hours=8))).date()
+            if status == "fresh" and quote_date != china_today:
                 status = "stale"
+                hard_expired = True
+        except ValueError:
+            status = "stale"
+            hard_expired = True
     if source_time is None:
         status = "stale"
-    elif age_seconds is not None and age_seconds > 24 * 3600:
+        hard_expired = True
+    elif hard_expired:
         status = "stale"
-    elif age_seconds is not None and age_seconds > 10 * 60:
+    elif status == "fresh" and age_seconds is not None and age_seconds > 10 * 60:
         status = "delayed"
-    return {
+    context = {
         **estimate,
-        "calculated_at": datetime.now(timezone.utc).isoformat(),
+        "calculated_at": estimate.get("calculated_at") or current_utc.isoformat(),
         "age_seconds": age_seconds,
         "status": status,
-        "is_fallback": False,
-        "fallback_reason": None,
+        "is_fallback": bool(estimate.get("is_fallback")),
         "market": _market_kind(detail),
     }
+    if hard_expired:
+        context.update({"estimate_change": None, "estimate_nav": None, "value_nav": None})
+    return context
 
 
 def _decision_detail(detail: dict) -> dict:
@@ -263,10 +300,11 @@ def fund_analyze(
 
 @app.post("/api/portfolio/decisions", response_model=PortfolioDecisionResponse)
 def portfolio_decisions(request: PortfolioDecisionRequest, _role: str = Depends(require_worker_or_admin)) -> dict:
-    """批量决策：自选列表一次返回各基金决策卡片（V6-P1）。
+    """批量决策：自选列表一次返回各基金决策卡片（v7）。
 
     body: { "items": [{ "code": "510300", "current_weight": 5, "target_weight": 15 }] }
-    current_weight / target_weight 可选；缺省时 position_rule 仅给方向建议。
+    current_weight / target_weight 可选；受信 Worker 还可携带经过
+    Pydantic 边界校验的 estimate_context，确保估值与决策使用同一证据。
     """
     payload = request.model_dump()
     items = payload.get("items") or []
@@ -289,6 +327,11 @@ def portfolio_decisions(request: PortfolioDecisionRequest, _role: str = Depends(
                 if weight < 0 or weight > 100:
                     raise HTTPException(status_code=400, detail=f"{code} 的 {k} 需在 0-100 之间")
                 row[k] = weight
+        if isinstance(it.get("estimate_context"), dict):
+            # Pydantic has already validated and bounded every field.  Preserve
+            # the evidence so the portfolio engine does not refetch a different
+            # estimate source while handling the same request.
+            row["estimate_context"] = dict(it["estimate_context"])
         cleaned.append(row)
     if not cleaned:
         raise HTTPException(status_code=400, detail="items 不能为空")

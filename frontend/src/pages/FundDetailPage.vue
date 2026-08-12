@@ -9,7 +9,7 @@ import StarRating from '@/components/StarRating.vue'
 import DecisionCard from '@/components/DecisionCard.vue'
 import Chart from '@/components/Chart.vue'
 import DcaCalc from '@/components/DcaCalc.vue'
-import { fetchEstimate, latestNavMove, preferredDailyMove, type Estimate } from '@/utils/estimate'
+import { estimateDataFreshness, fetchEstimate, latestNavMove, preferredDailyMove, type Estimate } from '@/utils/estimate'
 import { getHoldings, type Holding } from '@/utils/holdings'
 import { templateInterpret, llmInterpret } from '@/utils/interpret'
 import { getAiConfig, setAiConfig, hasAiKey, providerDef, PROVIDERS, type AiConfig } from '@/utils/ai'
@@ -192,8 +192,17 @@ const valuationDisplay = computed(() => {
 
 const navMove = computed(() => latestNavMove(detail.value?.nav_history))
 const primaryMove = computed(() => preferredDailyMove(est.value, navMove.value, detail.value?.type || detail.value?.name))
+const estimateExpired = computed(() =>
+  est.value != null
+  && primaryMove.value == null
+  && estimateDataFreshness(est.value) === 'expired',
+)
+const modelMove = computed(() => est.value?.kind === 'overseas_model'
+  ? preferredDailyMove(est.value, null, detail.value?.type || detail.value?.name)
+  : null)
 const showModelLine = computed(() =>
-  primaryMove.value?.label === '净' && est.value?.estChange != null && est.value?.estNav != null,
+  primaryMove.value?.label === '净' && modelMove.value != null
+  && est.value?.estChange != null && est.value?.estNav != null,
 )
 
 async function toggleWatch() {
@@ -228,8 +237,8 @@ async function toggleWatch() {
         <div v-if="detail.stale" class="data-warning">数据源暂不可用，当前展示 {{ detail.updated_at || detail.latest_nav_date }} 的历史缓存；评分与决策已降级。</div>
         <div class="est card">
           <div class="est-head">
-            <span class="est-label">{{ primaryMove?.label === '净' ? '最新净值涨跌' : (est?.label || '盘中估值') }}</span>
-            <span class="est-time">{{ primaryMove?.date || est?.estTime || (estDone ? '' : '加载中…') }}</span>
+            <span class="est-label">{{ estimateExpired ? '估值数据过期' : (primaryMove?.label === '净' ? '最新净值涨跌' : (est?.label || '盘中估值')) }}</span>
+            <span class="est-time">{{ estimateExpired ? `${est?.estTime || est?.valueDate || '时间未知'} · 已过期` : (primaryMove?.date || est?.estTime || (estDone ? '' : '加载中…')) }}</span>
           </div>
           <div class="est-main" v-if="primaryMove && primaryMove.change != null">
             <div class="est-chg" :style="{ color: colorOf(primaryMove.change) }">{{ pct(primaryMove.change) }}</div>
@@ -249,7 +258,9 @@ async function toggleWatch() {
             <span>{{ est.confidence || '样本积累中' }}</span>
             <span v-if="est.errorBand != null">历史约 ±{{ num(est.errorBand, 2) }}%</span>
           </div>
-          <div class="est-empty" v-if="!primaryMove && estDone">暂无估值，以最新净值为准。</div>
+          <div class="est-empty" v-if="!primaryMove && estDone">
+            {{ estimateExpired ? '估值数据已过期，以最新正式净值为准。' : '暂无估值，以最新净值为准。' }}
+          </div>
           <van-loading v-if="!estDone" size="18" style="padding:6px 0" />
         </div>
 

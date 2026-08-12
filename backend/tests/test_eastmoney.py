@@ -1,4 +1,6 @@
 """天天基金 pingzhongdata JS 文本的解析函数单测（用内联样本，绝不打网络）。"""
+import pytest
+
 from service.eastmoney import _build_primary_nav_history, _json_var, _num, _str_var
 
 JS = """
@@ -52,6 +54,141 @@ def test_live_estimate_keeps_upstream_quote_time(monkeypatch):
     assert result["source_time"] == "2026-07-22"
     assert result["source_time_precision"] == "date"
     assert result["fetched_at"] != result["source_time"]
+
+
+def test_resolved_estimate_preserves_worker_model_evidence(monkeypatch):
+    from service import eastmoney as em
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "status": "degraded", "source": "eastmoney_holdings_model",
+                "fetched_at": "2026-08-12T02:01:00Z",
+                "items": [{
+                    "code": "005844", "est_kind": "holdings_model", "status": "modeled",
+                    "source": "eastmoney_holdings_model", "base_nav": 3.4509,
+                    "base_nav_date": "2026-08-11", "value_nav": 3.5014,
+                    "value_date": "2026-08-12", "est_change": 1.46,
+                    "source_time": "2026-08-12T10:00:37+08:00",
+                        "source_time_precision": "datetime", "is_fallback": True,
+                        "fallback_reason": "schema_invalid",
+                        "model_coverage": 83.47,
+                    "model_quote_count": 10, "model_report_date": "2026-06-30",
+                    "model_oldest_quote_time": "2026-08-12T09:59:50+08:00",
+                        "model_newest_quote_time": "2026-08-12T10:00:37+08:00",
+                        "model_rejected_count": 0,
+                    "diagnostics": {"primary_reason": "schema_invalid", "rejected": {}},
+                }],
+            }
+
+    monkeypatch.setattr(em.requests, "get", lambda *args, **kwargs: Response())
+    result = em.fetch_resolved_estimate("005844")
+    assert result["status"] == "modeled"
+    assert result["kind"] == "holdings_model"
+    assert result["estimate_nav"] == 3.5014
+    assert result["model_coverage"] == 83.47
+    assert result["source_time_precision"] == "datetime"
+
+
+def test_resolved_estimate_rejects_worker_cross_field_contradictions(monkeypatch):
+    from service import eastmoney as em
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"items": [{
+                "code": "005844", "est_kind": "holdings_model", "status": "fresh",
+                "source": "eastmoney_holdings_model", "base_nav": 3.4509,
+                "base_nav_date": "2026-08-11", "value_nav": 3.5014,
+                "value_date": "2026-08-12", "est_change": 1.46,
+                "source_time": "2026-08-12T10:00:37+08:00",
+                "source_time_precision": "datetime", "is_fallback": True,
+                "fallback_reason": "schema_invalid",
+                "model_coverage": 83.47, "model_quote_count": 10,
+                "model_report_date": "2026-06-30",
+                "model_oldest_quote_time": "2026-08-12T09:59:50+08:00",
+                "model_newest_quote_time": "2026-08-12T10:00:37+08:00",
+                "model_rejected_count": 0,
+                "diagnostics": {"primary_reason": "schema_invalid", "rejected": {}},
+            }]}
+
+    monkeypatch.setattr(em.requests, "get", lambda *args, **kwargs: Response())
+    with pytest.raises(ValueError, match="modeled/datetime/fallback"):
+        em.fetch_resolved_estimate("005844")
+
+
+def test_resolved_estimate_accepts_delayed_datetime_primary_wire(monkeypatch):
+    from service import eastmoney as em
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"items": [{
+                "code": "005844", "est_kind": "estimate", "status": "delayed",
+                "source": "eastmoney_estimate_table", "base_nav": 3.4509,
+                "base_nav_date": "2026-08-11", "value_nav": 3.5014,
+                "value_date": "2026-08-12", "est_change": 1.46,
+                "source_time": "2026-08-12T09:30:00+08:00",
+                "source_time_precision": "datetime", "is_fallback": False,
+                "model_rejected_count": 0,
+                "diagnostics": {"source_time_precision": "datetime", "rejected": {}},
+            }]}
+
+    monkeypatch.setattr(em.requests, "get", lambda *args, **kwargs: Response())
+    result = em.fetch_resolved_estimate("005844")
+    assert result["status"] == "delayed"
+    assert result["source_time_precision"] == "datetime"
+    assert result["is_fallback"] is False
+
+
+def test_resolved_estimate_rejects_internally_contradictory_worker_numbers(monkeypatch):
+    from service import eastmoney as em
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"items": [{
+                "code": "005844", "est_kind": "estimate", "status": "fresh",
+                "source": "eastmoney_estimate_table", "base_nav": 1.0,
+                "base_nav_date": "2026-08-11", "value_nav": 2.0,
+                "value_date": "2026-08-12", "est_change": 1.0,
+                "source_time": "2026-08-12T14:29:00+08:00",
+                "source_time_precision": "datetime", "is_fallback": False,
+                "diagnostics": {"source_time_precision": "datetime", "rejected": {}},
+            }]}
+
+    monkeypatch.setattr(em.requests, "get", lambda *args, **kwargs: Response())
+    with pytest.raises(ValueError, match="数值不一致"):
+        em.fetch_resolved_estimate("005844")
+
+
+def test_resolved_estimate_rejects_null_blank_and_ambiguous_rows(monkeypatch):
+    from service import eastmoney as em
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"items": [{
+                "code": "000001", "est_kind": "estimate", "status": "fresh",
+                "last_nav": None, "est_nav": "", "est_change": "1oops",
+                "est_time": "2026-08-12 10:00", "source": "test",
+                "is_fallback": False,
+            }]}
+
+    monkeypatch.setattr(em.requests, "get", lambda *args, **kwargs: Response())
+    with pytest.raises(ValueError, match="数值无效"):
+        em.fetch_resolved_estimate("000001")
 
 
 def test_primary_daily_returns_are_compounded_into_cumulative_return():

@@ -18,12 +18,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
-      - name: 读取目标版本
+      - name: 读取并校验目标版本
         id: release
         shell: bash
         run: |
           version=$(sed -n 's/^[[:space:]]*"version": "\([^"]*\)",*$/\1/p' frontend/package.json | head -1)
           test -n "$version"
+          test "$(jq -r .version worker/package.json)" = "$version"
+          grep -Fq "APP_VERSION = '$version'" frontend/src/version.ts
+          grep -Fq "司南基金 v$version ·" frontend/vite.config.ts
+          grep -Fq "version=\"$version\"" backend/main.py
+          grep -Fq "version: '$version'" worker/src/index.ts
           echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: 检查 GitHub Pages 版本
         env:
@@ -34,7 +39,11 @@ jobs:
           curl --fail --show-error --retry 4 --retry-delay 10 "$page/"
           for attempt in {1..24}; do
             manifest=$(curl --fail --silent --show-error "$page/manifest.webmanifest?release=${GITHUB_SHA}" || true)
-            if jq -e --arg version "v$EXPECTED_VERSION" '.description | contains($version)' <<<"$manifest" >/dev/null 2>&1; then
+            if jq -e --arg description "司南基金 v$EXPECTED_VERSION · 个人基金选基与择时辅助工具" '
+              .name == "司南基金"
+              and .lang == "zh-CN"
+              and .description == $description
+            ' <<<"$manifest" >/dev/null 2>&1; then
               exit 0
             fi
             sleep 10
@@ -58,7 +67,19 @@ jobs:
             fi
             sleep 15
           done
-          curl --fail --silent --show-error "$api/api/fund/005844" | jq -e '.code == "005844"' >/dev/null
+          jq -e '
+            .database.engine == "sqlite"
+            and .database.persistence == "ephemeral"
+            and .database.durable == false
+          ' <<<"$health" >/dev/null
+          fund=$(curl --fail --silent --show-error "$api/api/fund/005844")
+          jq -e '
+            .code == "005844"
+            and (.latest_nav | type) == "number"
+            and (.latest_nav_date | type) == "string"
+            and (.latest_nav_date | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$"))
+            and (.stale | type) == "boolean"
+          ' <<<"$fund" >/dev/null
           curl --fail --silent --show-error "$api/api/strategy/registry" | jq -e 'type == "object"' >/dev/null
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' "$api/api/fund/not-a-code")" = "404"
       - name: 检查 Worker 版本与估值契约
@@ -83,11 +104,71 @@ jobs:
               and has("last_cron_result")
               and has("last_cron_reason")
               and has("last_attempt_at")
+              and has("last_success_at")
+          ' <<<"$health" >/dev/null
+          jq -e '
+            .configured.gist_id == true
+            and .configured.gist_token == true
+            and .configured.serverchan == true
+            and .configured.worker == true
+            and .configured.fund_api == true
           ' <<<"$health" >/dev/null
           estimates=$(curl --fail --silent --show-error "$WORKER_BASE/estimates?codes=005844,018147")
           jq -e '
             .requested == 2
             and (.returned + .unavailable == .requested)
-            and all(.items[]; (.est_nav | type) == "number" and (.est_change | type) == "number")
-            and all(.unavailable_items[]; .status == "unavailable" and .est_nav == null and .est_change == null)
+            and (.status == "ok" or .status == "degraded" or .status == "unavailable")
+            and (.source | type) == "string"
+            and (.fetched_at | type) == "string"
+            and (.accounting | type) == "object"
+            and (.accounting.primary | type) == "number"
+            and (.accounting.model | type) == "number"
+            and (.accounting.official | type) == "number"
+            and (.accounting.unavailable | type) == "number"
+            and (.accounting.primary + .accounting.model + .accounting.official + .accounting.unavailable == .requested)
+            and all(.items[];
+              (.code | test("^[0-9]{6}$"))
+              and (.last_nav | type) == "number"
+              and (.est_nav | type) == "number"
+              and (.est_change | type) == "number"
+              and (.est_realtime | type) == "boolean"
+              and (.est_kind == "estimate" or .est_kind == "holdings_model" or .est_kind == "official_nav")
+              and (if .est_kind == "estimate" then
+                ((.source_time_precision == "datetime" and .status == "fresh" and .est_realtime == true)
+                  or ((.source_time_precision == "date" or .source_time_precision == "datetime")
+                    and .status == "delayed" and .est_realtime == false))
+              elif .est_kind == "holdings_model" then
+                .status == "modeled"
+                and .source == "eastmoney_holdings_model"
+                and .est_realtime == false
+                and .source_time_precision == "datetime"
+                and (.base_nav | type) == "number"
+                and (.base_nav_date | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$"))
+                and (.value_nav | type) == "number"
+                and (.value_date | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$"))
+                and (.est_time | type) == "string"
+                and (.model_coverage | type) == "number"
+                and .model_coverage >= 0 and .model_coverage <= 100
+                and (.model_quote_count | type) == "number"
+                and .model_quote_count > 0
+                and (.model_report_date | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$"))
+                and (.model_oldest_quote_time | type) == "string"
+                and (.model_newest_quote_time | type) == "string"
+                and (.model_rejected_count | type) == "number"
+                and (.est_note | type) == "string"
+                and ((.est_note | contains("非官方")) or (.est_note | contains("不是基金公司官方")))
+              elif .est_kind == "official_nav" then
+                .est_realtime == false
+                and .status == "latest_official"
+                and .source == "eastmoney_official_nav"
+                and (.fallback_reason | type) == "string"
+              else true end)
+            )
+            and all(.unavailable_items[];
+              .status == "unavailable"
+              and .last_nav == null
+              and .est_nav == null
+              and .est_change == null
+              and (.fallback_reason | type) == "string"
+            )
           ' <<<"$estimates" >/dev/null

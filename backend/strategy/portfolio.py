@@ -1,4 +1,4 @@
-"""批量决策与组合校准（V6-P1/P2）。"""
+"""批量决策、可追溯估值证据与组合校准。"""
 from service import repo
 from strategy.decision import decide_fund
 
@@ -66,6 +66,7 @@ def decide_portfolio(items: list[dict], portfolio_value: float | None = None) ->
     - code: 6 位基金代码（必填）
     - current_weight: 当前仓位 %（可选）
     - target_weight: 目标仓位 %（可选）
+    - estimate_context: 受信调用方提供并已在 API 边界校验的估值证据（可选）
     """
     decisions: list[dict] = []
     errors: list[dict] = []
@@ -80,13 +81,19 @@ def decide_portfolio(items: list[dict], portfolio_value: float | None = None) ->
             holding = {"current_weight": float(cw), "target_weight": float(tw)}
         try:
             detail = repo.get_detail(code)
+            context = raw.get("estimate_context")
+            if isinstance(context, dict):
+                detail = {**detail, "decision_context": dict(context)}
             d = decide_fund(detail, holding)
+            as_of_nav = (context or {}).get("value_nav") or (context or {}).get("estimate_nav")
+            as_of_date = (context or {}).get("value_date") or (context or {}).get("source_time")
             decisions.append({
                 "code": detail.get("code"),
                 "name": detail.get("name"),
                 "type": detail.get("type"),
-                "as_of_nav": detail.get("latest_nav"),
-                "as_of_date": detail.get("latest_nav_date"),
+                "as_of_nav": as_of_nav or detail.get("latest_nav"),
+                "as_of_date": as_of_date or detail.get("latest_nav_date"),
+                "estimate_kind": (context or {}).get("kind"),
                 **d,
             })
         except Exception as ex:

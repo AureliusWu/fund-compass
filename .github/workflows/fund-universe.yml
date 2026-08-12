@@ -15,6 +15,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: fund-universe
@@ -38,6 +39,12 @@ jobs:
       - run: python -m pytest tests/test_universe_artifact.py
         working-directory: backend
       - uses: stefanzweifel/git-auto-commit-action@v5
+        id: commit
         with:
           commit_message: 'chore: refresh fund universe artifact'
           file_pattern: 'backend/data/fund-universe.json.gz backend/data/fund-universe.meta.json'
+      - name: Trigger CI for generated data commit
+        if: steps.commit.outputs.changes_detected == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run ci.yml --ref main

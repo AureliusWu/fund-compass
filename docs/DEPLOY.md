@@ -1,6 +1,6 @@
 # 部署指南
 
-前端已自动部署到 GitHub Pages（push `frontend/**` 触发 Actions）。要让线上拿到真实数据，需把**后端部署到公网**并让前端指向它。
+前端通过 `CI` 成功后的 `Deploy frontend to GitHub Pages` 工作流自动部署。由 GitHub Actions 生成并提交的持仓、经理、基金全集、海外精度或校准数据，会在提交成功后显式调度一次 `CI`；这样既能让 Pages 跟进静态数据，又不会依赖 `GITHUB_TOKEN` push 自动触发新工作流，也不会形成提交循环。要让线上拿到真实数据，还需把**后端部署到公网**并让前端指向它。
 
 ## 一、部署后端（任选其一）
 
@@ -55,6 +55,8 @@ services:
 
 挂载新磁盘不会自动迁移临时文件系统中的旧 SQLite 文件。若旧数据需要保留，必须在重启或重新部署前制作一致性备份并单独导入持久盘。继续使用 `plan: free` 时，健康接口会明确报告 `ephemeral`，不得宣称决策闭环已持久化。
 
+当前 v7.0.0 生产方案仍使用 `render.yaml` 的 `plan: free`，预期健康状态必须是 `persistence: ephemeral`、`durable: false`。版本发布不会自动购买磁盘、迁移数据库或改变这一边界。
+
 ## 二、让前端指向后端
 
 后端 CORS 已放行 `https://aureliuswu.github.io`，无需改后端。
@@ -64,6 +66,14 @@ services:
    - Value：你的后端地址 + `/api`，例如 `https://fund-compass-api.onrender.com/api`
 2. 触发前端重新部署：改动 `frontend/**` 后 push，或在 Actions 里手动 Run workflow（`Deploy frontend to GitHub Pages`）。
 3. 打开 https://aureliuswu.github.io/fund-compass/ ，选基 / 自选 / 详情 / 对比都能拿到真实数据。
+
+## 发布与回滚
+
+发布必须绑定同一个精确提交完成以下闭环：本地全量门禁 → push `main` → CI → Pages → Render → 手动部署 Worker → `post-deploy-smoke`。Pages、API 与 Worker 均报告目标版本后，才创建版本标签。自动数据提交也要经过显式调度的 CI/Pages 链路，不能只看到仓库数据更新就认为生产静态数据已经更新。
+
+Worker 的 HTTP 健康和估值烟测不会触发通知；禁止在发布烟测中调用受保护的 `POST /test` 或运行 `manual-estimate-push`。自然 Cron 是否成功，只能由部署后的工作日北京时间 14:30/14:40 的新记录证明，不能用 Worker 部署成功代替。
+
+v7.0.0 发布前冻结以下回滚证据：上一正式标签与提交、最新数据提交、Pages deployment、Render deployment、Worker version ID。回滚应用反向提交保留后续自动生成的数据提交，不使用强推或把 `main` 重置到旧标签；Worker 使用 Wrangler 的精确 version ID 回滚。Render 免费 SQLite 不具备耐久性，因此代码回滚不等于数据库数据恢复。
 
 ## 本地联调
 

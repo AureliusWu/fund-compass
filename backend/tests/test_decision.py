@@ -1,4 +1,8 @@
 """V6-P0 决策引擎测试。"""
+from datetime import datetime, timezone
+
+import pytest
+
 from strategy.decision import decide_fund
 from strategy.rules import build_decision, map_action, compute_confidence
 
@@ -143,6 +147,74 @@ def test_unavailable_intraday_data_caps_strength_and_action(sample_detail, monke
     assert decision["action"] == "观望"
     assert decision["strength"] <= 25
     assert decision["data_status"] == "暂不可用"
+
+
+def test_single_decision_context_uses_worker_resolver_without_relabeling_model(sample_detail, monkeypatch):
+    import main
+
+    monkeypatch.setattr(main.eastmoney, "fetch_resolved_estimate", lambda _code: {
+        "status": "modeled",
+        "source": "eastmoney_holdings_model",
+        "kind": "holdings_model",
+        "source_time": "2026-08-12T10:00:37+08:00",
+        "source_time_precision": "datetime",
+        "estimate_change": 1.46,
+        "estimate_nav": 3.501,
+        "base_nav": 3.4509,
+        "base_nav_date": "2026-08-11",
+        "value_nav": 3.501,
+        "value_date": "2026-08-12",
+        "model_coverage": 83.47,
+        "model_quote_count": 10,
+        "model_report_date": "2026-06-30",
+        "model_oldest_quote_time": "2026-08-12T09:59:50+08:00",
+        "model_newest_quote_time": "2026-08-12T10:00:37+08:00",
+        "model_rejected_count": 0,
+        "is_fallback": True,
+    })
+
+    context = main._estimate_context(
+        sample_detail,
+        datetime(2026, 8, 12, 2, 1, tzinfo=timezone.utc),
+    )
+
+    assert context["status"] == "modeled"
+    assert context["kind"] == "holdings_model"
+    assert context["source"] == "eastmoney_holdings_model"
+    assert context["model_coverage"] == 83.47
+    assert context["market"] == "cn"
+
+
+@pytest.mark.parametrize(("source_time", "expected_status", "keeps_value"), [
+    ("2026-08-12T13:00:00+08:00", "delayed", True),
+    ("2026-08-12T12:59:59+08:00", "stale", False),
+    ("2026-08-12T14:36:00+08:00", "stale", False),
+])
+def test_single_decision_hard_intraday_window(
+    sample_detail, monkeypatch, source_time, expected_status, keeps_value,
+):
+    import main
+
+    monkeypatch.setattr(main.eastmoney, "fetch_resolved_estimate", lambda _code: {
+        "status": "delayed", "source": "eastmoney_estimate_table", "kind": "estimate",
+        "source_time": source_time, "source_time_precision": "datetime",
+        "estimate_change": 1.0, "estimate_nav": 1.01, "value_nav": 1.01,
+        "base_nav": 1.0, "base_nav_date": "2026-08-11", "value_date": "2026-08-12",
+        "is_fallback": False,
+    })
+
+    context = main._estimate_context(
+        sample_detail,
+        datetime(2026, 8, 12, 6, 30, tzinfo=timezone.utc),
+    )
+    assert context["status"] == expected_status
+    assert (context["estimate_change"] is not None) is keeps_value
+    assert (context["estimate_nav"] is not None) is keeps_value
+    if not keeps_value:
+        sample_detail["decision_context"] = context
+        decision = decide_fund(sample_detail, {"is_held": False})
+        assert decision["action"] == "观望"
+        assert all("盘中估值涨跌" not in reason for reason in decision["reasons"])
 
 
 def test_backtest_marks_timing_as_historical(uptrend, monkeypatch):

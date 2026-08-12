@@ -1,5 +1,17 @@
 # Changelog
 
+## 7.0.0 - 2026-08-12
+
+- 盘中估值新增 `holdings_model`：参考蜉蝣基金的公开持仓穿透方法，在司南 Worker 内独立实现，以公开披露持仓、可用行情和最近正式净值生成非官方参考估值，并保留覆盖率、行情时间、持仓披露日期和模型状态证据；批量响应用 `accounting` 对直接盘中、模型、正式净值降级与不可用结果逐项守恒计数。
+- **Breaking contract**：`GET /estimates` 的 `est_kind` 不再只有实时估值表与 `official_nav`，客户端必须显式处理 `holdings_model`；该分支使用 `source=eastmoney_holdings_model`、`status=modeled`、`source_time_precision=datetime`、`est_realtime=false`，并通过 `model_coverage`、`model_quote_count`、`model_report_date` 和报价时间范围说明证据。不得仅凭 `est_nav` 为数值就认定它是基金公司净值或官方实时估值。`official_nav` 与 `unavailable` 的降级/空值语义继续保留。
+- FundVal v13 兼容：旧客户端不识别新模型，因此 `holdings_model` 的旧别名 `est_time` 故意降为日期级，避免被误标为实时；模型的精确时间以规范 `source_time` 和 `model_*_quote_time` 为准。
+- 健壮性收口：第三方 GET 增加超时、有限重试、响应体上限、JSON/结构校验和稳定失败原因；持仓覆盖不足、行情过期、部分报价缺失或结果非有限时失败关闭，不以 0 补缺失数据，不把降级结果送入新鲜盘中推送。
+- 后端决策接收估值来源、模型/新鲜度状态和时间证据；只有证据满足门槛的盘中结果参与实时决策，正式净值降级继续明确标记为非实时。
+- 修复每周策略校准工作流未安装 `backend/requirements.txt` 导致缺少 `requests` 的问题；自动数据任务提交后显式调度 CI，使持仓、经理、基金全集、海外精度与校准数据经过 CI 后进入 Pages 部署，且不形成 push 循环。
+- 部署后烟测绑定源提交中的统一版本，校验 Pages、API、Worker、正式净值与盘中模型/降级联合契约；烟测只调用公开 GET，不要求非交易时段出现 `holdings_model`，也不触发通知。
+- 前端、API、Worker、PWA 描述与锁文件统一升级为 7.0.0。Render 免费实例仍为临时 SQLite，生产预期保持 `ephemeral / durable=false`；自然 Cron 成功仍需在部署后的工作日 14:30/14:40 观测。
+- 安全配置收紧：`GIST_ID` 不再写入公开的 `wrangler.toml`，改由 Cloudflare/GitHub Secret 注入。历史中曾出现的 Gist ID 必须在生产切换前轮换；GitHub secret Gist 不等同于真正私有存储。
+
 ## 6.0.6 - 2026-08-09
 
 - 修正 Cloudflare Cron 星期编号：北京时间 14:30/14:40 仅在周一至周五触发，不再误跑周日、漏跑周五。

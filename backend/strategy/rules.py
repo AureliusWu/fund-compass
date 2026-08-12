@@ -200,6 +200,8 @@ def collect_issues(score: dict, signal: dict, bt: dict, detail: dict | None = No
         issues.append("盘中数据已过期或不可用")
     elif freshness.get("status") in ("delayed", "degraded", "latest_official"):
         issues.append("盘中数据延迟或已降级")
+    elif freshness.get("status") == "modeled":
+        issues.append("盘中数据来自重仓模型估算，并非基金官方实时净值")
     return issues
 
 
@@ -207,6 +209,7 @@ def _data_status(context: dict, detail: dict) -> str:
     status = context.get("status")
     labels = {
         "fresh": "实时",
+        "modeled": "模型估算",
         "delayed": "延迟",
         "stale": "旧数据",
         "degraded": "降级",
@@ -226,7 +229,7 @@ def _strength(quality: float | None, score: dict, signal: dict, confidence: str,
         value = round(45 + abs(float(quality) - 50) * 0.7 + coverage * 20)
     if confidence == "低":
         value = min(value, 45)
-    caps = {"实时": 100, "延迟": 65, "降级": 55, "最新正式净值": 55, "旧数据": 35, "暂不可用": 25}
+    caps = {"实时": 100, "模型估算": 65, "延迟": 65, "降级": 55, "最新正式净值": 55, "旧数据": 35, "暂不可用": 25}
     return max(0, min(100, value, caps.get(data_status, 45)))
 
 
@@ -311,8 +314,14 @@ def build_decision(
 
     reasons = build_reasons(score, signal, bt, bt_ok)
     estimate_change = context.get("estimate_change")
-    if estimate_change is not None:
-        reasons.append(f"盘中估值涨跌 {float(estimate_change):+.2f}%（行情时间 {source_time or '未知'}）")
+    intraday_evidence = (
+        context.get("kind") == "holdings_model" and context.get("status") == "modeled"
+    ) or (
+        context.get("kind") == "estimate" and context.get("status") == "fresh"
+    )
+    if estimate_change is not None and intraday_evidence:
+        metric = "重仓模型估算" if context.get("kind") == "holdings_model" else "盘中估值"
+        reasons.append(f"{metric}涨跌 {float(estimate_change):+.2f}%（行情时间 {source_time or '未知'}）")
 
     return {
         "code": detail.get("code"),

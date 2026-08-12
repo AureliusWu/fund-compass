@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { DecisionResp } from '@/api/client'
 import type { Alert } from './alerts'
-import type { Estimate } from './estimate'
+import { estimateDataFreshness, type Estimate } from './estimate'
 import {
   MAIN_NAV_ITEMS,
   WATCH_SECTIONS,
@@ -18,6 +18,7 @@ import {
 
 const baseEstimate: Estimate = {
   code: '012920', name: '全球成长', lastNav: 5, estNav: 5.1, estChange: 2,
+  baseNav: 5, baseNavDate: '2026-07-09', valueNav: 5.1, valueDate: '2026-07-10',
   navDate: '2026-07-09', estTime: '2026-07-10 14:30', kind: 'overseas_model',
   label: '海外模型估算', isRealtime: true, sourceNote: '模型估算',
 }
@@ -87,6 +88,106 @@ describe('freshness and QDII evidence', () => {
     expect(marketDataFreshness('2026-07-10 15:00', Date.parse('2026-07-12T08:00:00+08:00'))).toBe('fresh')
     expect(marketDataFreshness('2026-07-10 15:00', Date.parse('2026-07-13T16:00:00+08:00'))).toBe('stale')
     expect(marketDataFreshness('2026-07-10 15:00', Date.parse('2026-07-16T16:00:00+08:00'))).toBe('expired')
+  })
+
+  it('parses timezone-less quote times as Beijing time and rejects future drift', () => {
+    const now = Date.parse('2026-08-12T10:00:00+08:00')
+    expect(marketDataFreshness('2026-08-12 09:59:00', now)).toBe('fresh')
+    expect(marketDataFreshness('2026-08-12 10:04:00', now)).toBe('fresh')
+    expect(marketDataFreshness('2026-08-12 10:06:00', now)).toBe('expired')
+  })
+
+  it('evaluates date-only estimates by Beijing trading date without inventing a close time', () => {
+    const morning = Date.parse('2026-08-12T09:00:00+08:00')
+    expect(marketDataFreshness('2026-08-12', morning)).toBe('fresh')
+    expect(marketDataFreshness('2026-08-11', morning)).toBe('stale')
+    expect(marketDataFreshness('2026-08-10', morning)).toBe('stale')
+    expect(marketDataFreshness('2026-08-07', morning)).toBe('expired')
+    expect(marketDataFreshness('2026-08-14', morning)).toBe('expired')
+    expect(marketDataFreshness('2026-02-31', morning)).toBe('expired')
+
+    // Friday remains current over the weekend because no trading day elapsed.
+    expect(marketDataFreshness('2026-08-07', Date.parse('2026-08-09T09:00:00+08:00'))).toBe('fresh')
+  })
+
+  it('keeps a same-Beijing-day holdings model current without calling it realtime', () => {
+    const estimate: Estimate = {
+      ...baseEstimate,
+      code: '005844', name: '国内混合', kind: 'holdings_model', label: '重仓模型估算',
+      isRealtime: false, modelReportDate: '2026-06-30', modelCoverage: 83.47,
+      modelQuoteCount: 10, modelRejectedCount: 0,
+      modelOldestQuoteTime: '2026-08-12 09:58:00', modelNewestQuoteTime: '2026-08-12 10:02:00',
+    }
+    const now = Date.parse('2026-08-12T10:03:00+08:00')
+    expect(estimateFreshness(estimate, now)).toBe('fresh')
+    expect(estimateChangeForDisplay(estimate, now)).toBe(2)
+    expect(estimateTrustText(estimate)).toContain('重仓披露 2026-06-30')
+    expect(estimateTrustText(estimate)).toContain('覆盖 83.5%')
+    expect(estimateTrustText(estimate)).toContain('10 只行情')
+    expect(estimateTrustText(estimate)).toContain('非官方模型估算')
+  })
+
+  it('expires a holdings model when any contributing quote window is old', () => {
+    const estimate: Estimate = {
+      ...baseEstimate,
+      kind: 'holdings_model', label: '重仓模型估算', isRealtime: false,
+      modelOldestQuoteTime: '2026-08-07 14:30:00',
+      modelNewestQuoteTime: '2026-08-12 10:02:00',
+    }
+    expect(estimateFreshness(estimate, Date.parse('2026-08-12T10:03:00+08:00'))).toBe('expired')
+    expect(estimateChangeForDisplay(estimate, Date.parse('2026-08-12T10:03:00+08:00'))).toBeNull()
+  })
+
+  it('uses minute age for holdings models across the lunch break', () => {
+    const estimate: Estimate = {
+      ...baseEstimate,
+      kind: 'holdings_model', label: '重仓模型估算', isRealtime: false,
+      estTime: '2026-08-12 11:30:00',
+      modelOldestQuoteTime: '2026-08-12 11:30:00',
+      modelNewestQuoteTime: '2026-08-12 11:30:00',
+    }
+    expect(estimateFreshness(estimate, Date.parse('2026-08-12T11:45:00+08:00'))).toBe('fresh')
+    expect(estimateFreshness(estimate, Date.parse('2026-08-12T13:00:00+08:00'))).toBe('stale')
+    expect(estimateFreshness(estimate, Date.parse('2026-08-12T13:01:00+08:00'))).toBe('expired')
+    expect(estimateChangeForDisplay(estimate, Date.parse('2026-08-12T13:01:00+08:00'))).toBeNull()
+    expect(estimateFreshness({
+      ...estimate,
+      estTime: '2026-08-12 13:06:00',
+      modelOldestQuoteTime: '2026-08-12 13:06:00',
+      modelNewestQuoteTime: '2026-08-12 13:06:00',
+    }, Date.parse('2026-08-12T13:00:00+08:00'))).toBe('expired')
+  })
+
+  it('shares the same pure freshness result used by preferred daily moves', () => {
+    const estimate: Estimate = {
+      ...baseEstimate,
+      kind: 'holdings_model', label: '重仓模型估算', isRealtime: false,
+      estTime: '2026-08-12 12:59:00',
+      modelOldestQuoteTime: '2026-08-12 12:59:00',
+      modelNewestQuoteTime: '2026-08-12 12:59:00',
+    }
+    const now = Date.parse('2026-08-12T14:30:00+08:00')
+    expect(estimateDataFreshness(estimate, now)).toBe('expired')
+    expect(estimateFreshness(estimate, now)).toBe('expired')
+    expect(estimateDataFreshness({ ...estimate,
+      estTime: '2026-08-12 14:29:00',
+      modelOldestQuoteTime: '2026-08-12 14:29:00',
+      modelNewestQuoteTime: '2026-08-12 14:29:00',
+    }, now)).toBe('fresh')
+  })
+
+  it('expires precise direct estimates after 90 minutes and hides their change', () => {
+    const estimate: Estimate = {
+      ...baseEstimate,
+      code: '005844', name: '国内混合', kind: 'intraday', label: '盘中估值',
+      isRealtime: true, status: 'fresh', estTime: '2026-08-12 09:30:00',
+    }
+    const afternoon = Date.parse('2026-08-12T14:30:00+08:00')
+    expect(estimateFreshness(estimate, afternoon)).toBe('expired')
+    expect(estimateChangeForDisplay(estimate, afternoon)).toBeNull()
+    expect(estimateFreshness({ ...estimate, estTime: '2026-08-12 14:29:00' }, afternoon)).toBe('fresh')
+    expect(estimateChangeForDisplay({ ...estimate, estTime: '2026-08-12 14:29:00' }, afternoon)).toBe(2)
+    expect(estimateFreshness({ ...estimate, estTime: '2026-08-12 14:36:00' }, afternoon)).toBe('expired')
   })
 })
 

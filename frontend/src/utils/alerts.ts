@@ -142,10 +142,10 @@ export async function checkNavSpike(
   try {
     const hasEstimate = Object.prototype.hasOwnProperty.call(observation, 'estimate')
     const est = hasEstimate ? observation.estimate : await fetchEstimate(code)
-    const move = preferredDailyMove(est, observation.navMove, observation.typeOrName || name)
+    const now = observation.now ?? Date.now()
+    const move = preferredDailyMove(est, observation.navMove, observation.typeOrName || name, now)
     if (!move || move.change == null) return null
 
-    const now = observation.now ?? Date.now()
     const freshness = move.label === '净'
       ? marketDataFreshness(move.date, now)
       : estimateFreshness(est, now)
@@ -156,10 +156,17 @@ export async function checkNavSpike(
 
     const direction = move.change > 0 ? '涨' : '跌'
     const level: Alert['level'] = chg > 5 ? 'danger' : chg > 3 ? 'warn' : 'info'
+    const holdingsModel = move.label === '重仓模型' || est?.kind === 'holdings_model'
     const overseasEstimate = move.label !== '净' && isOverseasLike(observation.typeOrName || name, est)
-    const metric = move.label === '净' ? 'official_nav' : overseasEstimate ? 'next_nav_estimate' : 'estimate'
-    const metricLabel = move.label === '净' ? '最新公布净值' : overseasEstimate ? '下一净值估算' : move.label === '估' ? '盘中估值' : '延迟估值'
-    const titlePrefix = move.label === '净' ? '净值异动' : overseasEstimate ? '估算异动' : '估值异动'
+    const metric = move.label === '净'
+      ? 'official_nav'
+      : holdingsModel ? 'holdings_model_estimate' : overseasEstimate ? 'next_nav_estimate' : 'estimate'
+    const metricLabel = move.label === '净'
+      ? '最新公布净值'
+      : holdingsModel ? '非官方重仓模型估算' : overseasEstimate ? '下一净值估算' : move.label === '估' ? '盘中估值' : '延迟估值'
+    const titlePrefix = move.label === '净'
+      ? '净值异动'
+      : holdingsModel ? '模型估算异动' : overseasEstimate ? '估算异动' : '估值异动'
     const observedAt = move.date || est?.estTime || est?.navDate || ''
 
     const a = pushAlert({

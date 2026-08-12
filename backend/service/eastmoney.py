@@ -7,6 +7,8 @@
 """
 import json
 import logging
+import math
+import os
 import re
 import threading
 import time
@@ -14,12 +16,18 @@ from datetime import datetime, timedelta, timezone
 
 import requests
 
+from models.api import EstimateContext
+
 log = logging.getLogger(__name__)
 
 CST = timezone(timedelta(hours=8))
 _HEADERS = {"User-Agent": "Mozilla/5.0", "Referer": "https://fund.eastmoney.com/"}
 _TIMEOUT = (4, 10)
 _ESTIMATE_TTL_SECONDS = 30
+_ESTIMATE_PROXY_URL = os.environ.get(
+    "ESTIMATE_PROXY_URL",
+    "https://sinan-estimate-push.ligugu69.workers.dev/estimates",
+).strip()
 _estimate_table_cache: dict[str, dict] = {}
 _estimate_table_cached_at = 0.0
 _estimate_table_lock = threading.Lock()
@@ -93,6 +101,107 @@ def fetch_estimate(code: str) -> dict:
         "fetched_at": datetime.now(timezone.utc).isoformat(),
         "source": "eastmoney_estimate_table",
     }
+
+
+def _strict_number(value, *, positive: bool = False) -> float | None:
+    """Parse a complete finite numeric field; blank/booleans never become zero/one."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        number = float(value)
+    elif isinstance(value, str) and re.fullmatch(
+        r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?",
+        value.strip(),
+    ):
+        number = float(value.strip())
+    else:
+        return None
+    if not math.isfinite(number) or (positive and number <= 0):
+        return None
+    return number
+
+
+def fetch_resolved_estimate(code: str) -> dict:
+    """Read the Worker v7 resolver so UI and scheduled decisions share evidence."""
+    if not re.fullmatch(r"\d{6}", code):
+        raise ValueError("无效基金代码")
+    response = requests.get(
+        _ESTIMATE_PROXY_URL,
+        params={"codes": code},
+        headers={"Accept": "application/json", "User-Agent": "sinan-api"},
+        timeout=_TIMEOUT,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
+        raise ValueError("估值代理响应无效")
+    rows = [row for row in payload["items"] if isinstance(row, dict) and str(row.get("code")) == code]
+    if len(rows) != 1:
+        raise ValueError("估值代理未返回唯一基金")
+    row = rows[0]
+    kind = str(row.get("est_kind") or row.get("kind") or "")
+    status = str(row.get("status") or "")
+    if kind not in {"estimate", "holdings_model", "official_nav"}:
+        raise ValueError("估值代理类型无效")
+    allowed_status = {"fresh", "modeled", "delayed", "degraded", "latest_official"}
+    if status not in allowed_status:
+        raise ValueError("估值代理状态无效")
+    estimate_nav = _strict_number(row.get("value_nav", row.get("est_nav")), positive=True)
+    base_nav = _strict_number(row.get("base_nav", row.get("last_nav")), positive=True)
+    estimate_change = _strict_number(row.get("estimate_change", row.get("est_change")))
+    if estimate_nav is None or base_nav is None or estimate_change is None or not -100 <= estimate_change <= 1000:
+        raise ValueError("估值代理数值无效")
+    precision = str(row.get("source_time_precision") or "date")
+    if precision not in {"date", "datetime"}:
+        raise ValueError("估值代理时间精度无效")
+    source_time = str(
+        row.get("source_time") or row.get("model_newest_quote_time")
+        or row.get("est_time") or row.get("value_date") or ""
+    ).strip()
+    if not source_time:
+        raise ValueError("估值代理缺少行情时间")
+    raw_diagnostics = row.get("diagnostics") if isinstance(row.get("diagnostics"), dict) else {}
+    raw_rejected = raw_diagnostics.get("rejected") if isinstance(raw_diagnostics.get("rejected"), dict) else {}
+    diagnostics = {
+        "primary_reason": str(raw_diagnostics.get("primary_reason") or "")[:80] or None,
+        "model_reason": str(raw_diagnostics.get("model_reason") or "")[:80] or None,
+        "official_reason": str(raw_diagnostics.get("official_reason") or "")[:80] or None,
+        "source_time_precision": precision,
+        "rejected": {
+            str(key)[:80]: int(value)
+            for key, value in list(raw_rejected.items())[:20]
+            if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 100
+        },
+    }
+    is_fallback = row.get("is_fallback")
+    if not isinstance(is_fallback, bool):
+        raise ValueError("估值代理缺少严格 fallback 标记")
+    context = {
+        "status": status,
+        "source": str(row.get("source") or payload.get("source") or "unavailable")[:80],
+        "kind": kind,
+        "source_time": source_time,
+        "source_time_precision": precision,
+        "fetched_at": str(row.get("fetched_at") or payload.get("fetched_at") or "") or None,
+        "calculated_at": str(row.get("calculated_at") or "") or None,
+        "is_fallback": is_fallback,
+        "fallback_reason": str(row.get("fallback_reason") or "")[:240] or None,
+        "estimate_change": estimate_change,
+        "estimate_nav": estimate_nav,
+        "base_nav": base_nav,
+        "base_nav_date": str(row.get("base_nav_date") or row.get("nav_date") or "") or None,
+        "value_nav": estimate_nav,
+        "value_date": str(row.get("value_date") or "") or None,
+        "model_coverage": _strict_number(row.get("model_coverage", row.get("coverage"))) if kind == "holdings_model" else None,
+        "model_quote_count": row.get("model_quote_count", row.get("quote_count")) if kind == "holdings_model" else None,
+        "model_report_date": (str(row.get("model_report_date") or row.get("report_date") or "") or None) if kind == "holdings_model" else None,
+        "model_oldest_quote_time": (str(row.get("model_oldest_quote_time") or row.get("oldest_quote_time") or "") or None) if kind == "holdings_model" else None,
+        "model_newest_quote_time": (str(row.get("model_newest_quote_time") or row.get("newest_quote_time") or "") or None) if kind == "holdings_model" else None,
+        "model_rejected_count": row.get("model_rejected_count", row.get("rejected_count")) if kind == "holdings_model" else None,
+        "note": str(row.get("est_note") or row.get("note") or "")[:500] or None,
+        "diagnostics": diagnostics,
+    }
+    return EstimateContext.model_validate(context).model_dump()
 
 
 def _raw_var(text: str, name: str):

@@ -20,6 +20,7 @@ describe('holding alert deduplication', () => {
   it('uses the signal fund type before a non-matching display name', () => {
     const estimate = {
       code: '012920', name: '普通名称', lastNav: 5, estNav: 5.1, estChange: 2,
+      baseNav: 5, baseNavDate: '2026-07-09', valueNav: 5.1, valueDate: '2026-07-10T07:00:00.000Z',
       navDate: '2026-07-09', estTime: '2026-07-10T07:00:00.000Z', kind: 'intraday' as const,
       label: '盘中估值' as const, isRealtime: true, sourceNote: 'test',
     }
@@ -32,6 +33,7 @@ describe('holding alert deduplication', () => {
     installStorage()
     const estimate = {
       code: '005844', name: '测试基金', lastNav: 1, estNav: 0.94, estChange: -6.42,
+      baseNav: 1, baseNavDate: '2026-07-09', valueNav: 0.94, valueDate: '2026-07-10T07:00:00.000Z',
       navDate: '2026-07-09', estTime: '2026-07-10T07:00:00.000Z', kind: 'intraday' as const,
       label: '盘中估值' as const, isRealtime: false, sourceNote: 'test',
     }
@@ -46,6 +48,7 @@ describe('holding alert deduplication', () => {
     installStorage()
     const estimate = {
       code: '005844', name: '测试基金', lastNav: 1, estNav: 0.94, estChange: -6.42,
+      baseNav: 1, baseNavDate: '2026-07-01', valueNav: 0.94, valueDate: '2026-07-01T07:00:00.000Z',
       navDate: '2026-07-01', estTime: '2026-07-01T07:00:00.000Z', kind: 'intraday' as const,
       label: '延迟估值' as const, isRealtime: false, sourceNote: 'test', cached: true,
       cachedAt: '2026-07-01T08:00:00.000Z',
@@ -62,6 +65,7 @@ describe('holding alert deduplication', () => {
     installStorage()
     const estimate = {
       code: '012920', name: '全球成长 QDII', lastNav: 5, estNav: 4.7, estChange: -6,
+      baseNav: 5, baseNavDate: '2026-07-09', valueNav: 4.7, valueDate: '2026-07-10T07:00:00.000Z',
       navDate: '2026-07-09', estTime: '2026-07-10T07:00:00.000Z', kind: 'overseas_model' as const,
       label: '海外模型估算' as const, isRealtime: false, sourceNote: 'model',
       generatedAt: '2026-07-10T07:00:00.000Z',
@@ -87,6 +91,25 @@ describe('holding alert deduplication', () => {
       title: '估算异动 · 海外基金',
       body: '下一净值估算跌 6.00%（2026-07-10T07:00:00.000Z）',
     })
+  })
+
+  it('labels holdings-model alerts as non-official model estimates', async () => {
+    installStorage()
+    const estimate = {
+      code: '005844', name: '国内混合', lastNav: 1, estNav: 1.04, estChange: 4,
+      baseNav: 1, baseNavDate: '2026-08-11', valueNav: 1.04, valueDate: '2026-08-12',
+      navDate: '2026-08-11', estTime: '2026-08-12 10:00:00', kind: 'holdings_model' as const,
+      label: '重仓模型估算' as const, isRealtime: false, sourceNote: '非官方模型',
+      modelOldestQuoteTime: '2026-08-12 09:59:00', modelNewestQuoteTime: '2026-08-12 10:00:00',
+    }
+    const alert = await checkNavSpike('005844', '国内混合', 3, {
+      estimate, now: Date.parse('2026-08-12T10:05:00+08:00'),
+    })
+    expect(alert).toMatchObject({
+      title: '模型估算异动 · 国内混合',
+      body: '非官方重仓模型估算涨 4.00%（2026-08-12 10:00:00）',
+    })
+    expect(alert?.fingerprint).toContain('holdings_model_estimate')
   })
 
   it('collapses duplicate records already stored by older versions', () => {

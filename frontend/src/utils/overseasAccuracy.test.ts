@@ -28,6 +28,7 @@ describe('overseas accuracy metadata', () => {
     await loadOverseasAccuracy(true)
     const estimate: Estimate = {
       code: '012920', name: '测试QDII', lastNav: 4, estNav: 4.1, estChange: 2.5,
+      baseNav: 4, baseNavDate: '2026-07-09', valueNav: 4.1, valueDate: '2026-07-10',
       navDate: '2026-07-09', estTime: '2026-07-10 14:30',
       kind: 'overseas_model', label: '海外模型估算', isRealtime: true,
       sourceNote: '风格模型', modelWeight: 100,

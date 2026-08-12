@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: enrich-holdings
@@ -49,6 +50,9 @@ jobs:
             git commit -m "chore: 富集持仓+排行数据"
             git pull --rebase origin main
             git push origin main
+            gh workflow run ci.yml --ref main
           else
             echo "无变化"
           fi
+        env:
+          GH_TOKEN: ${{ github.token }}

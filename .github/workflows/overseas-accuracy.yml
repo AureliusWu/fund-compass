@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: overseas-accuracy-ledger
@@ -64,6 +65,9 @@ jobs:
             git commit -m "chore: 更新海外估值精度账本"
             git pull --rebase origin main
             git push origin main
+            gh workflow run ci.yml --ref main
           else
             echo "海外精度数据无变化"
           fi
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -114,6 +114,7 @@ function displayChange(code: string) {
 function estimateMeta(code: string) {
   const estimate = estimates[code]
   if (!estimate) return estimatesLoading.value ? '估值更新中' : '暂无估值'
+  if (estimate.status === 'unavailable') return '数据不可用'
   if (estimateFreshness(estimate) === 'expired') return '数据过期'
   const time = estimate.estTime ? estimate.estTime.slice(5) : ''
   const label = estimate.cached ? '缓存估值' : estimate.label
@@ -192,7 +193,7 @@ onMounted(refresh)
               <div class="estimate-value">
                 <strong :style="{ color: colorOf(displayChange(item.code)) }">{{ estimateText(item.code) }}</strong>
                 <span>{{ estimateMeta(item.code) }}</span>
-                <em v-if="estimates[item.code]?.kind === 'overseas_model'" class="trust-line">{{ estimateTrustText(estimates[item.code]) }}</em>
+                <em v-if="['holdings_model', 'overseas_model'].includes(estimates[item.code]?.kind || '')" class="trust-line">{{ estimateTrustText(estimates[item.code]) }}</em>
               </div>
             </article>
             <template #right><van-button square type="danger" text="移除" class="remove-button" @click="remove(item.code)" /></template>

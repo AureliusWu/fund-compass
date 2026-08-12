@@ -48,6 +48,54 @@ def test_portfolio_request_id_is_idempotent(monkeypatch):
     assert second["total"] == 1
 
 
+def test_portfolio_endpoint_preserves_validated_estimate_context(monkeypatch):
+    captured = {}
+
+    def decide(items, value):
+        captured["items"] = items
+        return {"decisions": [], "errors": [], "total": 0, "allocation": {}, "rebalance": []}
+
+    monkeypatch.setattr(main, "decide_portfolio", decide)
+    request = PortfolioDecisionRequest(**{
+        "items": [{
+            "code": "510300",
+            "estimate_context": {
+                "status": "modeled",
+                "source": "eastmoney_holdings_model",
+                "kind": "holdings_model",
+                "source_time": "2026-08-12T10:00:37+08:00",
+                "source_time_precision": "datetime",
+                "estimate_change": 1.46,
+                "estimate_nav": 3.501,
+                "base_nav": 3.4509,
+                "base_nav_date": "2026-08-11",
+                "value_nav": 3.501,
+                "value_date": "2026-08-12",
+                "model_coverage": 83.47,
+                "model_quote_count": 10,
+                "model_report_date": "2026-06-30",
+                "model_oldest_quote_time": "2026-08-12T09:59:50+08:00",
+                "model_newest_quote_time": "2026-08-12T10:00:37+08:00",
+                "model_rejected_count": 0,
+                "is_fallback": True,
+                "fallback_reason": "schema_invalid",
+                "diagnostics": {
+                    "primary_reason": "schema_invalid", "source_time_precision": "datetime",
+                },
+            },
+        }],
+    })
+
+    main.portfolio_decisions(request, "worker")
+
+    context = captured["items"][0]["estimate_context"]
+    assert context["kind"] == "holdings_model"
+    assert context["model_coverage"] == 83.47
+    assert context["source_time_precision"] == "datetime"
+    assert context["diagnostics"]["primary_reason"] == "schema_invalid"
+    assert context["diagnostics"]["rejected"] == {}
+
+
 def test_failed_persistence_releases_claim_and_retry_completes_missing_write(monkeypatch):
     decision = {
         "code": "510300", "name": "测试基金", "type": "指数型",

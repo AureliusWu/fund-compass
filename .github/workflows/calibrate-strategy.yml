@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: calibrate-strategy
@@ -21,6 +22,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend runtime dependencies
+        run: python -m pip install -r backend/requirements.txt
       - name: Require backend URL
         env:
           FUND_API_BASE: ${{ secrets.FUND_API_BASE || 'https://fund-compass-api.onrender.com' }}
@@ -53,6 +58,9 @@ jobs:
             git commit -m "chore: calibrate strategy"
             git pull --rebase origin main
             git push origin main
+            gh workflow run ci.yml --ref main
           else
             echo "No calibration changes"
           fi
+        env:
+          GH_TOKEN: ${{ github.token }}
