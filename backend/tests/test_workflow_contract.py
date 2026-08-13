@@ -117,7 +117,9 @@ def test_manual_signal_notification_requires_explicit_gist_id() -> None:
 def test_post_deploy_smoke_verifies_exact_api_and_complete_static_data() -> None:
     source = workflow("post-deploy-smoke.yml")
 
-    assert '.deployment.commit == $commit' in source
+    assert 'git merge-base --is-ancestor "$deployment_commit" "$EXPECTED_SHA"' in source
+    assert 'git diff --quiet "$deployment_commit" "$EXPECTED_SHA" -- backend render.yaml' in source
+    assert 'backend_source_matches=true' in source
     assert '.universe_ready == true' in source
     assert '.universe >= 1000' in source
     assert 'verify_chunks("screener", "funds", "c", 1000)' in source

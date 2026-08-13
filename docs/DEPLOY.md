@@ -69,7 +69,7 @@ services:
 
 ## 发布与回滚
 
-发布必须绑定同一个精确提交完成以下闭环：本地全量门禁 → push `main` → CI → Pages → Render → 必要时部署 Worker → `post-deploy-smoke`。Pages 的 `release.json`、API 健康接口的 Render commit 与目标 SHA 必须一致；Worker 有源码变化时还必须核对实际部署 version，只有版本号相同不能证明部署。全部通过后才创建版本标签。自动数据提交也要经过显式调度的 CI/Pages 链路，不能只看到仓库数据更新就认为生产静态数据已经更新。
+发布必须绑定同一个精确提交完成以下闭环：本地全量门禁 → push `main` → CI → Pages → Render → 必要时部署 Worker → `post-deploy-smoke`。Pages 的 `release.json` 必须等于目标 SHA；API 健康接口的 Render commit 必须是目标提交本身，或是目标提交的祖先且 `backend/` 与 `render.yaml` 内容逐字节等价（纯静态数据提交不会强迫 Render 重部署）。Worker 有源码变化时还必须核对实际部署 version，只有版本号相同不能证明部署。全部通过后才创建版本标签。自动数据提交也要经过显式调度的 CI/Pages 链路，不能只看到仓库数据更新就认为生产静态数据已经更新。
 
 选基、经理和持仓静态数据使用 schema v2 清单与内容哈希；生产 smoke 会下载全部分片，核对 SHA-256、行数、唯一性、披露日期与明细文件。指数估值只接受真实源日期和可用核心 PE 分位，任务运行日期不能替代行情日期。定期任务状态页只统计自然 `schedule` 运行；手工验收结果必须单独记录，不能遮盖最近一次自然失败。
 

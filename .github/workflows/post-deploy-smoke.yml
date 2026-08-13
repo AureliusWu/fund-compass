@@ -26,6 +26,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.target_sha }}
+          fetch-depth: 0
       - name: 校验精确源码
         shell: bash
         run: test "$(git rev-parse HEAD)" = "${{ inputs.target_sha }}"
@@ -280,12 +281,20 @@ jobs:
           api=${FUND_API_BASE:-https://fund-compass-api.onrender.com}
           for attempt in {1..40}; do
             health=$(curl --fail --silent --show-error "$api/api/health" || true)
-            if jq -e --arg version "$EXPECTED_VERSION" --arg commit "$EXPECTED_SHA" '
+            deployment_commit=$(jq -r '.deployment.commit // empty' <<<"$health" 2>/dev/null || true)
+            backend_source_matches=false
+            if [[ "$deployment_commit" =~ ^[0-9a-f]{40}$ ]] \
+              && git merge-base --is-ancestor "$deployment_commit" "$EXPECTED_SHA" \
+              && git diff --quiet "$deployment_commit" "$EXPECTED_SHA" -- backend render.yaml; then
+              backend_source_matches=true
+            fi
+            if jq -e --arg version "$EXPECTED_VERSION" '
               .status == "ok"
               and .version == $version
               and .deployment.platform == "render"
-              and .deployment.commit == $commit
-            ' <<<"$health" >/dev/null 2>&1; then
+              and (.deployment.commit | type) == "string"
+            ' <<<"$health" >/dev/null 2>&1 \
+              && [[ "$backend_source_matches" == "true" ]]; then
               break
             fi
             if [ "$attempt" -eq 40 ]; then
