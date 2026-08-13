@@ -2,20 +2,22 @@
   "status": "warning",
   "errors": [],
   "warnings": [
-    "已保留并排除 17 条历史日期轴错位样本"
+    "已保留并排除 17 条历史日期轴错位样本",
+    "计划任务延迟至同日窗口，预测仅使用已证明归属目标日的行情"
   ],
   "stats": {
-    "records": 19,
+    "records": 22,
     "statuses": {
       "observed_only": 2,
-      "legacy_misaligned": 17
+      "legacy_misaligned": 17,
+      "pending": 3
     },
-    "prediction_due": false,
-    "prediction_expected": false,
-    "effective_predictions_for_observation": 0,
+    "prediction_due": true,
+    "prediction_expected": true,
+    "effective_predictions_for_observation": 3,
     "legacy_misaligned": 17,
-    "prediction_effective_age_hours": null,
+    "prediction_effective_age_hours": 0.0,
     "settlement_effective_age_hours": null
   },
-  "updated_at": "2026-08-13T14:54:54+08:00"
+  "updated_at": "2026-08-13T16:03:17+08:00"
 }
