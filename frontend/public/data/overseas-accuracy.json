@@ -5,7 +5,7 @@
     "applied_at": "2026-08-13T13:46:49+08:00",
     "legacy_records_retained": 17
   },
-  "updated_at": "2026-08-13T13:46:49+08:00",
+  "updated_at": "2026-08-13T14:54:52+08:00",
   "summary": {
     "539002": {
       "samples": 0,
@@ -711,12 +711,32 @@
     }
   ],
   "pipeline": {
-    "last_run_at": "2026-08-12T16:01:21+08:00",
-    "quotes_count": 21,
+    "last_run_at": "2026-08-13T14:54:52+08:00",
+    "quotes_count": 0,
     "details_count": 3,
     "alignment_version": "observation-target-v2",
     "legacy_misaligned_records": 17,
     "legacy_last_prediction_at": "2026-07-17T16:38:44+08:00",
-    "legacy_last_settlement_at": "2026-07-21T17:13:24+08:00"
+    "legacy_last_settlement_at": "2026-07-21T17:13:24+08:00",
+    "heartbeat_at": "2026-08-13T14:54:52+08:00",
+    "run_mode": "manual",
+    "scheduled_for": "2026-08-13T14:35+08:00",
+    "delay_minutes": 19.87,
+    "observation_date": "2026-08-13",
+    "calendar_supported": true,
+    "calendar_source": "https://www.sse.com.cn/disclosure/dealinstruc/closed/",
+    "trading_day": true,
+    "prediction_due": false,
+    "prediction_expected": false,
+    "prediction_window_status": "open",
+    "prediction_target_date": "2026-08-12",
+    "expected_models": 3,
+    "effective_predictions_for_observation": 0,
+    "consecutive_expected_zero_prediction_runs": 0,
+    "last_expected_zero_prediction_observation_date": null,
+    "predictions_written": 0,
+    "settlements_written": 0,
+    "legacy_records_migrated": 0,
+    "quote_error": null
   }
 }
