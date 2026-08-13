@@ -102,8 +102,8 @@ npm run build
 - Render 免费实例的 SQLite 属于临时存储；生产决策账本需要付费持久盘并配置 `FUND_DB`，运行状态页会显示当前持久化模式。
 - 实时决策：前端调用 Render 后端，后端直接请求现行估值源；Service Worker 不缓存 `/api`。
 - 14:30 自选决策推送由 Cloudflare Workers Cron 执行；Worker 生产发布当前需在 `worker/` 手动执行 `npm run deploy`，GitHub Actions 的估值/信号任务仅保留手动应急入口。
-- Pages 只在整套 CI 成功后部署；自动数据任务提交后会显式调度 CI，使静态数据也进入 Pages 部署链路。部署后烟测会核对前端、API 与 Worker 的目标版本和关键估值契约。
-- GitHub Actions 只承担测试、构建、Pages 部署和持仓/经理/校准等低频离线任务。
+- Pages 只在同一精确 SHA 的整套 CI 成功后部署；自动数据任务完整排队，提交后重试派发 CI，使静态数据也进入 Pages 部署链路。部署后烟测会核对 Pages/Render 的真实提交、Worker 版本及静态分片完整性。
+- GitHub Actions 只承担测试、构建、Pages 部署和公开种子持仓、排行、经理、全集、校准与海外精度等低频离线任务；定期健康只看自然 schedule，手工验收不覆盖自然失败。
 - 配置参考：`docs/DEPLOY.md`、`docs/PUSH-SETUP.md`、`render.yaml`。
 - 命名规范：`docs/NAMING-CONVENTIONS.md`。
 

@@ -14,11 +14,16 @@
 """
 import datetime
 import json
+import math
 import os
+import re
 import sys
+from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "frontend", "public", "data", "index-valuation.json")
+BEIJING = datetime.timezone(datetime.timedelta(hours=8), "Asia/Shanghai")
+CORE_INDICES = {"沪深300", "上证50", "上证180", "中证100", "中证500", "中证1000"}
 
 # 乐咕乐股 symbol（中文全称，简称可能 KeyError）。key 是司南内部标准指数名，
 # value 是按稳定性排序的候选 symbol；CI 逐个尝试，成功才写入。
@@ -92,29 +97,102 @@ def _series_from(ak, fn_name, sym, prefer, dump_cols):
     if dump_cols:
         print(f"[diag] {fn_name}('{sym}') columns: {list(df.columns)}")
     col = _value_col(df, prefer)
-    cur, pct = _pct(df[col].tolist()) if col else (None, None)
-    date = str(df["日期"].iloc[-1]) if "日期" in df.columns else None
+    if not col or "日期" not in df.columns:
+        return None, None, None, col
+    # Keep date and value from the same row.  Upstream ordering is not a
+    # contract, and a trailing NaN must not lend its date to an older value.
+    dated_values: list[tuple[str, float]] = []
+    for raw_date, raw_value in zip(df["日期"].tolist(), df[col].tolist()):
+        source_date = _source_date(raw_date)
+        if source_date is None or isinstance(raw_value, bool):
+            continue
+        try:
+            value = float(raw_value)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(value):
+            dated_values.append((source_date, value))
+    dated_values.sort(key=lambda item: item[0])
+    cur, pct = _pct([value for _, value in dated_values])
+    date = dated_values[-1][0] if cur is not None else None
     return cur, pct, date, col
+
+
+def _source_date(value) -> str | None:
+    """Return a real source date; never substitute the job's run date."""
+    if isinstance(value, datetime.datetime):
+        return value.date().isoformat()
+    if isinstance(value, datetime.date):
+        return value.isoformat()
+    text = str(value or "").strip()
+    match = re.match(r"^(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})(?:日)?(?:$|[ T])", text)
+    if not match:
+        return None
+    try:
+        return datetime.date(*(int(part) for part in match.groups())).isoformat()
+    except ValueError:
+        return None
+
+
+def _finite_number(value, *, positive: bool = False, percentile: bool = False) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return False
+    if positive and value <= 0:
+        return False
+    if percentile and not 0 <= value <= 100:
+        return False
+    return True
+
+
+def _valid_core_item(item: dict) -> bool:
+    source_date = _source_date(item.get("date"))
+    return (
+        isinstance(item, dict)
+        and item.get("name") in CORE_INDICES
+        and _finite_number(item.get("pe"), positive=True)
+        and _finite_number(item.get("pb"), positive=True)
+        and _finite_number(item.get("pe_pct"), percentile=True)
+        and _finite_number(item.get("pb_pct"), percentile=True)
+        and source_date == item.get("date")
+        and item.get("pe_date") == source_date
+        and item.get("pb_date") == source_date
+    )
 
 
 def _fetch_one_index(ak, name, candidates, dumped):
     last_warn = None
+    partial = None
     for sym in candidates:
         pe, pe_pct, d1, pe_col = _series_from(ak, "stock_index_pe_lg", sym, ("滚动市盈率", "市盈率"), not dumped)
         pb, pb_pct, d2, pb_col = _series_from(ak, "stock_index_pb_lg", sym, ("市净率",), False)
         if pe is None and pb is None:
             last_warn = sym
             continue
+        if pe is not None and pb is not None and d1 != d2:
+            print(f"[warn] {name}: PE/PB 源日期不一致 symbol={sym} pe_date={d1} pb_date={d2}")
+            last_warn = sym
+            continue
+        source_date = d1 or d2
+        if source_date is None:
+            last_warn = sym
+            continue
         print(f"[col] {name}: symbol={sym} pe列={pe_col} pb列={pb_col}")
-        return {
+        item = {
             "name": name,
             "symbol": sym,
             "pe": pe,
             "pe_pct": pe_pct,
+            "pe_date": d1,
             "pb": pb,
             "pb_pct": pb_pct,
-            "date": d1 or d2 or datetime.date.today().isoformat(),
+            "pb_date": d2,
+            "date": source_date,
         }
+        if pe is not None and pb is not None:
+            return item
+        partial = item
+    if partial is not None:
+        return partial
     print(f"[warn] {name} 候选 symbol 均失败: {candidates} last={last_warn}")
     return None
 
@@ -138,21 +216,43 @@ def main():
     except Exception as e:
         print("指数估值富集失败:", e)
         return 1
-    if not data:
-        print("无指数估值数据（symbol/列名需据 [diag]/[warn] 调整）")
+    valid_core = {item["name"] for item in data if _valid_core_item(item)}
+    missing_core = sorted(CORE_INDICES - valid_core)
+    if missing_core:
+        print(f"核心指数估值不完整或字段无效：{len(valid_core)}/{len(CORE_INDICES)}")
         return 1
 
+    returned = {item["name"] for item in data}
+
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
+    source_dates = [_source_date(item.get("date")) for item in data]
+    if not source_dates or any(date is None for date in source_dates):
+        print("指数估值含缺失或无效源日期")
+        return 1
+    now = datetime.datetime.now(BEIJING)
+    missing = sorted(set(LG_SYMBOLS) - returned)
     payload = {
-        "updated": datetime.date.today().isoformat(),
+        "schema_version": 2,
+        # updated 是最保守的源数据日期，不再用任务运行日期冒充行情日期。
+        "updated": min(date for date in source_dates if date is not None),
+        "fetched_at": now.isoformat(timespec="seconds"),
         "source": "legulegu",
         "indices": data,
+        "coverage": {
+            "core_requested": len(CORE_INDICES),
+            "core_returned": len(valid_core),
+            "requested": len(LG_SYMBOLS),
+            "returned": len(data),
+            "missing": missing,
+        },
         "unsupported": UNSUPPORTED_INDICES,
     }
-    with open(OUT, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
+    target = Path(OUT)
+    temporary = target.with_suffix(target.suffix + ".tmp")
+    temporary.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    temporary.replace(target)
     print(f"done: {len(data)} indices → {OUT}")
-    print("[result]", json.dumps(data, ensure_ascii=False))
+    print(f"[coverage] core={len(CORE_INDICES)}/{len(CORE_INDICES)} total={len(data)}/{len(LG_SYMBOLS)}")
     return 0
 
 

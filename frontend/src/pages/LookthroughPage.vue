@@ -15,9 +15,9 @@ const lt = ref<Lookthrough | null>(null)
 const loading = ref(true)
 
 const SOURCE_LABEL: Record<string, string> = {
-  enrich: '完整持仓（AKShare 富集）',
+  enrich: '公开定期报告持仓（AKShare 富集）',
   top10: '前十大重仓（近似）',
-  mixed: '部分完整 / 部分前十大',
+  mixed: '部分定期报告 / 部分前十大回退',
   none: '无数据',
 }
 
@@ -74,6 +74,14 @@ onMounted(refresh)
             <div><div class="k">穿透个股</div><div class="v">{{ lt.stocks.length }}</div></div>
           </div>
           <div class="src">数据：{{ SOURCE_LABEL[lt.source] }}</div>
+          <div class="src">
+            个股披露期：{{ lt.stockDisclosureDates.length ? lt.stockDisclosureDates.join(' / ') : '未提供' }}
+            <template v-if="lt.hasUndatedStockFallback">；前十大回退数据未提供披露期</template>
+            ；并非实时持仓
+          </div>
+          <div v-if="lt.industries.length" class="src">
+            行业披露期：{{ lt.industryDisclosureDates.length ? lt.industryDisclosureDates.join(' / ') : '未提供' }}；并非实时持仓
+          </div>
         </div>
 
         <template v-if="lt.industries.length">
@@ -90,7 +98,7 @@ onMounted(refresh)
             <span class="st-pct">{{ s.pct.toFixed(2) }}%</span>
             <span class="st-val">{{ num(s.value, 0) }}</span>
           </div>
-          <div class="note">个股占比 = Σ 基金市值 × 个股占该基金净值比例 ÷ 组合总市值。前十大来源时为近似（未覆盖前十之外）。</div>
+          <div class="note">个股占比 = Σ 基金市值 × 个股占该基金净值比例 ÷ 组合总市值。持仓来自最近公开季报，不代表今日实时仓位；前十大来源时为近似（未覆盖前十之外）。</div>
         </div>
       </template>
     </div>

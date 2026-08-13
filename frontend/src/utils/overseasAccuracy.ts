@@ -13,6 +13,7 @@ export interface AccuracySummary {
   rolling_20?: AccuracyWindow | null
   pending?: number
   stale?: number
+  legacy_misaligned?: number
 }
 export interface AccuracyWindow { samples: number; mae: number; bias: number; direction_accuracy: number }
 export interface AccuracyRecord {
@@ -33,9 +34,31 @@ export interface AccuracyRecord {
 }
 export interface AccuracyReport {
   updated_at: string
-  pipeline?: { last_run_at?: string; last_prediction_at?: string; last_settlement_at?: string }
+  pipeline?: {
+    heartbeat_at?: string
+    last_run_at?: string
+    last_prediction_at?: string
+    last_settlement_at?: string
+    last_effective_prediction_at?: string
+    last_effective_settlement_at?: string
+    scheduled_for?: string
+    delay_minutes?: number
+    prediction_expected?: boolean
+    alignment_version?: string
+    legacy_misaligned_records?: number
+  }
   summary: Record<string, AccuracySummary>
   records: AccuracyRecord[]
+}
+
+const EFFECTIVE_FRESH_MS = 96 * 60 * 60 * 1000
+
+export function accuracyEffectiveAt(report: AccuracyReport, samples: number): string | undefined {
+  const pipeline = report.pipeline
+  if (!pipeline) return undefined
+  return samples > 0
+    ? pipeline.last_effective_settlement_at
+    : pipeline.last_effective_prediction_at
 }
 
 let reportPromise: Promise<AccuracyReport | null> | null = null
@@ -54,14 +77,20 @@ export async function attachAccuracy(estimate: Estimate): Promise<Estimate> {
   const report = await loadOverseasAccuracy()
   const summary = report?.summary?.[estimate.code]
   if (!summary) return estimate
-  const reportAge = report?.updated_at ? Date.now() - Date.parse(report.updated_at) : Infinity
-  const confidence = reportAge > 72 * 60 * 60 * 1000 ? '精度数据过期' : summary.confidence
+  const effectiveAt = accuracyEffectiveAt(report, summary.samples)
+  const parsedEffectiveAt = effectiveAt ? Date.parse(effectiveAt) : Number.NaN
+  const effectiveAge = Number.isFinite(parsedEffectiveAt) && parsedEffectiveAt <= Date.now() + 5 * 60 * 1000
+    ? Date.now() - parsedEffectiveAt
+    : Infinity
+  const confidence = summary.samples === 0
+    ? '精度样本重新积累中'
+    : effectiveAge > EFFECTIVE_FRESH_MS ? '精度数据过期' : summary.confidence
   return {
     ...estimate,
     confidence,
     accuracySamples: summary.samples,
     errorBand: summary.error_band,
-    accuracyUpdatedAt: report?.updated_at,
+    accuracyUpdatedAt: effectiveAt,
     sourceNote: `${estimate.sourceNote} · ${confidence}${summary.error_band != null ? ` · 历史约±${summary.error_band.toFixed(2)}%` : ''}`,
   }
 }

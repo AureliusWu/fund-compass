@@ -5,20 +5,71 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      target_sha:
+        description: Exact main commit to validate and release (defaults to dispatch SHA)
+        type: string
+        required: false
+        default: ''
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      target_sha: ${{ steps.target.outputs.target_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Resolve and validate exact source commit
+        id: target
+        shell: bash
+        env:
+          REQUESTED_SHA: ${{ github.event.inputs.target_sha || '' }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_SHA: ${{ github.sha }}
+        run: |
+          target_sha=${REQUESTED_SHA:-$EVENT_SHA}
+          if [[ ! "$target_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "target_sha must be a full 40-character commit SHA" >&2
+            exit 1
+          fi
+          git cat-file -e "$target_sha^{commit}"
+          if [[ "$EVENT_NAME" != "pull_request" ]]; then
+            git fetch --no-tags origin main
+            remote_sha=$(git rev-parse origin/main)
+            [[ "$target_sha" == "$remote_sha" ]] || {
+              echo "target_sha is stale; refusing to release a non-HEAD main commit" >&2
+              exit 1
+            }
+          fi
+          echo "target_sha=$target_sha" >> "$GITHUB_OUTPUT"
+
   backend:
+    needs: resolve
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: backend
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.target_sha }}
+      - name: Verify exact source
+        run: test "$(git rev-parse HEAD)" = "${{ needs.resolve.outputs.target_sha }}"
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -30,13 +81,20 @@ jobs:
       - run: pytest
 
   frontend:
+    needs: resolve
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: frontend
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.target_sha }}
+      - name: Verify exact source
+        run: test "$(git rev-parse HEAD)" = "${{ needs.resolve.outputs.target_sha }}"
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -48,13 +106,20 @@ jobs:
       - run: npm run build
 
   worker:
+    needs: resolve
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: worker
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.target_sha }}
+      - name: Verify exact source
+        run: test "$(git rev-parse HEAD)" = "${{ needs.resolve.outputs.target_sha }}"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -64,3 +129,24 @@ jobs:
       - run: npm run check
       - run: npm test
       - run: npx wrangler deploy --dry-run
+
+  deploy:
+    if: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+    needs: [resolve, backend, frontend, worker]
+    uses: ./.github/workflows/deploy.yml
+    with:
+      target_sha: ${{ needs.resolve.outputs.target_sha }}
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+
+  smoke:
+    if: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+    needs: [resolve, deploy]
+    uses: ./.github/workflows/post-deploy-smoke.yml
+    with:
+      target_sha: ${{ needs.resolve.outputs.target_sha }}
+    secrets: inherit
+    permissions:
+      contents: read

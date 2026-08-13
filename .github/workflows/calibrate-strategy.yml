@@ -4,14 +4,19 @@ on:
   schedule:
     - cron: '40 1 * * 1'
   workflow_dispatch:
+    inputs:
+      auto_promote:
+        description: 手工验收时是否允许自动晋级（默认只生成候选证据）
+        type: boolean
+        default: false
 
 permissions:
   contents: write
   actions: write
 
 concurrency:
-  group: calibrate-strategy
-  cancel-in-progress: false
+  group: scheduled-data-main
+  queue: max
 
 jobs:
   calibrate:
@@ -33,7 +38,7 @@ jobs:
         run: test -n "$FUND_API_BASE" || { echo "FUND_API_BASE secret is required"; exit 1; }
       - name: Calibrate strategy candidate
         env:
-          AUTO_PROMOTE_STRATEGY: 'true'
+          AUTO_PROMOTE_STRATEGY: ${{ github.event_name == 'schedule' || inputs.auto_promote }}
           CALIBRATION_MIN_VALID: '12'
           CALIBRATION_MAX_FUNDS: '30'
           FUND_API_BASE: ${{ secrets.FUND_API_BASE || 'https://fund-compass-api.onrender.com' }}
@@ -56,9 +61,36 @@ jobs:
             git config user.email "github-actions[bot]@users.noreply.github.com"
             git add frontend/public/data/strategy-calibration.json backend/data/strategy-params.json
             git commit -m "chore: calibrate strategy"
-            git pull --rebase origin main
-            git push origin main
-            gh workflow run ci.yml --ref main
+            base_sha=$(git rev-parse HEAD^)
+            pushed=false
+            for attempt in 1 2 3; do
+              if ! git fetch --no-tags origin main; then
+                sleep $((attempt * 2))
+                continue
+              fi
+              remote_sha=$(git rev-parse origin/main)
+              [[ "$remote_sha" == "$base_sha" ]] || {
+                echo "main changed while data was generated; rerun on the new HEAD" >&2
+                exit 1
+              }
+              if git push origin HEAD:main; then
+                pushed=true
+                break
+              fi
+              sleep $((attempt * 2))
+            done
+            [[ "$pushed" == "true" ]] || { echo "Failed to push generated data" >&2; exit 1; }
+            commit_sha=$(git rev-parse HEAD)
+            dispatched=false
+            for attempt in 1 2 3; do
+              if gh workflow run ci.yml --ref main -f target_sha="$commit_sha"; then
+                dispatched=true
+                break
+              fi
+              sleep $((attempt * 2))
+            done
+            [[ "$dispatched" == "true" ]] || { echo "Failed to create exact-source CI run" >&2; exit 1; }
+            echo "Created exact-source CI run for generated commit"
           else
             echo "No calibration changes"
           fi

@@ -1,92 +1,70 @@
 {
-  "schema": 1,
-  "updated_at": "2026-08-12T16:01:21+08:00",
+  "schema": 2,
+  "evidence_migration": {
+    "id": "observation-target-v2",
+    "applied_at": "2026-08-13T13:46:49+08:00",
+    "legacy_records_retained": 17
+  },
+  "updated_at": "2026-08-13T13:46:49+08:00",
   "summary": {
     "539002": {
-      "samples": 6,
+      "samples": 0,
       "status": "collecting",
       "confidence": "样本积累中",
-      "mae": 2.895,
-      "bias": 1.764,
-      "direction_accuracy": 83.3,
-      "error_band": 4.098,
+      "mae": null,
+      "bias": null,
+      "direction_accuracy": null,
+      "error_band": null,
       "error_percentiles": {
-        "p50": 2.193,
-        "p80": 4.098,
-        "p95": 5.421
+        "p50": null,
+        "p80": null,
+        "p95": null
       },
-      "rolling_5": {
-        "samples": 5,
-        "mae": 3.211,
-        "bias": 2.379,
-        "direction_accuracy": 80.0
-      },
-      "rolling_20": {
-        "samples": 6,
-        "mae": 2.895,
-        "bias": 1.764,
-        "direction_accuracy": 83.3
-      },
+      "rolling_5": null,
+      "rolling_20": null,
       "pending": 0,
       "stale": 0,
+      "legacy_misaligned": 6,
       "model_version": "v1-2026q1-holdings"
     },
     "012920": {
-      "samples": 5,
+      "samples": 0,
       "status": "collecting",
       "confidence": "样本积累中",
-      "mae": 3.59,
-      "bias": 3.215,
-      "direction_accuracy": 100.0,
-      "error_band": 7.594,
+      "mae": null,
+      "bias": null,
+      "direction_accuracy": null,
+      "error_band": null,
       "error_percentiles": {
-        "p50": 3.455,
-        "p80": 5.904,
-        "p95": 7.171
+        "p50": null,
+        "p80": null,
+        "p95": null
       },
-      "rolling_5": {
-        "samples": 5,
-        "mae": 3.59,
-        "bias": 3.215,
-        "direction_accuracy": 100.0
-      },
-      "rolling_20": {
-        "samples": 5,
-        "mae": 3.59,
-        "bias": 3.215,
-        "direction_accuracy": 100.0
-      },
+      "rolling_5": null,
+      "rolling_20": null,
       "pending": 0,
       "stale": 0,
+      "legacy_misaligned": 5,
       "model_version": "v1-2026q1-style"
     },
     "018147": {
-      "samples": 6,
+      "samples": 0,
       "status": "collecting",
       "confidence": "样本积累中",
-      "mae": 2.903,
-      "bias": 1.77,
-      "direction_accuracy": 83.3,
-      "error_band": 4.124,
+      "mae": null,
+      "bias": null,
+      "direction_accuracy": null,
+      "error_band": null,
       "error_percentiles": {
-        "p50": 2.184,
-        "p80": 4.124,
-        "p95": 5.431
+        "p50": null,
+        "p80": null,
+        "p95": null
       },
-      "rolling_5": {
-        "samples": 5,
-        "mae": 3.217,
-        "bias": 2.391,
-        "direction_accuracy": 80.0
-      },
-      "rolling_20": {
-        "samples": 6,
-        "mae": 2.903,
-        "bias": 1.77,
-        "direction_accuracy": 83.3
-      },
+      "rolling_5": null,
+      "rolling_20": null,
       "pending": 0,
       "stale": 0,
+      "legacy_misaligned": 6,
       "model_version": "v1-2026q1-holdings"
     }
   },
@@ -125,7 +103,7 @@
       "predicted_nav": 2.5306,
       "model_version": "v1-2026q1-holdings",
       "quote_time": "2026-07-10T14:07:53+08:00",
-      "status": "settled",
+      "status": "legacy_misaligned",
       "raw_change": 2.621331,
       "predicted_change": 2.6213,
       "coverage": 64.33,
@@ -148,7 +126,10 @@
       "actual_change": 3.9335,
       "error": -1.3122,
       "absolute_error": 1.3122,
-      "direction_hit": true
+      "direction_hit": true,
+      "legacy_status": "settled",
+      "excluded_from_metrics": true,
+      "legacy_misalignment_reason": "旧口径将观察日同时当作目标净值日，无法证明行情与净值归属日对齐"
     },
     {
       "code": "012920",
@@ -160,7 +141,7 @@
       "predicted_nav": 4.5302,
       "model_version": "v1-2026q1-style",
       "quote_time": "2026-07-10T14:07:53+08:00",
-      "status": "settled",
+      "status": "legacy_misaligned",
       "raw_change": 1.5045,
       "predicted_change": 2.1063,
       "coverage": 100.0,
@@ -177,7 +158,10 @@
       "actual_change": 1.6251,
       "error": 0.4812,
       "absolute_error": 0.4812,
-      "direction_hit": true
+      "direction_hit": true,
+      "legacy_status": "settled",
+      "excluded_from_metrics": true,
+      "legacy_misalignment_reason": "旧口径将观察日同时当作目标净值日，无法证明行情与净值归属日对齐"
     },
     {
       "code": "018147",
@@ -189,7 +173,7 @@
       "predicted_nav": 2.4906,
       "model_version": "v1-2026q1-holdings",
       "quote_time": "2026-07-10T14:07:53+08:00",
-      "status": "settled",
+      "status": "legacy_misaligned",
       "raw_change": 2.621331,
       "predicted_change": 2.6213,
       "coverage": 64.33,
@@ -212,7 +196,10 @@
       "actual_change": 3.9555,
       "error": -1.3342,
       "absolute_error": 1.3342,
-      "direction_hit": true
+      "direction_hit": true,
+      "legacy_status": "settled",
+      "excluded_from_metrics": true,
+      "legacy_misalignment_reason": "旧口径将观察日同时当作目标净值日，无法证明行情与净值归属日对齐"
     },
     {
       "code": "539002",
@@ -224,7 +211,7 @@
       "predicted_nav": 2.5591,
       "model_version": "v1-2026q1-holdings",
       "quote_time": "2026-07-13T17:56:12+08:00",
-      "status": "settled",
+      "status": "legacy_misaligned",
       "raw_change": 0.595029,
       "predicted_change": 0.595,
       "coverage": 64.33,
@@ -247,7 +234,10 @@
       "actual_change": -5.2673,
       "error": 5.8623,
       "absolute_error": 5.8623,
-      "direction_hit": false
+      "direction_hit": false,
+      "legacy_status": "settled",
+      "excluded_from_metrics": true,
+      "legacy_misalignment_reason": "旧口径将观察日同时当作目标净值日，无法证明行情与净值归属日对齐"
     },
     {
       "code": "012920",
@@ -259,7 +249,7 @@
       "predicted_nav": 4.6195,
       "model_version": "v1-2026q1-style",
       "quote_time": "2026-07-13T17:56:12+08:00",
-      "status": "settled",
+      "status": "legacy_misaligned",
       "raw_change": -0.326,
       "predicted_change": -0.4564,
       "coverage": 100.0,
@@ -276,7 +266,10 @@
       "actual_change": -8.0505,
       "error": 7.5941,
       "absolute_error": 7.5941,
-      "direction_hit": true
+      "direction_hit": true,
+      "legacy_status": "settled",
+      "excluded_from_metrics": true,
+      "legacy_misalignment_reason": "旧口径将观察日同时当作目标净值日，无法证明行情与净值归属日对齐"
     },
     {
       "code": "018147",
@@ -288,7 +281,7 @@
       "predicted_nav": 2.5189,
       "model_version": "v1-2026q1-holdings",
       "quote_time": "2026-07-13T17:56:12+08:00",
-      "status": "settled",
+      "status": "legacy_misaligned",
       "raw_change": 0.595029,
       "predicted_change": 0.595,
       "coverage": 64.33,
@@ -311,7 +304,10 @@
       "actual_change": -5.2716,
       "error": 5.8666,
       "absolute_error": 5.8666,
-      "direction_hit": false
+      "direction_hit": false,
+      "legacy_status": "settled",
+      "excluded_from_metrics": true,
+      "legacy_misalignment_reason": "旧口径将观察日同时当作目标净值日，无法证明行情与净值归属日对齐"
     },
     {
       "code": "539002",
@@ -323,7 +319,7 @@
       "predicted_nav": 2.4207,
       "model_version": "v1-2026q1-holdings",
       "quote_time": "2026-07-14T16:39:54+08:00",
-      "status": "settled",
+      "status": "legacy_misaligned",
       "raw_change": -5.553306,
       "predicted_change": -5.5533,
       "coverage": 64.33,
@@ -346,7 +342,10 @@
       "actual_change": -3.4725,
       "error": -2.0808,
       "absolute_error": 2.0808,
-      "direction_hit": true
+      "direction_hit": true,
+      "legacy_status": "settled",
+      "excluded_from_metrics": true,
+      "legacy_misalignment_reason": "旧口径将观察日同时当作目标净值日，无法证明行情与净值归属日对齐"
     },
     {
       "code": "018147",
@@ -358,7 +357,7 @@
       "predicted_nav": 2.3829,
       "model_version": "v1-2026q1-holdings",
       "quote_time": "2026-07-14T16:39:54+08:00",
-      "status": "settled",
+      "status": "legacy_misaligned",
       "raw_change": -5.553306,
       "predicted_change": -5.5533,
       "coverage": 64.33,
@@ -381,7 +380,10 @@
       "actual_change": -3.4879,
       "error": -2.0654,
       "absolute_error": 2.0654,
-      "direction_hit": true
+      "direction_hit": true,
+      "legacy_status": "settled",
+      "excluded_from_metrics": true,
+      "legacy_misalignment_reason": "旧口径将观察日同时当作目标净值日，无法证明行情与净值归属日对齐"
     },
     {
       "code": "539002",
@@ -393,7 +395,7 @@
       "predicted_nav": 2.4912,
       "model_version": "v1-2026q1-holdings",
       "quote_time": "2026-07-15T16:57:15+08:00",
-      "status": "settled",
+      "status": "legacy_misaligned",
       "raw_change": 3.36996,
       "predicted_change": 3.37,
       "coverage": 64.33,
@@ -416,7 +418,10 @@
       "actual_change": 1.6598,
       "error": 1.7102,
       "absolute_error": 1.7102,
-      "direction_hit": true
+      "direction_hit": true,
+      "legacy_status": "settled",
+      "excluded_from_metrics": true,
+      "legacy_misalignment_reason": "旧口径将观察日同时当作目标净值日，无法证明行情与净值归属日对齐"
     },
     {
       "code": "012920",
@@ -428,7 +433,7 @@
       "predicted_nav": 4.3405,
       "model_version": "v1-2026q1-style",
       "quote_time": "2026-07-15T16:57:15+08:00",
-      "status": "settled",
+      "status": "legacy_misaligned",
       "raw_change": 1.228,
       "predicted_change": 1.7192,
       "coverage": 100.0,
@@ -445,7 +450,10 @@
       "actual_change": 2.6575,
       "error": -0.9383,
       "absolute_error": 0.9383,
-      "direction_hit": true
+      "direction_hit": true,
+      "legacy_status": "settled",
+      "excluded_from_metrics": true,
+      "legacy_misalignment_reason": "旧口径将观察日同时当作目标净值日，无法证明行情与净值归属日对齐"
     },
     {
       "code": "018147",
@@ -457,7 +465,7 @@
       "predicted_nav": 2.4519,
       "model_version": "v1-2026q1-holdings",
       "quote_time": "2026-07-15T16:57:15+08:00",
-      "status": "settled",
+      "status": "legacy_misaligned",
       "raw_change": 3.36996,
       "predicted_change": 3.37,
       "coverage": 64.33,
@@ -480,7 +488,10 @@
       "actual_change": 1.6442,
       "error": 1.7258,
       "absolute_error": 1.7258,
-      "direction_hit": true
+      "direction_hit": true,
+      "legacy_status": "settled",
+      "excluded_from_metrics": true,
+      "legacy_misalignment_reason": "旧口径将观察日同时当作目标净值日，无法证明行情与净值归属日对齐"
     },
     {
       "code": "539002",
@@ -492,7 +503,7 @@
       "predicted_nav": 2.4084,
       "model_version": "v1-2026q1-holdings",
       "quote_time": "2026-07-16T16:57:55+08:00",
-      "status": "settled",
+      "status": "legacy_misaligned",
       "raw_change": -2.652265,
       "predicted_change": -2.6523,
       "coverage": 64.33,
@@ -515,7 +526,10 @@
       "actual_change": -6.7502,
       "error": 4.0979,
       "absolute_error": 4.0979,
-      "direction_hit": true
+      "direction_hit": true,
+      "legacy_status": "settled",
+      "excluded_from_metrics": true,
+      "legacy_misalignment_reason": "旧口径将观察日同时当作目标净值日，无法证明行情与净值归属日对齐"
     },
     {
       "code": "012920",
@@ -527,7 +541,7 @@
       "predicted_nav": 4.3362,
       "model_version": "v1-2026q1-style",
       "quote_time": "2026-07-16T16:57:55+08:00",
-      "status": "settled",
+      "status": "legacy_misaligned",
       "raw_change": -1.253,
       "predicted_change": -1.7542,
       "coverage": 100.0,
@@ -544,7 +558,10 @@
       "actual_change": -5.2089,
       "error": 3.4547,
       "absolute_error": 3.4547,
-      "direction_hit": true
+      "direction_hit": true,
+      "legacy_status": "settled",
+      "excluded_from_metrics": true,
+      "legacy_misalignment_reason": "旧口径将观察日同时当作目标净值日，无法证明行情与净值归属日对齐"
     },
     {
       "code": "018147",
@@ -556,7 +573,7 @@
       "predicted_nav": 2.3704,
       "model_version": "v1-2026q1-holdings",
       "quote_time": "2026-07-16T16:57:55+08:00",
-      "status": "settled",
+      "status": "legacy_misaligned",
       "raw_change": -2.652265,
       "predicted_change": -2.6523,
       "coverage": 64.33,
@@ -579,7 +596,10 @@
       "actual_change": -6.7762,
       "error": 4.1239,
       "absolute_error": 4.1239,
-      "direction_hit": true
+      "direction_hit": true,
+      "legacy_status": "settled",
+      "excluded_from_metrics": true,
+      "legacy_misalignment_reason": "旧口径将观察日同时当作目标净值日，无法证明行情与净值归属日对齐"
     },
     {
       "code": "539002",
@@ -591,7 +611,7 @@
       "predicted_nav": 2.3225,
       "model_version": "v1-2026q1-holdings",
       "quote_time": "2026-07-17T16:38:44+08:00",
-      "status": "settled",
+      "status": "legacy_misaligned",
       "raw_change": -5.204202,
       "predicted_change": -5.2042,
       "coverage": 64.33,
@@ -614,7 +634,10 @@
       "actual_change": -7.5102,
       "error": 2.306,
       "absolute_error": 2.306,
-      "direction_hit": true
+      "direction_hit": true,
+      "legacy_status": "settled",
+      "excluded_from_metrics": true,
+      "legacy_misalignment_reason": "旧口径将观察日同时当作目标净值日，无法证明行情与净值归属日对齐"
     },
     {
       "code": "012920",
@@ -626,7 +649,7 @@
       "predicted_nav": 4.198,
       "model_version": "v1-2026q1-style",
       "quote_time": "2026-07-17T16:38:44+08:00",
-      "status": "settled",
+      "status": "legacy_misaligned",
       "raw_change": -2.976,
       "predicted_change": -4.1664,
       "coverage": 100.0,
@@ -643,7 +666,10 @@
       "actual_change": -9.6473,
       "error": 5.4809,
       "absolute_error": 5.4809,
-      "direction_hit": true
+      "direction_hit": true,
+      "legacy_status": "settled",
+      "excluded_from_metrics": true,
+      "legacy_misalignment_reason": "旧口径将观察日同时当作目标净值日，无法证明行情与净值归属日对齐"
     },
     {
       "code": "018147",
@@ -655,7 +681,7 @@
       "predicted_nav": 2.2855,
       "model_version": "v1-2026q1-holdings",
       "quote_time": "2026-07-17T16:38:44+08:00",
-      "status": "settled",
+      "status": "legacy_misaligned",
       "raw_change": -5.204202,
       "predicted_change": -5.2042,
       "coverage": 64.33,
@@ -678,14 +704,19 @@
       "actual_change": -7.5073,
       "error": 2.3031,
       "absolute_error": 2.3031,
-      "direction_hit": true
+      "direction_hit": true,
+      "legacy_status": "settled",
+      "excluded_from_metrics": true,
+      "legacy_misalignment_reason": "旧口径将观察日同时当作目标净值日，无法证明行情与净值归属日对齐"
     }
   ],
   "pipeline": {
     "last_run_at": "2026-08-12T16:01:21+08:00",
     "quotes_count": 21,
     "details_count": 3,
-    "last_prediction_at": "2026-07-17T16:38:44+08:00",
-    "last_settlement_at": "2026-07-21T17:13:24+08:00"
+    "alignment_version": "observation-target-v2",
+    "legacy_misaligned_records": 17,
+    "legacy_last_prediction_at": "2026-07-17T16:38:44+08:00",
+    "legacy_last_settlement_at": "2026-07-21T17:13:24+08:00"
   }
 }

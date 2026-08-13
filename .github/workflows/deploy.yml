@@ -1,10 +1,12 @@
 name: Deploy frontend to GitHub Pages
 
 on:
-  workflow_run:
-    workflows: ["CI"]
-    types: [completed]
-  workflow_dispatch:
+  workflow_call:
+    inputs:
+      target_sha:
+        description: Exact validated main commit to deploy
+        type: string
+        required: true
 
 permissions:
   contents: read
@@ -17,7 +19,6 @@ concurrency:
 
 jobs:
   build:
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -26,7 +27,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ inputs.target_sha }}
+      - name: Verify exact source
+        run: test "$(git rev-parse HEAD)" = "${{ inputs.target_sha }}"
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -40,8 +43,11 @@ jobs:
           # 在仓库 Settings → Actions → Variables 里设 VITE_API_BASE 为后端公网地址；
           # 未设时为空，前端回退 /api（GitHub Pages 上无后端会显示未连接，属正常）。
           VITE_API_BASE: ${{ vars.VITE_API_BASE }}
+      - name: Stamp exact deployed commit
+        shell: bash
+        run: printf '{"commit":"%s"}\n' '${{ inputs.target_sha }}' > dist/release.json
       - name: Verify production artifact
-        run: test -f dist/index.html && test -f dist/manifest.webmanifest
+        run: test -f dist/index.html && test -f dist/manifest.webmanifest && test "$(jq -r .commit dist/release.json)" = "${{ inputs.target_sha }}"
       - uses: actions/upload-pages-artifact@v3
         with:
           path: frontend/dist

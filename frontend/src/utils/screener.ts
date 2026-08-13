@@ -23,33 +23,122 @@ export interface RankFilter {
 }
 
 const BROAD_RE = /沪深300|中证500|上证50|上证180|中证1000|创业板|科创50|红利|中证100|深100|300ETF|500ETF|50ETF|1000ETF|A500/i
+const CATS = ['指数型', '股票型', '混合型', '债券型', 'QDII', 'FOF']
 
 let cache: { funds: ScreenFund[]; updated: string } | null = null
+
+interface StaticManifest {
+  schema_version: 2
+  updated: string
+  total: number
+  collection: string
+  sha256: string
+  chunks: string[]
+  chunk_sha256: Record<string, string>
+}
+
+const SHA256_RE = /^[a-f0-9]{64}$/
+const CHUNK_RE = /^part-(\d{3})-([a-f0-9]{12})\.json$/
+
+async function sha256Text(value: string): Promise<string> {
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+function validIsoDate(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const [year, month, day] = value.split('-').map(Number)
+  const parsed = new Date(Date.UTC(year, month - 1, day))
+  return parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day
+}
+
+function validManifest(raw: unknown, collection: string): raw is StaticManifest {
+  if (!raw || typeof raw !== 'object') return false
+  const row = raw as Record<string, unknown>
+  if (row.schema_version !== 2 || row.collection !== collection || !Number.isInteger(row.total) || Number(row.total) <= 0) return false
+  if (!validIsoDate(row.updated)
+    || typeof row.sha256 !== 'string' || !SHA256_RE.test(row.sha256)) return false
+  if (!Array.isArray(row.chunks) || row.chunks.length === 0 || !row.chunk_sha256
+    || typeof row.chunk_sha256 !== 'object' || Array.isArray(row.chunk_sha256)) return false
+  const chunks = row.chunks as unknown[]
+  const hashes = row.chunk_sha256 as Record<string, unknown>
+  if (new Set(chunks).size !== chunks.length || Object.keys(hashes).length !== chunks.length) return false
+  return chunks.every((file, index) => {
+    if (typeof file !== 'string') return false
+    const match = CHUNK_RE.exec(file)
+    const digest = hashes[file]
+    if (!match || typeof digest !== 'string') return false
+    return match[1] === String(index).padStart(3, '0')
+      && SHA256_RE.test(digest) && digest.startsWith(match[2])
+  })
+}
+
+function validScreenFund(row: unknown): row is ScreenFund {
+  if (!row || typeof row !== 'object') return false
+  const item = row as Record<string, unknown>
+  const numeric = ['r1m', 'r3m', 'r6m', 'r1y', 'r3y', 'ytd', 'fee'] as const
+  return typeof item.c === 'string' && /^\d{6}$/.test(item.c)
+    && typeof item.n === 'string' && item.n.trim().length > 0
+    && typeof item.t === 'string' && CATS.includes(item.t)
+    && numeric.every((field) => item[field] === null
+      || (typeof item[field] === 'number' && Number.isFinite(item[field])))
+    && (item.fee === null || (typeof item.fee === 'number' && item.fee >= 0 && item.fee <= 100))
+}
+
+function validFunds(rows: unknown, expectedTotal?: number): rows is ScreenFund[] {
+  return Array.isArray(rows) && (expectedTotal == null || rows.length === expectedTotal)
+    && rows.every(validScreenFund)
+    && new Set(rows.map((row) => (row as ScreenFund).c)).size === rows.length
+}
+
+function validLegacy(raw: unknown): raw is { updated: string; funds: ScreenFund[] } {
+  if (!raw || typeof raw !== 'object') return false
+  const row = raw as Record<string, unknown>
+  return row.schema_version === 2 && row.source === 'eastmoney_fund_ranking'
+    && validIsoDate(row.updated)
+    && typeof row.fetched_at === 'string' && /\+08:00$/.test(row.fetched_at)
+    && Number.isFinite(Date.parse(row.fetched_at)) && validFunds(row.funds)
+}
 
 export async function loadScreener(): Promise<{ funds: ScreenFund[]; updated: string }> {
   if (cache) return cache
   const base = `${import.meta.env.BASE_URL}data/screener`
-  const manifestResponse = await fetch(`${base}/manifest.json`)
+  const manifestResponse = await fetch(`${base}/manifest.json`, { cache: 'no-cache' })
   if (manifestResponse.ok) {
-    const manifest = await manifestResponse.json() as { updated: string; chunks: string[] }
-    if (Array.isArray(manifest.chunks)) {
-      const chunks = await Promise.all(manifest.chunks.map(async (file) => {
-        const response = await fetch(`${base}/${file}`)
-        if (!response.ok) throw new Error('排行数据分片加载失败')
-        return (await response.json() as { funds: ScreenFund[] }).funds || []
-      }))
-      cache = { funds: chunks.flat(), updated: manifest.updated || '' }
-      return cache
+    const manifest = await manifestResponse.json() as unknown
+    if (!validManifest(manifest, 'funds')) throw new Error('排行数据清单格式无效')
+    const chunks = await Promise.all(manifest.chunks.map(async (file) => {
+      const response = await fetch(`${base}/${file}`, { cache: 'force-cache' })
+      if (!response.ok) throw new Error('排行数据分片加载失败')
+      const text = await response.text()
+      if (await sha256Text(text) !== manifest.chunk_sha256[file]) throw new Error('排行数据分片校验失败')
+      const prefix = '{"funds":'
+      if (!text.startsWith(prefix) || !text.endsWith('}')) throw new Error('排行数据分片格式无效')
+      const arrayText = text.slice(prefix.length, -1)
+      if (!arrayText.startsWith('[') || !arrayText.endsWith(']')) throw new Error('排行数据分片格式无效')
+      let payload: unknown
+      try { payload = JSON.parse(text) } catch { throw new Error('排行数据分片格式无效') }
+      const rows = (payload as { funds?: unknown })?.funds
+      if (!Array.isArray(rows) || !rows.every(validScreenFund)) throw new Error('排行数据分片格式无效')
+      return { rows, arrayText }
+    }))
+    const funds = chunks.flatMap((chunk) => chunk.rows)
+    if (!validFunds(funds, manifest.total)) throw new Error('排行数据分片不完整')
+    const datasetText = `[${chunks.map((chunk) => chunk.arrayText.slice(1, -1)).filter(Boolean).join(',')}]`
+    if (await sha256Text(datasetText) !== manifest.sha256) {
+      throw new Error('排行数据集合校验失败')
     }
+    cache = { funds, updated: manifest.updated }
+    return cache
   }
-  const legacy = await fetch(`${import.meta.env.BASE_URL}data/screener.json`)
+  const legacy = await fetch(`${import.meta.env.BASE_URL}data/screener.json`, { cache: 'no-cache' })
   if (!legacy.ok) throw new Error('暂无排行数据')
-  const d = (await legacy.json()) as { updated: string; funds: ScreenFund[] }
-  cache = { funds: d.funds || [], updated: d.updated || '' }
+  const d = await legacy.json() as unknown
+  if (!validLegacy(d)) throw new Error('排行数据格式无效')
+  cache = { funds: d.funds, updated: d.updated }
   return cache
 }
 
-const CATS = ['指数型', '股票型', '混合型', '债券型', 'QDII', 'FOF']
 export function catOf(t: string | null): string | null {
   if (!t) return null
   for (const c of CATS) if (t.includes(c)) return c
@@ -66,8 +155,14 @@ function scale(x: number | null, lo: number, hi: number): number | null {
   return clamp(((x - lo) / (hi - lo)) * 100)
 }
 
+/** 排行综合质量所需的核心收益证据覆盖率。三个区间缺一即低于 70%。 */
+export function screenQualityCoverage(f: ScreenFund): number {
+  return [f.r1y, f.r3y, f.r6m].filter((value) => value != null && Number.isFinite(value)).length / 3
+}
+
 /** V6-P4：用现有排行字段估算「决策质量分」0–100（非后端四维评分，供选基排序/筛选）。 */
 export function screenQuality(f: ScreenFund): number | null {
+  if (screenQualityCoverage(f) < 0.7) return null
   const r1 = scale(f.r1y, -20, 60)
   const r3 = scale(f.r3y, -30, 120)
   const r6 = scale(f.r6m, -15, 80)

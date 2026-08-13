@@ -10,6 +10,7 @@ r"""司南基金 后端入口（FastAPI）。
 基金全集需要时通过 POST /api/admin/refresh-universe 手动刷新，避免冷启动被网络请求拖慢。
 """
 import logging
+import os
 import re
 from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
@@ -39,6 +40,16 @@ log = logging.getLogger(__name__)
 
 NAV_TAIL = 800  # 返回给前端的净值条数（≈3年，供走势图 / 定投回放 / 指标计算）
 STARTED_AT = datetime.now(timezone.utc).isoformat()
+
+
+def _deployment_status() -> dict:
+    """Expose only a validated source commit, never arbitrary environment text."""
+    raw_commit = os.environ.get("RENDER_GIT_COMMIT", "").strip().lower()
+    commit = raw_commit if re.fullmatch(r"[0-9a-f]{40}", raw_commit) else None
+    return {
+        "platform": "render" if os.environ.get("RENDER") == "true" else "local",
+        "commit": commit,
+    }
 
 
 @asynccontextmanager
@@ -196,6 +207,7 @@ def health() -> dict:
         "status": "ok",
         "service": "fund-compass",
         "version": app.version,
+        "deployment": _deployment_status(),
         "started_at": STARTED_AT,
         "universe": universe,
         "universe_ready": universe > 0,

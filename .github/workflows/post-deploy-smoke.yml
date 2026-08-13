@@ -1,23 +1,34 @@
 name: post-deploy-smoke
 
 on:
-  workflow_run:
-    workflows: ["Deploy frontend to GitHub Pages"]
-    types: [completed]
-  workflow_dispatch:
+  workflow_call:
+    inputs:
+      target_sha:
+        description: Exact validated and deployed main commit to verify
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: post-deploy-smoke
+  cancel-in-progress: true
 
 jobs:
   smoke:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     env:
       FUND_API_BASE: ${{ secrets.FUND_API_BASE }}
       WORKER_BASE: https://sinan-estimate-push.ligugu69.workers.dev
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ inputs.target_sha }}
+      - name: 校验精确源码
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "${{ inputs.target_sha }}"
       - name: 读取并校验目标版本
         id: release
         shell: bash
@@ -33,32 +44,248 @@ jobs:
       - name: 检查 GitHub Pages 版本
         env:
           EXPECTED_VERSION: ${{ steps.release.outputs.version }}
+          EXPECTED_SHA: ${{ inputs.target_sha }}
         shell: bash
         run: |
           page=https://aureliuswu.github.io/fund-compass
           curl --fail --show-error --retry 4 --retry-delay 10 "$page/"
           for attempt in {1..24}; do
-            manifest=$(curl --fail --silent --show-error "$page/manifest.webmanifest?release=${GITHUB_SHA}" || true)
+            manifest=$(curl --fail --silent --show-error "$page/manifest.webmanifest?release=${EXPECTED_SHA}" || true)
+            deployed_commit=$(curl --fail --silent --show-error "$page/release.json?release=${EXPECTED_SHA}" | jq -r .commit 2>/dev/null || true)
             if jq -e --arg description "司南基金 v$EXPECTED_VERSION · 个人基金选基与择时辅助工具" '
               .name == "司南基金"
               and .lang == "zh-CN"
               and .description == $description
-            ' <<<"$manifest" >/dev/null 2>&1; then
+            ' <<<"$manifest" >/dev/null 2>&1 && [[ "$deployed_commit" == "${{ inputs.target_sha }}" ]]; then
               exit 0
             fi
             sleep 10
           done
           echo "Pages 未在时限内呈现 v$EXPECTED_VERSION" >&2
           exit 1
+      - name: 检查选基与富集静态数据契约
+        env:
+          PAGE_DATA_BASE: https://aureliuswu.github.io/fund-compass/data
+          RELEASE_SHA: ${{ inputs.target_sha }}
+        shell: bash
+        run: |
+          python - <<'PY'
+          import datetime
+          import hashlib
+          import json
+          import os
+          import re
+          import time
+          import urllib.parse
+          import urllib.request
+
+          base = os.environ["PAGE_DATA_BASE"].rstrip("/")
+          release = os.environ["RELEASE_SHA"]
+          date_pattern = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+          digest_pattern = re.compile(r"^[0-9a-f]{64}$")
+
+          def download(path: str) -> bytes:
+              quoted = "/".join(urllib.parse.quote(part) for part in path.split("/"))
+              url = f"{base}/{quoted}?release={urllib.parse.quote(release)}"
+              last_error = None
+              for attempt in range(4):
+                  try:
+                      with urllib.request.urlopen(url, timeout=30) as response:
+                          return response.read()
+                  except Exception as error:
+                      last_error = error
+                      if attempt < 3:
+                          time.sleep((attempt + 1) * 2)
+              raise RuntimeError(f"static asset download failed: {path}") from last_error
+
+          def load_json(path: str):
+              return json.loads(download(path).decode("utf-8"))
+
+          def verify_chunks(directory: str, collection: str, identity: str, minimum: int) -> None:
+              manifest = load_json(f"{directory}/manifest.json")
+              assert manifest.get("schema_version") == 2
+              assert manifest.get("collection") == collection
+              assert isinstance(manifest.get("total"), int) and manifest["total"] >= minimum
+              assert digest_pattern.fullmatch(str(manifest.get("sha256", "")))
+              chunks = manifest.get("chunks")
+              hashes = manifest.get("chunk_sha256")
+              assert isinstance(chunks, list) and chunks and len(chunks) == len(set(chunks))
+              assert isinstance(hashes, dict) and set(hashes) == set(chunks)
+
+              rows = []
+              for name in chunks:
+                  assert isinstance(name, str)
+                  assert re.fullmatch(r"part-\d{3}-[0-9a-f]{12}\.json", name)
+                  raw = download(f"{directory}/{name}")
+                  expected = hashes[name]
+                  assert digest_pattern.fullmatch(str(expected))
+                  assert hashlib.sha256(raw).hexdigest() == expected
+                  payload = json.loads(raw.decode("utf-8"))
+                  assert set(payload) == {collection}
+                  chunk_rows = payload[collection]
+                  assert isinstance(chunk_rows, list) and chunk_rows
+                  rows.extend(chunk_rows)
+
+              assert len(rows) == manifest["total"]
+              canonical = json.dumps(rows, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+              assert hashlib.sha256(canonical).hexdigest() == manifest["sha256"]
+              identities = [row.get(identity) for row in rows if isinstance(row, dict)]
+              assert len(identities) == len(rows)
+              assert all(isinstance(value, str) and value for value in identities)
+              assert len(identities) == len(set(identities))
+              if identity == "c":
+                  assert all(re.fullmatch(r"\d{6}", value) for value in identities)
+              elif identity == "id":
+                  assert all(re.fullmatch(r"\d+", value) for value in identities)
+              print(f"{directory}: chunks={len(chunks)} rows={len(rows)} sha256=ok unique=ok")
+
+          verify_chunks("screener", "funds", "c", 1000)
+          verify_chunks("managers", "managers", "id", 1000)
+
+          enrich = load_json("enrich/index.json")
+          assert enrich.get("schema_version") == 2
+          assert enrich.get("source") == "akshare_eastmoney"
+          datetime.datetime.fromisoformat(enrich["fetched_at"])
+          funds = enrich.get("funds")
+          assert isinstance(funds, list) and funds
+          codes = [row.get("code") for row in funds if isinstance(row, dict)]
+          assert len(codes) == len(funds) == len(set(codes))
+          assert all(isinstance(code, str) and re.fullmatch(r"\d{6}", code) for code in codes)
+
+          for summary in funds:
+              code = summary["code"]
+              detail = load_json(f"enrich/{code}.json")
+              assert detail.get("schema_version") == 2
+              assert detail.get("code") == code
+              assert detail.get("source") == "akshare_eastmoney"
+              datetime.datetime.fromisoformat(detail["fetched_at"])
+              for field in ("holdings_as_of", "industries_as_of"):
+                  value = detail.get(field)
+                  assert value is None or date_pattern.fullmatch(value)
+                  assert value == summary.get(field)
+              holdings = detail.get("holdings")
+              industries = detail.get("industries")
+              assert isinstance(holdings, list) and holdings
+              assert isinstance(industries, list) and industries
+              assert len(holdings) == summary.get("n_holdings")
+              assert len(industries) == summary.get("n_industries")
+              holding_codes = [row.get("code") for row in holdings if isinstance(row, dict)]
+              assert len(holding_codes) == len(holdings) == len(set(holding_codes))
+              assert all(re.fullmatch(r"\d{5,6}", value or "") for value in holding_codes)
+              assert all(isinstance(row.get("name"), str) and row["name"] for row in holdings)
+              assert all(isinstance(row.get("ratio"), (int, float)) and 0 < row["ratio"] <= 100 for row in holdings)
+              industry_names = [row.get("name") for row in industries if isinstance(row, dict)]
+              assert len(industry_names) == len(industries) == len(set(industry_names))
+              assert all(isinstance(row.get("ratio"), (int, float)) and 0 < row["ratio"] <= 100 for row in industries)
+          print(f"enrich: funds={len(funds)} details=all schema-v2")
+
+          valuation = load_json("index-valuation.json")
+          assert valuation.get("schema_version") == 2
+          assert valuation.get("source") == "legulegu"
+          assert date_pattern.fullmatch(str(valuation.get("updated", "")))
+          datetime.datetime.fromisoformat(valuation["fetched_at"])
+          indices = valuation.get("indices")
+          coverage = valuation.get("coverage")
+          assert isinstance(indices, list) and indices
+          assert isinstance(coverage, dict)
+          names = [row.get("name") for row in indices if isinstance(row, dict)]
+          assert len(names) == len(indices) == len(set(names))
+          core = {"沪深300", "上证50", "上证180", "中证100", "中证500", "中证1000"}
+          assert core.issubset(names)
+          assert coverage.get("core_requested") == len(core)
+          assert coverage.get("core_returned") == len(core)
+          assert coverage.get("returned") == len(indices)
+          assert isinstance(coverage.get("requested"), int) and coverage["requested"] >= len(indices)
+          assert isinstance(coverage.get("missing"), list)
+          assert len(coverage["missing"]) == len(set(coverage["missing"]))
+          assert not set(coverage["missing"]) & set(names)
+          assert len(indices) + len(coverage["missing"]) == coverage["requested"]
+          for row in indices:
+              assert date_pattern.fullmatch(str(row.get("date", "")))
+              values = (row.get("pe"), row.get("pb"))
+              assert any(isinstance(value, (int, float)) for value in values)
+              for field in ("pe_pct", "pb_pct"):
+                  value = row.get(field)
+                  assert value is None or isinstance(value, (int, float)) and 0 <= value <= 100
+              if row.get("name") in core:
+                  assert all(isinstance(row.get(field), (int, float)) for field in ("pe", "pb", "pe_pct", "pb_pct"))
+          assert valuation["updated"] == min(row["date"] for row in indices)
+          print(f"index-valuation: indices={len(indices)} core={len(core)} schema-v2")
+          PY
+      - name: 检查后端基金全集真实产物契约
+        env:
+          UNIVERSE_BASE: https://raw.githubusercontent.com/AureliusWu/fund-compass/${{ inputs.target_sha }}/backend/data
+        shell: bash
+        run: |
+          python - <<'PY'
+          import gzip
+          import hashlib
+          import json
+          import os
+          import re
+          import time
+          import urllib.request
+
+          base = os.environ["UNIVERSE_BASE"].rstrip("/")
+
+          def download(name: str) -> bytes:
+              last_error = None
+              for attempt in range(4):
+                  try:
+                      with urllib.request.urlopen(f"{base}/{name}", timeout=30) as response:
+                          return response.read()
+                  except Exception as error:
+                      last_error = error
+                      if attempt < 3:
+                          time.sleep((attempt + 1) * 2)
+              raise RuntimeError(f"universe asset download failed: {name}") from last_error
+
+          meta = json.loads(download("fund-universe.meta.json").decode("utf-8"))
+          compressed = download("fund-universe.json.gz")
+          assert compressed.startswith(b"\x1f\x8b")
+          payload = gzip.decompress(compressed)
+          digest = hashlib.sha256(payload).hexdigest()
+
+          assert isinstance(meta, dict)
+          assert meta.get("schema_version") == 1
+          assert isinstance(meta.get("fund_count"), int) and not isinstance(meta["fund_count"], bool)
+          assert meta["fund_count"] >= 1000
+          assert re.fullmatch(r"[0-9a-f]{64}", str(meta.get("sha256", "")))
+          assert digest == meta["sha256"]
+
+          funds = json.loads(payload)
+          assert isinstance(funds, list) and len(funds) == meta["fund_count"]
+          codes = []
+          for row in funds:
+              assert isinstance(row, dict) and set(row) == {"code", "name", "type", "pinyin"}
+              code = row["code"]
+              name = row["name"]
+              assert isinstance(code, str) and re.fullmatch(r"\d{6}", code)
+              assert isinstance(name, str) and name == name.strip() and 0 < len(name) <= 200
+              for field in ("type", "pinyin"):
+                  value = row[field]
+                  assert value is None or isinstance(value, str) and len(value) <= 200
+              codes.append(code)
+
+          assert codes == sorted(codes)
+          assert len(codes) == len(set(codes))
+          print(f"fund-universe: rows={len(funds)} gzip=ok sha256=ok unique=ok sorted=ok")
+          PY
       - name: 检查后端版本、基金与策略注册表
         env:
           EXPECTED_VERSION: ${{ steps.release.outputs.version }}
+          EXPECTED_SHA: ${{ inputs.target_sha }}
         shell: bash
         run: |
           api=${FUND_API_BASE:-https://fund-compass-api.onrender.com}
           for attempt in {1..40}; do
             health=$(curl --fail --silent --show-error "$api/api/health" || true)
-            if jq -e --arg version "$EXPECTED_VERSION" '.status == "ok" and .version == $version' <<<"$health" >/dev/null 2>&1; then
+            if jq -e --arg version "$EXPECTED_VERSION" --arg commit "$EXPECTED_SHA" '
+              .status == "ok"
+              and .version == $version
+              and .deployment.platform == "render"
+              and .deployment.commit == $commit
+            ' <<<"$health" >/dev/null 2>&1; then
               break
             fi
             if [ "$attempt" -eq 40 ]; then
@@ -71,6 +298,9 @@ jobs:
             .database.engine == "sqlite"
             and .database.persistence == "ephemeral"
             and .database.durable == false
+            and .universe_ready == true
+            and (.universe | type) == "number"
+            and .universe >= 1000
           ' <<<"$health" >/dev/null
           fund=$(curl --fail --silent --show-error "$api/api/fund/005844")
           jq -e '

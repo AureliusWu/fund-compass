@@ -18,8 +18,8 @@ permissions:
   actions: write
 
 concurrency:
-  group: fund-universe
-  cancel-in-progress: false
+  group: scheduled-data-main
+  queue: max
 
 jobs:
   build:
@@ -36,15 +36,50 @@ jobs:
             backend/requirements-dev.txt
       - run: python -m pip install -r backend/requirements.txt -r backend/requirements-dev.txt
       - run: python tools/build_universe.py
-      - run: python -m pytest tests/test_universe_artifact.py
+      - name: Verify the generated artifact and metadata pair
+        run: python tools/build_universe.py --verify
+      - run: python -m pytest tests/test_universe_artifact.py tests/test_build_universe_tool.py
         working-directory: backend
-      - uses: stefanzweifel/git-auto-commit-action@v5
-        id: commit
-        with:
-          commit_message: 'chore: refresh fund universe artifact'
-          file_pattern: 'backend/data/fund-universe.json.gz backend/data/fund-universe.meta.json'
-      - name: Trigger CI for generated data commit
-        if: steps.commit.outputs.changes_detected == 'true'
+      - name: Commit generated data and trigger exact-source CI
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run ci.yml --ref main
+        run: |
+          if [[ -n "$(git status --porcelain backend/data/fund-universe.json.gz backend/data/fund-universe.meta.json)" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add backend/data/fund-universe.json.gz backend/data/fund-universe.meta.json
+            git commit -m "chore: refresh fund universe artifact"
+            base_sha=$(git rev-parse HEAD^)
+            pushed=false
+            for attempt in 1 2 3; do
+              if ! git fetch --no-tags origin main; then
+                sleep $((attempt * 2))
+                continue
+              fi
+              remote_sha=$(git rev-parse origin/main)
+              [[ "$remote_sha" == "$base_sha" ]] || {
+                echo "main changed while data was generated; rerun on the new HEAD" >&2
+                exit 1
+              }
+              if git push origin HEAD:main; then
+                pushed=true
+                break
+              fi
+              sleep $((attempt * 2))
+            done
+            [[ "$pushed" == "true" ]] || { echo "Failed to push generated data" >&2; exit 1; }
+            commit_sha=$(git rev-parse HEAD)
+            dispatched=false
+            for attempt in 1 2 3; do
+              if gh workflow run ci.yml --ref main -f target_sha="$commit_sha"; then
+                dispatched=true
+                break
+              fi
+              sleep $((attempt * 2))
+            done
+            [[ "$dispatched" == "true" ]] || { echo "Failed to create exact-source CI run" >&2; exit 1; }
+            echo "Created exact-source CI run for generated commit"
+          else
+            echo "No universe changes"
+          fi

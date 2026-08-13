@@ -1,6 +1,6 @@
 # Changelog
 
-## 7.0.0 - 2026-08-12
+## 7.0.0 - 2026-08-13
 
 - 盘中估值新增 `holdings_model`：参考蜉蝣基金的公开持仓穿透方法，在司南 Worker 内独立实现，以公开披露持仓、可用行情和最近正式净值生成非官方参考估值，并保留覆盖率、行情时间、持仓披露日期和模型状态证据；批量响应用 `accounting` 对直接盘中、模型、正式净值降级与不可用结果逐项守恒计数。
 - **Breaking contract**：`GET /estimates` 的 `est_kind` 不再只有实时估值表与 `official_nav`，客户端必须显式处理 `holdings_model`；该分支使用 `source=eastmoney_holdings_model`、`status=modeled`、`source_time_precision=datetime`、`est_realtime=false`，并通过 `model_coverage`、`model_quote_count`、`model_report_date` 和报价时间范围说明证据。不得仅凭 `est_nav` 为数值就认定它是基金公司净值或官方实时估值。`official_nav` 与 `unavailable` 的降级/空值语义继续保留。
@@ -12,6 +12,11 @@
 - 前端、API、Worker、PWA 描述与锁文件统一升级为 7.0.0。Render 免费实例仍为临时 SQLite，生产预期保持 `ephemeral / durable=false`；自然 Cron 成功仍需在部署后的工作日 14:30/14:40 观测。
 - 安全配置收紧：`GIST_ID` 不再写入公开的 `wrangler.toml`，改由 Cloudflare/GitHub Secret 注入。历史中曾出现的 Gist ID 必须在生产切换前轮换；GitHub secret Gist 不等同于真正私有存储。
 - Gist 轮换恢复采用失败关闭：浏览器命中已删除的旧 ID 后只读重绑定，必须先成功下载并完成 schema 校验/本地合并，才允许再次上传；自选与手工资产分别加写锁，避免旧设备整文件覆盖新 Gist。
+- 选基与富集任务移除私有自选 Gist 输入，公开产物只允许审核过的 4 个基金种子；持仓和行业分别记录真实披露期，缺失比例保持为空，过期或无日期证据不再冒充最新季报。
+- 基金排行、经理、持仓和指数估值统一失败关闭：HTTPS、有限重试、响应总数/分页/唯一性/覆盖率门禁、原子发布和内容寻址分片；指数源日期缺失时拒绝更新，不再用任务日期伪造新鲜度。
+- 海外精度账本停用已退役的 fundgz，按观察日、目标净值归属日和基准净值日分别落账；心跳不再刷新有效样本时间，错位历史样本不参与精度汇总或自动校准。
+- 定时数据任务使用完整等待队列并在推送数据提交后重试派发精确 SHA 的 CI；CI 成为唯一发布编排器，依次执行三端门禁、Pages 部署和生产烟测，不再依赖机器人 push 的隐式级联。
+- 生产烟测新增静态分片内容哈希/行数、富集明细、指数估值和 Render 精确提交检查；运维页只用自然 `schedule` 运行判断定期任务健康，手工验收不会覆盖自然失败。
 
 ## 6.0.6 - 2026-08-09
 

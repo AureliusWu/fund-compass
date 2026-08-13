@@ -1,13 +1,21 @@
 {
-  "status": "healthy",
+  "status": "warning",
   "errors": [],
-  "warnings": [],
+  "warnings": [
+    "已保留并排除 17 条历史日期轴错位样本"
+  ],
   "stats": {
     "records": 19,
     "statuses": {
       "observed_only": 2,
-      "settled": 17
-    }
+      "legacy_misaligned": 17
+    },
+    "prediction_due": false,
+    "prediction_expected": false,
+    "effective_predictions_for_observation": 0,
+    "legacy_misaligned": 17,
+    "prediction_effective_age_hours": null,
+    "settlement_effective_age_hours": null
   },
-  "updated_at": "2026-08-12T16:02:01+08:00"
+  "updated_at": "2026-08-13T13:46:49+08:00"
 }

@@ -4,6 +4,8 @@ import importlib.util
 import json
 from pathlib import Path
 
+import pytest
+
 
 SCRIPT = Path(__file__).resolve().parents[2] / "tools" / "estimate_push.py"
 SPEC = importlib.util.spec_from_file_location("estimate_push", SCRIPT)
@@ -627,6 +629,7 @@ def _install_main_probe(monkeypatch, decision_call):
     sends = []
     monkeypatch.setattr(estimate_push.datetime, "datetime", FixedDateTime)
     monkeypatch.setattr(estimate_push, "GIST_TOKEN", "gist-token")
+    monkeypatch.setattr(estimate_push, "GIST_ID", "a" * 32)
     monkeypatch.setattr(estimate_push, "FUND_API_BASE", "https://api.test")
     monkeypatch.setattr(estimate_push, "WORKER_TOKEN", "worker-token")
     monkeypatch.setattr(estimate_push, "FORCE", False)
@@ -659,13 +662,33 @@ def _install_main_probe(monkeypatch, decision_call):
     return written, sends
 
 
+def test_gist_target_must_be_explicit_and_is_never_enumerated(monkeypatch):
+    monkeypatch.setattr(estimate_push, "GIST_ID", "")
+    monkeypatch.setattr(
+        estimate_push,
+        "_gh",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not enumerate Gists")),
+    )
+
+    assert estimate_push.find_gist_id() is None
+
+
+def test_main_fails_closed_when_gist_configuration_is_missing(monkeypatch):
+    monkeypatch.setattr(estimate_push, "FORCE", True)
+    monkeypatch.setattr(estimate_push, "GIST_TOKEN", "")
+    monkeypatch.setattr(estimate_push, "GIST_ID", "")
+
+    with pytest.raises(SystemExit, match="GIST_TOKEN"):
+        estimate_push.main()
+
+
 def test_main_records_decision_timeout_as_sent_with_warning(monkeypatch):
     written, sends = _install_main_probe(
         monkeypatch,
         lambda *_args, **_kwargs: (None, "组合决策暂不可用: timed out"),
     )
 
-    estimate_push.main()
+    assert estimate_push.main() == 0
 
     assert sends == [True]
     assert written[-1]["sent_slots"] == ["14:30"]
@@ -682,7 +705,7 @@ def test_main_records_auth_failure_without_sending_or_marking_sent(monkeypatch):
 
     written, sends = _install_main_probe(monkeypatch, auth_failure)
 
-    estimate_push.main()
+    assert estimate_push.main() == 1
 
     assert sends == []
     assert written[-1]["sent_slots"] == []
@@ -702,9 +725,31 @@ def test_main_does_not_mark_sent_when_provider_does_not_acknowledge(monkeypatch)
         lambda *_args: sends.append(True) or False,
     )
 
-    estimate_push.main()
+    assert estimate_push.main() == 1
 
     assert sends == [True]
+    assert written == []
+
+
+def test_main_fails_closed_when_state_read_fails(monkeypatch):
+    written, sends = _install_main_probe(monkeypatch, lambda *_args, **_kwargs: (None, None))
+    monkeypatch.setattr(
+        estimate_push,
+        "gist_file",
+        lambda *_args: (_ for _ in ()).throw(OSError("temporary failure")),
+    )
+
+    assert estimate_push.main() == 1
+    assert sends == []
+    assert written == []
+
+
+def test_main_fails_closed_when_state_is_malformed(monkeypatch):
+    written, sends = _install_main_probe(monkeypatch, lambda *_args, **_kwargs: (None, None))
+    monkeypatch.setattr(estimate_push, "gist_file", lambda *_args: '{"date":"bad"}')
+
+    assert estimate_push.main() == 1
+    assert sends == []
     assert written == []
 
 

@@ -1,6 +1,6 @@
 # 部署指南
 
-前端通过 `CI` 成功后的 `Deploy frontend to GitHub Pages` 工作流自动部署。由 GitHub Actions 生成并提交的持仓、经理、基金全集、海外精度或校准数据，会在提交成功后显式调度一次 `CI`；这样既能让 Pages 跟进静态数据，又不会依赖 `GITHUB_TOKEN` push 自动触发新工作流，也不会形成提交循环。要让线上拿到真实数据，还需把**后端部署到公网**并让前端指向它。
+前端只通过 `CI` 的可复用 Pages 作业部署。CI 锁定 `origin/main` 的精确提交，后端、前端和 Worker 门禁全部通过后才部署并执行生产 smoke。由 GitHub Actions 生成并提交的持仓、经理、基金全集、海外精度或校准数据，会在提交成功后带精确 SHA 重试派发一次 `CI`；这样既能让 Pages 跟进静态数据，又不会依赖 `GITHUB_TOKEN` push 自动触发新工作流，也不会形成提交循环。要让线上拿到真实数据，还需把**后端部署到公网**并让前端指向它。
 
 ## 一、部署后端（任选其一）
 
@@ -64,12 +64,16 @@ services:
 1. GitHub 仓库 → Settings → Secrets and variables → Actions → **Variables** → New，
    - Name：`VITE_API_BASE`
    - Value：你的后端地址 + `/api`，例如 `https://fund-compass-api.onrender.com/api`
-2. 触发前端重新部署：改动 `frontend/**` 后 push，或在 Actions 里手动 Run workflow（`Deploy frontend to GitHub Pages`）。
+2. 触发前端重新部署：push 到 `main`，或在 Actions 中手工运行 `CI` 并传入当前 `main` 的完整 40 位提交 SHA。`Deploy frontend to GitHub Pages` 是可复用子工作流，不能绕过 CI 单独发布。
 3. 打开 https://aureliuswu.github.io/fund-compass/ ，选基 / 自选 / 详情 / 对比都能拿到真实数据。
 
 ## 发布与回滚
 
-发布必须绑定同一个精确提交完成以下闭环：本地全量门禁 → push `main` → CI → Pages → Render → 手动部署 Worker → `post-deploy-smoke`。Pages、API 与 Worker 均报告目标版本后，才创建版本标签。自动数据提交也要经过显式调度的 CI/Pages 链路，不能只看到仓库数据更新就认为生产静态数据已经更新。
+发布必须绑定同一个精确提交完成以下闭环：本地全量门禁 → push `main` → CI → Pages → Render → 必要时部署 Worker → `post-deploy-smoke`。Pages 的 `release.json`、API 健康接口的 Render commit 与目标 SHA 必须一致；Worker 有源码变化时还必须核对实际部署 version，只有版本号相同不能证明部署。全部通过后才创建版本标签。自动数据提交也要经过显式调度的 CI/Pages 链路，不能只看到仓库数据更新就认为生产静态数据已经更新。
+
+选基、经理和持仓静态数据使用 schema v2 清单与内容哈希；生产 smoke 会下载全部分片，核对 SHA-256、行数、唯一性、披露日期与明细文件。指数估值只接受真实源日期和可用核心 PE 分位，任务运行日期不能替代行情日期。定期任务状态页只统计自然 `schedule` 运行；手工验收结果必须单独记录，不能遮盖最近一次自然失败。
+
+GitHub schedule 不保证金融时点准时。海外精度任务必须保存真实观察时间与调度延迟，迟到样本不得回填为计划时刻；观察日、目标净值归属日和基准净值日必须分别记录。自然定时产出仍需后续交易日证据，手工 workflow 只验证代码链路且默认禁止模型自动晋级。
 
 Worker 的 HTTP 健康和估值烟测不会触发通知；禁止在发布烟测中调用受保护的 `POST /test` 或运行 `manual-estimate-push`。自然 Cron 是否成功，只能由部署后的工作日北京时间 14:30/14:40 的新记录证明，不能用 Worker 部署成功代替。
 

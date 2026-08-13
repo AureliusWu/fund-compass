@@ -19,12 +19,30 @@ let lock: Promise<unknown> = Promise.resolve() // 串行化 window.apidata 访�
 function loadLS(code: string): Holding[] | null {
   try {
     const r = JSON.parse(localStorage.getItem(LS + code) || 'null')
-    if (r && Array.isArray(r.v) && Date.now() - r.t < TTL) return r.v
+    if (r && Array.isArray(r.v) && Date.now() - r.t < TTL) {
+      const rows = r.v.map((row: unknown) => {
+        if (!row || typeof row !== 'object') return null
+        const item = row as Record<string, unknown>
+        return normalizeHoldingRow(item.code, item.name, item.ratio)
+      })
+        .filter((row: Holding | null): row is Holding => row != null)
+      return rows.length ? rows : null
+    }
   } catch { /* ignore */ }
   return null
 }
 function saveLS(code: string, v: Holding[]) {
   try { localStorage.setItem(LS + code, JSON.stringify({ t: Date.now(), v })) } catch { /* 容量满忽略 */ }
+}
+
+export function normalizeHoldingRow(codeValue: unknown, nameValue: unknown, ratioValue: unknown): Holding | null {
+  const code = String(codeValue ?? '').trim()
+  const name = String(nameValue ?? '').trim()
+  const ratioText = String(ratioValue ?? '').trim().replace('%', '')
+  if (!/^\d{5,6}$/.test(code) || !name || !ratioText) return null
+  const ratio = Number(ratioText)
+  if (!Number.isFinite(ratio) || ratio <= 0 || ratio > 100) return null
+  return { code, name, ratio }
 }
 
 function parseHoldings(html: string): Holding[] {
@@ -38,10 +56,12 @@ function parseHoldings(html: string): Holding[] {
     if (cells.length < 7) return
     const codeEl = cells[1].querySelector('a')
     const nameEl = cells[2].querySelector('a')
-    const code = (codeEl?.textContent || cells[1].textContent || '').trim()
-    const name = (nameEl?.textContent || cells[2].textContent || '').trim()
-    const ratio = parseFloat((cells[6].textContent || '').trim()) || 0
-    if (code && name) out.push({ code, name, ratio })
+    const row = normalizeHoldingRow(
+      codeEl?.textContent || cells[1].textContent,
+      nameEl?.textContent || cells[2].textContent,
+      cells[6].textContent,
+    )
+    if (row) out.push(row)
   })
   return out
 }

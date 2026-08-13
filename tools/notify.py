@@ -11,17 +11,21 @@
 
 环境变量：
   API_BASE     后端 API 基址（默认线上 Render）
+  GIST_ID      App 云同步使用的唯一 Gist ID（必填；禁止遍历账号 Gist）
   GIST_TOKEN   GitHub PAT（gist 权限，与 App 云同步用的同一个）
-  SC_SENDKEY   Server酱 SENDKEY
+  SC_SENDKEY   Server酱 SENDKEY（必填）
   FORCE        "1"/"true" 忽略交易时段强制运行 + 发推送测试
 """
 import datetime
 import json
 import os
+import re
+import sys
 import urllib.parse
 import urllib.request
 
 API_BASE = os.environ.get("API_BASE", "https://fund-compass-api.onrender.com/api").rstrip("/")
+GIST_ID = os.environ.get("GIST_ID", "").strip()
 GIST_TOKEN = os.environ.get("GIST_TOKEN", "").strip()
 SC_SENDKEY = os.environ.get("SC_SENDKEY", "").strip()
 FORCE = os.environ.get("FORCE", "").lower() in ("1", "true", "yes")
@@ -42,11 +46,15 @@ def _req(url, data=None, headers=None, method=None, timeout=90):
 
 
 def gh(url, data=None, method=None):
-    return _req(url, data=data, method=method, headers={
-        "Authorization": f"token {GIST_TOKEN}",
-        "Accept": "application/vnd.github+json",
-        "Content-Type": "application/json",
-    })
+    try:
+        return _req(url, data=data, method=method, headers={
+            "Authorization": f"token {GIST_TOKEN}",
+            "Accept": "application/vnd.github+json",
+            "Content-Type": "application/json",
+        })
+    except Exception:
+        # 不把包含私有 Gist ID 的请求 URL 带进 Actions 日志。
+        raise RuntimeError("Gist request failed") from None
 
 
 def trading_now() -> bool:
@@ -58,26 +66,16 @@ def trading_now() -> bool:
     return (570 <= m <= 690) or (780 <= m <= 900)
 
 
-def find_gist_id():
-    for page in range(1, 6):
-        arr = json.loads(gh(f"{GH}/gists?per_page=100&page={page}"))
-        if not arr:
-            return None
-        for g in arr:
-            if WATCH_FILE in (g.get("files") or {}):
-                return g["id"]
-        if len(arr) < 100:
-            return None
-    return None
-
-
 def gist_file(gid, name):
     data = json.loads(gh(f"{GH}/gists/{gid}"))
     f = (data.get("files") or {}).get(name)
     if not f:
         return None
     if f.get("truncated") and f.get("raw_url"):  # 大文件 content 被截断时走 raw
-        return _req(f["raw_url"], headers={"User-Agent": "sinan-bot"})
+        try:
+            return _req(f["raw_url"], headers={"User-Agent": "sinan-bot"})
+        except Exception:
+            raise RuntimeError("Gist raw file request failed") from None
     return f.get("content")
 
 
@@ -95,75 +93,99 @@ def get_signal(code):
 
 def notify(title, desp):
     body = urllib.parse.urlencode({"title": title, "desp": desp}).encode()
-    out = _req(f"https://sctapi.ftqq.com/{SC_SENDKEY}.send", data=body,
-               headers={"Content-Type": "application/x-www-form-urlencoded"}, timeout=30)
-    print("server酱:", out[:160])
+    try:
+        _req(f"https://sctapi.ftqq.com/{SC_SENDKEY}.send", data=body,
+             headers={"Content-Type": "application/x-www-form-urlencoded"}, timeout=30)
+    except Exception:
+        # HTTPError 会携带含 SENDKEY 的 URL，统一收口为无敏感信息错误。
+        raise RuntimeError("ServerChan request failed") from None
+    print("server酱: ok")
 
 
-def main():
+def main() -> int:
+    missing = [name for name, value in (
+        ("GIST_ID", GIST_ID),
+        ("GIST_TOKEN", GIST_TOKEN),
+        ("SC_SENDKEY", SC_SENDKEY),
+    ) if not value]
+    if missing:
+        print(f"缺少必需配置：{', '.join(missing)}", file=sys.stderr)
+        return 2
+    if not re.fullmatch(r"[0-9a-fA-F]{20,64}", GIST_ID):
+        print("GIST_ID 格式无效", file=sys.stderr)
+        return 2
+
     if not trading_now() and not FORCE:
-        print("非交易时段，跳过"); return
+        print("非交易时段，跳过")
+        return 0
 
     try:
-        _req(f"{API_BASE}/health", timeout=120); print("health ok（已保活）")
-    except Exception as e:
-        print("health ping failed:", e)
+        _req(f"{API_BASE}/health", timeout=120)
+        print("health ok（已保活）")
+    except Exception:
+        print("health ping failed")
 
-    if not GIST_TOKEN:
-        print("未配置 GIST_TOKEN，无法读取自选"); return
-    gid = find_gist_id()
-    if not gid:
-        print("未找到自选 Gist（请先在 App 配置云同步并上传自选）"); return
+    gid = GIST_ID
 
     raw = gist_file(gid, WATCH_FILE)
     entries = json.loads(raw) if raw else []
+    if not isinstance(entries, list):
+        print("自选 Gist 数据格式无效", file=sys.stderr)
+        return 1
     codes = [e["code"] for e in entries
              if isinstance(e, dict) and e.get("code") and not e.get("deleted")]
+    if any(not isinstance(code, str) or not re.fullmatch(r"\d{6}", code) for code in codes):
+        print("自选 Gist 含无效基金代码", file=sys.stderr)
+        return 1
+    codes = list(dict.fromkeys(codes))
     if not codes:
-        print("自选为空"); return
+        print("自选为空")
+        return 0
 
     sraw = gist_file(gid, STATE_FILE)
     state = json.loads(sraw) if sraw else {}
+    if not isinstance(state, dict):
+        print("信号状态 Gist 数据格式无效", file=sys.stderr)
+        return 1
     seeding = not state
 
     new_state, names, changes = {}, {}, []
+    signal_failures = 0
     for c in codes:
         try:
             sig, name = get_signal(c)
-        except Exception as e:
-            print("signal fail", c, e)
+        except Exception:
+            signal_failures += 1
             if c in state:
                 new_state[c] = state[c]
             continue
         names[c] = name
         if not sig:
+            signal_failures += 1
             continue
         new_state[c] = sig
         prev = state.get(c)
         if prev and prev != sig:
             changes.append((c, name, prev, sig))
 
-    if FORCE and SC_SENDKEY:  # 手动运行：发一条测试，校验通道
+    if signal_failures:
+        print(f"signal fetch failed: count={signal_failures}", file=sys.stderr)
+        return 1
+
+    if FORCE:  # 手动运行：发一条测试，校验通道
         rows = [f"- **{names.get(c, c)}**（{c}）：{new_state.get(c, '—')}" for c in codes]
-        try:
-            notify("司南基金 · 推送测试", "当前自选信号：\n" + "\n".join(rows) +
-                   "\n\n> 这是手动测试推送，收到即说明通道已通。")
-        except Exception as e:
-            print("test notify failed:", e)
-    elif changes and SC_SENDKEY:  # 定时运行：仅信号变化才推
+        notify("司南基金 · 推送测试", "当前自选信号：\n" + "\n".join(rows) +
+               "\n\n> 这是手动测试推送，收到即说明通道已通。")
+    elif changes:  # 定时运行：仅信号变化才推
         title = f"司南基金 · {len(changes)} 只信号变化"
         lines = [f"- **{n}**（{c}）：{p} → **{s}**" for c, n, p, s in changes]
         desp = "\n".join(lines) + "\n\n> 仅供个人参考，不构成投资建议。"
-        try:
-            notify(title, desp)
-        except Exception as e:
-            print("notify failed:", e)
-    elif changes:
-        print("有变化但未配置 SC_SENDKEY：", changes)
+        notify(title, desp)
 
     write_state(gid, new_state)
     print(f"codes={len(codes)} changes={len(changes)} seeding={seeding}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

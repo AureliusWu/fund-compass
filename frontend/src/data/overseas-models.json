@@ -1,6 +1,11 @@
 {
-  "schema": 1,
-  "updated_at": "2026-08-12T16:02:01+08:00",
+  "schema": 2,
+  "evidence_migration": {
+    "id": "observation-target-v2",
+    "applied_at": "2026-08-13T13:46:49+08:00",
+    "legacy_records_excluded": 17
+  },
+  "updated_at": "2026-08-13T13:46:49+08:00",
   "models": {
     "539002": {
       "name": "建信新兴市场混合(QDII)A",
@@ -77,8 +82,12 @@
         "version": "candidate-20260812",
         "created_at": "2026-08-12T16:02:01+08:00",
         "status": "collecting",
-        "samples": 6,
-        "required": 20
+        "samples": 0,
+        "required": 20,
+        "data_fingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "data_effective_at": null,
+        "evidence_alignment": "observation-target-v2",
+        "evidence_reset_reason": "legacy_same_day_axis_quarantined"
       },
       "history": [],
       "governance": {
@@ -86,7 +95,7 @@
         "min_samples": 20,
         "poor_cycles": 0,
         "drift_evidence": {
-          "samples": 6,
+          "samples": 0,
           "reason": "insufficient"
         }
       }
@@ -166,8 +175,12 @@
         "version": "candidate-20260812",
         "created_at": "2026-08-12T16:02:01+08:00",
         "status": "collecting",
-        "samples": 5,
-        "required": 20
+        "samples": 0,
+        "required": 20,
+        "data_fingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "data_effective_at": null,
+        "evidence_alignment": "observation-target-v2",
+        "evidence_reset_reason": "legacy_same_day_axis_quarantined"
       },
       "history": [],
       "governance": {
@@ -175,7 +188,7 @@
         "min_samples": 20,
         "poor_cycles": 0,
         "drift_evidence": {
-          "samples": 5,
+          "samples": 0,
           "reason": "insufficient"
         }
       }
@@ -255,8 +268,12 @@
         "version": "candidate-20260812",
         "created_at": "2026-08-12T16:02:01+08:00",
         "status": "collecting",
-        "samples": 6,
-        "required": 20
+        "samples": 0,
+        "required": 20,
+        "data_fingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "data_effective_at": null,
+        "evidence_alignment": "observation-target-v2",
+        "evidence_reset_reason": "legacy_same_day_axis_quarantined"
       },
       "history": [],
       "governance": {
@@ -264,10 +281,11 @@
         "min_samples": 20,
         "poor_cycles": 0,
         "drift_evidence": {
-          "samples": 6,
+          "samples": 0,
           "reason": "insufficient"
         }
       }
     }
-  }
+  },
+  "evidence_alignment": "observation-target-v2"
 }

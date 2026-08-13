@@ -207,3 +207,17 @@ def test_health_exposes_index_freshness_and_database_mode(monkeypatch):
 
     assert result["index_valuation"] == index_status
     assert result["database"] == database_status
+
+
+def test_deployment_status_exposes_only_valid_render_commit(monkeypatch):
+    commit = "a" * 40
+    monkeypatch.setenv("RENDER", "true")
+    monkeypatch.setenv("RENDER_GIT_COMMIT", commit.upper())
+    assert main._deployment_status() == {"platform": "render", "commit": commit}
+
+    monkeypatch.setenv("RENDER_GIT_COMMIT", "not-a-commit private-value")
+    assert main._deployment_status() == {"platform": "render", "commit": None}
+
+    monkeypatch.delenv("RENDER", raising=False)
+    monkeypatch.delenv("RENDER_GIT_COMMIT", raising=False)
+    assert main._deployment_status() == {"platform": "local", "commit": None}

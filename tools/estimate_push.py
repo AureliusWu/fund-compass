@@ -7,7 +7,7 @@
 该脚本仅作为 GitHub Actions 人工应急入口；正式 14:30/14:40 调度由 Cloudflare Worker 承担。
 脚本复用 Gist 状态文件 sinan-estimate-state.json，并只认 14:30 发送槽位，避免与 Worker 重复发送。
 
-环境变量：GIST_TOKEN、WECHAT_SENDKEY（兼容 SC_SENDKEY）、FUND_API_BASE、WORKER_TOKEN、
+环境变量：GIST_ID、GIST_TOKEN、WECHAT_SENDKEY（兼容 SC_SENDKEY）、FUND_API_BASE、WORKER_TOKEN、
 ESTIMATE_PROXY_URL、
 SCHEDULE_CRON、PUSH_SLOT、FORCE。
 纯 stdlib，无需 pip。
@@ -92,19 +92,8 @@ def _gh(url, data=None, method=None):
 
 
 def find_gist_id():
-    """找到含自选文件的 Gist id。"""
-    if GIST_ID:
-        return GIST_ID
-    for page in range(1, 6):
-        arr = json.loads(_gh(f"{GH}/gists?per_page=100&page={page}"))
-        if not arr:
-            return None
-        for g in arr:
-            if WATCH_FILE in (g.get("files") or {}):
-                return g["id"]
-        if len(arr) < 100:
-            return None
-    return None
+    """Return the explicitly configured Gist; never guess during a migration."""
+    return GIST_ID if re.fullmatch(r"[0-9a-fA-F]{20,64}", GIST_ID) else None
 
 
 def gist_file(gid, name):
@@ -197,13 +186,31 @@ def sanitize_push_state(value):
     return state
 
 
-def parse_push_state(raw):
+def parse_push_state(raw, *, strict=False):
     if not raw:
         return {}
     try:
         value = json.loads(raw) if isinstance(raw, str) else raw
     except (TypeError, ValueError, json.JSONDecodeError):
+        if strict:
+            raise ValueError("push state is not valid JSON") from None
         return {}
+    if strict:
+        if not isinstance(value, dict):
+            raise ValueError("push state must be an object")
+        if "date" in value and _valid_state_date(value.get("date")) is None:
+            raise ValueError("push state date is invalid")
+        if "sent_slots" in value and (
+            not isinstance(value.get("sent_slots"), list)
+            or any(not isinstance(slot, str) or slot not in VALID_SLOTS for slot in value["sent_slots"])
+        ):
+            raise ValueError("push state sent_slots is invalid")
+        attempts = value.get("attempt_count")
+        if "attempt_count" in value and not (
+            isinstance(attempts, int) and not isinstance(attempts, bool)
+            and 0 <= attempts <= MAX_STATE_ATTEMPTS
+        ):
+            raise ValueError("push state attempt_count is invalid")
     return sanitize_push_state(value)
 
 
@@ -843,36 +850,39 @@ def main():
                 f"planned slot {planned_slot} is {delay} minutes late "
                 f"(now={now.isoformat()}); skip stale push"
             )
-            return
+            return 0
         if delay < -5:
             print(
                 f"planned slot {planned_slot} is {-delay} minutes early "
                 f"(now={now.isoformat()}); skip unexpected early push"
             )
-            return
+            return 0
     if now.weekday() >= 5 and not FORCE:
-        print("周末，跳过"); return
+        print("周末，跳过"); return 0
     if not GIST_TOKEN:
-        print("未配置 GIST_TOKEN，无法读自选"); return
+        raise SystemExit("未配置 GIST_TOKEN，人工应急任务拒绝空跑")
     gid = find_gist_id()
     if not gid:
-        print("未找到自选 Gist（请先在 App 配置云同步并上传自选）"); return
+        raise SystemExit("未配置有效 GIST_ID，人工应急任务拒绝枚举或猜测目标")
 
     # 与正式 Worker 共用 14:30 槽位；人工应急成功后也阻止同日重复发送。
     state = {}
     try:
         sraw = gist_file(gid, STATE_FILE)
-        state = parse_push_state(sraw)
-    except Exception as ex:
-        print("读状态失败（按未推过处理）:", ex)
+        state = parse_push_state(sraw, strict=not FORCE)
+    except Exception:
+        if not FORCE:
+            print("读取或校验推送状态失败；为避免重复发送，本次终止")
+            return 1
+        print("FORCE 已启用：忽略不可用的推送状态")
     state = rollover_daily_state(state, today)
     sent_slots = state.setdefault("sent_slots", [])
     if slot in sent_slots and not FORCE:
-        print(f"今日（{today}）{slot} 已推过，跳过"); return
+        print(f"今日（{today}）{slot} 已推过，跳过"); return 0
 
     entries = watch_entries(gid)
     if not entries:
-        print("自选为空"); return
+        print("自选为空"); return 0
 
     unique = {}
     for entry in entries:
@@ -883,13 +893,13 @@ def main():
         estimates = fetch_estimates(unique.keys())
     except Exception as ex:
         print("estimate proxy fail; retired fundgz fallback is disabled:", ex)
-        return
+        return 1
     fresh = any(_is_publishable_intraday(row, today) for row in estimates.values())
 
     if not estimates:
-        print("无估值数据"); return
+        print("无估值数据"); return 1
     if not fresh and not FORCE:
-        print("今日无盘中估值（非交易日/休市），跳过"); return
+        print("今日无盘中估值（非交易日/休市），跳过"); return 0
 
     decision_result = None
     decision_warning = None
@@ -924,7 +934,7 @@ def main():
                         write_state(gid, state)
                     except Exception as write_ex:
                         print("写鉴权失败状态失败:", write_ex)
-                return
+                return 1
     decisions = {
         str(row.get("code")): row
         for row in ((decision_result or {}).get("decisions") or [])
@@ -941,7 +951,7 @@ def main():
         content = "\n".join(f"- {ln}" for ln in lines) + "\n\n" + portfolio_summary + "\n\n> 数据辅助分析，不构成投资建议。"
     if not send_notification(title, content):
         print("notification not accepted; state unchanged")
-        return
+        return 1
     if FORCE:
         print("FORCE 测试推送，不写入 slot 去重状态")
     else:
@@ -959,10 +969,12 @@ def main():
             state["decision_status"] = decision_status
             state["last_http_status"] = 200
             write_state(gid, state)
-        except Exception as ex:
-            print("写状态失败（下次可能重推）:", ex)
+        except Exception:
+            print("通知已发送但状态写入失败；任务标记失败以阻止假绿")
+            return 1
     print(f"pushed {len(lines)} funds, fresh={fresh}, slot={slot}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

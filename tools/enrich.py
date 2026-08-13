@@ -1,138 +1,347 @@
 #!/usr/bin/env python3
-"""司南基金 · AKShare 离线富集任务（GitHub Actions 跑，不进实时请求路径）。
+"""Publish public-seed holdings/industry enrichment for portfolio look-through.
 
-为「待富集」的基金抓取完整持仓 + 行业配置，输出静态 JSON 到 frontend/public/data/enrich/，
-随 GitHub Pages 部署，前端做持仓穿透（V3-3）时消费；缺数据时前端回退到 jjcc 前十大。
-
-待富集基金来源（并集）：
-  1. Gist 自选（sinan-watchlist.json，需 GIST_TOKEN，与 V2-6 同源）——覆盖用户实际持有；
-  2. tools/enrich_funds.txt（每行一个 6 位代码，# 注释）——种子/兜底，离线也有数据。
-
-环境变量：GIST_TOKEN（可选）。依赖：akshare（见 requirements-enrich.txt）。
-本机 python 3.14 装不了 akshare，本脚本主要在 CI（3.12）运行。
+This public repository intentionally never reads a private watchlist or Gist.
+Only the explicitly reviewed codes in ``tools/enrich_funds.txt`` may become
+public filenames or index entries.
 """
+from __future__ import annotations
+
+import calendar
 import datetime
 import json
+import math
 import os
+import re
+import shutil
 import sys
-import urllib.request
+import tempfile
+from pathlib import Path
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OUT_DIR = os.path.join(ROOT, "frontend", "public", "data", "enrich")
-FUNDS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "enrich_funds.txt")
-GIST_TOKEN = os.environ.get("GIST_TOKEN", "").strip()
-WATCH_FILE = "sinan-watchlist.json"
-GH = "https://api.github.com"
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
+from static_chunks import atomic_write_json
 
-def gist_codes() -> list[str]:
-    if not GIST_TOKEN:
-        return []
-    try:
-        hdr = {"Authorization": f"token {GIST_TOKEN}", "Accept": "application/vnd.github+json",
-               "User-Agent": "sinan-enrich"}
-        for page in range(1, 6):
-            req = urllib.request.Request(f"{GH}/gists?per_page=100&page={page}", headers=hdr)
-            arr = json.loads(urllib.request.urlopen(req, timeout=30).read().decode("utf-8"))
-            if not arr:
-                return []
-            for g in arr:
-                if WATCH_FILE in (g.get("files") or {}):
-                    gid = g["id"]
-                    req2 = urllib.request.Request(f"{GH}/gists/{gid}", headers=hdr)
-                    data = json.loads(urllib.request.urlopen(req2, timeout=30).read().decode("utf-8"))
-                    raw = (data.get("files") or {}).get(WATCH_FILE, {}).get("content") or "[]"
-                    return [e["code"] for e in json.loads(raw)
-                            if isinstance(e, dict) and e.get("code") and not e.get("deleted")]
-            if len(arr) < 100:
-                return []
-    except Exception as e:
-        print("gist read failed:", e)
-    return []
+ROOT = Path(__file__).resolve().parents[1]
+OUT_DIR = ROOT / "frontend" / "public" / "data" / "enrich"
+FUNDS_FILE = Path(__file__).resolve().with_name("enrich_funds.txt")
+SCHEMA_VERSION = 2
+SOURCE = "akshare_eastmoney"
+BEIJING = datetime.timezone(datetime.timedelta(hours=8), "Asia/Shanghai")
+MIN_COVERAGE_RATIO = 0.90
+MAX_HOLDINGS = 10
+CONNECT_TIMEOUT = 8
+READ_TIMEOUT = 60
 
 
-def file_codes() -> list[str]:
-    if not os.path.exists(FUNDS_FILE):
-        return []
-    with open(FUNDS_FILE, encoding="utf-8") as f:
-        return [ln.strip() for ln in f if ln.strip() and not ln.lstrip().startswith("#")]
+def _session() -> requests.Session:
+    retry = Retry(
+        total=3,
+        connect=3,
+        read=3,
+        status=3,
+        backoff_factor=0.8,
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=frozenset({"GET"}),
+        respect_retry_after_header=True,
+        raise_on_status=False,
+    )
+    session = requests.Session()
+    session.mount("https://", HTTPAdapter(max_retries=retry))
+    return session
 
 
-def enrich_one(ak, code: str) -> dict:
-    """抓单只基金最新一期持仓 + 行业配置。akshare 接口随版本变动，做防御性处理。"""
-    out = {"code": code, "updated": datetime.date.today().isoformat(), "holdings": [], "industries": []}
-    years = [str(datetime.date.today().year), str(datetime.date.today().year - 1)]
-
-    for y in years:
-        try:
-            df = ak.fund_portfolio_hold_em(symbol=code, date=y)
-        except Exception:
-            df = None
-        if df is not None and len(df):
-            # 取最新季度
-            if "季度" in df.columns:
-                df = df[df["季度"] == df["季度"].iloc[0]]
-            recs = df.to_dict("records")
-            for r in recs[:10]:
-                c = str(r.get("股票代码", "")).strip()
-                n = str(r.get("股票名称", "")).strip()
-                try:
-                    ratio = float(r.get("占净值比例"))
-                except (TypeError, ValueError):
-                    ratio = 0.0
-                if c and n:
-                    out["holdings"].append({"code": c, "name": n, "ratio": ratio})
-            if out["holdings"]:
-                break
-
-    for y in years:
-        try:
-            di = ak.fund_portfolio_industry_allocation_em(symbol=code, date=y)
-        except Exception:
-            di = None
-        if di is not None and len(di):
-            if "截止时间" in di.columns:
-                di = di[di["截止时间"] == di["截止时间"].iloc[0]]
-            col = "行业类别" if "行业类别" in di.columns else di.columns[1]
-            for r in di.to_dict("records"):
-                name = str(r.get(col, "")).strip()
-                try:
-                    ratio = float(r.get("占净值比例"))
-                except (TypeError, ValueError):
-                    ratio = 0.0
-                if name and ratio:
-                    out["industries"].append({"name": name, "ratio": ratio})
-            if out["industries"]:
-                break
-
-    return out
+def _safe_get(session: requests.Session, url: str, **kwargs):
+    if not isinstance(url, str) or not url.lower().startswith("https://"):
+        raise RuntimeError("enrichment source must use HTTPS")
+    kwargs.setdefault("timeout", (CONNECT_TIMEOUT, READ_TIMEOUT))
+    response = session.get(url, **kwargs)
+    response.raise_for_status()
+    if not str(response.url).lower().startswith("https://"):
+        raise RuntimeError("enrichment response was not delivered over HTTPS")
+    return response
 
 
-def main():
-    import akshare as ak  # 仅 CI 有
+def configure_akshare_http() -> None:
+    """Give AKShare's two Eastmoney requests bounded HTTPS retry semantics."""
+    session = _session()
+    requests.get = lambda url, **kwargs: _safe_get(session, url, **kwargs)
 
-    codes = sorted(set(gist_codes()) | set(file_codes()))
+
+def file_codes(path: Path = FUNDS_FILE) -> list[str]:
+    if not path.exists():
+        raise RuntimeError(f"public seed file is missing: {path.name}")
+    codes: list[str] = []
+    with path.open(encoding="utf-8") as stream:
+        for line_number, line in enumerate(stream, 1):
+            value = line.strip()
+            if not value or value.startswith("#"):
+                continue
+            if not re.fullmatch(r"\d{6}", value):
+                raise ValueError(f"invalid public seed on line {line_number}")
+            codes.append(value)
     if not codes:
-        print("无待富集基金"); return
-    os.makedirs(OUT_DIR, exist_ok=True)
-    print(f"待富集 {len(codes)} 只：{codes}")
-    index = []
-    for i, code in enumerate(codes, 1):
-        print(f"[{i}/{len(codes)}] 抓取 {code} …")
+        raise RuntimeError("public seed list is empty")
+    if len(codes) != len(set(codes)):
+        raise ValueError("public seed list contains duplicates")
+    return sorted(codes)
+
+
+def _as_of(value) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime.datetime):
+        return value.date().isoformat()
+    if isinstance(value, datetime.date):
+        return value.isoformat()
+    text = str(value).strip()
+    if not text or text.lower() in {"nan", "nat", "none", "null"}:
+        return None
+    date_match = re.search(r"(20\d{2})[-/.年](\d{1,2})[-/.月](\d{1,2})", text)
+    if date_match:
         try:
-            data = enrich_one(ak, code)
-        except Exception as e:
-            print("enrich fail", code, e); continue
-        if not data["holdings"]:
-            print("skip(no holdings)", code); continue
-        with open(os.path.join(OUT_DIR, f"{code}.json"), "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
-        index.append({"code": code, "updated": data["updated"],
-                      "n_holdings": len(data["holdings"]), "n_industries": len(data["industries"])})
-        print("ok", code, len(data["holdings"]), "holdings")
-    with open(os.path.join(OUT_DIR, "index.json"), "w", encoding="utf-8") as f:
-        json.dump({"updated": datetime.date.today().isoformat(), "funds": index}, f, ensure_ascii=False)
-    print(f"done: {len(index)} funds enriched")
+            return datetime.date(*(int(part) for part in date_match.groups())).isoformat()
+        except ValueError:
+            return None
+    quarter_match = re.search(r"(20\d{2})(?:年)?\s*(?:第)?([1-4])(?:季|Q)", text, re.I)
+    if not quarter_match:
+        quarter_match = re.search(r"(20\d{2})\s*Q([1-4])", text, re.I)
+    if quarter_match:
+        year, quarter = (int(part) for part in quarter_match.groups())
+        month = quarter * 3
+        return datetime.date(year, month, calendar.monthrange(year, month)[1]).isoformat()
+    return None
+
+
+def _positive_ratio(value) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        ratio = float(str(value).strip().replace("%", ""))
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(ratio) or ratio <= 0 or ratio > 100:
+        return None
+    return round(ratio, 6)
+
+
+def _stock_code(value) -> str | None:
+    text = str(value or "").strip()
+    if text.endswith(".0"):
+        text = text[:-2]
+    # Mainland codes are six digits; Eastmoney publishes Hong Kong codes with
+    # five digits.  Preserve both exactly instead of inventing a leading zero.
+    if not text.isdigit() or len(text) not in (5, 6):
+        return None
+    return text
+
+
+def _clean_name(value) -> str | None:
+    text = str(value or "").strip()
+    return None if not text or text.lower() in {"nan", "none", "null"} else text
+
+
+def _latest_records(frame, period_column: str | None) -> tuple[list[dict], str | None]:
+    records = frame.to_dict("records")
+    if not isinstance(records, list) or not records:
+        return [], None
+    if not period_column:
+        return records, None
+    dated = [(record, _as_of(record.get(period_column))) for record in records]
+    valid_dates = [as_of for _, as_of in dated if as_of]
+    if valid_dates:
+        latest = max(valid_dates)
+        return [record for record, as_of in dated if as_of == latest], latest
+    first_period = records[0].get(period_column)
+    return [record for record in records if record.get(period_column) == first_period], None
+
+
+def enrich_one(ak, code: str, *, now: datetime.datetime | None = None) -> dict:
+    """Fetch one public seed; source failures degrade fields, never their semantics."""
+    current = (now or datetime.datetime.now(BEIJING)).astimezone(BEIJING)
+    years = [str(current.year), str(current.year - 1)]
+    holdings: list[dict] = []
+    industries: list[dict] = []
+    holdings_as_of: str | None = None
+    industries_as_of: str | None = None
+
+    for year in years:
+        try:
+            frame = ak.fund_portfolio_hold_em(symbol=code, date=year)
+        except Exception as error:
+            print(f"[warn] holdings source attempt failed: {type(error).__name__}")
+            continue
+        if frame is None or not len(frame):
+            continue
+        period_column = "季度" if "季度" in frame.columns else None
+        records, observed = _latest_records(frame, period_column)
+        for record in records:
+            stock_code = _stock_code(record.get("股票代码"))
+            name = _clean_name(record.get("股票名称"))
+            ratio = _positive_ratio(record.get("占净值比例"))
+            if stock_code and name and ratio is not None:
+                holdings.append({"code": stock_code, "name": name, "ratio": ratio})
+        if holdings:
+            holdings_as_of = observed
+            holdings = holdings[:MAX_HOLDINGS]
+            break
+
+    for year in years:
+        try:
+            frame = ak.fund_portfolio_industry_allocation_em(symbol=code, date=year)
+        except Exception as error:
+            print(f"[warn] industries source attempt failed: {type(error).__name__}")
+            continue
+        if frame is None or not len(frame):
+            continue
+        period_column = "截止时间" if "截止时间" in frame.columns else None
+        records, observed = _latest_records(frame, period_column)
+        name_column = next((name for name in ("行业类别", "行业名称", "行业") if name in frame.columns), None)
+        if not name_column:
+            continue
+        for record in records:
+            name = _clean_name(record.get(name_column))
+            ratio = _positive_ratio(record.get("占净值比例"))
+            if name and ratio is not None:
+                industries.append({"name": name, "ratio": ratio})
+        if industries:
+            industries_as_of = observed
+            break
+
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "code": code,
+        "source": SOURCE,
+        "fetched_at": current.isoformat(timespec="seconds"),
+        "holdings_as_of": holdings_as_of,
+        "industries_as_of": industries_as_of,
+        "holdings": holdings,
+        "industries": industries,
+    }
+
+
+def validate_result(data: dict, expected_code: str) -> None:
+    if not isinstance(data, dict) or data.get("schema_version") != SCHEMA_VERSION:
+        raise RuntimeError("invalid enrichment schema")
+    if data.get("code") != expected_code or data.get("source") != SOURCE:
+        raise RuntimeError("enrichment identity mismatch")
+    try:
+        fetched_at = datetime.datetime.fromisoformat(data["fetched_at"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise RuntimeError("invalid enrichment fetched_at") from error
+    if fetched_at.tzinfo is None or fetched_at.utcoffset() != datetime.timedelta(hours=8):
+        raise RuntimeError("enrichment fetched_at must use Beijing offset")
+    holdings = data.get("holdings")
+    industries = data.get("industries")
+    if not isinstance(holdings, list) or not holdings or not isinstance(industries, list) or not industries:
+        raise RuntimeError("enrichment holdings or industries are missing")
+    if holdings and not data.get("holdings_as_of"):
+        raise RuntimeError("non-empty enrichment holdings require holdings_as_of")
+    if industries and not data.get("industries_as_of"):
+        raise RuntimeError("non-empty enrichment industries require industries_as_of")
+    holding_codes: set[str] = set()
+    holding_ratio = 0.0
+    for row in holdings:
+        if (not isinstance(row, dict) or not isinstance(row.get("code"), str)
+                or not re.fullmatch(r"\d{5,6}", row["code"])
+                or not isinstance(row.get("name"), str) or not _clean_name(row.get("name"))
+                or isinstance(row.get("ratio"), bool) or not isinstance(row.get("ratio"), (int, float))
+                or _positive_ratio(row.get("ratio")) is None):
+            raise RuntimeError("invalid enrichment holding")
+        if row["code"] in holding_codes:
+            raise RuntimeError("duplicate enrichment holding")
+        holding_codes.add(row["code"])
+        holding_ratio += float(row["ratio"])
+    if holding_ratio > 100.001:
+        raise RuntimeError("enrichment holding ratios exceed 100%")
+    industry_names: set[str] = set()
+    industry_ratio = 0.0
+    for row in industries:
+        if (not isinstance(row, dict) or not isinstance(row.get("name"), str) or not _clean_name(row.get("name"))
+                or isinstance(row.get("ratio"), bool) or not isinstance(row.get("ratio"), (int, float))
+                or _positive_ratio(row.get("ratio")) is None):
+            raise RuntimeError("invalid enrichment industry")
+        if row["name"] in industry_names:
+            raise RuntimeError("duplicate enrichment industry")
+        industry_names.add(row["name"])
+        industry_ratio += float(row["ratio"])
+    if industry_ratio > 100.001:
+        raise RuntimeError("enrichment industry ratios exceed 100%")
+    for field in ("holdings_as_of", "industries_as_of"):
+        value = data.get(field)
+        if value is not None and _as_of(value) != value:
+            raise RuntimeError(f"invalid {field}")
+
+
+def publish(results: dict[str, dict], expected_codes: list[str], out_dir: Path = OUT_DIR) -> dict:
+    expected = set(expected_codes)
+    if not expected or set(results) - expected:
+        raise RuntimeError("enrichment output is outside the public seed allowlist")
+    required = math.ceil(len(expected) * MIN_COVERAGE_RATIO)
+    successful = {code: data for code, data in results.items() if data.get("holdings")}
+    if len(successful) < required:
+        raise RuntimeError(f"enrichment coverage regressed: {len(successful)}/{len(expected)}")
+    if set(successful) != expected:
+        raise RuntimeError("not every public seed has a valid enrichment result")
+    for code, data in successful.items():
+        validate_result(data, code)
+
+    out_dir.parent.mkdir(parents=True, exist_ok=True)
+    stage = Path(tempfile.mkdtemp(prefix=".enrich-stage-", dir=out_dir.parent))
+    try:
+        index_rows = []
+        for code in sorted(successful):
+            data = successful[code]
+            atomic_write_json(stage / f"{code}.json", data)
+            index_rows.append({
+                "code": code,
+                "holdings_as_of": data["holdings_as_of"],
+                "industries_as_of": data["industries_as_of"],
+                "n_holdings": len(data["holdings"]),
+                "n_industries": len(data["industries"]),
+            })
+        fetched_at = next(iter(successful.values()))["fetched_at"]
+        index = {
+            "schema_version": SCHEMA_VERSION,
+            "source": SOURCE,
+            "fetched_at": fetched_at,
+            "funds": index_rows,
+        }
+        atomic_write_json(stage / "index.json", index)
+
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for code in sorted(successful):
+            os.replace(stage / f"{code}.json", out_dir / f"{code}.json")
+        os.replace(stage / "index.json", out_dir / "index.json")  # publish manifest last
+
+        allowed_files = {f"{code}.json" for code in expected} | {"index.json"}
+        for existing in out_dir.glob("*.json"):
+            if existing.name not in allowed_files:
+                existing.unlink()
+        return index
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
+
+
+def main() -> int:
+    import akshare as ak  # CI-only dependency
+
+    configure_akshare_http()
+    codes = file_codes()
+    print(f"public seeds: {len(codes)}")
+    results: dict[str, dict] = {}
+    for index, code in enumerate(codes, 1):
+        print(f"enrich progress: {index}/{len(codes)}")
+        data = enrich_one(ak, code)
+        if data["holdings"]:
+            results[code] = data
+        else:
+            print("[warn] one public seed has no holdings")
+    index = publish(results, codes)
+    print(f"done: {len(index['funds'])} public funds enriched")
+    return 0
 
 
 if __name__ == "__main__":

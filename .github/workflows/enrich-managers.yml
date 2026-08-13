@@ -10,8 +10,8 @@ permissions:
   actions: write
 
 concurrency:
-  group: enrich-managers
-  cancel-in-progress: false
+  group: scheduled-data-main
+  queue: max
 
 jobs:
   managers:
@@ -36,9 +36,36 @@ jobs:
             git config user.email "github-actions[bot]@users.noreply.github.com"
             git add frontend/public/data/managers.json frontend/public/data/managers
             git commit -m "chore: enrich fund managers"
-            git pull --rebase origin main
-            git push origin main
-            gh workflow run ci.yml --ref main
+            base_sha=$(git rev-parse HEAD^)
+            pushed=false
+            for attempt in 1 2 3; do
+              if ! git fetch --no-tags origin main; then
+                sleep $((attempt * 2))
+                continue
+              fi
+              remote_sha=$(git rev-parse origin/main)
+              [[ "$remote_sha" == "$base_sha" ]] || {
+                echo "main changed while data was generated; rerun on the new HEAD" >&2
+                exit 1
+              }
+              if git push origin HEAD:main; then
+                pushed=true
+                break
+              fi
+              sleep $((attempt * 2))
+            done
+            [[ "$pushed" == "true" ]] || { echo "Failed to push generated data" >&2; exit 1; }
+            commit_sha=$(git rev-parse HEAD)
+            dispatched=false
+            for attempt in 1 2 3; do
+              if gh workflow run ci.yml --ref main -f target_sha="$commit_sha"; then
+                dispatched=true
+                break
+              fi
+              sleep $((attempt * 2))
+            done
+            [[ "$dispatched" == "true" ]] || { echo "Failed to create exact-source CI run" >&2; exit 1; }
+            echo "Created exact-source CI run for generated commit"
           else
             echo "No manager changes"
           fi

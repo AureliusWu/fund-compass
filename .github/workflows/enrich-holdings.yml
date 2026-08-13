@@ -1,7 +1,7 @@
 name: enrich-holdings
 
 # 司南基金 · AKShare 离线富集（持仓+行业）。
-# 季度披露，故每周一跑一次足矣 + 可手动触发。抓 tools/enrich_funds.txt ∪ Gist 自选，
+# 季度披露，故每周一跑一次足矣 + 可手动触发。抓公开基金种子列表，
 # 输出 frontend/public/data/enrich/*.json 并提交（随 Pages 部署）。
 on:
   schedule:
@@ -13,8 +13,8 @@ permissions:
   actions: write
 
 concurrency:
-  group: enrich-holdings
-  cancel-in-progress: false
+  group: scheduled-data-main
+  queue: max
 
 jobs:
   enrich:
@@ -29,11 +29,9 @@ jobs:
         run: pip install -r tools/requirements-enrich.txt
       - name: 富集持仓（akshare）
         env:
-          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
           PYTHONUNBUFFERED: '1' # 日志实时输出，能看到「抓取 X …」进度
         run: python tools/enrich.py
       - name: 富集指数估值（akshare · 乐咕乐股）· V3-5
-        continue-on-error: true # 第三方源，失败不阻断持仓/排行/经理富集
         env:
           PYTHONUNBUFFERED: '1'
         run: python tools/enrich_index_valuation.py
@@ -48,9 +46,36 @@ jobs:
             git config user.email "github-actions[bot]@users.noreply.github.com"
             git add frontend/public/data/enrich frontend/public/data/index-valuation.json frontend/public/data/screener.json frontend/public/data/screener
             git commit -m "chore: 富集持仓+排行数据"
-            git pull --rebase origin main
-            git push origin main
-            gh workflow run ci.yml --ref main
+            base_sha=$(git rev-parse HEAD^)
+            pushed=false
+            for attempt in 1 2 3; do
+              if ! git fetch --no-tags origin main; then
+                sleep $((attempt * 2))
+                continue
+              fi
+              remote_sha=$(git rev-parse origin/main)
+              [[ "$remote_sha" == "$base_sha" ]] || {
+                echo "main changed while data was generated; rerun on the new HEAD" >&2
+                exit 1
+              }
+              if git push origin HEAD:main; then
+                pushed=true
+                break
+              fi
+              sleep $((attempt * 2))
+            done
+            [[ "$pushed" == "true" ]] || { echo "Failed to push generated data" >&2; exit 1; }
+            commit_sha=$(git rev-parse HEAD)
+            dispatched=false
+            for attempt in 1 2 3; do
+              if gh workflow run ci.yml --ref main -f target_sha="$commit_sha"; then
+                dispatched=true
+                break
+              fi
+              sleep $((attempt * 2))
+            done
+            [[ "$dispatched" == "true" ]] || { echo "Failed to create exact-source CI run" >&2; exit 1; }
+            echo "Created exact-source CI run for generated commit"
           else
             echo "无变化"
           fi

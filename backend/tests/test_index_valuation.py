@@ -75,7 +75,12 @@ class TestLookupFallback:
     def test_stale_data_is_rejected(self, monkeypatch):
         import strategy.index_valuation as iv
 
-        stale = {**SAMPLE_VALUATION, "updated": (BEIJING_TODAY - timedelta(days=8)).isoformat()}
+        stale_date = (BEIJING_TODAY - timedelta(days=8)).isoformat()
+        stale = {
+            **SAMPLE_VALUATION,
+            "updated": stale_date,
+            "indices": [{**item, "date": stale_date} for item in SAMPLE_VALUATION["indices"]],
+        }
         monkeypatch.setattr(iv, "_valuation_data", stale)
         monkeypatch.setattr(iv, "_index_map", SAMPLE_MAP)
 
@@ -165,7 +170,12 @@ class TestStatus:
     def test_stale_snapshot_reports_age_and_is_unusable(self, monkeypatch):
         import strategy.index_valuation as iv
 
-        stale = {**SAMPLE_VALUATION, "updated": (BEIJING_TODAY - timedelta(days=8)).isoformat()}
+        stale_date = (BEIJING_TODAY - timedelta(days=8)).isoformat()
+        stale = {
+            **SAMPLE_VALUATION,
+            "updated": stale_date,
+            "indices": [{**item, "date": stale_date} for item in SAMPLE_VALUATION["indices"]],
+        }
         monkeypatch.setattr(iv, "_valuation_data", stale)
         monkeypatch.setattr(iv, "_index_map", SAMPLE_MAP)
         result = iv.status()
@@ -173,6 +183,26 @@ class TestStatus:
         assert result["usable"] is False
         assert result["stale"] is True
         assert result["age_days"] == 8
+
+    def test_fresh_snapshot_label_cannot_hide_stale_index_row(self, monkeypatch):
+        import strategy.index_valuation as iv
+
+        stale_date = (BEIJING_TODAY - timedelta(days=8)).isoformat()
+        mixed = {
+            **SAMPLE_VALUATION,
+            "updated": TODAY,
+            "indices": [
+                {**SAMPLE_VALUATION["indices"][0], "date": stale_date},
+                SAMPLE_VALUATION["indices"][1],
+            ],
+        }
+        monkeypatch.setattr(iv, "_valuation_data", mixed)
+        monkeypatch.setattr(iv, "_index_map", {"510300": "沪深300", "510500": "中证500"})
+
+        assert iv.lookup("510300") is None
+        assert "已过期" in iv.unavailable_reason("510300")
+        assert iv.lookup("510500") is not None
+        assert iv.status()["usable"] is True
 
     def test_missing_snapshot_is_explicitly_unavailable(self, monkeypatch):
         import strategy.index_valuation as iv

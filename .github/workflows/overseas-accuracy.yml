@@ -4,14 +4,19 @@ on:
   schedule:
     - cron: '35 6 * * 1-5' # 北京时间工作日 14:35，独立于推送任务落账
   workflow_dispatch:
+    inputs:
+      auto_promote:
+        description: 手工验收时是否允许海外模型自动晋级（默认仅生成证据）
+        type: boolean
+        default: false
 
 permissions:
   contents: write
   actions: write
 
 concurrency:
-  group: overseas-accuracy-ledger
-  cancel-in-progress: false
+  group: scheduled-data-main
+  queue: max
 
 jobs:
   ledger:
@@ -25,16 +30,33 @@ jobs:
       - name: 更新海外估值误差账本
         env:
           FUND_API_BASE: ${{ secrets.FUND_API_BASE }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_EVENT_SCHEDULE: ${{ github.event.schedule }}
+          OVERSEAS_RUN_MODE: ${{ github.event_name == 'schedule' && 'scheduled' || 'manual' }}
+          OVERSEAS_SCHEDULE_TIME: '14:35'
+          OVERSEAS_PREDICTION_EARLY_MINUTES: '5'
+          OVERSEAS_PREDICTION_LATE_MINUTES: '45'
+          OVERSEAS_ZERO_PREDICTION_LIMIT: '2'
+          OVERSEAS_EFFECTIVE_MAX_AGE_HOURS: '96'
+          OVERSEAS_MAX_BASE_AGE_DAYS: '7'
+          OVERSEAS_NON_TRADING_DATES: ${{ vars.OVERSEAS_NON_TRADING_DATES }}
           PYTHONUNBUFFERED: '1'
-        run: python tools/overseas_accuracy.py
+        shell: bash
+        run: |
+          export GITHUB_RUN_STARTED_AT=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          python tools/overseas_accuracy.py
       - name: 校准海外 Challenger
         env:
-          AUTO_PROMOTE_OVERSEAS: 'true'
+          AUTO_PROMOTE_OVERSEAS: ${{ github.event_name == 'schedule' || inputs.auto_promote }}
           OVERSEAS_MIN_SAMPLES: '20'
         run: python tools/calibrate_overseas.py
       - name: 审计海外精度账本
+        env:
+          OVERSEAS_ZERO_PREDICTION_LIMIT: '2'
+          OVERSEAS_EFFECTIVE_MAX_AGE_HOURS: '96'
         run: python tools/audit_overseas_accuracy.py
       - name: 写入海外精度摘要
+        if: always()
         shell: bash
         run: |
           python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
@@ -43,11 +65,17 @@ jobs:
           data = json.loads(Path("frontend/public/data/overseas-accuracy.json").read_text(encoding="utf-8"))
           pipeline = data.get("pipeline") or {}
           print("## 海外估值精度")
-          print(f"- 运行：{pipeline.get('last_run_at')} · 行情 {pipeline.get('quotes_count', 0)} · 详情 {pipeline.get('details_count', 0)}")
+          print(f"- 心跳：{pipeline.get('heartbeat_at')}")
+          print(f"- 最后有效预测：{pipeline.get('last_effective_prediction_at')}")
+          print(f"- 最后有效结算：{pipeline.get('last_effective_settlement_at')}")
+          print(f"- 计划时间：{pipeline.get('scheduled_for')} · 延迟 {pipeline.get('delay_minutes')} 分钟 · 窗口 {pipeline.get('prediction_window_status')}")
+          print(f"- 当日有效预测：{pipeline.get('effective_predictions_for_target', 0)}/{pipeline.get('expected_models', 0)} · 连续零产出 {pipeline.get('consecutive_expected_zero_prediction_runs', 0)} 次")
+          print(f"- 本次抓取：行情 {pipeline.get('quotes_count', 0)} · 详情 {pipeline.get('details_count', 0)}")
           for code, row in (data.get("summary") or {}).items():
               print(f"- {code}: {row.get('samples', 0)} 样本 · 待结算 {row.get('pending', 0)} · MAE {row.get('mae')} · {row.get('confidence')}")
           PY
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: overseas-accuracy-${{ github.run_number }}
           path: |
@@ -56,6 +84,7 @@ jobs:
             frontend/src/data/overseas-models.json
           retention-days: 90
       - name: 提交海外精度数据
+        if: success()
         shell: bash
         run: |
           if [[ -n "$(git status --porcelain frontend/public/data/overseas-accuracy.json frontend/public/data/overseas-audit.json frontend/src/data/overseas-models.json)" ]]; then
@@ -63,9 +92,36 @@ jobs:
             git config user.email "github-actions[bot]@users.noreply.github.com"
             git add frontend/public/data/overseas-accuracy.json frontend/public/data/overseas-audit.json frontend/src/data/overseas-models.json
             git commit -m "chore: 更新海外估值精度账本"
-            git pull --rebase origin main
-            git push origin main
-            gh workflow run ci.yml --ref main
+            base_sha=$(git rev-parse HEAD^)
+            pushed=false
+            for attempt in 1 2 3; do
+              if ! git fetch --no-tags origin main; then
+                sleep $((attempt * 2))
+                continue
+              fi
+              remote_sha=$(git rev-parse origin/main)
+              [[ "$remote_sha" == "$base_sha" ]] || {
+                echo "main changed while data was generated; rerun on the new HEAD" >&2
+                exit 1
+              }
+              if git push origin HEAD:main; then
+                pushed=true
+                break
+              fi
+              sleep $((attempt * 2))
+            done
+            [[ "$pushed" == "true" ]] || { echo "Failed to push generated data" >&2; exit 1; }
+            commit_sha=$(git rev-parse HEAD)
+            dispatched=false
+            for attempt in 1 2 3; do
+              if gh workflow run ci.yml --ref main -f target_sha="$commit_sha"; then
+                dispatched=true
+                break
+              fi
+              sleep $((attempt * 2))
+            done
+            [[ "$dispatched" == "true" ]] || { echo "Failed to create exact-source CI run" >&2; exit 1; }
+            echo "Created exact-source CI run for generated commit"
           else
             echo "海外精度数据无变化"
           fi

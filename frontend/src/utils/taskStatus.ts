@@ -5,6 +5,7 @@ export interface TaskConfig {
   cadence: string
   staleHours: number
   manual?: boolean
+  event?: string
 }
 
 export interface TaskStatus {
@@ -36,10 +37,14 @@ const TASK_CACHE_KEY = 'sinan_task_status_v1'
 const TASK_CACHE_TTL = 10 * 60 * 1000
 
 export const SCHEDULED_TASKS: TaskConfig[] = [
-  { id: 'enrich', label: '离线富集', workflow: 'enrich-holdings.yml', cadence: '每周一 09:00', staleHours: 8 * 24 },
-  { id: 'estimate-push', label: '估值推送', workflow: 'manual-estimate-push.yml', cadence: '人工应急', staleHours: 0, manual: true },
-  { id: 'overseas-accuracy', label: '海外精度', workflow: 'overseas-accuracy.yml', cadence: '交易日 14:35', staleHours: 72 },
-  { id: 'signal-notify', label: '信号通知', workflow: 'notify.yml', cadence: '人工应急', staleHours: 0, manual: true },
+  { id: 'enrich', label: '持仓与选基富集', workflow: 'enrich-holdings.yml', cadence: '每周一 09:00', staleHours: 8 * 24, event: 'schedule' },
+  { id: 'managers', label: '经理富集', workflow: 'enrich-managers.yml', cadence: '每周一 09:20', staleHours: 8 * 24, event: 'schedule' },
+  { id: 'calibration', label: '策略校准', workflow: 'calibrate-strategy.yml', cadence: '每周一 09:40', staleHours: 8 * 24, event: 'schedule' },
+  { id: 'universe', label: '基金全集', workflow: 'fund-universe.yml', cadence: '每周一 10:20', staleHours: 8 * 24, event: 'schedule' },
+  { id: 'overseas-accuracy', label: '海外精度', workflow: 'overseas-accuracy.yml', cadence: '交易日实际运行时取证', staleHours: 72, event: 'schedule' },
+  { id: 'release', label: '发布门禁、部署与烟测', workflow: 'ci.yml', cadence: '主分支更新后', staleHours: 30 * 24 },
+  { id: 'estimate-push', label: '估值推送', workflow: 'manual-estimate-push.yml', cadence: '人工应急', staleHours: 0, manual: true, event: 'workflow_dispatch' },
+  { id: 'signal-notify', label: '信号通知', workflow: 'notify.yml', cadence: '人工应急', staleHours: 0, manual: true, event: 'workflow_dispatch' },
 ]
 
 function cacheGet(): TaskStatus[] | null {
@@ -105,7 +110,9 @@ export function normalizeTaskStatus(config: TaskConfig, run: WorkflowRun | null,
 }
 
 async function fetchTask(config: TaskConfig): Promise<TaskStatus> {
-  const url = `https://api.github.com/repos/${REPO}/actions/workflows/${config.workflow}/runs?branch=main&per_page=1`
+  const query = new URLSearchParams({ branch: 'main', per_page: '1' })
+  if (config.event) query.set('event', config.event)
+  const url = `https://api.github.com/repos/${REPO}/actions/workflows/${config.workflow}/runs?${query}`
   const res = await fetch(url, {
     headers: { Accept: 'application/vnd.github+json' },
     signal: AbortSignal.timeout(6000),

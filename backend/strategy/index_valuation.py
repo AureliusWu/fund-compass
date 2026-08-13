@@ -43,12 +43,16 @@ def _is_fresh(raw_date: str | None, today: date | None = None) -> bool:
     return 0 <= age <= MAX_VALUATION_AGE_DAYS
 
 
+def _item_date(item: dict, snapshot_updated: str | None = None) -> str | None:
+    raw = item.get("date")
+    return raw if isinstance(raw, str) and raw else snapshot_updated
+
+
 def status(today: date | None = None) -> dict:
     """Expose whether the loaded snapshot is fresh enough for live signals."""
     loaded = bool(_valuation_data)
     updated = _valuation_data.get("updated") if _valuation_data else None
     age_days = _age_days(updated, today)
-    stale = loaded and not _is_fresh(updated, today)
     indices = (_valuation_data.get("indices") or []) if _valuation_data else []
     mapped_names = {
         _canonical_index_name(name)
@@ -60,10 +64,19 @@ def status(today: date | None = None) -> dict:
         for item in indices
         if item.get("pe_pct") is not None and _canonical_index_name(item.get("name"))
     }
-    mapped_usable_indices = mapped_names & usable_names
+    fresh_usable_names = {
+        _canonical_index_name(item.get("name"))
+        for item in indices
+        if item.get("pe_pct") is not None
+        and _canonical_index_name(item.get("name"))
+        and _is_fresh(_item_date(item, updated), today)
+    }
+    mapped_usable_indices = mapped_names & fresh_usable_names
+    mapped_known_indices = mapped_names & usable_names
+    stale = bool(loaded and mapped_known_indices and not mapped_usable_indices)
     return {
         "loaded": loaded,
-        "usable": bool(loaded and not stale and age_days is not None and mapped_usable_indices),
+        "usable": bool(loaded and mapped_usable_indices),
         "stale": bool(stale),
         "age_days": age_days,
         "max_age_days": MAX_VALUATION_AGE_DAYS,
@@ -146,14 +159,14 @@ def lookup(fund_code: str) -> dict | None:
     """
     if not _valuation_data or not _index_map:
         return None
-    if not _is_fresh(_valuation_data.get("updated")):
-        return None
     index_name = _canonical_index_name(_index_map.get(fund_code))
     if not index_name:
         return None
     indices = _valuation_data.get("indices", [])
     for idx in indices:
         if _canonical_index_name(idx.get("name")) == index_name:
+            if not _is_fresh(_item_date(idx, _valuation_data.get("updated"))):
+                return None
             if idx.get("pe_pct") is None:
                 return None  # PE 分位缺失则回退
             return {
@@ -179,9 +192,6 @@ def unavailable_reason(fund_code: str) -> str | None:
         return None
     if not _valuation_data:
         return f"已映射至 {index_name}，但指数估值数据尚未加载"
-    if not _is_fresh(_valuation_data.get("updated")):
-        return f"已映射至 {index_name}，但指数估值数据已过期"
-
     for item in _valuation_data.get("unsupported", []) or []:
         if _canonical_index_name(item.get("name")) == index_name:
             reason = item.get("reason")
@@ -190,7 +200,11 @@ def unavailable_reason(fund_code: str) -> str | None:
     indices = _valuation_data.get("indices", [])
     for idx in indices:
         if _canonical_index_name(idx.get("name")) == index_name:
+            if not _is_fresh(_item_date(idx, _valuation_data.get("updated"))):
+                return f"已映射至 {index_name}，但指数估值数据已过期"
             if idx.get("pe_pct") is None:
                 return f"已映射至 {index_name}，但 PE 分位缺失"
             return None
+    if not _is_fresh(_valuation_data.get("updated")):
+        return f"已映射至 {index_name}，但指数估值数据已过期"
     return f"已映射至 {index_name}，但估值数据源暂未覆盖"

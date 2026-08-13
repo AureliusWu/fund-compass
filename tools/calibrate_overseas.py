@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """用海外误差账本训练 Challenger；严格按时间切分，达标后才可晋级。"""
 import datetime as dt
+import hashlib
 import json
+import math
 import os
 from pathlib import Path
 
@@ -10,6 +12,111 @@ REGISTRY = ROOT / "frontend" / "src" / "data" / "overseas-models.json"
 LEDGER = ROOT / "frontend" / "public" / "data" / "overseas-accuracy.json"
 AUTO_PROMOTE = os.environ.get("AUTO_PROMOTE_OVERSEAS", "").lower() in ("1", "true", "yes")
 MIN_SAMPLES = int(os.environ.get("OVERSEAS_MIN_SAMPLES", "20"))
+BUILTIN_NON_TRADING_DATES = {
+    "2025-01-01", "2025-01-28", "2025-01-29", "2025-01-30", "2025-01-31",
+    "2025-02-03", "2025-02-04", "2025-04-04", "2025-05-01", "2025-05-02",
+    "2025-05-05", "2025-06-02", "2025-10-01", "2025-10-02", "2025-10-03",
+    "2025-10-06", "2025-10-07", "2025-10-08", "2026-01-01", "2026-01-02",
+    "2026-02-16", "2026-02-17", "2026-02-18", "2026-02-19", "2026-02-20",
+    "2026-02-23", "2026-04-06", "2026-05-01", "2026-05-04", "2026-05-05",
+    "2026-06-19", "2026-09-25", "2026-10-01", "2026-10-02", "2026-10-05",
+    "2026-10-06", "2026-10-07",
+}
+SUPPORTED_CALENDAR_YEARS = {2025, 2026}
+NON_TRADING_DATES = {
+    value.strip()
+    for value in os.environ.get("OVERSEAS_NON_TRADING_DATES", "").split(",")
+    if value.strip()
+}
+
+
+def previous_trading_date(value: dt.date) -> dt.date:
+    candidate = value - dt.timedelta(days=1)
+    while True:
+        if candidate.year not in SUPPORTED_CALENDAR_YEARS:
+            raise ValueError("unsupported calendar")
+        if candidate.weekday() < 5 and candidate.isoformat() not in (BUILTIN_NON_TRADING_DATES | NON_TRADING_DATES):
+            return candidate
+        candidate -= dt.timedelta(days=1)
+
+
+def valid_feature_evidence(row: dict) -> bool:
+    features = row.get("features")
+    evidence = row.get("feature_evidence")
+    if not isinstance(features, dict) or not features or not isinstance(evidence, dict):
+        return False
+    if set(features) != set(evidence):
+        return False
+    for code, value in features.items():
+        item = evidence.get(code)
+        try:
+            feature_value = float(value)
+            evidence_value = float(item.get("change")) if isinstance(item, dict) else math.nan
+        except (TypeError, ValueError):
+            return False
+        if (
+            not isinstance(item, dict)
+            or item.get("quote_date") != row.get("target_nav_date")
+            or not math.isfinite(feature_value)
+            or not math.isfinite(evidence_value)
+            or not math.isclose(feature_value, evidence_value, rel_tol=1e-8, abs_tol=1e-8)
+            or not isinstance(item.get("quote_time"), str)
+            or not item["quote_time"].strip()
+            or not isinstance(item.get("source"), str)
+            or not item["source"].strip()
+        ):
+            return False
+    return True
+
+
+def eligible_settled_rows(rows: list[dict]) -> list[dict]:
+    output = []
+    for row in rows:
+        if row.get("status") != "settled" or not isinstance(row.get("features"), dict) or not row.get("features"):
+            continue
+        try:
+            observation = dt.date.fromisoformat(row["prediction_date"])
+            target = dt.date.fromisoformat(row["target_nav_date"])
+            base = dt.date.fromisoformat(row["base_nav_date"])
+            expected_target = previous_trading_date(observation)
+            expected_base = previous_trading_date(target)
+            actual_change = float(row["actual_change"])
+            feature_values = [float(value) for value in row["features"].values()]
+        except (KeyError, TypeError, ValueError):
+            continue
+        if (
+            target != expected_target
+            or base != expected_base
+            or not row.get("model_version")
+            or not math.isfinite(actual_change)
+            or not all(math.isfinite(value) for value in feature_values)
+            or not valid_feature_evidence(row)
+        ):
+            continue
+        output.append(row)
+    return output
+
+
+def data_fingerprint(rows: list[dict]) -> str:
+    evidence = [{
+        "target_nav_date": row.get("target_nav_date"),
+        "prediction_date": row.get("prediction_date"),
+        "base_nav_date": row.get("base_nav_date"),
+        "model_version": row.get("model_version"),
+        "actual_change": row.get("actual_change"),
+        "features": row.get("features"),
+        "feature_evidence": row.get("feature_evidence"),
+    } for row in sorted(rows, key=lambda item: (item.get("target_nav_date") or "", item.get("model_version") or ""))]
+    encoded = json.dumps(evidence, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def data_effective_at(rows: list[dict]) -> str | None:
+    settled_times = [row.get("settled_at") for row in rows if row.get("settled_at")]
+    if settled_times:
+        return max(settled_times)
+    target_dates = [row.get("target_nav_date") for row in rows if row.get("target_nav_date")]
+    return max(target_dates) if target_dates else None
 
 
 def predict(row: dict, model: dict) -> float | None:
@@ -128,8 +235,15 @@ def main() -> None:
     registry = json.loads(REGISTRY.read_text(encoding="utf-8"))
     ledger = json.loads(LEDGER.read_text(encoding="utf-8"))
     now = dt.datetime.now(dt.timezone(dt.timedelta(hours=8))).isoformat(timespec="seconds")
+    changed = 0
+    statuses = {}
     for code, entry in registry["models"].items():
-        rows = [row for row in ledger.get("records", []) if row.get("code") == code and row.get("status") == "settled" and row.get("features")]
+        rows = eligible_settled_rows([row for row in ledger.get("records", []) if row.get("code") == code])
+        fingerprint = data_fingerprint(rows)
+        previous_candidate = entry.get("candidate") or {}
+        if previous_candidate.get("data_fingerprint") == fingerprint:
+            statuses[code] = previous_candidate.get("status") or "unchanged"
+            continue
         result = calibrate(rows, entry["active"])
         degraded, drift = active_is_degraded(rows, entry["active"]["version"])
         previous_cycles = int((entry.get("governance") or {}).get("poor_cycles") or 0)
@@ -137,6 +251,8 @@ def main() -> None:
         candidate = {
             "version": "candidate-" + now[:10].replace("-", ""),
             "created_at": now,
+            "data_fingerprint": fingerprint,
+            "data_effective_at": data_effective_at(rows),
             **result,
         }
         entry["candidate"] = candidate
@@ -164,9 +280,12 @@ def main() -> None:
                 "status": "rolled-back", "poor_cycles": 0,
                 "rolled_back_from": failed["version"],
             })
-    registry["updated_at"] = now
-    write_json_atomic(REGISTRY, registry)
-    print(json.dumps({code: entry["candidate"]["status"] for code, entry in registry["models"].items()}, ensure_ascii=False))
+        statuses[code] = entry["candidate"]["status"]
+        changed += 1
+    if changed:
+        registry["updated_at"] = now
+        write_json_atomic(REGISTRY, registry)
+    print(json.dumps({"changed": changed, "statuses": statuses}, ensure_ascii=False))
 
 
 if __name__ == "__main__":

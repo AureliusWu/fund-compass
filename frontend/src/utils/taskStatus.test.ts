@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { normalizeTaskStatus, type TaskConfig } from './taskStatus'
 
@@ -61,5 +61,34 @@ describe('normalizeTaskStatus', () => {
     const s = normalizeTaskStatus(manual, null, NOW)
     expect(s.stale).toBe(false)
     expect(s.note).toBe('按需手动运行')
+  })
+
+  it('current manual contract queries workflow_dispatch instead of old schedules', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue({ workflow_runs: [] }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    vi.resetModules()
+    const { fetchTaskStatuses } = await import('./taskStatus')
+
+    await fetchTaskStatuses(true)
+
+    const urls = fetchMock.mock.calls.map(([url]) => String(url))
+    expect(urls.find((url) => url.includes('manual-estimate-push.yml'))).toContain('event=workflow_dispatch')
+    expect(urls.find((url) => url.includes('notify.yml'))).toContain('event=workflow_dispatch')
+    expect(urls.some((url) => url.includes('calibrate-strategy.yml'))).toBe(true)
+    expect(urls.some((url) => url.includes('fund-universe.yml'))).toBe(true)
+    expect(urls.some((url) => url.includes('ci.yml'))).toBe(true)
+    expect(urls.some((url) => url.includes('deploy.yml'))).toBe(false)
+    expect(urls.some((url) => url.includes('post-deploy-smoke.yml'))).toBe(false)
+    for (const workflow of [
+      'enrich-holdings.yml', 'enrich-managers.yml', 'calibrate-strategy.yml',
+      'fund-universe.yml', 'overseas-accuracy.yml',
+    ]) {
+      expect(urls.find((url) => url.includes(workflow))).toContain('event=schedule')
+    }
+    expect(urls.find((url) => url.includes('ci.yml'))).not.toContain('event=')
+    vi.unstubAllGlobals()
   })
 })
