@@ -5,7 +5,7 @@
     "applied_at": "2026-08-13T13:46:49+08:00",
     "legacy_records_excluded": 17
   },
-  "updated_at": "2026-08-13T13:46:49+08:00",
+  "updated_at": "2026-08-14T15:59:43+08:00",
   "models": {
     "539002": {
       "name": "建信新兴市场混合(QDII)A",
@@ -79,15 +79,13 @@
         }
       },
       "candidate": {
-        "version": "candidate-20260812",
-        "created_at": "2026-08-12T16:02:01+08:00",
+        "version": "candidate-20260814",
+        "created_at": "2026-08-14T15:59:43+08:00",
+        "data_fingerprint": "7f2c3707834ad80ac1503df743a3ee83a021318781963d2da6cfb1a3e69dc4b4",
+        "data_effective_at": "2026-08-14T15:58:57+08:00",
         "status": "collecting",
-        "samples": 0,
-        "required": 20,
-        "data_fingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
-        "data_effective_at": null,
-        "evidence_alignment": "observation-target-v2",
-        "evidence_reset_reason": "legacy_same_day_axis_quarantined"
+        "samples": 1,
+        "required": 20
       },
       "history": [],
       "governance": {
@@ -95,7 +93,7 @@
         "min_samples": 20,
         "poor_cycles": 0,
         "drift_evidence": {
-          "samples": 0,
+          "samples": 1,
           "reason": "insufficient"
         }
       }
@@ -172,15 +170,13 @@
         }
       },
       "candidate": {
-        "version": "candidate-20260812",
-        "created_at": "2026-08-12T16:02:01+08:00",
+        "version": "candidate-20260814",
+        "created_at": "2026-08-14T15:59:43+08:00",
+        "data_fingerprint": "883f7305e364ac42dfad130e3ca060c0160437b01408cc93c30cbefb89ddad56",
+        "data_effective_at": "2026-08-14T15:58:57+08:00",
         "status": "collecting",
-        "samples": 0,
-        "required": 20,
-        "data_fingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
-        "data_effective_at": null,
-        "evidence_alignment": "observation-target-v2",
-        "evidence_reset_reason": "legacy_same_day_axis_quarantined"
+        "samples": 1,
+        "required": 20
       },
       "history": [],
       "governance": {
@@ -188,7 +184,7 @@
         "min_samples": 20,
         "poor_cycles": 0,
         "drift_evidence": {
-          "samples": 0,
+          "samples": 1,
           "reason": "insufficient"
         }
       }
@@ -265,15 +261,13 @@
         }
       },
       "candidate": {
-        "version": "candidate-20260812",
-        "created_at": "2026-08-12T16:02:01+08:00",
+        "version": "candidate-20260814",
+        "created_at": "2026-08-14T15:59:43+08:00",
+        "data_fingerprint": "4a617d3249ebe86cb4890627322dbef3f40281063a4aa19436ca49bbd2bf4b11",
+        "data_effective_at": "2026-08-14T15:58:57+08:00",
         "status": "collecting",
-        "samples": 0,
-        "required": 20,
-        "data_fingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
-        "data_effective_at": null,
-        "evidence_alignment": "observation-target-v2",
-        "evidence_reset_reason": "legacy_same_day_axis_quarantined"
+        "samples": 1,
+        "required": 20
       },
       "history": [],
       "governance": {
@@ -281,7 +275,7 @@
         "min_samples": 20,
         "poor_cycles": 0,
         "drift_evidence": {
-          "samples": 0,
+          "samples": 1,
           "reason": "insufficient"
         }
       }
