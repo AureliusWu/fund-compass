@@ -5,31 +5,31 @@
     "applied_at": "2026-08-13T13:46:49+08:00",
     "legacy_records_retained": 17
   },
-  "updated_at": "2026-08-20T15:25:13+08:00",
+  "updated_at": "2026-08-21T15:26:06+08:00",
   "summary": {
     "539002": {
-      "samples": 5,
+      "samples": 6,
       "status": "collecting",
       "confidence": "样本积累中",
-      "mae": 0.883,
-      "bias": -0.619,
+      "mae": 0.982,
+      "bias": -0.269,
       "direction_accuracy": 100.0,
       "error_band": 1.429,
       "error_percentiles": {
-        "p50": 1.039,
-        "p80": 1.315,
-        "p95": 1.401
+        "p50": 1.163,
+        "p80": 1.429,
+        "p95": 1.466
       },
       "rolling_5": {
         "samples": 5,
-        "mae": 0.883,
-        "bias": -0.619,
+        "mae": 1.097,
+        "bias": -0.405,
         "direction_accuracy": 100.0
       },
       "rolling_20": {
-        "samples": 5,
-        "mae": 0.883,
-        "bias": -0.619,
+        "samples": 6,
+        "mae": 0.982,
+        "bias": -0.269,
         "direction_accuracy": 100.0
       },
       "pending": 1,
@@ -38,29 +38,29 @@
       "model_version": "v1-2026q1-holdings"
     },
     "012920": {
-      "samples": 5,
+      "samples": 6,
       "status": "collecting",
       "confidence": "样本积累中",
-      "mae": 2.654,
-      "bias": 0.13,
-      "direction_accuracy": 80.0,
-      "error_band": 3.306,
+      "mae": 2.234,
+      "bias": 0.131,
+      "direction_accuracy": 83.3,
+      "error_band": 3.152,
       "error_percentiles": {
-        "p50": 3.002,
-        "p80": 3.183,
-        "p95": 3.275
+        "p50": 2.836,
+        "p80": 3.152,
+        "p95": 3.267
       },
       "rolling_5": {
         "samples": 5,
-        "mae": 2.654,
-        "bias": 0.13,
+        "mae": 2.05,
+        "bias": -0.473,
         "direction_accuracy": 80.0
       },
       "rolling_20": {
-        "samples": 5,
-        "mae": 2.654,
-        "bias": 0.13,
-        "direction_accuracy": 80.0
+        "samples": 6,
+        "mae": 2.234,
+        "bias": 0.131,
+        "direction_accuracy": 83.3
       },
       "pending": 1,
       "stale": 0,
@@ -68,28 +68,28 @@
       "model_version": "v1-2026q1-style"
     },
     "018147": {
-      "samples": 5,
+      "samples": 6,
       "status": "collecting",
       "confidence": "样本积累中",
-      "mae": 0.889,
-      "bias": -0.609,
+      "mae": 0.989,
+      "bias": -0.26,
       "direction_accuracy": 100.0,
       "error_band": 1.436,
       "error_percentiles": {
-        "p50": 1.027,
-        "p80": 1.313,
-        "p95": 1.406
+        "p50": 1.155,
+        "p80": 1.436,
+        "p95": 1.475
       },
       "rolling_5": {
         "samples": 5,
-        "mae": 0.889,
-        "bias": -0.609,
+        "mae": 1.098,
+        "bias": -0.4,
         "direction_accuracy": 100.0
       },
       "rolling_20": {
-        "samples": 5,
-        "mae": 0.889,
-        "bias": -0.609,
+        "samples": 6,
+        "mae": 0.989,
+        "bias": -0.26,
         "direction_accuracy": 100.0
       },
       "pending": 1,
@@ -2104,7 +2104,7 @@
       "delay_minutes": 50.22,
       "calendar_source": "https://www.sse.com.cn/disclosure/dealinstruc/closed/",
       "alignment_version": "observation-target-v2",
-      "status": "pending",
+      "status": "settled",
       "raw_change": -1.600783,
       "predicted_change": -1.6008,
       "coverage": 64.33,
@@ -2178,7 +2178,13 @@
       "model_label": "2026Q1重仓穿透模型",
       "fallback_used": false,
       "waiting_days": 1,
-      "settlement_note": "等待同一归属日净值公布"
+      "settlement_note": "按目标净值日精确匹配官方净值",
+      "actual_nav": 2.329,
+      "actual_change": -3.0795,
+      "error": 1.4787,
+      "absolute_error": 1.4787,
+      "direction_hit": true,
+      "settled_at": "2026-08-21T15:26:06+08:00"
     },
     {
       "code": "012920",
@@ -2195,7 +2201,7 @@
       "delay_minutes": 50.22,
       "calendar_source": "https://www.sse.com.cn/disclosure/dealinstruc/closed/",
       "alignment_version": "observation-target-v2",
-      "status": "pending",
+      "status": "settled",
       "raw_change": -4.168275,
       "predicted_change": -4.1683,
       "coverage": 33.98,
@@ -2248,7 +2254,13 @@
       "model_label": "2026Q1重仓穿透模型",
       "fallback_used": true,
       "waiting_days": 1,
-      "settlement_note": "等待同一归属日净值公布"
+      "settlement_note": "按目标净值日精确匹配官方净值",
+      "actual_nav": 3.7482,
+      "actual_change": -4.3021,
+      "error": 0.1338,
+      "absolute_error": 0.1338,
+      "direction_hit": true,
+      "settled_at": "2026-08-21T15:26:06+08:00"
     },
     {
       "code": "018147",
@@ -2265,7 +2277,7 @@
       "delay_minutes": 50.22,
       "calendar_source": "https://www.sse.com.cn/disclosure/dealinstruc/closed/",
       "alignment_version": "observation-target-v2",
-      "status": "pending",
+      "status": "settled",
       "raw_change": -1.600783,
       "predicted_change": -1.6008,
       "coverage": 64.33,
@@ -2339,29 +2351,287 @@
       "model_label": "2026Q1重仓穿透模型",
       "fallback_used": false,
       "waiting_days": 1,
+      "settlement_note": "按目标净值日精确匹配官方净值",
+      "actual_nav": 2.291,
+      "actual_change": -3.088,
+      "error": 1.4872,
+      "absolute_error": 1.4872,
+      "direction_hit": true,
+      "settled_at": "2026-08-21T15:26:06+08:00"
+    },
+    {
+      "code": "539002",
+      "name": "建信新兴市场混合(QDII)A",
+      "prediction_date": "2026-08-21",
+      "target_nav_date": "2026-08-20",
+      "base_nav_date": "2026-08-19",
+      "base_nav": 2.329,
+      "predicted_nav": 2.3583,
+      "model_version": "v1-2026q1-holdings",
+      "observed_at": "2026-08-21T15:26:06+08:00",
+      "quote_time": "2026-08-20 16:04:56",
+      "scheduled_for": "2026-08-21T14:35+08:00",
+      "delay_minutes": 51.11,
+      "calendar_source": "https://www.sse.com.cn/disclosure/dealinstruc/closed/",
+      "alignment_version": "observation-target-v2",
+      "status": "pending",
+      "raw_change": 1.257455,
+      "predicted_change": 1.2575,
+      "coverage": 64.33,
+      "features": {
+        "usTSM": 0.95,
+        "usNVDA": -0.33,
+        "usEWY": 2.14,
+        "usAVGO": 0.43,
+        "usSNDK": 2.02,
+        "usGLW": -0.66,
+        "usWDC": 1.51,
+        "usLITE": 6.24,
+        "usMPWR": 0.8
+      },
+      "feature_evidence": {
+        "usTSM": {
+          "change": 0.95,
+          "quote_date": "2026-08-20",
+          "quote_time": "2026-08-20 16:04:56",
+          "source": "tencent_quote"
+        },
+        "usNVDA": {
+          "change": -0.33,
+          "quote_date": "2026-08-20",
+          "quote_time": "2026-08-20 16:00:01",
+          "source": "tencent_quote"
+        },
+        "usEWY": {
+          "change": 2.14,
+          "quote_date": "2026-08-20",
+          "quote_time": "2026-08-20 16:00:01",
+          "source": "tencent_quote"
+        },
+        "usAVGO": {
+          "change": 0.43,
+          "quote_date": "2026-08-20",
+          "quote_time": "2026-08-20 16:00:01",
+          "source": "tencent_quote"
+        },
+        "usSNDK": {
+          "change": 2.02,
+          "quote_date": "2026-08-20",
+          "quote_time": "2026-08-20 16:00:01",
+          "source": "tencent_quote"
+        },
+        "usGLW": {
+          "change": -0.66,
+          "quote_date": "2026-08-20",
+          "quote_time": "2026-08-20 16:04:56",
+          "source": "tencent_quote"
+        },
+        "usWDC": {
+          "change": 1.51,
+          "quote_date": "2026-08-20",
+          "quote_time": "2026-08-20 16:00:01",
+          "source": "tencent_quote"
+        },
+        "usLITE": {
+          "change": 6.24,
+          "quote_date": "2026-08-20",
+          "quote_time": "2026-08-20 16:00:01",
+          "source": "tencent_quote"
+        },
+        "usMPWR": {
+          "change": 0.8,
+          "quote_date": "2026-08-20",
+          "quote_time": "2026-08-20 16:00:01",
+          "source": "tencent_quote"
+        }
+      },
+      "model_label": "2026Q1重仓穿透模型",
+      "fallback_used": false,
+      "waiting_days": 1,
+      "settlement_note": "等待同一归属日净值公布"
+    },
+    {
+      "code": "012920",
+      "name": "易方达全球成长精选混合(QDII)人民币A",
+      "prediction_date": "2026-08-21",
+      "target_nav_date": "2026-08-20",
+      "base_nav_date": "2026-08-19",
+      "base_nav": 3.7482,
+      "predicted_nav": 3.8025,
+      "model_version": "v1-2026q1-style",
+      "observed_at": "2026-08-21T15:26:06+08:00",
+      "quote_time": "2026-08-20 16:04:56",
+      "scheduled_for": "2026-08-21T14:35+08:00",
+      "delay_minutes": 51.11,
+      "calendar_source": "https://www.sse.com.cn/disclosure/dealinstruc/closed/",
+      "alignment_version": "observation-target-v2",
+      "status": "pending",
+      "raw_change": 1.448935,
+      "predicted_change": 1.4489,
+      "coverage": 33.98,
+      "features": {
+        "usTSM": 0.95,
+        "usLITE": 6.24,
+        "usGLW": -0.66,
+        "usAXTI": -0.42,
+        "usTSEM": -1.18,
+        "usGOOGL": -1.17
+      },
+      "feature_evidence": {
+        "usTSM": {
+          "change": 0.95,
+          "quote_date": "2026-08-20",
+          "quote_time": "2026-08-20 16:04:56",
+          "source": "tencent_quote"
+        },
+        "usLITE": {
+          "change": 6.24,
+          "quote_date": "2026-08-20",
+          "quote_time": "2026-08-20 16:00:01",
+          "source": "tencent_quote"
+        },
+        "usGLW": {
+          "change": -0.66,
+          "quote_date": "2026-08-20",
+          "quote_time": "2026-08-20 16:04:56",
+          "source": "tencent_quote"
+        },
+        "usAXTI": {
+          "change": -0.42,
+          "quote_date": "2026-08-20",
+          "quote_time": "2026-08-20 16:00:01",
+          "source": "tencent_quote"
+        },
+        "usTSEM": {
+          "change": -1.18,
+          "quote_date": "2026-08-20",
+          "quote_time": "2026-08-20 16:00:01",
+          "source": "tencent_quote"
+        },
+        "usGOOGL": {
+          "change": -1.17,
+          "quote_date": "2026-08-20",
+          "quote_time": "2026-08-20 16:00:01",
+          "source": "tencent_quote"
+        }
+      },
+      "model_label": "2026Q1重仓穿透模型",
+      "fallback_used": true,
+      "waiting_days": 1,
+      "settlement_note": "等待同一归属日净值公布"
+    },
+    {
+      "code": "018147",
+      "name": "建信新兴市场混合(QDII)C",
+      "prediction_date": "2026-08-21",
+      "target_nav_date": "2026-08-20",
+      "base_nav_date": "2026-08-19",
+      "base_nav": 2.291,
+      "predicted_nav": 2.3198,
+      "model_version": "v1-2026q1-holdings",
+      "observed_at": "2026-08-21T15:26:06+08:00",
+      "quote_time": "2026-08-20 16:04:56",
+      "scheduled_for": "2026-08-21T14:35+08:00",
+      "delay_minutes": 51.11,
+      "calendar_source": "https://www.sse.com.cn/disclosure/dealinstruc/closed/",
+      "alignment_version": "observation-target-v2",
+      "status": "pending",
+      "raw_change": 1.257455,
+      "predicted_change": 1.2575,
+      "coverage": 64.33,
+      "features": {
+        "usTSM": 0.95,
+        "usNVDA": -0.33,
+        "usEWY": 2.14,
+        "usAVGO": 0.43,
+        "usSNDK": 2.02,
+        "usGLW": -0.66,
+        "usWDC": 1.51,
+        "usLITE": 6.24,
+        "usMPWR": 0.8
+      },
+      "feature_evidence": {
+        "usTSM": {
+          "change": 0.95,
+          "quote_date": "2026-08-20",
+          "quote_time": "2026-08-20 16:04:56",
+          "source": "tencent_quote"
+        },
+        "usNVDA": {
+          "change": -0.33,
+          "quote_date": "2026-08-20",
+          "quote_time": "2026-08-20 16:00:01",
+          "source": "tencent_quote"
+        },
+        "usEWY": {
+          "change": 2.14,
+          "quote_date": "2026-08-20",
+          "quote_time": "2026-08-20 16:00:01",
+          "source": "tencent_quote"
+        },
+        "usAVGO": {
+          "change": 0.43,
+          "quote_date": "2026-08-20",
+          "quote_time": "2026-08-20 16:00:01",
+          "source": "tencent_quote"
+        },
+        "usSNDK": {
+          "change": 2.02,
+          "quote_date": "2026-08-20",
+          "quote_time": "2026-08-20 16:00:01",
+          "source": "tencent_quote"
+        },
+        "usGLW": {
+          "change": -0.66,
+          "quote_date": "2026-08-20",
+          "quote_time": "2026-08-20 16:04:56",
+          "source": "tencent_quote"
+        },
+        "usWDC": {
+          "change": 1.51,
+          "quote_date": "2026-08-20",
+          "quote_time": "2026-08-20 16:00:01",
+          "source": "tencent_quote"
+        },
+        "usLITE": {
+          "change": 6.24,
+          "quote_date": "2026-08-20",
+          "quote_time": "2026-08-20 16:00:01",
+          "source": "tencent_quote"
+        },
+        "usMPWR": {
+          "change": 0.8,
+          "quote_date": "2026-08-20",
+          "quote_time": "2026-08-20 16:00:01",
+          "source": "tencent_quote"
+        }
+      },
+      "model_label": "2026Q1重仓穿透模型",
+      "fallback_used": false,
+      "waiting_days": 1,
       "settlement_note": "等待同一归属日净值公布"
     }
   ],
   "pipeline": {
-    "last_run_at": "2026-08-20T15:25:13+08:00",
+    "last_run_at": "2026-08-21T15:26:06+08:00",
     "quotes_count": 21,
     "details_count": 3,
     "alignment_version": "observation-target-v2",
     "legacy_misaligned_records": 17,
     "legacy_last_prediction_at": "2026-07-17T16:38:44+08:00",
     "legacy_last_settlement_at": "2026-07-21T17:13:24+08:00",
-    "heartbeat_at": "2026-08-20T15:25:13+08:00",
+    "heartbeat_at": "2026-08-21T15:26:06+08:00",
     "run_mode": "scheduled",
-    "scheduled_for": "2026-08-20T14:35+08:00",
-    "delay_minutes": 50.22,
-    "observation_date": "2026-08-20",
+    "scheduled_for": "2026-08-21T14:35+08:00",
+    "delay_minutes": 51.11,
+    "observation_date": "2026-08-21",
     "calendar_supported": true,
     "calendar_source": "https://www.sse.com.cn/disclosure/dealinstruc/closed/",
     "trading_day": true,
     "prediction_due": true,
     "prediction_expected": true,
     "prediction_window_status": "delayed_same_day",
-    "prediction_target_date": "2026-08-19",
+    "prediction_target_date": "2026-08-20",
     "expected_models": 3,
     "effective_predictions_for_observation": 3,
     "consecutive_expected_zero_prediction_runs": 0,
@@ -2370,9 +2640,9 @@
     "settlements_written": 3,
     "legacy_records_migrated": 0,
     "quote_error": null,
-    "last_prediction_at": "2026-08-20T15:25:13+08:00",
-    "last_effective_prediction_at": "2026-08-20T15:25:13+08:00",
-    "last_settlement_at": "2026-08-20T15:25:13+08:00",
-    "last_effective_settlement_at": "2026-08-20T15:25:13+08:00"
+    "last_prediction_at": "2026-08-21T15:26:06+08:00",
+    "last_effective_prediction_at": "2026-08-21T15:26:06+08:00",
+    "last_settlement_at": "2026-08-21T15:26:06+08:00",
+    "last_effective_settlement_at": "2026-08-21T15:26:06+08:00"
   }
 }
