@@ -1,5 +1,12 @@
 # Changelog
 
+## 7.0.1 - 2026-08-24
+
+- GitHub Actions 统一升级到 Node 24 兼容主版本：`checkout@v7`、`setup-node@v7`、`setup-python@v7`、`upload-artifact@v7`、`upload-pages-artifact@v5` 与 `deploy-pages@v5`，清除现行工作流中的 Node 20 弃用告警。
+- Worker 将上游明确返回的“暂无数据”归类为 `upstream_empty` 并保留到正式净值降级诊断中；真正结构异常仍为 `schema_invalid`，休市或无盘中数据时不再误报协议损坏。
+- 增加工作流运行时与全端版本一致性契约测试，避免后续定时任务回退到旧 Action，或前端、API、Worker、锁文件、文档之间出现版本漂移。
+- 前端、API、Worker、PWA 描述与锁文件统一升级为 7.0.1；数据口径、定时任务计划、Render 临时 SQLite 边界和 Worker 通知契约保持不变。
+
 ## 7.0.0 - 2026-08-13
 
 - 盘中估值新增 `holdings_model`：参考蜉蝣基金的公开持仓穿透方法，在司南 Worker 内独立实现，以公开披露持仓、可用行情和最近正式净值生成非官方参考估值，并保留覆盖率、行情时间、持仓披露日期和模型状态证据；批量响应用 `accounting` 对直接盘中、模型、正式净值降级与不可用结果逐项守恒计数。

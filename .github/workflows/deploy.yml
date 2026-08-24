@@ -25,12 +25,12 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.target_sha }}
       - name: Verify exact source
         run: test "$(git rev-parse HEAD)" = "${{ inputs.target_sha }}"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: npm
@@ -48,7 +48,7 @@ jobs:
         run: printf '{"commit":"%s"}\n' '${{ inputs.target_sha }}' > dist/release.json
       - name: Verify production artifact
         run: test -f dist/index.html && test -f dist/manifest.webmanifest && test "$(jq -r .commit dist/release.json)" = "${{ inputs.target_sha }}"
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: frontend/dist
 
@@ -61,4 +61,4 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

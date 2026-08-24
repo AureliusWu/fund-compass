@@ -630,7 +630,7 @@ describe('Cloudflare push worker', () => {
     const response = await worker.fetch(new Request('https://worker.test/health'), env)
     const body = await response.json() as { runtime: Record<string, unknown>; version: string }
     expect(response.status).toBe(200)
-    expect(body.version).toBe('7.0.0')
+    expect(body.version).toBe('7.0.1')
     expect(body.runtime).toMatchObject({
       state_available: true,
       last_cron_at: '2026-07-13T14:30:00+08:00',

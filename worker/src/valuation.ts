@@ -302,6 +302,12 @@ export function isPublishableIntraday(estimate: Estimate, date: string, now = ne
 }
 
 export function parseEstimateTablePayload(payload: unknown, codes: string[]): Map<string, Estimate> {
+  if (isRecord(payload)
+    && payload.ErrCode === -1
+    && String(payload.ErrMsg ?? '').trim() === '暂无数据'
+    && payload.Data === null) {
+    throw new ExternalDataError('upstream_empty')
+  }
   if (!isRecord(payload) || payload.ErrCode !== 0 || !isRecord(payload.Data) || !Array.isArray(payload.Data.list)) {
     throw new ExternalDataError('schema_invalid')
   }

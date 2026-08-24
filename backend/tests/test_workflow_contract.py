@@ -152,3 +152,29 @@ def test_all_workflow_files_parse_as_yaml() -> None:
     for path in sorted(WORKFLOWS.glob("*.yml")):
         parsed = yaml.safe_load(path.read_text(encoding="utf-8"))
         assert isinstance(parsed, dict), path.name
+
+
+def test_actions_use_node24_compatible_majors() -> None:
+    combined = "\n".join(path.read_text(encoding="utf-8") for path in sorted(WORKFLOWS.glob("*.yml")))
+
+    obsolete = (
+        "actions/checkout@v4",
+        "actions/setup-node@v4",
+        "actions/setup-python@v5",
+        "actions/upload-artifact@v4",
+        "actions/upload-pages-artifact@v3",
+        "actions/deploy-pages@v4",
+    )
+    current = (
+        "actions/checkout@v7",
+        "actions/setup-node@v7",
+        "actions/setup-python@v7",
+        "actions/upload-artifact@v7",
+        "actions/upload-pages-artifact@v5",
+        "actions/deploy-pages@v5",
+    )
+
+    for action in obsolete:
+        assert action not in combined
+    for action in current:
+        assert action in combined

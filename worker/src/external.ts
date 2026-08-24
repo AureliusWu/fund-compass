@@ -7,6 +7,7 @@ export type ExternalFailureReason =
   | 'response_too_large'
   | 'json_invalid'
   | 'schema_invalid'
+  | 'upstream_empty'
   | 'request_budget_exhausted'
 
 const DEFAULT_TIMEOUT_MS = 10_000

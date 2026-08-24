@@ -55,7 +55,7 @@ services:
 
 挂载新磁盘不会自动迁移临时文件系统中的旧 SQLite 文件。若旧数据需要保留，必须在重启或重新部署前制作一致性备份并单独导入持久盘。继续使用 `plan: free` 时，健康接口会明确报告 `ephemeral`，不得宣称决策闭环已持久化。
 
-当前 v7.0.0 生产方案仍使用 `render.yaml` 的 `plan: free`，预期健康状态必须是 `persistence: ephemeral`、`durable: false`。版本发布不会自动购买磁盘、迁移数据库或改变这一边界。
+当前 v7.0.1 生产方案仍使用 `render.yaml` 的 `plan: free`，预期健康状态必须是 `persistence: ephemeral`、`durable: false`。版本发布不会自动购买磁盘、迁移数据库或改变这一边界。
 
 ## 二、让前端指向后端
 
@@ -77,7 +77,7 @@ GitHub schedule 不保证金融时点准时。海外精度任务必须保存真�
 
 Worker 的 HTTP 健康和估值烟测不会触发通知；禁止在发布烟测中调用受保护的 `POST /test` 或运行 `manual-estimate-push`。自然 Cron 是否成功，只能由部署后的工作日北京时间 14:30/14:40 的新记录证明，不能用 Worker 部署成功代替。
 
-v7.0.0 发布前冻结以下回滚证据：上一正式标签与提交、最新数据提交、Pages deployment、Render deployment、Worker version ID。回滚应用反向提交保留后续自动生成的数据提交，不使用强推或把 `main` 重置到旧标签；Worker 使用 Wrangler 的精确 version ID 回滚。Render 免费 SQLite 不具备耐久性，因此代码回滚不等于数据库数据恢复。
+v7.0.1 发布前冻结以下回滚证据：上一正式标签与提交、最新数据提交、Pages deployment、Render deployment、Worker version ID。回滚应用反向提交保留后续自动生成的数据提交，不使用强推或把 `main` 重置到旧标签；Worker 使用 Wrangler 的精确 version ID 回滚。Render 免费 SQLite 不具备耐久性，因此代码回滚不等于数据库数据恢复。
 
 ## 本地联调
 

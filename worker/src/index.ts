@@ -867,7 +867,7 @@ export default {
         })
       }
       const runtime = await cachedHealthRuntime(env)
-      const payload = { status: 'ok', service: 'sinan-estimate-push', version: '7.0.0', runtime, configured: {
+      const payload = { status: 'ok', service: 'sinan-estimate-push', version: '7.0.1', runtime, configured: {
         gist_id: Boolean(env.GIST_ID), fund_api: Boolean(env.FUND_API_BASE),
         gist_token: Boolean(env.GIST_TOKEN), serverchan: Boolean(env.WECHAT_SENDKEY), admin: Boolean(env.ADMIN_TOKEN),
         worker: Boolean(env.WORKER_TOKEN),

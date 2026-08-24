@@ -23,7 +23,7 @@ jobs:
       FUND_API_BASE: ${{ secrets.FUND_API_BASE }}
       WORKER_BASE: https://sinan-estimate-push.ligugu69.workers.dev
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.target_sha }}
           fetch-depth: 0

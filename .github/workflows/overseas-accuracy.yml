@@ -23,8 +23,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: 更新海外估值误差账本
@@ -74,7 +74,7 @@ jobs:
           for code, row in (data.get("summary") or {}).items():
               print(f"- {code}: {row.get('samples', 0)} 样本 · 待结算 {row.get('pending', 0)} · MAE {row.get('mae')} · {row.get('confidence')}")
           PY
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: overseas-accuracy-${{ github.run_number }}

@@ -76,6 +76,38 @@ describe('valuation normalization and model boundaries', () => {
     expect(isPublishableIntraday(rounded, '2026-08-12', now)).toBe(true)
   })
 
+  it('distinguishes an explicit upstream empty estimate table from a broken schema', () => {
+    expect(() => parseEstimateTablePayload({ ErrCode: -1, ErrMsg: ' 暂无数据 ', Data: null }, ['005844']))
+      .toThrowError(expect.objectContaining({ reason: 'upstream_empty' }))
+    expect(() => parseEstimateTablePayload({ ErrCode: -1, ErrMsg: '系统异常', Data: null }, ['005844']))
+      .toThrowError(expect.objectContaining({ reason: 'schema_invalid' }))
+    expect(() => parseEstimateTablePayload({ ErrCode: 0, Data: null }, ['005844']))
+      .toThrowError(expect.objectContaining({ reason: 'schema_invalid' }))
+  })
+
+  it('preserves the upstream empty reason when resolving an official fallback', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.includes('/FundGuZhi/GetFundGZList')) {
+        return Response.json({ ErrCode: -1, ErrMsg: '暂无数据', Data: null })
+      }
+      if (url.includes('/f10/lsjz')) return Response.json({ ErrCode: 0, Data: { LSJZList: [
+        { FSRQ: '2026-08-11', DWJZ: '1.01', JZZZL: '1' },
+        { FSRQ: '2026-08-10', DWJZ: '1.00', JZZZL: '0' },
+      ] } })
+      if (url.includes('/pingzhongdata/')) return new Response('var fS_name = "国内基金";')
+      if (url.includes('/FundArchivesDatas.aspx')) return new Response('var apidata={ content:"<table></table>" };')
+      throw new Error(`unexpected ${url}`)
+    }))
+
+    const batch = await resolveValuations(['005844'], now)
+    expect(batch.primaryReason).toBe('upstream_empty')
+    expect(batch.estimates.get('005844')).toMatchObject({
+      kind: 'official_nav',
+      diagnostics: { primary_reason: 'upstream_empty' },
+    })
+  })
+
   it('routes an algebraically contradictory primary estimate into official fallback', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
       const url = String(input)

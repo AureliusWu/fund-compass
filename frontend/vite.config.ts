@@ -50,7 +50,7 @@ export default defineConfig({
         name: '司南基金',
         short_name: '司南基金',
         lang: 'zh-CN',
-        description: '司南基金 v7.0.0 · 个人基金选基与择时辅助工具',
+        description: '司南基金 v7.0.1 · 个人基金选基与择时辅助工具',
         theme_color: '#3F765C',
         background_color: '#F8F7F1',
         display: 'standalone',
