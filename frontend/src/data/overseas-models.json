@@ -5,7 +5,7 @@
     "applied_at": "2026-08-13T13:46:49+08:00",
     "legacy_records_excluded": 17
   },
-  "updated_at": "2026-08-26T15:29:27+08:00",
+  "updated_at": "2026-08-29T02:59:07+08:00",
   "models": {
     "539002": {
       "name": "建信新兴市场混合(QDII)A",
@@ -79,13 +79,15 @@
         }
       },
       "candidate": {
-        "version": "candidate-20260826",
-        "created_at": "2026-08-26T15:29:27+08:00",
-        "data_fingerprint": "a6a82b1906ae3b2cf1677775fb56d37874d6f58a0ba09e8c23f0d80fe8484799",
-        "data_effective_at": "2026-08-26T15:28:50+08:00",
+        "version": "candidate-20260829",
+        "created_at": "2026-08-29T02:59:07+08:00",
+        "data_fingerprint": "553a1d3bb2159e56b0cd599436ea3133fbabccd3935d2c04c4a02f46e0014941",
+        "data_effective_at": "2026-08-29T02:58:29+08:00",
         "status": "collecting",
-        "samples": 9,
-        "required": 20
+        "samples": 10,
+        "required": 20,
+        "eligible_for_admin_review": false,
+        "admin_review_recommendation": "no_active_change"
       },
       "history": [],
       "governance": {
@@ -93,9 +95,13 @@
         "min_samples": 20,
         "poor_cycles": 0,
         "drift_evidence": {
-          "samples": 9,
+          "samples": 10,
           "reason": "insufficient"
-        }
+        },
+        "active_change_policy": "explicit_admin_only",
+        "candidate_eligible_for_admin_review": false,
+        "rollback_recommended": false,
+        "recommendation": "collect_more_evidence"
       }
     },
     "012920": {
@@ -170,13 +176,15 @@
         }
       },
       "candidate": {
-        "version": "candidate-20260826",
-        "created_at": "2026-08-26T15:29:27+08:00",
-        "data_fingerprint": "ae6022a7677456fc9b1eab5e6d0551577c6bfdd29ba69aed16a302e9885ad180",
-        "data_effective_at": "2026-08-26T15:28:50+08:00",
+        "version": "candidate-20260829",
+        "created_at": "2026-08-29T02:59:07+08:00",
+        "data_fingerprint": "036f3600711b752357372979a894eb0d40c1ec898aaedc296a10812663400c11",
+        "data_effective_at": "2026-08-29T02:58:29+08:00",
         "status": "collecting",
-        "samples": 9,
-        "required": 20
+        "samples": 10,
+        "required": 20,
+        "eligible_for_admin_review": false,
+        "admin_review_recommendation": "no_active_change"
       },
       "history": [],
       "governance": {
@@ -184,9 +192,13 @@
         "min_samples": 20,
         "poor_cycles": 0,
         "drift_evidence": {
-          "samples": 9,
+          "samples": 10,
           "reason": "insufficient"
-        }
+        },
+        "active_change_policy": "explicit_admin_only",
+        "candidate_eligible_for_admin_review": false,
+        "rollback_recommended": false,
+        "recommendation": "collect_more_evidence"
       }
     },
     "018147": {
@@ -261,13 +273,15 @@
         }
       },
       "candidate": {
-        "version": "candidate-20260826",
-        "created_at": "2026-08-26T15:29:27+08:00",
-        "data_fingerprint": "a0d1914726015542840421716b8e75cd6f398ae0340c38855d7229fb067019bb",
-        "data_effective_at": "2026-08-26T15:28:50+08:00",
+        "version": "candidate-20260829",
+        "created_at": "2026-08-29T02:59:07+08:00",
+        "data_fingerprint": "ee0624ab7e0ee1346f782fe58d40eb87d42f4ca58c4f5a22cbbf2ff1e08b7da1",
+        "data_effective_at": "2026-08-29T02:58:29+08:00",
         "status": "collecting",
-        "samples": 9,
-        "required": 20
+        "samples": 10,
+        "required": 20,
+        "eligible_for_admin_review": false,
+        "admin_review_recommendation": "no_active_change"
       },
       "history": [],
       "governance": {
@@ -275,9 +289,13 @@
         "min_samples": 20,
         "poor_cycles": 0,
         "drift_evidence": {
-          "samples": 9,
+          "samples": 10,
           "reason": "insufficient"
-        }
+        },
+        "active_change_policy": "explicit_admin_only",
+        "candidate_eligible_for_admin_review": false,
+        "rollback_recommended": false,
+        "recommendation": "collect_more_evidence"
       }
     }
   },
