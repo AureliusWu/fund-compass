@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""跨基金策略校准：生成候选注册表，严格门槛通过时自动晋级 active。"""
+"""跨基金策略校准：只生成候选与审计建议，active 只能由管理员显式变更。"""
 import datetime as dt
 import json
 import math
@@ -23,7 +23,6 @@ REGISTRY = ROOT / "backend" / "data" / "strategy-params.json"
 PUBLIC_REPORT = ROOT / "frontend" / "public" / "data" / "strategy-calibration.json"
 MIN_VALID = int(os.environ.get("CALIBRATION_MIN_VALID", "12"))
 MAX_FUNDS = int(os.environ.get("CALIBRATION_MAX_FUNDS", "30"))
-AUTO_PROMOTE = os.environ.get("AUTO_PROMOTE_STRATEGY", "").lower() in ("1", "true", "yes")
 FUND_API_BASE = os.environ.get("FUND_API_BASE", "").rstrip("/")
 
 
@@ -132,6 +131,40 @@ def active_is_degraded(outcomes: dict | None, version: str) -> tuple[bool, dict]
     }
 
 
+def review_policy(
+    *,
+    candidate_passed: bool,
+    candidate_changed: bool,
+    degraded: bool,
+    frozen: bool,
+    poor_cycles: int,
+    rollback_available: bool,
+) -> dict:
+    """将校准和退化证据转为人工审核建议，不执行任何 active 变更。"""
+    eligible = candidate_passed and candidate_changed and not degraded and not frozen
+    rollback_recommended = poor_cycles >= 2 and rollback_available
+    if rollback_recommended:
+        recommendation = "review_rollback"
+    elif poor_cycles >= 2:
+        recommendation = "investigate_active_degradation"
+    elif degraded:
+        recommendation = "monitor_active_degradation"
+    elif frozen:
+        recommendation = "collect_more_evidence"
+    elif eligible:
+        recommendation = "review_candidate"
+    elif candidate_passed:
+        recommendation = "keep_active_same_parameters"
+    else:
+        recommendation = "keep_active_rejected_candidate"
+    return {
+        "active_change_policy": "explicit_admin_only",
+        "candidate_eligible_for_admin_review": eligible,
+        "rollback_recommended": rollback_recommended,
+        "recommendation": recommendation,
+    }
+
+
 def main() -> None:
     rows = []
     for index, (code, fund_type) in enumerate(sample_codes(), 1):
@@ -151,12 +184,25 @@ def main() -> None:
     degraded, outcome_evidence = active_is_degraded(outcomes, active_version)
     previous_cycles = int((current.get("governance") or {}).get("poor_cycles") or 0)
     poor_cycles = previous_cycles + 1 if degraded else 0
-    frozen = not summary["type_balance_ok"] or summary["valid"] < MIN_VALID
+    frozen = degraded or not summary["type_balance_ok"] or summary["valid"] < MIN_VALID
+    changed = summary["weights"] != current["active"].get("weights")
+    policy = review_policy(
+        candidate_passed=summary["passed"],
+        candidate_changed=changed,
+        degraded=degraded,
+        frozen=frozen,
+        poor_cycles=poor_cycles,
+        rollback_available=bool(current.get("history")),
+    )
     candidate = {
         "version": "candidate-" + now[:10].replace("-", ""),
         "created_at": now,
         "weights": summary["weights"],
         "status": "passed" if summary["passed"] else "rejected",
+        "eligible_for_admin_review": policy["candidate_eligible_for_admin_review"],
+        "admin_review_recommendation": (
+            "consider_promotion" if policy["candidate_eligible_for_admin_review"] else "no_active_change"
+        ),
         "evidence": {key: value for key, value in summary.items() if key != "weights"},
     }
     output = {
@@ -169,33 +215,11 @@ def main() -> None:
             "status": "frozen" if frozen else "healthy",
             "poor_cycles": poor_cycles,
             "outcome_evidence": outcome_evidence,
+            **policy,
         },
     }
-    changed = candidate["weights"] != current["active"].get("weights")
-    if summary["passed"] and AUTO_PROMOTE and changed and not frozen:
-        output["history"] = ([current["active"]] + output["history"])[:10]
-        output["active"] = {
-            "version": candidate["version"].replace("candidate", "auto"),
-            "weights": candidate["weights"],
-            "source": "cross-fund holdout validation",
-            "promoted_at": now,
-            "evidence": candidate["evidence"],
-            "previous_version": current["active"].get("version"),
-        }
-        candidate["status"] = "promoted"
-    elif summary["passed"] and not changed:
+    if summary["passed"] and not changed:
         candidate["status"] = "same-as-active"
-    if (
-        poor_cycles >= 2
-        and output["active"].get("source") == "cross-fund holdout validation"
-        and output["history"]
-    ):
-        failed = output["active"]
-        output["active"] = output["history"].pop(0)
-        output["history"] = ([failed] + output["history"])[:10]
-        output["governance"]["status"] = "rolled-back"
-        output["governance"]["poor_cycles"] = 0
-        output["governance"]["rolled_back_from"] = failed.get("version")
 
     REGISTRY.parent.mkdir(parents=True, exist_ok=True)
     write_json_atomic(REGISTRY, output)
@@ -203,6 +227,7 @@ def main() -> None:
         "updated_at": now,
         "active": output["active"],
         "candidate": candidate,
+        "governance": output["governance"],
         "summary": summary,
         "funds": [
             {

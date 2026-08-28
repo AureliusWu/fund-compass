@@ -62,7 +62,7 @@ def test_portfolio_contract_accepts_bounded_model_evidence():
 def _estimate_context(**updates):
     context = {
         "status": "fresh", "source": "eastmoney_estimate_table", "kind": "estimate",
-        "source_time": "2026-08-12 14:29:00", "source_time_precision": "datetime",
+        "source_time": "2026-08-12T14:29:00+08:00", "source_time_precision": "datetime",
         "is_fallback": False, "estimate_change": 1.0, "estimate_nav": 1.01,
         "base_nav": 1.0, "base_nav_date": "2026-08-11", "value_nav": 1.01,
         "value_date": "2026-08-12",
@@ -83,6 +83,7 @@ def _estimate_context(**updates):
         status="latest_official", kind="official_nav", source="eastmoney_official_nav",
         source_time="2026-08-11", source_time_precision="date", is_fallback=True,
         base_nav_date="2026-08-08", value_date="2026-08-11",
+        estimate_change=None, estimate_nav=None,
         fallback_reason="estimate_missing",
         diagnostics={"primary_reason": "estimate_missing", "source_time_precision": "date"},
     ),
@@ -133,6 +134,7 @@ def test_estimate_context_accepts_each_coherent_kind(context):
             status="latest_official", kind="official_nav", source="eastmoney_official_nav",
             source_time="2026-08-11", source_time_precision="date", is_fallback=True,
             value_date="2026-08-11", base_nav_date="2026-08-08", model_quote_count=5,
+            estimate_change=None, estimate_nav=None,
             fallback_reason="estimate_missing",
             diagnostics={"primary_reason": "estimate_missing", "source_time_precision": "date"},
         ),

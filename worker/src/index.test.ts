@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import worker, { formatMessage, normalizeEstimate, parseFundHoldings, parsePushState, parseWatchEntries, run, runScheduled, type Env, type Estimate } from './index'
+import worker, { formatMessage, normalizeBuildSha, normalizeEstimate, parseFundHoldings, parsePushState, parseWatchEntries, run, runScheduled, type Env, type Estimate } from './index'
 
 const env: Env = {
   GIST_ID: 'gist', FUND_API_BASE: '', GIST_TOKEN: 'gist-token', WECHAT_SENDKEY: 'send-key',
@@ -7,6 +7,66 @@ const env: Env = {
 }
 const monday1430 = new Date('2026-07-13T06:30:00Z')
 const monday1440 = new Date('2026-07-13T06:40:00Z')
+const buildSha = '0123456789abcdef0123456789abcdef01234567'
+
+function mockDecisionResponse(body: Record<string, unknown>) {
+  const items = body.items as Array<{ code: string }>
+  const decisions = items.map((item, index) => ({
+    code: item.code,
+    action: 'dca',
+    action_label: '分批定投',
+    summary: '维持计划',
+    decision: {
+      decision_id: `dec_${String(index + 1).padStart(64, 'a')}`,
+      fund_code: item.code,
+      action: 'dca',
+    },
+  }))
+  return {
+    request_id: body.request_id,
+    duplicate: false,
+    requested: items.length,
+    total: decisions.length,
+    complete: true,
+    decisions,
+    errors: [],
+    policy_version: `pol_${'b'.repeat(64)}`,
+    strategy_version: 'v8-decision-kernel-1',
+    allocation: { complete: true, warnings: [] },
+  }
+}
+
+function mockNotificationResponse(
+  body: Record<string, unknown>,
+  seen: Set<string>,
+) {
+  const ids = body.decision_ids as string[]
+  const status = String(body.status)
+  return {
+    total: ids.length,
+    events: ids.map((decisionId, index) => {
+      const key = `${decisionId}:${body.scheduled_window}:${status}:${body.attempt_no}`
+      const duplicate = seen.has(key)
+      seen.add(key)
+      return {
+        claimed: status === 'attempted' && !duplicate,
+        duplicate,
+        event: {
+          notification_event_id: `ntf_${String(index + 1).padStart(64, 'c')}`,
+          event_log_id: `ntl_${String(index + 1).padStart(64, 'd')}`,
+          decision_id: decisionId,
+          scheduled_window: body.scheduled_window,
+          status,
+          attempt_no: body.attempt_no,
+          natural_schedule: body.natural_schedule,
+          occurred_at: body.occurred_at,
+          error_class: body.error_class ?? null,
+          detail: body.detail,
+        },
+      }
+    }),
+  }
+}
 
 function fakeNetwork(sendStatuses = [200], options: {
   patchFails?: boolean; missingSecond?: boolean; gistReadFails?: boolean
@@ -21,7 +81,11 @@ function fakeNetwork(sendStatuses = [200], options: {
 } = {}) {
   let state: Record<string, unknown> = { ...(options.initialState || {}) }
   let sends = 0
+  let outcomeSettlements = 0
   let decisionBody: Record<string, unknown> | null = null
+  const decisionBodies: Record<string, unknown>[] = []
+  const notificationEvents: Record<string, unknown>[] = []
+  const seenNotificationEvents = new Set<string>()
   const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input)
     if (url.includes('/gists/gist') && (!init?.method || init.method === 'GET')) {
@@ -78,19 +142,40 @@ function fakeNetwork(sendStatuses = [200], options: {
         status, headers: status === 429 ? { 'Retry-After': '0' } : {},
       })
     }
-    if (url.includes('/api/portfolio/decisions')) {
+    if (url.includes('/api/v2/outcomes/settle')) {
+      outcomeSettlements += 1
+      expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer worker-token')
+      return Response.json({ settled: 0, pending: 0, errors: [] })
+    }
+    if (url.includes('/api/v2/notifications/events')) {
+      const body = JSON.parse(String(init?.body))
+      notificationEvents.push(body)
+      return Response.json(mockNotificationResponse(body, seenNotificationEvents))
+    }
+    if (url.includes('/api/v2/portfolio/decisions')) {
       if (options.backend === 'timeout') throw new DOMException('timeout', 'AbortError')
       if (options.backend === 'unauthorized') return new Response('unauthorized', { status: 401 })
       expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer worker-token')
       const body = JSON.parse(String(init?.body))
       decisionBody = body
-      expect(body.request_id).toBe('2026-07-13-14:30')
-      return Response.json({ decisions: [{ code: '000001', action: '继续定投', summary: '维持计划' }] })
+      decisionBodies.push(body)
+      expect([
+        'natural-2026-07-13-primary', 'manual-2026-07-13-143000',
+      ]).toContain(body.request_id)
+      return Response.json(mockDecisionResponse(body))
     }
     throw new Error(`unexpected request ${url}`)
   })
   vi.stubGlobal('fetch', fetchMock)
-  return { getState: () => state, getSends: () => sends, getDecisionBody: () => decisionBody, fetchMock }
+  return {
+    getState: () => state,
+    getSends: () => sends,
+    getOutcomeSettlements: () => outcomeSettlements,
+    getDecisionBody: () => decisionBody,
+    getDecisionBodies: () => decisionBodies,
+    getNotificationEvents: () => notificationEvents,
+    fetchMock,
+  }
 }
 
 function fakeModelNetwork(options: { qdii?: boolean; freshPrimary?: boolean } = {}) {
@@ -98,6 +183,7 @@ function fakeModelNetwork(options: { qdii?: boolean; freshPrimary?: boolean } = 
   let decisionBody: Record<string, unknown> | null = null
   const holdingCodes = ['688001', '688002', '688003', '688004', '688005', '688006']
   const name = options.qdii ? '嘉实美国成长股票(QDII)' : '国内科技混合'
+  const seenNotificationEvents = new Set<string>()
   const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input)
     if (url.includes('/gists/gist') && (!init?.method || init.method === 'GET')) {
@@ -132,9 +218,17 @@ function fakeModelNetwork(options: { qdii?: boolean; freshPrimary?: boolean } = 
     if (url.includes('/api/qt/ulist.np/get')) return Response.json({ data: { diff: holdingCodes.map((code) => ({
       f12: code, f2: 100, f3: 2, f124: Date.parse('2026-07-13T06:29:00Z') / 1000,
     })) } })
-    if (url.includes('/api/portfolio/decisions')) {
-      decisionBody = JSON.parse(String(init?.body))
-      return Response.json({ decisions: [] })
+    if (url.includes('/api/v2/outcomes/settle')) {
+      return Response.json({ settled: 0, pending: 0, errors: [] })
+    }
+    if (url.includes('/api/v2/notifications/events')) {
+      const body = JSON.parse(String(init?.body))
+      return Response.json(mockNotificationResponse(body, seenNotificationEvents))
+    }
+    if (url.includes('/api/v2/portfolio/decisions')) {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>
+      decisionBody = body
+      return Response.json(mockDecisionResponse(body))
     }
     if (url.includes('sctapi.ftqq.com')) return new Response('{"code":0}')
     throw new Error(`unexpected request ${url}`)
@@ -151,6 +245,7 @@ function fakeBudgetedModelNetwork() {
   const modelCodes = new Set(fundCodes.slice(0, 3))
   const holdingCodes = ['688001', '688002', '688003', '688004', '688005', '688006']
   const watchEntries = fundCodes.map((code) => ({ code, name: `基金${code}`, shares: 100 }))
+  const seenNotificationEvents = new Set<string>()
   const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input)
     if (url.includes('/gists/gist') && (!init?.method || init.method === 'GET')) {
@@ -186,9 +281,17 @@ function fakeBudgetedModelNetwork() {
     if (url.includes('/api/qt/ulist.np/get')) return Response.json({ data: { diff: holdingCodes.map((code) => ({
       f12: code, f2: 100, f3: 2, f124: Date.parse('2026-07-13T06:29:00Z') / 1000,
     })) } })
-    if (url.includes('/api/portfolio/decisions')) {
-      decisionBody = JSON.parse(String(init?.body))
-      return Response.json({ decisions: [] })
+    if (url.includes('/api/v2/outcomes/settle')) {
+      return Response.json({ settled: 0, pending: 0, errors: [] })
+    }
+    if (url.includes('/api/v2/notifications/events')) {
+      const body = JSON.parse(String(init?.body))
+      return Response.json(mockNotificationResponse(body, seenNotificationEvents))
+    }
+    if (url.includes('/api/v2/portfolio/decisions')) {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>
+      decisionBody = body
+      return Response.json(mockDecisionResponse(body))
     }
     if (url.includes('sctapi.ftqq.com')) {
       notification = String((init?.body as URLSearchParams).get('desp'))
@@ -233,18 +336,29 @@ describe('watchlist boundary', () => {
 })
 
 describe('Cloudflare push worker', () => {
+  it('accepts only a complete Git commit identity', () => {
+    expect(normalizeBuildSha(`  ${buildSha.toUpperCase()}  `)).toBe(buildSha)
+    expect(normalizeBuildSha('0123456')).toBeNull()
+    expect(normalizeBuildSha('g'.repeat(40))).toBeNull()
+    expect(normalizeBuildSha(null)).toBeNull()
+  })
+
   it('sanitizes untrusted Gist push state with bounded typed fields', () => {
     expect(parsePushState('[]')).toEqual({})
     expect(parsePushState('{bad json')).toEqual({})
     expect(parsePushState(JSON.stringify({
       date: '2026-07-13', sent_slots: ['14:30', '14:30', '14:40', 1], attempt_count: 2,
       last_slot: '14:30', last_cron_at: '2026-07-13T14:40:00+08:00',
+      last_cron_build_sha: buildSha.toUpperCase(),
+      scheduled_at: '2026-07-13T14:30:00+08:00', schedule_delay_seconds: 600,
       last_cron_result: 'skipped', last_cron_reason: 'no_publishable_intraday',
       last_success_at: '2026-07-11T14:30:00+08:00', last_error: '', last_warning: 'warning',
       decision_status: 'degraded', last_http_status: 429, extra: 'discard me',
     }))).toEqual({
-      date: '2026-07-13', sent_slots: ['14:30'], attempt_count: 2, last_slot: '14:30',
+      date: '2026-07-13', sent_slots: ['14:30', '14:40'], attempt_count: 2, last_slot: '14:30',
       last_cron_at: '2026-07-13T14:40:00+08:00', last_cron_result: 'skipped',
+      last_cron_build_sha: buildSha,
+      scheduled_at: '2026-07-13T14:30:00+08:00', schedule_delay_seconds: 600,
       last_cron_reason: 'no_publishable_intraday', last_success_at: '2026-07-11T14:30:00+08:00',
       last_error: '', last_warning: 'warning', decision_status: 'degraded', last_http_status: 429,
     })
@@ -255,6 +369,8 @@ describe('Cloudflare push worker', () => {
       date: '2026-02-30', sent_slots: '14:30', attempt_count: 1001, last_slot: 'bad',
       last_success_at: '2026-07-11T14:30:00+08:00', last_attempt_at: 'not-a-time',
       last_cron_result: 'unknown', last_cron_reason: 'x'.repeat(81), last_error: 'x'.repeat(241),
+      last_cron_build_sha: 'not-a-full-sha',
+      scheduled_at: 'not-a-time', schedule_delay_seconds: -1,
       decision_status: 'unknown', last_http_status: 99,
     }))).toEqual({ last_success_at: '2026-07-11T14:30:00+08:00' })
   })
@@ -305,6 +421,19 @@ describe('Cloudflare push worker', () => {
     await expect(run(env, false, monday1430)).resolves.toEqual({ status: 'skipped', reason: 'empty_watchlist' })
     expect(net.getSends()).toBe(0)
     expect(net.fetchMock.mock.calls.some(([input]) => String(input).includes('/FundGuZhi/GetFundGZList'))).toBe(false)
+  })
+
+  it('settles outcomes before an empty-watchlist early exit', async () => {
+    const net = fakeNetwork([200], { rawWatchlist: [], backend: 'success' })
+
+    await expect(run({ ...env, FUND_API_BASE: 'https://api.test' }, false, monday1430))
+      .resolves.toMatchObject({
+        status: 'skipped', reason: 'empty_watchlist',
+        outcome_settlement: { settled: 0, pending: 0, errors: [] },
+      })
+    expect(net.getOutcomeSettlements()).toBe(1)
+    expect(net.getDecisionBodies()).toHaveLength(0)
+    expect(net.getSends()).toBe(0)
   })
 
   it('caps scheduled valuation subrequests while preserving an accounted skip', async () => {
@@ -366,9 +495,9 @@ describe('Cloudflare push worker', () => {
     const expired = decision.items.find((item) => item.code === '000002')!
     expect(expired.estimate_context).toMatchObject({
       kind: 'official_nav', status: 'latest_official', source_time_precision: 'date',
-      estimate_nav: 1, value_nav: 1, estimate_change: 0,
+      estimate_nav: null, value_nav: 1, estimate_change: null,
     })
-    expect(expired.current_weight).toBe(49.75)
+    expect((expired.holding as Record<string, unknown>).current_weight).toBe(49.75)
     expect(decision.portfolio_value).toBe(201)
     const sendCall = net.fetchMock.mock.calls.find(([input]) => String(input).includes('sctapi.ftqq.com'))
     const message = String((sendCall?.[1]?.body as URLSearchParams).get('desp'))
@@ -416,6 +545,27 @@ describe('Cloudflare push worker', () => {
   })
 
   it.each([
+    ['timeout', 'serverchan_timeout'],
+    ['network', 'serverchan_network_error'],
+    ['ambiguous response', 'serverchan_business_rejected_http_200'],
+  ])('audits a %s delivery failure as delivery_ambiguous', async (mode, expectedError) => {
+    const net = fakeNetwork([200], { backend: 'success' })
+    const original = net.fetchMock.getMockImplementation()!
+    net.fetchMock.mockImplementation(async (input, init) => {
+      if (!String(input).includes('sctapi.ftqq.com')) return original(input, init)
+      if (mode === 'timeout') throw new DOMException('private timeout detail', 'TimeoutError')
+      if (mode === 'network') throw new TypeError('private socket detail')
+      return Response.json({ message: 'provider result omitted' })
+    })
+
+    await expect(run({ ...env, FUND_API_BASE: 'https://api.test' }, false, monday1430))
+      .rejects.toThrow(expectedError)
+    const failed = [...net.getNotificationEvents()].reverse().find((event) => event.status === 'failed')
+    expect(failed).toMatchObject({ status: 'failed', error_class: 'delivery_ambiguous' })
+    expect(net.getState().sent_slots).toEqual([])
+  })
+
+  it.each([
     ['conflicting codes', { code: 0, errno: 1 }],
     ['missing code', { message: 'ambiguous success' }],
   ])('rejects ServerChan business responses with %s', async (_label, payload) => {
@@ -441,7 +591,7 @@ describe('Cloudflare push worker', () => {
     const sendCall = net.fetchMock.mock.calls.find(([input]) => String(input).includes('sctapi.ftqq.com'))
     const body = sendCall?.[1]?.body as URLSearchParams
 
-    expect(result.funds).toBe(2)
+    expect(result).toMatchObject({ funds: 2 })
     expect(body.get('desp')).toContain('**二号** +2.00%（最近净值）')
     expect(net.getSends()).toBe(1)
   })
@@ -486,6 +636,33 @@ describe('Cloudflare push worker', () => {
     expect(net.getSends()).toBe(0)
   })
 
+  it('does not let a settlement failure block an official-only early exit', async () => {
+    const net = fakeNetwork([200], {
+      backend: 'success',
+      estimateDates: { '000001': '2026-07-12', '000002': '2026-07-12' },
+    })
+    const original = net.fetchMock.getMockImplementation()!
+    net.fetchMock.mockImplementation(async (input, init) => (
+      String(input).includes('/api/v2/outcomes/settle')
+        ? new Response('temporarily unavailable', { status: 503 })
+        : original(input, init)
+    ))
+
+    await expect(runScheduled({ ...env, FUND_API_BASE: 'https://api.test' }, monday1430))
+      .resolves.toMatchObject({
+        status: 'skipped', reason: 'official_nav_only', outcome_settlement: null,
+        warning: '决策结果结算暂不可用: HTTP 503',
+      })
+    expect(net.fetchMock.mock.calls.filter(([input]) => String(input).includes('/api/v2/outcomes/settle')))
+      .toHaveLength(1)
+    expect(net.getState()).toMatchObject({
+      last_cron_result: 'skipped', last_cron_reason: 'official_nav_only',
+      last_warning: '决策结果结算暂不可用: HTTP 503',
+    })
+    expect(net.getDecisionBodies()).toHaveLength(0)
+    expect(net.getSends()).toBe(0)
+  })
+
   it('clears a previous-day failure and warning when today is skipped cleanly', async () => {
     const net = fakeNetwork([200], {
       estimateDates: { '000001': '2026-07-12', '000002': '2026-07-12' },
@@ -520,6 +697,44 @@ describe('Cloudflare push worker', () => {
     await expect(pending[0]).resolves.toBeUndefined()
   })
 
+  it('uses the execution clock for freshness and records delayed planned Cron telemetry', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('WORKER_BUILD_SHA', buildSha)
+    const executedAt = new Date('2026-07-13T06:37:00Z')
+    vi.setSystemTime(executedAt)
+    const net = fakeNetwork([200], {
+      backend: 'success',
+      estimateDates: {
+        '000001': '2026-07-13 14:36:00',
+        '000002': '2026-07-13 14:36:00',
+      },
+    })
+    const pending: Promise<unknown>[] = []
+    const ctx = {
+      waitUntil(promise: Promise<unknown>) { pending.push(promise) },
+    } as unknown as ExecutionContext
+
+    await worker.scheduled({
+      scheduledTime: monday1430.getTime(), cron: '30 6 * * MON-FRI',
+    } as ScheduledController, { ...env, FUND_API_BASE: 'https://api.test' }, ctx)
+    await expect(pending[0]).resolves.toBeUndefined()
+
+    expect(net.getState()).toMatchObject({
+      last_slot: '14:30',
+      last_attempt_at: '2026-07-13T14:37:00+08:00',
+      last_cron_at: '2026-07-13T14:37:00+08:00',
+      last_cron_build_sha: buildSha,
+      scheduled_at: '2026-07-13T14:30:00+08:00',
+      schedule_delay_seconds: 420,
+      last_cron_result: 'sent',
+    })
+    expect(net.getNotificationEvents().every((event) => (
+      event.occurred_at === '2026-07-13T14:37:00+08:00'
+      && event.scheduled_window === '2026-07-13T14:30+08:00'
+    ))).toBe(true)
+    expect(net.getSends()).toBe(1)
+  })
+
   it('labels a stale primary row with its official fallback in a fresh push', async () => {
     const net = fakeNetwork([200], { estimateDates: { '000002': '2026-07-12' } })
     const result = await run(env, false, monday1430)
@@ -551,17 +766,96 @@ describe('Cloudflare push worker', () => {
   it('runs the mocked Gist to estimate to backend to ServerChan to state chain', async () => {
     const net = fakeNetwork([200], { backend: 'success' })
     const result = await run({ ...env, FUND_API_BASE: 'https://api.test' }, false, monday1430)
-    expect(result.status).toBe('sent')
+    expect(result).toMatchObject({
+      status: 'sent', outcome_settlement: { settled: 0, pending: 0, errors: [] },
+    })
     expect(net.getState().sent_slots).toEqual(['14:30'])
   })
 
-  it('reports a warning when it degrades to an estimate-only push after backend timeout', async () => {
-    const net = fakeNetwork([200], { backend: 'timeout' })
-    const result = await run({ ...env, FUND_API_BASE: 'https://api.test' }, false, monday1430)
-    expect(result.status).toBe('sent_with_warning')
-    expect(result.warning).toContain('组合决策暂不可用')
-    expect(net.getState()).toMatchObject({ decision_status: 'degraded' })
+  it('uses the v2 holding contract and records the natural notification event sequence', async () => {
+    const net = fakeNetwork([200], { backend: 'success' })
+
+    await run({ ...env, FUND_API_BASE: 'https://api.test' }, false, monday1430)
+
+    const decision = net.getDecisionBody() as { items: Array<Record<string, unknown>> }
+    expect(decision.items[0]).not.toHaveProperty('current_weight')
+    expect(decision.items[0]).not.toHaveProperty('target_weight')
+    expect(decision.items[0].holding).toEqual({ is_held: false, source: 'worker-gist' })
+    expect(net.getNotificationEvents().map((event) => ({
+      status: event.status,
+      attempt_no: event.attempt_no,
+      scheduled_window: event.scheduled_window,
+      natural_schedule: event.natural_schedule,
+    }))).toEqual([
+      { status: 'scheduled', attempt_no: 0, scheduled_window: '2026-07-13T14:30+08:00', natural_schedule: true },
+      { status: 'attempted', attempt_no: 1, scheduled_window: '2026-07-13T14:30+08:00', natural_schedule: true },
+      { status: 'sent', attempt_no: 1, scheduled_window: '2026-07-13T14:30+08:00', natural_schedule: true },
+    ])
+  })
+
+  it('reuses the natural primary request id and records 14:40 after the primary send fails', async () => {
+    const net = fakeNetwork([429, 429, 200], { backend: 'success' })
+    const withBackend = { ...env, FUND_API_BASE: 'https://api.test' }
+
+    await expect(run(withBackend, false, monday1430)).rejects.toThrow('serverchan_http_error_http_429')
+    await expect(run(withBackend, false, monday1440)).resolves.toMatchObject({ status: 'sent' })
+
+    expect(net.getState().sent_slots).toEqual(['14:40'])
+    expect(net.getDecisionBodies().map((body) => body.request_id)).toEqual([
+      'natural-2026-07-13-primary',
+      'natural-2026-07-13-primary',
+    ])
+    const events = net.getNotificationEvents()
+    expect(events.map((event) => event.status)).toEqual([
+      'scheduled', 'attempted', 'failed', 'scheduled', 'attempted', 'compensated',
+    ])
+    expect(events.slice(0, 3).every((event) => event.scheduled_window === '2026-07-13T14:30+08:00')).toBe(true)
+    expect(events.slice(3).every((event) => event.scheduled_window === '2026-07-13T14:40+08:00')).toBe(true)
+    expect(net.getOutcomeSettlements()).toBe(1)
+  })
+
+  it('skips the compensation window after a successful primary send', async () => {
+    const net = fakeNetwork([200], { backend: 'success' })
+    const withBackend = { ...env, FUND_API_BASE: 'https://api.test' }
+    await run(withBackend, false, monday1430)
+
+    await expect(run(withBackend, false, monday1440)).resolves.toEqual({ status: 'skipped', reason: 'already_sent' })
+
     expect(net.getSends()).toBe(1)
+    expect(net.getNotificationEvents().map((event) => event.status)).toEqual([
+      'scheduled', 'attempted', 'sent', 'skipped',
+    ])
+    expect(net.getNotificationEvents()[3]).toMatchObject({
+      scheduled_window: '2026-07-13T14:40+08:00', attempt_no: 0, natural_schedule: true,
+    })
+  })
+
+  it('fails closed after backend timeout because no notification claim can be created', async () => {
+    const net = fakeNetwork([200], { backend: 'timeout' })
+    await expect(run({ ...env, FUND_API_BASE: 'https://api.test' }, false, monday1430))
+      .rejects.toThrow('无法建立通知幂等事件')
+    expect(net.getState()).toMatchObject({
+      decision_status: 'degraded', last_http_status: 503, last_error: 'decision_snapshot_unavailable',
+    })
+    expect(net.getSends()).toBe(0)
+  })
+
+  it('settles outcomes only at natural 14:30 and keeps notification alive on settlement failure', async () => {
+    const net = fakeNetwork([200], { backend: 'success' })
+    const original = net.fetchMock.getMockImplementation()!
+    net.fetchMock.mockImplementation(async (input, init) => (
+      String(input).includes('/api/v2/outcomes/settle')
+        ? new Response('temporarily unavailable', { status: 503 })
+        : original(input, init)
+    ))
+
+    const result = await run({ ...env, FUND_API_BASE: 'https://api.test' }, false, monday1430)
+
+    expect(result).toMatchObject({ status: 'sent_with_warning', outcome_settlement: null })
+    expect(result.warning).toContain('决策结果结算暂不可用: HTTP 503')
+    expect(net.getSends()).toBe(1)
+    expect(net.fetchMock.mock.calls.filter(([input]) => String(input).includes('/api/v2/outcomes/settle')))
+      .toHaveLength(1)
   })
 
   it('does not send or mark the slot sent when WORKER_TOKEN is missing', async () => {
@@ -582,6 +876,72 @@ describe('Cloudflare push worker', () => {
     expect(net.getState().sent_slots).toEqual([])
   })
 
+  it('fails closed on a backend 425 without falling back to an estimate-only push', async () => {
+    const net = fakeNetwork([200], { backend: 'success' })
+    const original = net.fetchMock.getMockImplementation()!
+    net.fetchMock.mockImplementation(async (input, init) => (
+      String(input).includes('/api/v2/portfolio/decisions')
+        ? new Response('still processing', { status: 425 })
+        : original(input, init)
+    ))
+
+    await expect(run({ ...env, FUND_API_BASE: 'https://api.test' }, false, monday1430))
+      .rejects.toThrow('幂等冲突: HTTP 425')
+    expect(net.getSends()).toBe(0)
+    expect(net.getState()).toMatchObject({ sent_slots: [], last_http_status: 425 })
+  })
+
+  it('rejects a malformed successful decision response and does not send', async () => {
+    const net = fakeNetwork([200], { backend: 'success' })
+    const original = net.fetchMock.getMockImplementation()!
+    net.fetchMock.mockImplementation(async (input, init) => (
+      String(input).includes('/api/v2/portfolio/decisions')
+        ? Response.json({ complete: true, decisions: [] })
+        : original(input, init)
+    ))
+
+    await expect(run({ ...env, FUND_API_BASE: 'https://api.test' }, false, monday1430))
+      .rejects.toThrow('组合决策响应格式无效')
+    expect(net.getSends()).toBe(0)
+    expect(net.getState()).toMatchObject({ sent_slots: [], last_http_status: 502 })
+  })
+
+  it('requires an explicit successful attempted claim before sending', async () => {
+    const net = fakeNetwork([200], { backend: 'success' })
+    const original = net.fetchMock.getMockImplementation()!
+    net.fetchMock.mockImplementation(async (input, init) => {
+      const response = await original(input, init)
+      if (!String(input).includes('/api/v2/notifications/events')) return response
+      const request = JSON.parse(String(init?.body))
+      if (request.status !== 'attempted') return response
+      const payload = await response.json() as { events: Array<Record<string, unknown>> }
+      return Response.json({
+        ...payload,
+        events: payload.events.map((row) => ({ ...row, claimed: false, duplicate: true })),
+      })
+    })
+
+    await expect(run({ ...env, FUND_API_BASE: 'https://api.test' }, false, monday1430))
+      .resolves.toMatchObject({
+        status: 'skipped', reason: 'notification_already_claimed',
+        outcome_settlement: { settled: 0, pending: 0, errors: [] },
+      })
+    expect(net.getSends()).toBe(0)
+    expect(net.getState().sent_slots).toEqual([])
+  })
+
+  it('separates deterministic natural request ids from manual test request ids', async () => {
+    let net = fakeNetwork([200], { backend: 'success' })
+    await run({ ...env, FUND_API_BASE: 'https://api.test' }, false, monday1430)
+    expect(net.getDecisionBody()).toMatchObject({ request_id: 'natural-2026-07-13-primary' })
+
+    vi.unstubAllGlobals()
+    net = fakeNetwork([200], { backend: 'success' })
+    await run({ ...env, FUND_API_BASE: 'https://api.test' }, true, monday1430)
+    expect(net.getDecisionBody()).toMatchObject({ request_id: 'manual-2026-07-13-143000' })
+    expect(net.getOutcomeSettlements()).toBe(0)
+  })
+
   it('does not calculate partial portfolio weights when a held fund has no NAV', async () => {
     const net = fakeNetwork([200], {
       backend: 'success',
@@ -592,16 +952,13 @@ describe('Cloudflare push worker', () => {
         { code: '000002', name: '二号', shares: 100 },
       ],
     })
-    const result = await run({ ...env, FUND_API_BASE: 'https://api.test' }, false, monday1430)
-    const sendCall = net.fetchMock.mock.calls.find(([input]) => String(input).includes('sctapi.ftqq.com'))
-    const body = sendCall?.[1]?.body as URLSearchParams
-
-    expect(result).toMatchObject({ status: 'sent_with_warning', decision_status: 'degraded', funds: 2 })
-    expect(result.warning).toContain('000002')
-    expect(body.get('desp')).toContain('**二号** --（数据暂不可用）')
-    expect(body.get('desp')).not.toContain('**二号** 0.00%')
-    expect(net.fetchMock.mock.calls.some(([input]) => String(input).includes('/api/portfolio/decisions'))).toBe(false)
-    expect(net.getSends()).toBe(1)
+    await expect(run({ ...env, FUND_API_BASE: 'https://api.test' }, false, monday1430))
+      .rejects.toThrow('无法建立通知幂等事件')
+    expect(net.fetchMock.mock.calls.some(([input]) => String(input).includes('/api/v2/portfolio/decisions'))).toBe(false)
+    expect(net.getState()).toMatchObject({
+      decision_status: 'degraded', last_error: 'decision_snapshot_unavailable',
+    })
+    expect(net.getSends()).toBe(0)
   })
 
   it('reports a Gist read failure without attempting a push', async () => {
@@ -624,16 +981,19 @@ describe('Cloudflare push worker', () => {
 
   it('health exposes runtime state without secret values', async () => {
     vi.useFakeTimers()
+    vi.stubGlobal('WORKER_BUILD_SHA', buildSha)
     vi.setSystemTime(monday1430)
     fakeNetwork()
     await runScheduled(env, monday1430)
     const response = await worker.fetch(new Request('https://worker.test/health'), env)
-    const body = await response.json() as { runtime: Record<string, unknown>; version: string }
+    const body = await response.json() as { runtime: Record<string, unknown>; version: string; build_sha: string }
     expect(response.status).toBe(200)
     expect(body.version).toBe('7.0.1')
+    expect(body.build_sha).toBe(buildSha)
     expect(body.runtime).toMatchObject({
       state_available: true,
       last_cron_at: '2026-07-13T14:30:00+08:00',
+      last_cron_build_sha: buildSha,
       last_cron_result: 'sent',
       last_cron_reason: null,
       last_attempt_at: '2026-07-13T14:30:00+08:00',

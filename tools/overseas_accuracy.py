@@ -115,29 +115,45 @@ def build_run_context(
 ) -> dict:
     """Describe whether this invocation may and must produce a prediction."""
     local_now = now.astimezone(CST) if now.tzinfo else now.replace(tzinfo=CST)
+    normalized_mode = run_mode.strip().lower() if isinstance(run_mode, str) else "manual"
     try:
         hour_text, minute_text = schedule_time.split(":", 1)
         scheduled_time = dt.time(int(hour_text), int(minute_text), tzinfo=CST)
     except (AttributeError, TypeError, ValueError):
         scheduled_time = dt.time(14, 35, tzinfo=CST)
     scheduled_for = dt.datetime.combine(local_now.date(), scheduled_time)
+    if normalized_mode == "scheduled" and (
+        scheduled_for.weekday() >= 5
+        or local_now < scheduled_for - dt.timedelta(minutes=max(0, early_minutes))
+    ):
+        # A schedule event cannot legitimately run before its own window.  If a
+        # weekday cron appears before today's window (or on a weekend), bind it
+        # to the latest weekday occurrence so a queue delay crossing midnight
+        # is explicit instead of looking like an early same-day observation.
+        scheduled_date = local_now.date() - dt.timedelta(days=1)
+        while scheduled_date.weekday() >= 5:
+            scheduled_date -= dt.timedelta(days=1)
+        scheduled_for = dt.datetime.combine(scheduled_date, scheduled_time)
     delay_minutes = round((local_now - scheduled_for).total_seconds() / 60, 2)
+    cross_day = normalized_mode == "scheduled" and scheduled_for.date() != local_now.date()
     excluded = non_trading_dates if non_trading_dates is not None else NON_TRADING_DATES
+    calendar_date = scheduled_for.date() if normalized_mode == "scheduled" else local_now.date()
     try:
-        trading_day = is_fund_trading_day(local_now.date(), excluded)
-        target_date = previous_trading_date(local_now.date(), excluded)
+        trading_day = is_fund_trading_day(calendar_date, excluded)
+        target_date = previous_trading_date(calendar_date, excluded)
         calendar_supported = True
     except ValueError:
         trading_day = False
         target_date = None
         calendar_supported = False
-    normalized_mode = run_mode.strip().lower() if isinstance(run_mode, str) else "manual"
     prediction_due = normalized_mode == "scheduled" and trading_day
-    prediction_allowed = prediction_due and delay_minutes >= -max(0, early_minutes)
+    prediction_allowed = prediction_due and not cross_day and delay_minutes >= -max(0, early_minutes)
     if not calendar_supported:
         window_status = "calendar_unsupported"
     elif not trading_day:
         window_status = "non_trading_day"
+    elif cross_day:
+        window_status = "delayed_cross_day"
     elif delay_minutes < -max(0, early_minutes):
         window_status = "too_early"
     elif delay_minutes > max(0, late_minutes):
@@ -151,6 +167,7 @@ def build_run_context(
         "scheduled_for": scheduled_for.isoformat(timespec="minutes"),
         "delay_minutes": delay_minutes,
         "observation_date": local_now.date().isoformat(),
+        "scheduled_observation_date": scheduled_for.date().isoformat(),
         "calendar_supported": calendar_supported,
         "trading_day": trading_day,
         "prediction_due": prediction_due,
@@ -554,10 +571,12 @@ def window_metrics(rows: list[dict], size: int) -> dict | None:
 def summarize(ledger: dict, registry: dict) -> dict:
     output = {}
     for code, entry in registry["models"].items():
+        active_version = (entry.get("active") or {}).get("version")
         rows = sorted(
             [
                 row for row in ledger.get("records", [])
                 if row.get("code") == code
+                and row.get("model_version") == active_version
                 and row.get("status") == "settled"
                 and valid_record_axis(row)
                 and valid_feature_evidence(row)
@@ -587,18 +606,20 @@ def summarize(ledger: dict, registry: dict) -> dict:
             "rolling_5": window_metrics(rows, 5),
             "rolling_20": window_metrics(rows, 20),
             "pending": sum(
-                row.get("code") == code and row.get("status") == "pending"
+                row.get("code") == code and row.get("model_version") == active_version
+                and row.get("status") == "pending"
                 for row in ledger.get("records", [])
             ),
             "stale": sum(
-                row.get("code") == code and row.get("status") in ("stale", "market_closed")
+                row.get("code") == code and row.get("model_version") == active_version
+                and row.get("status") in ("stale", "market_closed")
                 for row in ledger.get("records", [])
             ),
             "legacy_misaligned": sum(
                 row.get("code") == code and row.get("status") == "legacy_misaligned"
                 for row in ledger.get("records", [])
             ),
-            "model_version": entry["active"]["version"],
+            "model_version": active_version,
         }
     return output
 
@@ -712,6 +733,7 @@ def run_pipeline(now: dt.datetime | None = None, *, run_mode: str | None = None)
         "scheduled_for": run["scheduled_for"],
         "delay_minutes": run["delay_minutes"],
         "observation_date": run["observation_date"],
+        "scheduled_observation_date": run["scheduled_observation_date"],
         "calendar_supported": run["calendar_supported"],
         "calendar_source": CALENDAR_SOURCE,
         "alignment_version": "observation-target-v2",

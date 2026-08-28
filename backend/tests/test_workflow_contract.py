@@ -84,18 +84,31 @@ def test_generated_data_writers_do_not_delegate_git_state() -> None:
     assert not re.search(r"gh workflow run ci\.yml --ref main\s*$", combined, re.MULTILINE)
 
 
-def test_manual_calibration_is_observation_only_by_default() -> None:
+def test_calibration_workflows_are_candidate_only() -> None:
     for name in ("calibrate-strategy.yml", "overseas-accuracy.yml"):
         source = workflow(name)
-        assert "auto_promote:" in source
-        assert "default: false" in source
-        assert "github.event_name == 'schedule' || inputs.auto_promote" in source
+        assert "auto_promote" not in source.lower()
+        assert "AUTO_PROMOTE" not in source
+
+    for name in ("calibrate_strategy.py", "calibrate_overseas.py"):
+        source = (ROOT / "tools" / name).read_text(encoding="utf-8")
+        assert "AUTO_PROMOTE" not in source
+        assert "explicit_admin_only" in source
 
 
-def test_optional_index_step_is_not_green_when_core_coverage_fails() -> None:
+def test_enrichment_branches_preserve_good_artifacts_then_report_any_failure() -> None:
     source = workflow("enrich-holdings.yml")
-    assert "python tools/enrich_index_valuation.py" in source
-    assert "continue-on-error: true" not in source
+    assert source.count("continue-on-error: true") == 3
+    for step_id, outcome in (
+        ("holdings", "HOLDINGS_OUTCOME"),
+        ("valuation", "VALUATION_OUTCOME"),
+        ("screener", "SCREENER_OUTCOME"),
+    ):
+        assert f"id: {step_id}" in source
+        assert f"{outcome}: ${{{{ steps.{step_id}.outcome }}}}" in source
+        assert f'[[ "${outcome}" == "success" ]] || failed=true' in source
+    assert source.index("- name: 提交数据") < source.index("- name: 报告富集分支失败")
+    assert '[[ "$failed" == "false" ]] || {' in source
 
 
 def test_manual_notification_workflows_have_read_only_repository_access() -> None:
@@ -137,6 +150,27 @@ def test_post_deploy_smoke_verifies_exact_api_and_complete_static_data() -> None
     assert 'len(funds) == meta["fund_count"]' in source
     assert 'codes == sorted(codes)' in source
     assert 'len(codes) == len(set(codes))' in source
+    assert 'if (( 10#$expected_major >= 8 )); then' in source
+    assert '.database.persistence != "ephemeral"' in source
+    assert '.database.durable == true' in source
+    assert '.database.persistence == "ephemeral" and .database.durable == false' in source
+    assert '.build_sha == $sha' in source
+    assert 'git diff --quiet "$worker_deployment_sha" "$EXPECTED_SHA" -- worker' in source
+    assert '[[ "$worker_source_matches" == "true" ]]' in source
+    assert '.runtime.last_cron_build_sha == $sha' in source
+    assert 'Worker natural schedule: NOT_RUN' in source
+    assert '待下一个自然窗口验证' in source
+
+
+def test_worker_deploy_injects_exact_clean_git_identity() -> None:
+    package = (ROOT / "worker" / "package.json").read_text(encoding="utf-8")
+    deploy = (ROOT / "worker" / "scripts" / "deploy.mjs").read_text(encoding="utf-8")
+
+    assert '"deploy": "node scripts/deploy.mjs"' in package
+    assert "status', '--porcelain=v1', '--untracked-files=all'" in deploy
+    assert "rev-parse', '--verify', 'HEAD^{commit}'" in deploy
+    assert "WORKER_BUILD_SHA:${JSON.stringify(normalized)}" in deploy
+    assert "'--define'" in deploy
 
 
 def test_fund_universe_workflow_verifies_real_generated_artifact() -> None:
@@ -146,6 +180,19 @@ def test_fund_universe_workflow_verifies_real_generated_artifact() -> None:
     assert "python tools/build_universe.py --verify" in source
     assert "tests/test_universe_artifact.py tests/test_build_universe_tool.py" in source
     assert source.index("python tools/build_universe.py --verify") < source.index("git status --porcelain")
+
+
+def test_overseas_workflow_exports_the_audited_backend_evidence_artifact() -> None:
+    source = workflow("overseas-accuracy.yml")
+
+    assert "python tools/export_v8_overseas_evidence.py" in source
+    assert "backend/data/overseas-evidence.json" in source
+    assert source.index("python tools/audit_overseas_accuracy.py") < source.index(
+        "python tools/export_v8_overseas_evidence.py"
+    )
+    assert source.index("python tools/export_v8_overseas_evidence.py") < source.index(
+        "git status --porcelain"
+    )
 
 
 def test_all_workflow_files_parse_as_yaml() -> None:

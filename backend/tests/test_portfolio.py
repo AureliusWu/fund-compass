@@ -22,6 +22,10 @@ def test_portfolio_decisions_batch(sample_detail, monkeypatch):
     for d in r["decisions"]:
         assert "action" in d
         assert d["action"] in ("买入", "分批定投", "观望", "加仓", "持有", "减仓", "卖出")
+    assert r["allocation"]["complete"] is False
+    assert r["allocation"]["current_total"] is None
+    assert r["allocation"]["target_total"] is None
+    assert r["allocation"]["target_cash"] is None
 
 
 def test_portfolio_decisions_with_holding(sample_detail, monkeypatch):

@@ -195,6 +195,19 @@ def test_scheduled_window_records_delay_without_backdating_late_runs():
     assert late["observation_date"] == "2026-07-10"
     assert late["prediction_target_date"] == "2026-07-09"
 
+    cross_day = accuracy.build_run_context(
+        dt.datetime(2026, 7, 11, 1, 0, tzinfo=accuracy.CST), run_mode="scheduled",
+    )
+    assert cross_day["scheduled_for"] == "2026-07-10T14:35+08:00"
+    assert cross_day["delay_minutes"] == 625
+    assert cross_day["observation_date"] == "2026-07-11"
+    assert cross_day["scheduled_observation_date"] == "2026-07-10"
+    assert cross_day["prediction_due"] is True
+    assert cross_day["prediction_expected"] is False
+    assert cross_day["prediction_allowed"] is False
+    assert cross_day["prediction_window_status"] == "delayed_cross_day"
+    assert cross_day["prediction_target_date"] == "2026-07-09"
+
     manual_weekend = accuracy.build_run_context(
         dt.datetime(2026, 7, 11, 14, 35, tzinfo=accuracy.CST), run_mode="manual",
     )
@@ -308,6 +321,7 @@ def test_summary_has_rolling_windows_and_error_percentiles():
         rows.append({
             "code": "X", "prediction_date": observation.isoformat(),
             "target_nav_date": target.isoformat(), "base_nav_date": base.isoformat(),
+            "model_version": "v1",
             "status": "settled",
             "error": float(i), "direction_hit": i % 2 == 0,
             "features": {"usQQQ": float(i)},
@@ -492,6 +506,14 @@ def test_calibration_main_does_not_rewrite_unchanged_evidence(tmp_path, monkeypa
     registry = registry_fixture()
     registry["models"]["012920"]["candidate"] = {
         "status": "collecting", "data_fingerprint": calibration.data_fingerprint([row]),
+        "eligible_for_admin_review": False,
+        "admin_review_recommendation": "no_active_change",
+    }
+    registry["models"]["012920"]["governance"] = {
+        "status": "collecting", "poor_cycles": 0,
+        "active_change_policy": "explicit_admin_only",
+        "rollback_recommended": False,
+        "recommendation": "collect_more_evidence",
     }
     registry_path = tmp_path / "registry.json"
     ledger_path = tmp_path / "ledger.json"
@@ -505,6 +527,106 @@ def test_calibration_main_does_not_rewrite_unchanged_evidence(tmp_path, monkeypa
     calibration.main()
 
     assert writes == []
+
+
+def test_overseas_calibration_never_promotes_or_rolls_back_active(tmp_path, monkeypatch):
+    registry = registry_fixture()
+    entry = registry["models"]["012920"]
+    active = json.loads(json.dumps(entry["active"]))
+    history = [{"version": "v0", "scale": 0.8, "bias": 0, "legs": active["legs"]}]
+    entry["history"] = json.loads(json.dumps(history))
+    entry["governance"] = {"status": "frozen", "poor_cycles": 1}
+    registry_path = tmp_path / "registry.json"
+    ledger_path = tmp_path / "ledger.json"
+    registry_path.write_text(json.dumps(registry), encoding="utf-8")
+    ledger_path.write_text(json.dumps({"records": [{"code": "012920"}]}), encoding="utf-8")
+    monkeypatch.setattr(calibration, "REGISTRY", registry_path)
+    monkeypatch.setattr(calibration, "LEDGER", ledger_path)
+    monkeypatch.setattr(calibration, "eligible_settled_rows", lambda rows: rows)
+    monkeypatch.setattr(calibration, "data_fingerprint", lambda rows: "new-evidence")
+    monkeypatch.setattr(calibration, "data_effective_at", lambda rows: "2026-07-10T12:00:00+08:00")
+    monkeypatch.setattr(calibration, "calibrate", lambda rows, model: {
+        "status": "accepted",
+        "samples": 20,
+        "parameters": {"scale": 1.2, "bias": 0.1, "legs": model["legs"]},
+    })
+    monkeypatch.setattr(
+        calibration,
+        "active_is_degraded",
+        lambda rows, version: (True, {"samples": 20, "recent_mae": 1.2}),
+    )
+
+    calibration.main()
+
+    output = json.loads(registry_path.read_text(encoding="utf-8"))["models"]["012920"]
+    assert output["active"] == active
+    assert output["history"] == history
+    assert output["candidate"]["status"] == "accepted"
+    assert output["candidate"]["eligible_for_admin_review"] is False
+    assert output["governance"]["poor_cycles"] == 2
+    assert output["governance"]["rollback_recommended"] is True
+    assert output["governance"]["recommendation"] == "review_rollback"
+    assert output["governance"]["active_change_policy"] == "explicit_admin_only"
+
+
+def test_cross_day_run_settles_real_rows_without_backfilled_prediction(tmp_path, monkeypatch):
+    registry_path = tmp_path / "registry.json"
+    ledger_path = tmp_path / "ledger.json"
+    registry = registry_fixture()
+    pending = {
+        "code": "012920",
+        "prediction_date": "2026-07-10",
+        "target_nav_date": "2026-07-09",
+        "base_nav_date": "2026-07-08",
+        "base_nav": 5,
+        "predicted_change": 2,
+        "model_version": "v1",
+        "observed_at": "2026-07-10T14:40:00+08:00",
+        "status": "pending",
+        "features": {"usQQQ": 2},
+        "feature_evidence": {"usQQQ": {
+            "change": 2,
+            "quote_date": "2026-07-09",
+            "quote_time": "2026-07-09 16:00:00",
+            "source": "tencent_quote",
+        }},
+    }
+    registry_path.write_text(json.dumps(registry), encoding="utf-8")
+    ledger_path.write_text(json.dumps({"records": [pending]}), encoding="utf-8")
+    monkeypatch.setattr(accuracy, "REGISTRY", registry_path)
+    monkeypatch.setattr(accuracy, "LEDGER", ledger_path)
+    monkeypatch.setattr(accuracy, "fetch_details", lambda codes: {"012920": {
+        "nav_history": [
+            {"date": "2026-07-08", "nav": 5},
+            {"date": "2026-07-09", "nav": 5.1},
+        ],
+    }})
+    monkeypatch.setattr(
+        accuracy,
+        "fetch_quotes",
+        lambda codes: (_ for _ in ()).throw(AssertionError("cross-day run must not fetch prediction quotes")),
+    )
+    now = dt.datetime(2026, 7, 11, 1, 0, tzinfo=accuracy.CST)
+
+    result = accuracy.run_pipeline(now, run_mode="scheduled")
+
+    ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+    assert result["predictions_written"] == 0
+    assert result["settlements_written"] == 1
+    assert len(ledger["records"]) == 1
+    assert ledger["records"][0]["status"] == "settled"
+    assert ledger["pipeline"]["prediction_window_status"] == "delayed_cross_day"
+    assert ledger["pipeline"]["prediction_expected"] is False
+    assert ledger["pipeline"]["predictions_written"] == 0
+    assert ledger["pipeline"]["settlements_written"] == 1
+    report = audit_module.audit(ledger, registry, now=now)
+    assert report["errors"] == []
+    assert any("跨日" in warning for warning in report["warnings"])
+
+    invalid = json.loads(json.dumps(ledger))
+    invalid["pipeline"]["predictions_written"] = 1
+    invalid_report = audit_module.audit(invalid, registry, now=now)
+    assert any("不得回填伪预测" in error for error in invalid_report["errors"])
 
 
 def test_pipeline_counts_zero_output_once_per_expected_trading_date(tmp_path, monkeypatch):

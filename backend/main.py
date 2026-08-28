@@ -21,15 +21,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from database.db import init_db, persistence_status
 from models.api import (
     HealthResponse, PortfolioDecisionRequest, PortfolioDecisionResponse,
-    PortfolioLabRequest, WatchlistRequest,
+    PortfolioLabRequest, V8DecisionBatchRequest,
+    V8NotificationEventRequest, V8OutcomeSettleRequest, V8PolicyRequest, WatchlistRequest,
 )
-from service import eastmoney, repo
+from service import eastmoney, repo, v8_decisions, v8_repo
 from service.security import require_admin, require_worker_or_admin
 from strategy import backtest, decide_fund, score_fund, timing_signal
 from strategy.calibration import calibrate
 from strategy.index_valuation import status as index_valuation_status
 from strategy.portfolio import decide_portfolio
 from strategy.portfolio_lab import analyze_portfolio
+from strategy.decision_v2 import build_portfolio_policy
 from strategy.registry import registry_summary
 
 logging.basicConfig(
@@ -56,6 +58,10 @@ def _deployment_status() -> dict:
 async def lifespan(app: FastAPI):
     # 冷启动只做本地建表，绝不在启动路径里访问第三方数据源。
     init_db()
+    # Persist the deterministic default policy during startup so every public
+    # GET remains a genuine read and protected decision writes can reference a
+    # real immutable policy row.
+    v8_repo.ensure_default_policy()
     if repo.universe_count() == 0:
         repo.import_universe_artifact()
     yield
@@ -395,6 +401,303 @@ def strategy_version_comparison() -> dict:
     return repo.version_comparison()
 
 
+# ── v8 immutable decision chain (additive; legacy /api routes stay intact) ──
+
+def _v8_valid_code(code: str) -> str:
+    if not re.fullmatch(r"\d{6}", code):
+        raise HTTPException(status_code=422, detail="需要 6 位基金代码")
+    return code
+
+
+@app.get("/api/v2/fund/{code}/evidence")
+def v8_fund_evidence(code: str) -> dict:
+    """Return the latest persisted evidence without fetching or writing."""
+    snapshot = v8_repo.latest_evidence(_v8_valid_code(code))
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="尚无已生成的 V8 Evidence 快照")
+    return snapshot.model_dump(mode="json")
+
+
+@app.get("/api/v2/fund/{code}/decision")
+def v8_fund_decision(
+    code: str,
+) -> dict:
+    bundle = v8_repo.latest_decision_bundle(_v8_valid_code(code))
+    if bundle is None:
+        raise HTTPException(status_code=404, detail="尚无已生成的 V8 Decision 快照")
+    decision = bundle["decision"]
+    evidence = bundle["evidence"]
+    return {
+        "code": evidence.fund_code,
+        "name": evidence.fund_name,
+        "type": evidence.fund_type,
+        "action": decision.action,
+        "action_label": v8_decisions.ACTION_ZH[decision.action],
+        "strength": decision.strength,
+        "confidence": decision.confidence,
+        "summary": decision.summary,
+        **{key: bundle[key].model_dump(mode="json") for key in (
+            "decision", "evidence", "holding", "policy", "diff",
+        )},
+    }
+
+
+@app.get("/api/v2/fund/{code}/decision/diff")
+def v8_fund_decision_diff(
+    code: str,
+) -> dict:
+    diff = v8_repo.latest_decision_diff(_v8_valid_code(code))
+    if diff is None:
+        raise HTTPException(status_code=404, detail="尚无可比较的 V8 Decision 快照")
+    return diff.model_dump(mode="json")
+
+
+@app.get("/api/v2/fund/{code}/outcomes")
+def v8_fund_outcomes(code: str) -> dict:
+    return v8_repo.outcomes_for_fund(_v8_valid_code(code))
+
+
+def _v8_batch(request: V8DecisionBatchRequest) -> dict:
+    try:
+        return v8_decisions.create_batch_decisions(request, estimate_resolver=_estimate_context)
+    except v8_decisions.IdempotencyConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except v8_decisions.IdempotencyInProgressError as error:
+        raise HTTPException(status_code=425, detail=str(error)) from error
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+def _v8_attach_portfolio_snapshot(
+    request: V8DecisionBatchRequest,
+    result: dict,
+) -> dict:
+    """Persist only a complete, exact portfolio; never drop or normalize items."""
+    if not result.get("complete"):
+        return {
+            **result,
+            "portfolio_decision": None,
+            "portfolio_snapshot_status": "incomplete",
+        }
+    try:
+        snapshot = v8_repo.build_portfolio_decision_snapshot(
+            [item.model_dump(mode="python") for item in request.items],
+            result,
+            portfolio_value=request.portfolio_value,
+        )
+    except ValueError as error:
+        raise HTTPException(
+            status_code=422,
+            detail=f"组合快照无效: {error}",
+        ) from error
+    stored = v8_repo.save_portfolio_decision(snapshot)
+    return {
+        **result,
+        "portfolio_decision": stored.model_dump(mode="json"),
+        "portfolio_snapshot_status": "persisted",
+    }
+
+
+@app.post("/api/v2/watchlist/decisions")
+def v8_watchlist_decisions(
+    request: V8DecisionBatchRequest,
+    _role: str = Depends(require_worker_or_admin),
+) -> dict:
+    return _v8_batch(request)
+
+
+@app.post("/api/v2/portfolio/decisions")
+def v8_portfolio_decisions(
+    request: V8DecisionBatchRequest,
+    _role: str = Depends(require_worker_or_admin),
+) -> dict:
+    return _v8_attach_portfolio_snapshot(request, _v8_batch(request))
+
+
+@app.post("/api/v2/portfolio/rebalance")
+def v8_portfolio_rebalance(
+    request: V8DecisionBatchRequest,
+    _role: str = Depends(require_worker_or_admin),
+) -> dict:
+    result = _v8_attach_portfolio_snapshot(request, _v8_batch(request))
+    return {
+        "request_id": result.get("request_id"),
+        "duplicate": result.get("duplicate", False),
+        "complete": result["complete"],
+        "allocation": result["allocation"],
+        "rebalance": result["rebalance"],
+        "policy_version": result["policy_version"],
+        "strategy_version": result["strategy_version"],
+        "portfolio_decision": result.get("portfolio_decision"),
+        "portfolio_snapshot_status": result.get("portfolio_snapshot_status"),
+        **(
+            {"portfolio_snapshot_error": result["portfolio_snapshot_error"]}
+            if result.get("portfolio_snapshot_error") else {}
+        ),
+    }
+
+
+@app.get("/api/v2/portfolio/outcomes")
+def v8_portfolio_outcomes(limit: int = 100) -> dict:
+    return v8_repo.portfolio_outcomes(limit)
+
+
+@app.post("/api/v2/portfolio/outcomes/settle")
+def v8_settle_portfolio_outcomes(
+    portfolio_decision_id: str | None = None,
+    limit: int = 100,
+    _role: str = Depends(require_worker_or_admin),
+) -> dict:
+    bounded_limit = max(1, min(10_000, int(limit)))
+    if portfolio_decision_id is not None:
+        if not re.fullmatch(r"pdec_[0-9a-f]{64}", portfolio_decision_id):
+            raise HTTPException(status_code=422, detail="portfolio_decision_id 格式无效")
+        try:
+            before = len(v8_repo.portfolio_outcome_rows(portfolio_decision_id))
+            rows = v8_repo.settle_portfolio_outcomes(portfolio_decision_id)
+        except LookupError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        return {
+            "settled": max(0, len(rows) - before),
+            "errors": [],
+            "portfolio_decision_id": portfolio_decision_id,
+        }
+    return v8_repo.settle_all_portfolio_outcomes(bounded_limit)
+
+
+@app.get("/api/v2/portfolio/policy")
+def v8_portfolio_policy() -> dict:
+    try:
+        return v8_repo.read_policy().model_dump(mode="json")
+    except LookupError as error:
+        raise HTTPException(status_code=503, detail="V8 默认 Policy 尚未初始化") from error
+
+
+@app.post("/api/v2/portfolio/policy")
+def v8_post_portfolio_policy(
+    request: V8PolicyRequest,
+    _role: str = Depends(require_admin),
+) -> dict:
+    current = v8_repo.get_policy()
+    payload = request.model_dump(mode="python")
+    effective_at = payload.pop("effective_at") or datetime.now(timezone.utc)
+    policy = build_portfolio_policy(
+        **payload,
+        effective_at=effective_at,
+        source="admin",
+        supersedes=current.policy_version,
+    )
+    return v8_repo.save_policy(policy).model_dump(mode="json")
+
+
+@app.get("/api/v2/portfolio/policy/history")
+def v8_portfolio_policy_history() -> dict:
+    rows = v8_repo.read_policy_history()
+    return {"total": len(rows), "items": [row.model_dump(mode="json") for row in rows]}
+
+
+@app.get("/api/v2/strategy/registry")
+def v8_strategy_registry() -> dict:
+    registry = registry_summary()
+    active = (registry.get("active") or {}).get("version")
+    return {
+        **registry,
+        "v8_kernel": v8_decisions.STRATEGY_VERSION,
+        "v8_performance": v8_repo.strategy_performance(v8_decisions.STRATEGY_VERSION),
+        "legacy_active_performance": v8_repo.strategy_performance(active) if active else None,
+        "auto_promotion": False,
+    }
+
+
+@app.get("/api/v2/strategy/{version}/performance")
+def v8_strategy_performance(version: str) -> dict:
+    if not re.fullmatch(r"[A-Za-z0-9._:-]{1,120}", version):
+        raise HTTPException(status_code=422, detail="策略版本格式无效")
+    return v8_repo.strategy_performance(version)
+
+
+@app.get("/api/v2/strategy/candidates")
+def v8_strategy_candidates() -> dict:
+    registry = registry_summary()
+    return {
+        "candidate": registry.get("candidate"),
+        "history": registry.get("history") or [],
+        "governance": registry.get("governance"),
+        "auto_promotion": False,
+    }
+
+
+@app.post("/api/v2/outcomes/settle")
+def v8_settle_outcomes(
+    request: V8OutcomeSettleRequest,
+    _role: str = Depends(require_worker_or_admin),
+) -> dict:
+    settled = 0
+    errors: list[dict] = []
+    if request.decision_ids:
+        for decision_id in request.decision_ids:
+            try:
+                before = len(v8_repo.outcome_rows(decision_id))
+                v8_repo.settle_outcomes(decision_id)
+                settled += max(0, len(v8_repo.outcome_rows(decision_id)) - before)
+            except LookupError:
+                errors.append({"decision_id": decision_id, "error": "decision not found"})
+    else:
+        batch = v8_repo.settle_all_outcomes(request.limit)
+        settled = batch["settled"]
+        errors.extend(batch["errors"])
+    status = v8_repo.outcome_settlement_status(
+        request.decision_ids or None,
+        limit=request.limit,
+    )
+    known_errors = {
+        (row.get("decision_id"), row.get("error")) for row in errors
+    }
+    errors.extend(
+        row for row in status["errors"]
+        if (row.get("decision_id"), row.get("error")) not in known_errors
+    )
+    return {"settled": settled, "pending": status["pending"], "errors": errors}
+
+
+@app.post("/api/v2/notifications/events")
+def v8_notification_events(
+    request: V8NotificationEventRequest,
+    _role: str = Depends(require_worker_or_admin),
+) -> dict:
+    payload = request.model_dump(mode="python")
+    decision_ids = payload.pop("decision_ids")
+    try:
+        results = v8_repo.record_notification_events_batch(
+            decision_ids=decision_ids,
+            **payload,
+        )
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except v8_repo.SnapshotConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    events = [
+        {
+            "event": result.event.model_dump(mode="json"),
+            "claimed": result.claimed,
+            "duplicate": result.duplicate,
+        }
+        for result in results
+    ]
+    return {"total": len(events), "events": events}
+
+
+@app.get("/api/v2/notifications/{decision_id}")
+def v8_get_notification_events(
+    decision_id: str,
+    _role: str = Depends(require_worker_or_admin),
+) -> dict:
+    if not re.fullmatch(r"dec_[0-9a-f]{64}", decision_id):
+        raise HTTPException(status_code=422, detail="decision_id 格式无效")
+    rows = v8_repo.notification_events(decision_id)
+    return {"decision_id": decision_id, "total": len(rows), "events": [row.model_dump(mode="json") for row in rows]}
+
+
 @app.post("/api/portfolio/lab")
 def portfolio_lab(request: PortfolioLabRequest, _role: str = Depends(require_admin)) -> dict:
     """组合历史回测、风险贡献与受约束再平衡建议。"""
@@ -409,8 +712,10 @@ def portfolio_lab(request: PortfolioLabRequest, _role: str = Depends(require_adm
             raise HTTPException(status_code=400, detail=f"无效基金代码: {code or '(空)'}")
         row = {"code": code}
         for field in ("current_weight", "target_weight"):
+            if item.get(field) is None:
+                raise HTTPException(status_code=422, detail=f"{code} 缺少 {field}，组合实验室不会按 0 处理")
             try:
-                value = float(item.get(field, 0))
+                value = float(item[field])
             except (TypeError, ValueError) as ex:
                 raise HTTPException(status_code=400, detail=f"{code} 的 {field} 需为数字") from ex
             if value < 0 or value > 100:

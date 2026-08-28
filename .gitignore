@@ -17,6 +17,7 @@ venv/
 *.db
 *.db-wal
 *.db-shm
+*.db.pre-v8-*.bak
 .pytest_cache/
 
 # local env

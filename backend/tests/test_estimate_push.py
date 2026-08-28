@@ -382,6 +382,8 @@ def test_official_decision_context_drops_model_only_fields():
     context = estimate_push._decision_estimate_context(row)
     assert context["kind"] == "official_nav"
     assert context["fallback_reason"] == "estimate_missing"
+    assert "estimate_change" not in context
+    assert "estimate_nav" not in context
     assert "model_quote_count" not in context
     assert context["diagnostics"]["source_time_precision"] == "date"
 
@@ -466,7 +468,7 @@ def test_mixed_fresh_and_expired_estimates_use_only_formal_nav_for_expired_fund(
     assert value == 201.0
     assert expired.current_weight == 49.75
     assert expired.estimate_context.kind == "official_nav"
-    assert expired.estimate_context.estimate_nav == 1.0
+    assert expired.estimate_context.estimate_nav is None
     line = estimate_push.format_push_line(
         "000002", "expired", estimates["000002"],
         {"action": "加仓", "summary": "should not appear"}, "2026-08-12", now,

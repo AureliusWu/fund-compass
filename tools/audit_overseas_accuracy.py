@@ -228,6 +228,19 @@ def audit(
         errors.append("当前日期超出已审计基金交易日历覆盖范围")
     elif run_mode == "scheduled" and prediction_due and window_status == "delayed_same_day":
         warnings.append("计划任务延迟至同日窗口，预测仅使用已证明归属目标日的行情")
+    elif run_mode == "scheduled" and prediction_due and window_status == "delayed_cross_day":
+        try:
+            scheduled_date = dt.date.fromisoformat(pipeline["scheduled_observation_date"])
+            observation = dt.date.fromisoformat(observation_date)
+            valid_cross_day = scheduled_date < observation
+        except (KeyError, TypeError, ValueError):
+            valid_cross_day = False
+        if not valid_cross_day:
+            errors.append("跨日延迟任务的计划日与真实运行日不一致")
+        elif prediction_expected or safe_int(pipeline.get("predictions_written")) > 0:
+            errors.append("跨日延迟任务不得回填伪预测")
+        else:
+            warnings.append("计划任务延迟至跨日；已跳过预测，仅持久化真实结算与审计证据")
     elif run_mode == "scheduled" and prediction_due and window_status not in ("open", "delayed_same_day"):
         errors.append(f"计划预测任务无有效同日观察：{window_status or 'unknown'}")
     if prediction_expected:

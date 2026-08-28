@@ -7,8 +7,37 @@ DEFENSIVE_ACTIONS = {"减仓", "卖出"}
 
 
 def _allocation_summary(items: list[dict]) -> dict:
-    current = round(sum(float(x.get("current_weight") or 0) for x in items), 2)
-    target = round(sum(float(x.get("target_weight") or 0) for x in items), 2)
+    if not items:
+        return {
+            "current_total": 0,
+            "target_total": 0,
+            "target_cash": 100,
+            "status": "正常",
+            "warnings": [],
+            "complete": True,
+            "missing_current_weights": [],
+            "missing_target_weights": [],
+        }
+    missing_current = [str(x.get("code") or "未知") for x in items if x.get("current_weight") is None]
+    missing_target = [str(x.get("code") or "未知") for x in items if x.get("target_weight") is None]
+    if missing_current or missing_target:
+        warnings = []
+        if missing_current:
+            warnings.append(f"当前仓位缺失：{','.join(missing_current)}")
+        if missing_target:
+            warnings.append(f"目标仓位缺失：{','.join(missing_target)}")
+        return {
+            "current_total": None,
+            "target_total": None,
+            "target_cash": None,
+            "status": "数据不完整",
+            "warnings": warnings,
+            "complete": False,
+            "missing_current_weights": missing_current,
+            "missing_target_weights": missing_target,
+        }
+    current = round(sum(float(x["current_weight"]) for x in items), 2)
+    target = round(sum(float(x["target_weight"]) for x in items), 2)
     warnings: list[str] = []
     if target > 100.01:
         warnings.append(f"目标仓位合计 {target}%，超过 100%")
@@ -20,6 +49,9 @@ def _allocation_summary(items: list[dict]) -> dict:
         "target_cash": round(max(0, 100 - target), 2),
         "status": "需校准" if warnings else "正常",
         "warnings": warnings,
+        "complete": True,
+        "missing_current_weights": [],
+        "missing_target_weights": [],
     }
 
 
@@ -85,14 +117,22 @@ def decide_portfolio(items: list[dict], portfolio_value: float | None = None) ->
             if isinstance(context, dict):
                 detail = {**detail, "decision_context": dict(context)}
             d = decide_fund(detail, holding)
-            as_of_nav = (context or {}).get("value_nav") or (context or {}).get("estimate_nav")
-            as_of_date = (context or {}).get("value_date") or (context or {}).get("source_time")
+            as_of_nav = (context or {}).get("value_nav")
+            if as_of_nav is None:
+                as_of_nav = (context or {}).get("estimate_nav")
+            as_of_date = (context or {}).get("value_date")
+            if as_of_date is None:
+                as_of_date = (context or {}).get("source_time")
+            if as_of_nav is None:
+                as_of_nav = detail.get("latest_nav")
+            if as_of_date is None:
+                as_of_date = detail.get("latest_nav_date")
             decisions.append({
                 "code": detail.get("code"),
                 "name": detail.get("name"),
                 "type": detail.get("type"),
-                "as_of_nav": as_of_nav or detail.get("latest_nav"),
-                "as_of_date": as_of_date or detail.get("latest_nav_date"),
+                "as_of_nav": as_of_nav,
+                "as_of_date": as_of_date,
                 "estimate_kind": (context or {}).get("kind"),
                 **d,
             })

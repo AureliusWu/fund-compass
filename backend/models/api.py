@@ -4,7 +4,7 @@ import math
 import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class EstimateDiagnostics(BaseModel):
@@ -50,6 +50,13 @@ class EstimateContext(BaseModel):
     model_oldest_quote_time: str | None = Field(default=None, max_length=64)
     model_newest_quote_time: str | None = Field(default=None, max_length=64)
     model_rejected_count: int | None = Field(default=None, ge=0, le=100)
+    target_nav_date: str | None = Field(default=None, max_length=32)
+    market_time: str | None = Field(default=None, max_length=64)
+    model_version: str | None = Field(default=None, max_length=120)
+    sample_count: int | None = Field(default=None, ge=0, le=1_000_000)
+    mae: float | None = Field(default=None, ge=0, le=1000)
+    error_p80: float | None = Field(default=None, ge=0, le=1000)
+    direction_accuracy: float | None = Field(default=None, ge=0, le=100)
     note: str | None = Field(default=None, max_length=500)
     diagnostics: EstimateDiagnostics = Field(default_factory=EstimateDiagnostics)
 
@@ -76,7 +83,7 @@ class EstimateContext(BaseModel):
                 parsed = dt.datetime.fromisoformat(text)
             except ValueError:
                 return False
-            return parsed.hour >= 0
+            return parsed.tzinfo is not None
 
         if self.source_time_precision == "date":
             if self.source_time is not None and not valid_date(self.source_time):
@@ -87,6 +94,15 @@ class EstimateContext(BaseModel):
             value = getattr(self, field)
             if value is not None and not valid_datetime(value):
                 raise ValueError(f"{field} 必须为有效日期时间")
+        if self.target_nav_date is not None and not valid_date(self.target_nav_date):
+            raise ValueError("target_nav_date 必须为有效 YYYY-MM-DD")
+        if self.target_nav_date is not None:
+            if not valid_date(self.base_nav_date) or self.target_nav_date <= self.base_nav_date:
+                raise ValueError("target_nav_date 必须晚于 base_nav_date")
+        if self.market_time is not None and not valid_datetime(self.market_time):
+            raise ValueError("market_time 必须为有效日期时间")
+        if self.kind in {"official_nav", "unavailable"} and self.target_nav_date is not None:
+            raise ValueError("正式净值或不可用证据不得声明下一目标净值日")
 
         model_fields = (
             "model_coverage", "model_quote_count", "model_report_date",
@@ -156,13 +172,15 @@ class EstimateContext(BaseModel):
         if self.kind == "official_nav":
             if self.status != "latest_official" or self.source_time_precision != "date" or not self.is_fallback:
                 raise ValueError("正式净值必须为 latest_official/date/fallback")
-            required = ("source_time", *valuation_fields, "base_nav_date", "value_date")
+            required = ("source_time", "value_nav", "value_date")
             if any(missing(field) for field in required):
                 raise ValueError("正式净值证据字段不完整")
-            if not valuation_numbers_consistent():
-                raise ValueError("正式净值数值不一致")
+            if self.estimate_change is not None or self.estimate_nav is not None:
+                raise ValueError("正式净值不得伪装为盘中估值")
             if not valid_date(self.base_nav_date) or not valid_date(self.value_date):
                 raise ValueError("正式净值日期字段格式无效")
+            if (self.base_nav is None) != (self.base_nav_date is None):
+                raise ValueError("正式净值的可选基准净值与日期必须成对出现")
             if not self.fallback_reason or self.diagnostics.primary_reason != self.fallback_reason:
                 raise ValueError("正式净值必须携带一致的降级原因")
             if any(getattr(self, field) is not None for field in model_fields):
@@ -205,6 +223,171 @@ class PortfolioLabRequest(BaseModel):
     items: list[PortfolioItem] = Field(min_length=1, max_length=10)
     portfolio_value: float | None = Field(default=None, ge=0)
     assumptions: dict[str, float] = Field(default_factory=dict)
+
+
+class V8HoldingInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    is_held: bool
+    shares: float | None = Field(default=None, ge=0)
+    cost: float | None = Field(default=None, ge=0)
+    market_value: float | None = Field(default=None, ge=0)
+    account: str | None = Field(default=None, max_length=120)
+    current_weight: float | None = Field(default=None, ge=0, le=100)
+    target_weight: float | None = Field(default=None, ge=0, le=100)
+    updated_at: dt.datetime | None = None
+    source: str = Field(default="api", min_length=1, max_length=120)
+
+    @model_validator(mode="after")
+    def validate_holding_state(self) -> "V8HoldingInput":
+        positive = any(
+            value is not None and value > 0
+            for value in (self.shares, self.market_value, self.current_weight)
+        )
+        if not self.is_held and positive:
+            raise ValueError("未持有状态不能携带正持仓")
+        if self.updated_at is not None and self.updated_at.tzinfo is None:
+            raise ValueError("updated_at 必须包含时区")
+        return self
+
+
+class V8DecisionItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    code: str = Field(pattern=r"^\d{6}$")
+    theme: str | None = Field(default=None, min_length=1, max_length=120)
+    holding: V8HoldingInput
+    estimate_context: EstimateContext | None = None
+
+
+class V8DecisionBatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_id: str | None = Field(default=None, min_length=1, max_length=100, pattern=r"^[A-Za-z0-9._:-]+$")
+    items: list[V8DecisionItem] = Field(min_length=1, max_length=50)
+    policy_version: str | None = Field(default=None, pattern=r"^pol_[0-9a-f]{64}$")
+    portfolio_value: float | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def unique_fund_codes(self) -> "V8DecisionBatchRequest":
+        codes = [item.code for item in self.items]
+        if len(codes) != len(set(codes)):
+            raise ValueError("items 不得包含重复基金代码")
+        return self
+
+
+class V8PolicyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=120)
+    target_allocations: dict[str, float] = Field(default_factory=dict, max_length=100)
+    target_ranges: dict[str, tuple[float, float]] = Field(default_factory=dict, max_length=100)
+    max_single_fund_weight: float | None = Field(default=None, gt=0, le=100)
+    max_theme_weight: float | None = Field(default=None, gt=0, le=100)
+    rebalance_band: float | None = Field(default=None, ge=0, le=50)
+    dca_rules: dict[str, Any] = Field(default_factory=dict, max_length=30)
+    reduce_rules: dict[str, Any] = Field(default_factory=dict, max_length=30)
+    sell_rules: dict[str, Any] = Field(default_factory=dict, max_length=30)
+    effective_at: dt.datetime | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_boolean_policy_numbers(cls, raw: Any) -> Any:
+        if not isinstance(raw, dict):
+            return raw
+        for value in (raw.get("target_allocations") or {}).values():
+            if isinstance(value, bool):
+                raise ValueError("target_allocations 不接受布尔值")
+        for bounds in (raw.get("target_ranges") or {}).values():
+            if isinstance(bounds, (list, tuple)) and any(isinstance(value, bool) for value in bounds):
+                raise ValueError("target_ranges 不接受布尔值")
+        return raw
+
+    @model_validator(mode="after")
+    def validate_policy(self) -> "V8PolicyRequest":
+        if sum(self.target_allocations.values()) > 100 + 1e-9:
+            raise ValueError("target_allocations 合计不得超过 100%")
+        for key, value in self.target_allocations.items():
+            if not key.strip() or not math.isfinite(value) or value < 0 or value > 100:
+                raise ValueError("target_allocations 含无效条目")
+        for key, bounds in self.target_ranges.items():
+            low, high = bounds
+            if (
+                not key.strip()
+                or not math.isfinite(low) or not math.isfinite(high)
+                or low < 0 or high > 100 or low > high
+            ):
+                raise ValueError("target_ranges 含无效区间")
+        if self.effective_at is not None and self.effective_at.tzinfo is None:
+            raise ValueError("effective_at 必须包含时区")
+        for rules, key in (
+            (self.dca_rules, "max_step_percent"),
+            (self.reduce_rules, "max_step_percent"),
+        ):
+            value = rules.get(key)
+            if value is not None and (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+                or not 0 < float(value) <= 100
+            ):
+                raise ValueError(f"{key} 必须是 (0, 100] 内的有限数值")
+        minimum_confidence = self.dca_rules.get("minimum_confidence")
+        if minimum_confidence is not None and (
+            isinstance(minimum_confidence, bool)
+            or not isinstance(minimum_confidence, (int, float))
+            or not math.isfinite(float(minimum_confidence))
+            or not 0 <= float(minimum_confidence) <= 100
+        ):
+            raise ValueError("minimum_confidence 必须是 [0, 100] 内的有限数值")
+        require_structural = self.sell_rules.get("require_structural_invalidation")
+        if require_structural is not None and not isinstance(require_structural, bool):
+            raise ValueError("require_structural_invalidation 必须是布尔值")
+        return self
+
+
+class V8OutcomeSettleRequest(BaseModel):
+    """Bounded Worker/Admin request for the periodic immutable outcome job."""
+
+    model_config = ConfigDict(extra="forbid")
+    decision_ids: list[str] = Field(default_factory=list, max_length=200)
+    limit: int = Field(default=1000, ge=1, le=10_000)
+
+    @field_validator("decision_ids")
+    @classmethod
+    def validate_outcome_decision_ids(cls, values: list[str]) -> list[str]:
+        if len(values) != len(set(values)) or any(
+            not re.fullmatch(r"dec_[0-9a-f]{64}", value) for value in values
+        ):
+            raise ValueError("decision_ids 格式无效或重复")
+        return values
+
+
+class V8NotificationEventRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    decision_ids: list[str] = Field(min_length=1, max_length=50)
+    scheduled_window: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}[+-]\d{2}:\d{2}$")
+    status: Literal["scheduled", "skipped", "attempted", "sent", "failed", "compensated"]
+    attempt_no: int = Field(ge=0, le=100)
+    natural_schedule: bool = True
+    occurred_at: dt.datetime | None = None
+    error_class: str | None = Field(default=None, max_length=120)
+    detail: dict[str, Any] = Field(default_factory=dict, max_length=30)
+
+    @field_validator("decision_ids")
+    @classmethod
+    def validate_decision_ids(cls, values: list[str]) -> list[str]:
+        if len(values) != len(set(values)) or any(not re.fullmatch(r"dec_[0-9a-f]{64}", value) for value in values):
+            raise ValueError("decision_ids 格式无效或重复")
+        return values
+
+    @model_validator(mode="after")
+    def validate_event_time(self) -> "V8NotificationEventRequest":
+        if self.occurred_at is not None and self.occurred_at.tzinfo is None:
+            raise ValueError("occurred_at 必须包含时区")
+        if self.status in {"attempted", "sent", "failed", "compensated"} and self.attempt_no < 1:
+            raise ValueError("发送尝试事件的 attempt_no 必须至少为 1")
+        if self.status in {"scheduled", "skipped"} and self.attempt_no != 0:
+            raise ValueError("scheduled/skipped 的 attempt_no 必须为 0")
+        if self.status != "failed" and self.error_class is not None:
+            raise ValueError("仅 failed 事件可携带 error_class")
+        return self
 
 
 class WatchlistRequest(BaseModel):

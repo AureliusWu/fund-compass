@@ -4,11 +4,6 @@ on:
   schedule:
     - cron: '35 6 * * 1-5' # 北京时间工作日 14:35，独立于推送任务落账
   workflow_dispatch:
-    inputs:
-      auto_promote:
-        description: 手工验收时是否允许海外模型自动晋级（默认仅生成证据）
-        type: boolean
-        default: false
 
 permissions:
   contents: write
@@ -47,7 +42,6 @@ jobs:
           python tools/overseas_accuracy.py
       - name: 校准海外 Challenger
         env:
-          AUTO_PROMOTE_OVERSEAS: ${{ github.event_name == 'schedule' || inputs.auto_promote }}
           OVERSEAS_MIN_SAMPLES: '20'
         run: python tools/calibrate_overseas.py
       - name: 审计海外精度账本
@@ -55,6 +49,8 @@ jobs:
           OVERSEAS_ZERO_PREDICTION_LIMIT: '2'
           OVERSEAS_EFFECTIVE_MAX_AGE_HOURS: '96'
         run: python tools/audit_overseas_accuracy.py
+      - name: 导出 V8 后端 QDII 证据
+        run: python tools/export_v8_overseas_evidence.py
       - name: 写入海外精度摘要
         if: always()
         shell: bash
@@ -69,7 +65,7 @@ jobs:
           print(f"- 最后有效预测：{pipeline.get('last_effective_prediction_at')}")
           print(f"- 最后有效结算：{pipeline.get('last_effective_settlement_at')}")
           print(f"- 计划时间：{pipeline.get('scheduled_for')} · 延迟 {pipeline.get('delay_minutes')} 分钟 · 窗口 {pipeline.get('prediction_window_status')}")
-          print(f"- 当日有效预测：{pipeline.get('effective_predictions_for_target', 0)}/{pipeline.get('expected_models', 0)} · 连续零产出 {pipeline.get('consecutive_expected_zero_prediction_runs', 0)} 次")
+          print(f"- 当日有效预测：{pipeline.get('effective_predictions_for_observation', 0)}/{pipeline.get('expected_models', 0)} · 连续零产出 {pipeline.get('consecutive_expected_zero_prediction_runs', 0)} 次")
           print(f"- 本次抓取：行情 {pipeline.get('quotes_count', 0)} · 详情 {pipeline.get('details_count', 0)}")
           for code, row in (data.get("summary") or {}).items():
               print(f"- {code}: {row.get('samples', 0)} 样本 · 待结算 {row.get('pending', 0)} · MAE {row.get('mae')} · {row.get('confidence')}")
@@ -82,15 +78,16 @@ jobs:
             frontend/public/data/overseas-accuracy.json
             frontend/public/data/overseas-audit.json
             frontend/src/data/overseas-models.json
+            backend/data/overseas-evidence.json
           retention-days: 90
       - name: 提交海外精度数据
         if: success()
         shell: bash
         run: |
-          if [[ -n "$(git status --porcelain frontend/public/data/overseas-accuracy.json frontend/public/data/overseas-audit.json frontend/src/data/overseas-models.json)" ]]; then
+          if [[ -n "$(git status --porcelain frontend/public/data/overseas-accuracy.json frontend/public/data/overseas-audit.json frontend/src/data/overseas-models.json backend/data/overseas-evidence.json)" ]]; then
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add frontend/public/data/overseas-accuracy.json frontend/public/data/overseas-audit.json frontend/src/data/overseas-models.json
+            git add frontend/public/data/overseas-accuracy.json frontend/public/data/overseas-audit.json frontend/src/data/overseas-models.json backend/data/overseas-evidence.json
             git commit -m "chore: 更新海外估值精度账本"
             base_sha=$(git rev-parse HEAD^)
             pushed=false

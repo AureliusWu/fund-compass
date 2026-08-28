@@ -11,6 +11,13 @@ STRESS_SCENARIOS = [
 ]
 
 
+def _required_weight(item: dict, field: str) -> float:
+    value = item.get(field)
+    if value is None:
+        raise ValueError(f"{item.get('code') or '组合成分'} 缺少 {field}，不能按 0 计算")
+    return float(value)
+
+
 def normalize_weights(values: list[float]) -> list[float]:
     total = sum(max(0.0, value) for value in values)
     if total <= 0:
@@ -175,9 +182,9 @@ def portfolio_backtest(details: list[dict], target_weights: list[float], assumpt
 
 def constrained_rebalance(items: list[dict], risk: dict, portfolio_value=None, assumptions=None) -> dict:
     assumptions = {**DEFAULT_ASSUMPTIONS, **(assumptions or {})}
-    current = normalize_weights([float(item.get("current_weight") or 0) for item in items])
+    current = normalize_weights([_required_weight(item, "current_weight") for item in items])
     desired, effective_cap = capped_weights(
-        [float(item.get("target_weight") or 0) for item in items], assumptions["max_weight"],
+        [_required_weight(item, "target_weight") for item in items], assumptions["max_weight"],
     )
     risk_by_code = {row["code"]: row["risk_contribution"] for row in risk["contributions"]}
     # 单一基金贡献超过 40% 时，不允许建议继续加仓；其余权重按比例承接。
@@ -216,7 +223,7 @@ def constrained_rebalance(items: list[dict], risk: dict, portfolio_value=None, a
     return {
         "actions": actions,
         "turnover": round(turnover * 100, 2),
-        "estimated_cost": round((portfolio_value or 0) * turnover * assumptions["rebalance_fee"], 2) if portfolio_value is not None else None,
+        "estimated_cost": round(portfolio_value * turnover * assumptions["rebalance_fee"], 2) if portfolio_value is not None else None,
         "risk_change": {
             "current_volatility": risk["annual_volatility"],
             "suggested_volatility": round(suggested_volatility, 2),
@@ -241,15 +248,15 @@ def stress_scenarios(details: list[dict], weights: list[float], portfolio_value=
         output.append({
             "name": scenario["name"],
             "return": round(total_return, 2),
-            "pnl": round((portfolio_value or 0) * total_return / 100, 2) if portfolio_value is not None else None,
+            "pnl": round(portfolio_value * total_return / 100, 2) if portfolio_value is not None else None,
         })
     return output
 
 
 def analyze_portfolio(details: list[dict], items: list[dict], portfolio_value=None, assumptions=None) -> dict:
-    targets = [float(item.get("target_weight") or item.get("current_weight") or 0) for item in items]
+    targets = [_required_weight(item, "target_weight") for item in items]
     backtest = portfolio_backtest(details, targets, assumptions)
-    weights = normalize_weights([float(item.get("current_weight") or 0) for item in items])
+    weights = normalize_weights([_required_weight(item, "current_weight") for item in items])
     codes = [detail["code"] for detail in details]
     names = [detail.get("name") or detail["code"] for detail in details]
     risk = risk_analysis(codes, names, backtest["aligned"]["series"], weights)

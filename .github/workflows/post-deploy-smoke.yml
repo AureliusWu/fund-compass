@@ -305,12 +305,30 @@ jobs:
           done
           jq -e '
             .database.engine == "sqlite"
-            and .database.persistence == "ephemeral"
-            and .database.durable == false
             and .universe_ready == true
             and (.universe | type) == "number"
             and .universe >= 1000
           ' <<<"$health" >/dev/null
+          expected_major=${EXPECTED_VERSION%%.*}
+          [[ "$expected_major" =~ ^[0-9]+$ ]] || { echo "无法解析目标主版本: $EXPECTED_VERSION" >&2; exit 1; }
+          if (( 10#$expected_major >= 8 )); then
+            jq -e '
+              (.database.persistence | type) == "string"
+              and .database.persistence != "ephemeral"
+              and .database.persistence != "misconfigured"
+              and .database.durable == true
+            ' <<<"$health" >/dev/null
+          else
+            jq -e '
+              (.database.persistence == "ephemeral" and .database.durable == false)
+              or (
+                (.database.persistence | type) == "string"
+                and .database.persistence != "ephemeral"
+                and .database.persistence != "misconfigured"
+                and .database.durable == true
+              )
+            ' <<<"$health" >/dev/null
+          fi
           fund=$(curl --fail --silent --show-error "$api/api/fund/005844")
           jq -e '
             .code == "005844"
@@ -321,18 +339,29 @@ jobs:
           ' <<<"$fund" >/dev/null
           curl --fail --silent --show-error "$api/api/strategy/registry" | jq -e 'type == "object"' >/dev/null
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' "$api/api/fund/not-a-code")" = "404"
-      - name: 检查 Worker 版本与估值契约
+      - name: 检查 Worker 构建身份、估值契约与自然调度边界
         env:
           EXPECTED_VERSION: ${{ steps.release.outputs.version }}
+          EXPECTED_SHA: ${{ inputs.target_sha }}
         shell: bash
         run: |
           for attempt in {1..40}; do
-            health=$(curl --fail --silent --show-error "$WORKER_BASE/health" || true)
-            if jq -e --arg version "$EXPECTED_VERSION" '.status == "ok" and .version == $version' <<<"$health" >/dev/null 2>&1; then
+            health=$(curl --fail --silent --show-error "$WORKER_BASE/health?release=${EXPECTED_SHA}" || true)
+            worker_deployment_sha=$(jq -r '.build_sha // empty' <<<"$health" 2>/dev/null || true)
+            worker_source_matches=false
+            if [[ "$worker_deployment_sha" =~ ^[0-9a-f]{40}$ ]] \
+              && git merge-base --is-ancestor "$worker_deployment_sha" "$EXPECTED_SHA" \
+              && git diff --quiet "$worker_deployment_sha" "$EXPECTED_SHA" -- worker; then
+              worker_source_matches=true
+            fi
+            if jq -e --arg version "$EXPECTED_VERSION" --arg sha "$worker_deployment_sha" '
+              .status == "ok" and .version == $version and .build_sha == $sha
+            ' <<<"$health" >/dev/null 2>&1 \
+              && [[ "$worker_source_matches" == "true" ]]; then
               break
             fi
             if [ "$attempt" -eq 40 ]; then
-              echo "Worker 未在时限内呈现 v$EXPECTED_VERSION" >&2
+              echo "Worker 未在时限内呈现 v$EXPECTED_VERSION 的目标源码构建；target=$EXPECTED_SHA deployed=$worker_deployment_sha" >&2
               exit 1
             fi
             sleep 15
@@ -340,11 +369,37 @@ jobs:
           jq -e '
             .runtime
             | has("last_cron_at")
+              and has("last_cron_build_sha")
+              and has("scheduled_at")
+              and has("schedule_delay_seconds")
               and has("last_cron_result")
               and has("last_cron_reason")
               and has("last_attempt_at")
               and has("last_success_at")
           ' <<<"$health" >/dev/null
+          natural_sha=$(jq -r '.runtime.last_cron_build_sha // empty' <<<"$health")
+          if [[ "$natural_sha" == "$worker_deployment_sha" ]]; then
+            jq -e --arg sha "$worker_deployment_sha" '
+              .runtime.last_cron_build_sha == $sha
+              and (.runtime.last_cron_at | type) == "string"
+              and (.runtime.scheduled_at | type) == "string"
+              and (.runtime.schedule_delay_seconds | type) == "number"
+              and .runtime.schedule_delay_seconds >= 0
+              and (.runtime.last_cron_result == "sent"
+                or .runtime.last_cron_result == "sent_with_warning"
+                or .runtime.last_cron_result == "skipped"
+                or .runtime.last_cron_result == "failed")
+            ' <<<"$health" >/dev/null
+            natural_result=$(jq -r '.runtime.last_cron_result' <<<"$health")
+            printf '### Worker natural schedule: OBSERVED\n\n- target: `%s`\n- deployed Worker build: `%s`\n- result: `%s`\n' "$EXPECTED_SHA" "$worker_deployment_sha" "$natural_result" >> "$GITHUB_STEP_SUMMARY"
+            if [[ "$natural_result" == "failed" ]]; then
+              echo "当前 Worker 构建的最近一次自然调度失败" >&2
+              exit 1
+            fi
+          else
+            echo "::notice title=Worker natural schedule NOT_RUN::当前构建尚无自然 14:30/14:40 记录，待下一个自然窗口验证"
+            printf '### Worker natural schedule: NOT_RUN\n\n目标 `%s` 对应的 Worker 源码构建 `%s` 尚无自然 14:30/14:40 记录；待下一个自然窗口验证。其他构建记录不作为本次证据。\n' "$EXPECTED_SHA" "$worker_deployment_sha" >> "$GITHUB_STEP_SUMMARY"
+          fi
           jq -e '
             .configured.gist_id == true
             and .configured.gist_token == true

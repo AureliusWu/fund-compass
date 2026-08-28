@@ -25,7 +25,16 @@ export interface RankFilter {
 const BROAD_RE = /沪深300|中证500|上证50|上证180|中证1000|创业板|科创50|红利|中证100|深100|300ETF|500ETF|50ETF|1000ETF|A500/i
 const CATS = ['指数型', '股票型', '混合型', '债券型', 'QDII', 'FOF']
 
-let cache: { funds: ScreenFund[]; updated: string } | null = null
+export const SCREENER_MAX_AGE_DAYS = 10
+
+export interface ScreenerDataset {
+  funds: ScreenFund[]
+  updated: string
+  ageDays: number
+  stale: boolean
+}
+
+let cache: ScreenerDataset | null = null
 
 interface StaticManifest {
   schema_version: 2
@@ -50,6 +59,21 @@ function validIsoDate(value: unknown): value is string {
   const [year, month, day] = value.split('-').map(Number)
   const parsed = new Date(Date.UTC(year, month - 1, day))
   return parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day
+}
+
+function beijingCalendarDay(now: Date): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(now)
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]))
+  return Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day))
+}
+
+export function screenerFreshness(updated: string, now = new Date()): { ageDays: number; stale: boolean } {
+  if (!validIsoDate(updated) || !Number.isFinite(now.getTime())) return { ageDays: 0, stale: true }
+  const [year, month, day] = updated.split('-').map(Number)
+  const ageDays = Math.floor((beijingCalendarDay(now) - Date.UTC(year, month - 1, day)) / 86_400_000)
+  return { ageDays, stale: ageDays < 0 || ageDays > SCREENER_MAX_AGE_DAYS }
 }
 
 function validManifest(raw: unknown, collection: string): raw is StaticManifest {
@@ -100,7 +124,7 @@ function validLegacy(raw: unknown): raw is { updated: string; funds: ScreenFund[
     && Number.isFinite(Date.parse(row.fetched_at)) && validFunds(row.funds)
 }
 
-export async function loadScreener(): Promise<{ funds: ScreenFund[]; updated: string }> {
+export async function loadScreener(): Promise<ScreenerDataset> {
   if (cache) return cache
   const base = `${import.meta.env.BASE_URL}data/screener`
   const manifestResponse = await fetch(`${base}/manifest.json`, { cache: 'no-cache' })
@@ -128,14 +152,14 @@ export async function loadScreener(): Promise<{ funds: ScreenFund[]; updated: st
     if (await sha256Text(datasetText) !== manifest.sha256) {
       throw new Error('排行数据集合校验失败')
     }
-    cache = { funds, updated: manifest.updated }
+    cache = { funds, updated: manifest.updated, ...screenerFreshness(manifest.updated) }
     return cache
   }
   const legacy = await fetch(`${import.meta.env.BASE_URL}data/screener.json`, { cache: 'no-cache' })
   if (!legacy.ok) throw new Error('暂无排行数据')
   const d = await legacy.json() as unknown
   if (!validLegacy(d)) throw new Error('排行数据格式无效')
-  cache = { funds: d.funds, updated: d.updated }
+  cache = { funds: d.funds, updated: d.updated, ...screenerFreshness(d.updated) }
   return cache
 }
 
@@ -247,7 +271,8 @@ export function filterAndSortRank(all: ScreenFund[], filter: RankFilter): Screen
 export async function findSimilar(type: string | null, selfCode: string, baseR1y: number | null, n = 6): Promise<ScreenFund[]> {
   const cat = catOf(type)
   if (!cat) return []
-  const { funds } = await loadScreener()
+  const { funds, stale } = await loadScreener()
+  if (stale) return []
   let arr = funds.filter((f) => f.t === cat && f.c !== selfCode)
   if (baseR1y != null) arr = arr.filter((f) => f.r1y != null && f.r1y > baseR1y)
   arr.sort((a, b) => {

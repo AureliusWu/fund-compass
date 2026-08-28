@@ -7,7 +7,7 @@ import { colorOf, num, pct } from '@/utils/format'
 import Chart from '@/components/Chart.vue'
 import { completePortfolioWeights, holdingMarketValue, valuationCoverage } from '@/utils/portfolioCoverage'
 
-interface LabItem { code: string; name: string; current: number | null; target: number; value: number | null; costComplete: boolean }
+interface LabItem { code: string; name: string; current: number | null; target: number | null; value: number | null; costComplete: boolean }
 
 const watch = useWatchlistStore()
 const funds = useFundsStore()
@@ -21,7 +21,46 @@ const unpricedItems = computed(() => coverage.value.missing)
 const missingCostItems = computed(() => items.filter((item) => !item.costComplete))
 const portfolioReady = computed(() => coverage.value.complete && missingCostItems.value.length === 0)
 const portfolioValue = computed(() => coverage.value.complete ? coverage.value.pricedValue : null)
-const targetTotal = computed(() => items.reduce((sum, item) => sum + Number(item.target || 0), 0))
+const missingTargetItems = computed(() => items.filter((item) => item.target == null))
+const invalidTargetItems = computed(() => items.filter((item) => (
+  item.target != null && (!Number.isFinite(item.target) || item.target < 0 || item.target > 100)
+)))
+const targetTotal = computed<number | null>(() => {
+  if (missingTargetItems.value.length || invalidTargetItems.value.length) return null
+  let total = 0
+  for (const item of items) {
+    if (item.target == null) return null
+    total += item.target
+  }
+  return Math.round(total * 10000) / 10000
+})
+const targetReady = computed(() => targetTotal.value === 100)
+const analysisReady = computed(() => portfolioReady.value && targetReady.value)
+const targetSummary = computed(() => {
+  if (missingTargetItems.value.length) return `目标缺失 ${missingTargetItems.value.length} 项`
+  if (invalidTargetItems.value.length) return `目标无效 ${invalidTargetItems.value.length} 项`
+  return targetTotal.value == null ? '目标未就绪' : `目标 ${targetTotal.value.toFixed(1)}%`
+})
+const targetValidationError = computed(() => {
+  if (missingTargetItems.value.length) {
+    return `目标权重缺失：${missingTargetItems.value.map((item) => item.name).join('、')}。请逐项填写；系统不会自动均分。`
+  }
+  if (invalidTargetItems.value.length) {
+    return `目标权重必须在 0% 到 100% 之间：${invalidTargetItems.value.map((item) => item.name).join('、')}。`
+  }
+  if (targetTotal.value != null && !targetReady.value) {
+    return `目标权重合计 ${targetTotal.value.toFixed(1)}%，必须精确为 100.0%；系统不会自动归一化。`
+  }
+  return ''
+})
+
+function updateTarget(item: LabItem, event: Event) {
+  const raw = (event.target as HTMLInputElement).value.trim()
+  const parsed = raw === '' ? null : Number(raw)
+  item.target = parsed != null && Number.isFinite(parsed) ? parsed : null
+  result.value = null
+  error.value = ''
+}
 
 onMounted(async () => {
   await watch.load(true)
@@ -44,19 +83,14 @@ onMounted(async () => {
     } catch { return { ...row, value: null } }
   }))
   const currentWeights = completePortfolioWeights(loaded)
-  const explicit = loaded.reduce((sum, row) => sum + (row.target ?? 0), 0)
-  const unset = loaded.filter((row) => row.target == null).length
-  const fallback = unset ? Math.max(0, 100 - explicit) / unset : 0
   loaded.forEach((row, index) => items.push({
     code: row.code, name: row.name, value: row.value,
     current: currentWeights?.[index] ?? null,
-    target: row.target ?? fallback,
+    target: row.target ?? null,
     costComplete: row.costComplete,
   }))
   loading.value = false
-  if (!portfolioReady.value) {
-    error.value = '净值或成本覆盖不完整，请补齐后再计算'
-  } else if (items.length) await run()
+  if (items.length && analysisReady.value) await run()
 })
 
 async function run() {
@@ -66,16 +100,23 @@ async function run() {
     error.value = '存在未定价或成本缺失持仓，已停止权重、回测和再平衡计算'
     return
   }
-  const totalTarget = items.reduce((sum, item) => sum + Number(item.target || 0), 0)
-  if (totalTarget <= 0) { error.value = '目标权重合计需大于 0'; return }
-  if (Math.abs(totalTarget - 100) > 0.01) {
-    items.forEach((item) => { item.target = Number(item.target || 0) / totalTarget * 100 })
+  if (!targetReady.value) {
+    result.value = null
+    error.value = targetValidationError.value || '目标权重必须完整且合计精确为 100.0%'
+    return
+  }
+  const requestItems: Array<{ code: string; current_weight: number; target_weight: number }> = []
+  for (const item of items) {
+    if (item.current == null || item.target == null) {
+      result.value = null
+      error.value = '当前权重或目标权重缺失，已停止组合实验'
+      return
+    }
+    requestItems.push({ code: item.code, current_weight: item.current, target_weight: item.target })
   }
   running.value = true; error.value = ''
   try {
-    result.value = await postPortfolioLab(items.map((item) => ({
-      code: item.code, current_weight: item.current as number, target_weight: Number(item.target || 0),
-    })), portfolioValue.value)
+    result.value = await postPortfolioLab(requestItems, portfolioValue.value)
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : '组合分析失败'
   } finally { running.value = false }
@@ -113,13 +154,28 @@ const curveOption = computed(() => {
           <span>缺失净值不会按 0 生成权重；净值或成本未完整时不会进入组合实验。</span>
         </section>
         <section class="weights-band">
-          <div class="band-head"><b>组合权重</b><span :class="{ warn: Math.abs(targetTotal - 100) > 0.1 }">目标 {{ targetTotal.toFixed(1) }}%</span></div>
+          <div class="band-head"><b>组合权重</b><span :class="{ warn: !targetReady }">{{ targetSummary }}</span></div>
           <div v-for="item in items" :key="item.code" class="weight-row">
             <div class="fund"><b>{{ item.name }}</b><span>{{ item.code }} · 当前 {{ item.current != null ? item.current.toFixed(1) + '%' : '--' }}</span></div>
-            <van-stepper v-model="item.target" :min="0" :max="100" :step="1" decimal-length="1" input-width="48px" button-size="24px" />
+            <label class="target-input-wrap">
+              <span class="sr-only">{{ item.name }}目标权重</span>
+              <input
+                :value="item.target ?? ''"
+                type="number"
+                inputmode="decimal"
+                min="0"
+                max="100"
+                step="0.1"
+                placeholder="未设置"
+                :aria-invalid="item.target == null || item.target < 0 || item.target > 100"
+                @input="updateTarget(item, $event)"
+              >
+              <em>%</em>
+            </label>
           </div>
-          <van-button block type="primary" size="small" :loading="running" :disabled="!portfolioReady" @click="run">重新计算</van-button>
-          <div v-if="error" class="error">{{ error }}</div>
+          <div v-if="targetValidationError" class="target-error" role="alert">{{ targetValidationError }}</div>
+          <van-button block type="primary" size="small" :loading="running" :disabled="!analysisReady" @click="run">重新计算</van-button>
+          <div v-if="error" class="error" role="alert">{{ error }}</div>
         </section>
 
         <template v-if="result">
@@ -187,6 +243,12 @@ const curveOption = computed(() => {
 .fund b, .fund span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fund b { color: var(--ink); font-size: 13px; }
 .fund span { color: var(--text-hint); font-size: 10px; margin-top: 3px; }
+.target-input-wrap { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+.target-input-wrap input { width: 82px; height: 30px; padding: 0 8px; border: 1px solid var(--border); border-radius: 8px; color: var(--ink); background: var(--card-bg); font-family: var(--font-mono); font-size: 12px; text-align: right; }
+.target-input-wrap input[aria-invalid="true"] { border-color: var(--danger); }
+.target-input-wrap em { color: var(--text-hint); font-size: 11px; font-style: normal; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.target-error { margin: 2px 0 10px; padding: 8px 10px; border: 1px solid var(--danger); border-radius: 8px; color: var(--text-secondary); background: var(--danger-soft); font-size: 11px; line-height: 1.55; }
 .error { margin-top: 8px; font-size: 11px; }
 .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); background: var(--card-bg); border-bottom: 1px solid var(--border); margin-bottom: 14px; }
 .summary-grid div { padding: 12px 6px; text-align: center; }

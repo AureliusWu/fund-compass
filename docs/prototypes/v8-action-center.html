@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>司南基金 · V8 今日行动中心 Prototype</title>
+  <style>
+    :root {
+      --pine: #244f3d;
+      --teal: #3f765c;
+      --teal-soft: #edf4ef;
+      --gold: #c99a3d;
+      --gold-soft: #fbf4e7;
+      --cinnabar: #d24a3a;
+      --red-soft: #fbefec;
+      --ink: #183229;
+      --muted: #66786f;
+      --hint: #91a098;
+      --paper: #f8f7f1;
+      --card: #fffdf8;
+      --line: rgba(36, 79, 61, .15);
+      --shadow: 0 8px 26px rgba(24, 50, 41, .08);
+      --display: "Songti SC", "STSong", "Noto Serif SC", serif;
+      --body: "PingFang SC", "Microsoft YaHei", sans-serif;
+      --mono: "SFMono-Regular", Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    html { background: #e7ebe6; }
+    body { margin: 0; color: var(--ink); background: #e7ebe6; font-family: var(--body); }
+    button { font: inherit; }
+    button:focus-visible, summary:focus-visible { outline: 3px solid rgba(201,154,61,.35); outline-offset: 2px; }
+    .prototype-tools {
+      position: sticky; top: 0; z-index: 20; display: flex; flex-wrap: wrap; align-items: center;
+      justify-content: center; gap: 8px; padding: 10px 14px; background: rgba(24,50,41,.94);
+      color: #fff; box-shadow: 0 4px 18px rgba(0,0,0,.16);
+    }
+    .prototype-tools strong { margin-right: 8px; font-size: 12px; letter-spacing: .08em; }
+    .prototype-tools button { border: 1px solid rgba(255,255,255,.28); border-radius: 999px; padding: 5px 10px; color: #fff; background: transparent; cursor: pointer; font-size: 11px; }
+    .prototype-tools button[aria-pressed="true"] { color: var(--ink); background: #fff; }
+    .stage { min-height: calc(100vh - 52px); display: grid; place-items: start center; padding: 24px; }
+    .app {
+      position: relative; width: min(1180px, 100%); min-height: 780px; overflow: hidden;
+      background: var(--paper); box-shadow: 0 18px 60px rgba(24,50,41,.18);
+    }
+    .app::before {
+      content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .45;
+      background:
+        radial-gradient(900px 280px at 78% -8%, rgba(63,118,92,.12), transparent 70%),
+        repeating-linear-gradient(0deg, transparent 0 3px, rgba(36,79,61,.018) 3px 4px);
+    }
+    .shell { position: relative; z-index: 1; min-height: 780px; padding-bottom: 74px; }
+    .topbar { height: 66px; display: flex; align-items: center; justify-content: space-between; padding: 0 28px; border-bottom: 1px solid var(--line); background: rgba(255,253,248,.88); }
+    .brand { display: flex; align-items: baseline; gap: 10px; }
+    .brand b { font: 700 20px/1 var(--display); letter-spacing: .08em; }
+    .brand span, .asof { color: var(--hint); font: 10px/1.4 var(--mono); }
+    .heading { padding: 28px 28px 18px; display: flex; align-items: end; justify-content: space-between; gap: 22px; }
+    .heading small { color: var(--teal); font: 700 11px/1.4 var(--body); letter-spacing: .18em; }
+    .heading h1 { margin: 7px 0 6px; font: 700 clamp(26px,4vw,42px)/1.08 var(--display); letter-spacing: .02em; }
+    .heading p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.7; }
+    .freshness { flex: 0 0 auto; padding: 8px 11px; border: 1px solid var(--line); border-radius: 9px; color: var(--muted); background: var(--card); font-size: 11px; }
+    .freshness i { display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: #3f8b67; }
+    .freshness.warn i { background: var(--gold); }
+    .freshness.bad i { background: var(--cinnabar); }
+    .content { display: grid; grid-template-columns: minmax(0, 1.75fr) minmax(270px, .75fr); gap: 18px; padding: 0 28px 28px; }
+    .ledger, .panel { border: 1px solid var(--line); border-radius: 16px; background: var(--card); box-shadow: var(--shadow); }
+    .distribution { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid var(--line); }
+    .distribution div { min-width: 0; padding: 15px 16px 13px; }
+    .distribution div + div { border-left: 1px solid var(--line); }
+    .distribution span { display: block; color: var(--hint); font-size: 10px; }
+    .distribution b { display: block; margin-top: 5px; font: 600 21px/1 var(--mono); }
+    .distribution .do b { color: var(--cinnabar); }
+    .distribution .hold b { color: var(--teal); }
+    .distribution .watch b { color: var(--gold); }
+    .distribution .error b { color: var(--muted); }
+    .section-head { display: flex; justify-content: space-between; align-items: baseline; padding: 18px 19px 8px; }
+    .section-head h2, .panel h2 { margin: 0; font: 700 16px/1.3 var(--display); }
+    .section-head span { color: var(--hint); font-size: 10px; }
+    .compass-list { position: relative; margin: 5px 18px 20px 31px; padding-left: 27px; }
+    .compass-list::before { content: ""; position: absolute; left: 3px; top: 12px; bottom: 18px; width: 1px; background: linear-gradient(var(--cinnabar), var(--gold), var(--teal)); }
+    .action-card { position: relative; margin: 0 0 12px; padding: 15px 16px; border: 1px solid var(--line); border-radius: 12px; background: #fffefa; }
+    .action-card::before { content: ""; position: absolute; left: -31px; top: 22px; width: 11px; height: 11px; border: 3px solid var(--card); border-radius: 50%; background: var(--tone); box-shadow: 0 0 0 1px var(--tone); }
+    .action-card::after { content: ""; position: absolute; left: -18px; top: 27px; width: 17px; height: 1px; background: var(--line); }
+    .action-card.buy, .action-card.add { --tone: var(--cinnabar); }
+    .action-card.dca, .action-card.watch { --tone: var(--gold); }
+    .action-card.reduce { --tone: #3f8b67; }
+    .action-head { display: grid; grid-template-columns: 1fr auto; gap: 8px 14px; align-items: start; }
+    .fund b { display: block; font-size: 14px; }
+    .fund span { display: block; margin-top: 4px; color: var(--hint); font: 9px/1.4 var(--mono); }
+    .action-stamp { min-width: 70px; padding: 6px 9px; border: 1px solid var(--tone); border-radius: 6px; color: var(--tone); text-align: center; font: 700 13px/1 var(--display); transform: rotate(-1.5deg); }
+    .why { margin: 11px 0 10px; color: var(--ink); font-size: 12px; line-height: 1.65; }
+    .metrics { display: flex; flex-wrap: wrap; gap: 7px; }
+    .metrics span { padding: 4px 7px; border-radius: 5px; color: var(--muted); background: var(--teal-soft); font: 10px/1.3 var(--mono); }
+    .metrics .low { color: #996f1f; background: var(--gold-soft); }
+    .diff { margin-top: 10px; padding-top: 9px; border-top: 1px dashed var(--line); color: var(--muted); font-size: 10px; line-height: 1.6; }
+    .diff b { color: var(--teal); }
+    details { margin-top: 8px; color: var(--muted); font-size: 10px; }
+    summary { cursor: pointer; color: var(--pine); }
+    details p { margin: 6px 0 0; line-height: 1.6; }
+    .side { display: grid; align-content: start; gap: 12px; }
+    .panel { padding: 16px; }
+    .panel h2 { margin-bottom: 13px; }
+    .boundary { padding: 11px 12px; border-left: 3px solid var(--gold); background: var(--gold-soft); color: var(--muted); font-size: 11px; line-height: 1.65; }
+    .temperature { display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: center; }
+    .temperature strong { color: var(--pine); font: 600 34px/1 var(--mono); }
+    .temperature span { display: block; color: var(--muted); font-size: 11px; }
+    .temperature small { display: block; margin-top: 4px; color: var(--hint); font-size: 9px; }
+    .health { display: grid; gap: 8px; }
+    .health div { display: grid; grid-template-columns: 8px 54px 1fr; gap: 8px; align-items: center; font-size: 10px; }
+    .health i { width: 7px; height: 7px; border-radius: 50%; background: #3f8b67; }
+    .health i.warn { background: var(--gold); }
+    .health i.bad { background: var(--cinnabar); }
+    .health b { font-weight: 600; }
+    .health span { min-width: 0; overflow: hidden; color: var(--hint); text-overflow: ellipsis; white-space: nowrap; }
+    .empty { padding: 54px 24px 62px; text-align: center; }
+    .empty .mark { width: 56px; height: 56px; display: grid; place-items: center; margin: 0 auto 14px; border: 1px solid var(--line); border-radius: 50%; color: var(--teal); font: 700 22px var(--display); }
+    .empty b { display: block; font: 700 16px var(--display); }
+    .empty p { max-width: 360px; margin: 8px auto 0; color: var(--muted); font-size: 11px; line-height: 1.7; }
+    .skeleton { overflow: hidden; }
+    .skeleton span { display: block; height: 12px; margin: 10px 0; border-radius: 5px; background: linear-gradient(90deg,#edf0eb 20%,#faf9f5 50%,#edf0eb 80%); background-size: 240% 100%; animation: shimmer 1.4s linear infinite; }
+    .skeleton span:nth-child(2) { width: 72%; }.skeleton span:nth-child(3) { width: 88%; }
+    .bottom-nav { position: absolute; left: 0; right: 0; bottom: 0; height: 64px; display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--line); background: rgba(255,253,248,.96); padding-bottom: env(safe-area-inset-bottom); }
+    .bottom-nav button { border: 0; color: var(--muted); background: transparent; cursor: pointer; font-size: 11px; }
+    .bottom-nav button:first-child { color: var(--teal); font-weight: 700; }
+    .bottom-nav b { display: block; margin-bottom: 4px; font: 700 16px/1 var(--display); }
+    body.preview-mobile .stage { padding: 18px; }
+    body.preview-mobile .app { width: 390px; height: 844px; min-height: 844px; border-radius: 24px; }
+    body.preview-mobile .shell { height: 844px; min-height: 844px; overflow-y: auto; }
+    body.preview-mobile .topbar { height: 56px; padding: 0 16px; }
+    body.preview-mobile .heading { display: block; padding: 20px 16px 14px; }
+    body.preview-mobile .heading h1 { font-size: 27px; }
+    body.preview-mobile .freshness { display: inline-block; margin-top: 10px; }
+    body.preview-mobile .content { display: block; padding: 0 12px 88px; }
+    body.preview-mobile .side { margin-top: 12px; }
+    body.preview-mobile .distribution div { padding: 12px 9px; }
+    body.preview-mobile .distribution b { font-size: 18px; }
+    body.preview-mobile .compass-list { margin-left: 24px; padding-left: 23px; }
+    body.preview-mobile .action-card::before { left: -27px; }
+    body.preview-mobile .action-card::after { left: -15px; width: 14px; }
+    body.preview-mobile .asof { display: none; }
+    @media (max-width: 760px) {
+      .prototype-tools strong { width: 100%; text-align: center; }
+      .stage { padding: 0; }
+      .app { min-height: 100vh; }
+      .topbar { padding: 0 16px; }
+      .heading { display: block; padding: 20px 16px 14px; }
+      .freshness { display: inline-block; margin-top: 10px; }
+      .content { display: block; padding: 0 12px 88px; }
+      .side { margin-top: 12px; }
+    }
+    @keyframes shimmer { to { background-position: -240% 0; } }
+    @media (prefers-reduced-motion: reduce) { .skeleton span { animation: none; } }
+  </style>
+</head>
+<body class="preview-mobile">
+  <nav class="prototype-tools" aria-label="原型控制">
+    <strong>V8 PROTOTYPE · 未接入正式页面</strong>
+    <button data-view="mobile" aria-pressed="true">手机 390×844</button>
+    <button data-view="desktop" aria-pressed="false">PC</button>
+    <button data-state="normal" aria-pressed="true">正常</button>
+    <button data-state="loading" aria-pressed="false">加载</button>
+    <button data-state="empty" aria-pressed="false">空数据</button>
+    <button data-state="stale" aria-pressed="false">数据过期</button>
+    <button data-state="partial" aria-pressed="false">部分失败</button>
+    <button data-state="low" aria-pressed="false">低置信度</button>
+    <button data-state="multi" aria-pressed="false">多动作</button>
+    <button data-state="offline" aria-pressed="false">PWA 离线</button>
+  </nav>
+  <div class="stage"><div class="app"><div class="shell" id="shell"></div></div></div>
+  <script>
+    const actions = [
+      { cls:'dca', name:'沪深300指数基金', code:'000051', action:'分批定投', why:'估值处于相对低位，当前仓位仍低于计划区间。', strength:72, confidence:78, data:'正式净值 08-24', diff:'观察 → 分批定投', driver:'趋势企稳，评分覆盖恢复到 86%', invalid:'估值进入高位、仓位达到目标或关键数据过期时停止新增。' },
+      { cls:'reduce', name:'科技主题基金', code:'008888', action:'减仓', why:'当前仓位高于目标上沿，估值进入高位；减仓不等于清仓。', strength:68, confidence:69, data:'盘中证据 14:29', diff:'持有 → 减仓', driver:'仓位越过 18% 上沿，估值分位升至 82%', invalid:'仓位回到目标区间且趋势稳定时停止减仓。' },
+      { cls:'watch', name:'全球成长精选（QDII）', code:'012920', action:'观察', why:'目标净值日已绑定，但成熟样本仅 7 条，P80 历史误差偏高。', strength:38, confidence:44, data:'目标净值日 08-25', diff:'观察（未变化）', driver:'模型继续仅作辅助，不参与强动作', invalid:'样本达到门槛、误差收敛且正式净值完成精确结算后再评估。' },
+    ]
+    const state = { view:'mobile', mode:'normal' }
+    const card = (row) => `<article class="action-card ${row.cls}">
+      <div class="action-head"><div class="fund"><b>${row.name}</b><span>${row.code} · Decision Snapshot</span></div><div class="action-stamp">${row.action}</div></div>
+      <p class="why">${row.why}</p>
+      <div class="metrics"><span>强度 ${row.strength}</span><span class="${row.confidence < 55 ? 'low' : ''}">可信度 ${row.confidence}</span><span>${row.data}</span></div>
+      <div class="diff"><b>${row.diff}</b> · ${row.driver}</div>
+      <details><summary>什么情况下会改变</summary><p>${row.invalid}</p></details>
+    </article>`
+    function bodyFor(mode) {
+      if (mode === 'loading') return `<section class="ledger"><div class="distribution"><div><span>需要动作</span><b>—</b></div><div><span>继续持有</span><b>—</b></div><div><span>观察</span><b>—</b></div><div><span>数据异常</span><b>—</b></div></div><div class="section-head"><h2>正在整理今天的证据</h2><span>不展示未完成结论</span></div><div class="empty skeleton" aria-label="加载中"><span></span><span></span><span></span><span></span></div></section>`
+      if (mode === 'empty') return `<section class="ledger"><div class="distribution"><div><span>需要动作</span><b>0</b></div><div><span>继续持有</span><b>0</b></div><div><span>观察</span><b>0</b></div><div><span>数据异常</span><b>0</b></div></div><div class="empty"><div class="mark">南</div><b>还没有需要分析的基金</b><p>先去选基或添加自选。系统不会为了填满页面而制造建议。</p></div></section>`
+      const staleRow = { ...actions[0], cls:'watch', action:'观察', why:'关键行情与估值源已过期，本次强动作已关闭。', strength:28, confidence:28, data:'离最后成功 29 小时', diff:'分批定投 → 观察', driver:'数据新鲜度门控触发', invalid:'关键源恢复并生成新 Evidence Snapshot 后重新评估。' }
+      const offlineRow = { ...actions[0], cls:'watch', action:'离线快照', why:'这是上次联网时保存的结论，仅供回看，不代表当前盘中状态。', strength:72, confidence:78, data:'保存于 08-24 14:30', diff:'未联网，无法计算变化', driver:'等待恢复网络', invalid:'联网并完成来源健康检查后生成新快照。' }
+      let rows = mode === 'low' ? [actions[2]] : mode === 'multi' ? actions : mode === 'stale' ? [staleRow] : mode === 'offline' ? [offlineRow] : actions.slice(0, 2)
+      const issue = mode === 'stale' ? 3 : mode === 'partial' ? 1 : 0
+      return `<section class="ledger">
+        <div class="distribution"><div class="do"><span>需要动作</span><b>${['low','stale','offline'].includes(mode) ? 0 : 2}</b></div><div class="hold"><span>继续持有</span><b>8</b></div><div class="watch"><span>观察</span><b>${mode === 'low' || mode === 'stale' ? 1 : 4}</b></div><div class="error"><span>数据异常</span><b>${issue}</b></div></div>
+        <div class="section-head"><h2>优先关注</h2><span>按动作紧迫度与证据强度排序</span></div>
+        <div class="compass-list">${rows.map(card).join('')}</div>
+      </section>`
+    }
+    function render() {
+      const stale = state.mode === 'stale', partial = state.mode === 'partial', offline = state.mode === 'offline'
+      document.getElementById('shell').innerHTML = `
+        <header class="topbar"><div class="brand"><b>司南基金</b><span>V8 PREVIEW</span></div><div class="asof">证据时间 2026-08-25 14:30 CST</div></header>
+        <section class="heading"><div><small>今日行动中心</small><h1>${stale ? '先核对数据，再做动作。' : partial ? '两项可判断，一项待恢复。' : offline ? '离线查看上次快照。' : state.mode === 'empty' ? '从一只自选开始。' : '先看需要改变的事。'}</h1><p>动作来自确定性快照；指标作为证据，不替代你的资产配置目标。</p></div><div class="freshness ${stale ? 'bad' : partial || offline ? 'warn' : ''}"><i></i>${stale ? '3 个关键源已过期' : partial ? '已生成 14/15 · 1 只失败' : offline ? '离线快照 · 保存于 08-24' : '证据已更新 · 14:30'}</div></section>
+        <main class="content">${bodyFor(state.mode)}
+          <aside class="side">
+            <section class="panel"><h2>数据边界</h2><div class="boundary">${stale ? '关键源已过期，BUY / ADD / SELL 全部关闭；缺失值保持为空。' : partial ? '异常基金不参与组合总额与现金比例计算，已停止伪精确汇总。' : offline ? '离线时只保留最后快照及原始时间，不伪装成当前实时结论。' : '正式净值、盘中市场变化与下一净值估算分别展示；模型不能自动晋级。'}</div></section>
+            <section class="panel"><h2>市场与持仓温度</h2><div class="temperature"><strong>${stale ? '—' : '57'}</strong><div><span>${stale ? '等待新数据' : '中性偏暖'}</span><small>温度越高表示拥挤与回撤风险越高</small></div></div></section>
+            <section class="panel"><h2>系统状态</h2><div class="health"><div><i class="${offline ? 'warn' : ''}"></i><b>服务</b><span>${offline ? '离线' : 'API 正常'}</span></div><div><i class="${stale ? 'bad' : partial || offline ? 'warn' : ''}"></i><b>数据</b><span>${stale ? '关键源过期' : partial ? '部分降级' : offline ? '最后快照' : '来源可用'}</span></div><div><i></i><b>任务</b><span>自然调度待生产验收</span></div></div></section>
+          </aside>
+        </main>
+        <nav class="bottom-nav" aria-label="主导航"><button><b>⌂</b>首页</button><button><b>◇</b>选基</button><button><b>☆</b>自选</button></nav>`
+    }
+    document.querySelectorAll('[data-view]').forEach((button) => button.addEventListener('click', () => {
+      state.view = button.dataset.view
+      document.body.classList.toggle('preview-mobile', state.view === 'mobile')
+      document.querySelectorAll('[data-view]').forEach((item) => item.setAttribute('aria-pressed', String(item === button)))
+    }))
+    document.querySelectorAll('[data-state]').forEach((button) => button.addEventListener('click', () => {
+      state.mode = button.dataset.state
+      document.querySelectorAll('[data-state]').forEach((item) => item.setAttribute('aria-pressed', String(item === button)))
+      render()
+    }))
+    render()
+  </script>
+</body>
+</html>

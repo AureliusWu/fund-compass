@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- 完成 v8.0.0 候选的正式决策界面：首页新增“今日行动中心”，自选页优先展示 V8 动作、强度、置信度、数据状态、原因与 Decision Diff，基金详情按 Decision、Diff、Position、Evidence、Risk / Invalidation、Outcome 六层展示，并把旧指标降为次级信息。
+- UI 只读不可变 V8 快照；404、空值、过期、源不可用、低置信、部分失败与未成熟 Outcome 均失败关闭。正式净值、盘中估值和 QDII 下一净值估算按日期轴分开展示，缺失值不补 0。
+- 刷新前端锁文件中的传递依赖补丁（`brace-expansion`、`fast-uri`、`nanoid`、`postcss`），不改变直接依赖或运行时接口；生产依赖审计为 0 项漏洞。
+- 当前 SemVer 仍为 7.0.1；生产持久化、Worker exact SHA 与自然 14:30/14:40 调度证据完成前，不标记 v8.0.0 发布。
+
 ## 7.0.1 - 2026-08-24
 
 - GitHub Actions 统一升级到 Node 24 兼容主版本：`checkout@v7`、`setup-node@v7`、`setup-python@v7`、`upload-artifact@v7`、`upload-pages-artifact@v5` 与 `deploy-pages@v5`，清除现行工作流中的 Node 20 弃用告警。

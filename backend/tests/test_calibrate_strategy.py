@@ -1,4 +1,5 @@
 import importlib.util
+import json
 from pathlib import Path
 
 
@@ -74,3 +75,83 @@ def test_atomic_json_write(tmp_path):
     module.write_json_atomic(path, {"ok": True})
     assert path.read_text(encoding="utf-8").strip() == '{\n  "ok": true\n}'
     assert not (tmp_path / "report.json.tmp").exists()
+
+
+def test_review_policy_only_recommends_explicit_admin_changes():
+    promotion = module.review_policy(
+        candidate_passed=True,
+        candidate_changed=True,
+        degraded=False,
+        frozen=False,
+        poor_cycles=0,
+        rollback_available=False,
+    )
+    assert promotion == {
+        "active_change_policy": "explicit_admin_only",
+        "candidate_eligible_for_admin_review": True,
+        "rollback_recommended": False,
+        "recommendation": "review_candidate",
+    }
+
+    rollback = module.review_policy(
+        candidate_passed=True,
+        candidate_changed=True,
+        degraded=True,
+        frozen=True,
+        poor_cycles=2,
+        rollback_available=True,
+    )
+    assert rollback["candidate_eligible_for_admin_review"] is False
+    assert rollback["rollback_recommended"] is True
+    assert rollback["recommendation"] == "review_rollback"
+
+
+def test_main_never_promotes_or_rolls_back_active(tmp_path, monkeypatch):
+    active = {
+        "version": "auto-previous",
+        "weights": {"买入": 1.0, "定投": 0.75, "持有": 0.5, "减仓": 0.25},
+        "source": "cross-fund holdout validation",
+    }
+    history = [{"version": "v1-default", "weights": {"买入": 1.0}}]
+    current = {
+        "active": active,
+        "history": history,
+        "governance": {"poor_cycles": 1},
+    }
+    summary = {
+        "sampled": 20,
+        "valid": 20,
+        "accepted": 20,
+        "winner_votes": 20,
+        "required_votes": 8,
+        "median_validation_improvement": 1.0,
+        "type_distribution": {"混合型": 5, "股票型": 5, "指数型": 5, "QDII": 5},
+        "valid_type_distribution": {"混合型": 5, "股票型": 5, "指数型": 5, "QDII": 5},
+        "max_type_share": 0.25,
+        "type_balance_ok": True,
+        "passed": True,
+        "weights": {"买入": 1.0, "定投": 0.85, "持有": 0.6, "减仓": 0.2},
+    }
+    registry_path = tmp_path / "strategy-params.json"
+    report_path = tmp_path / "strategy-calibration.json"
+    monkeypatch.setattr(module, "REGISTRY", registry_path)
+    monkeypatch.setattr(module, "PUBLIC_REPORT", report_path)
+    monkeypatch.setattr(module, "sample_codes", lambda: [("000001", "混合型")])
+    monkeypatch.setattr(module, "fetch_detail", lambda code: {})
+    monkeypatch.setattr(module, "calibrate", lambda detail: {"available": True, "accepted": True})
+    monkeypatch.setattr(module, "aggregate", lambda rows: summary)
+    monkeypatch.setattr(module, "load_registry", lambda: json.loads(json.dumps(current)))
+    monkeypatch.setattr(module, "fetch_outcomes", lambda: {})
+    monkeypatch.setattr(module, "active_is_degraded", lambda outcomes, version: (True, {"poor_groups": 2}))
+
+    module.main()
+
+    output = json.loads(registry_path.read_text(encoding="utf-8"))
+    assert output["active"] == active
+    assert output["history"] == history
+    assert output["candidate"]["status"] == "passed"
+    assert output["candidate"]["eligible_for_admin_review"] is False
+    assert output["governance"]["poor_cycles"] == 2
+    assert output["governance"]["rollback_recommended"] is True
+    assert output["governance"]["recommendation"] == "review_rollback"
+    assert output["governance"]["active_change_policy"] == "explicit_admin_only"

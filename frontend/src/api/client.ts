@@ -323,11 +323,14 @@ export interface PortfolioDecisionsResp {
   errors: { code: string; error: string }[]
   total: number
   allocation: {
-    current_total: number
-    target_total: number
-    target_cash: number
+    current_total: number | null
+    target_total: number | null
+    target_cash: number | null
     status: string
     warnings: string[]
+    complete?: boolean
+    missing_current_weights?: string[]
+    missing_target_weights?: string[]
   }
   rebalance: {
     code: string
@@ -345,6 +348,280 @@ export const postPortfolioDecisions = (items: PortfolioDecisionItem[], portfolio
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ items, portfolio_value: portfolioValue }),
   })
+
+export type V8Action = 'buy' | 'dca' | 'watch' | 'add' | 'hold' | 'reduce' | 'sell'
+export type V8UserState = 'unheld' | 'held'
+
+export interface V8SourceState {
+  source_id: string
+  state: 'healthy' | 'degraded' | 'stale' | 'unavailable' | 'unknown'
+  last_success: string | null
+  last_failure: string | null
+  latency_ms: number | null
+  data_age_seconds: number | null
+  stale: boolean
+  error_class: string | null
+}
+
+export interface V8EvidenceNode {
+  node_id: string
+  category: 'valuation' | 'trend' | 'momentum' | 'quality' | 'risk' | 'holding' | 'portfolio' | 'data_quality' | 'model_accuracy' | 'outcome'
+  state: 'support' | 'constraint' | 'neutral' | 'missing'
+  label: string
+  value: number | string | boolean | null
+  source_id: string | null
+}
+
+export interface V8EvidenceSnapshot {
+  schema_version: 'v8-evidence-1'
+  evidence_id: string
+  fund_code: string
+  fund_name: string | null
+  fund_type: string
+  created_at: string
+  market_time: string | null
+  official_nav: number | null
+  official_nav_date: string | null
+  target_nav_date: string | null
+  benchmark_id: string | null
+  valuation_percentile: number | null
+  trend_state: string | null
+  momentum_state: string | null
+  drawdown: number | null
+  volatility: number | null
+  market_temperature: number | null
+  score: number | null
+  score_version: string | null
+  score_coverage: number
+  timing_signal: string | null
+  timing_coverage: number
+  estimate: number | null
+  estimate_status: string
+  estimate_coverage: number | null
+  estimate_model_version: string | null
+  estimate_error_p80: number | null
+  estimate_sample_count: number | null
+  estimate_mae: number | null
+  estimate_direction_accuracy: number | null
+  source_states: V8SourceState[]
+  evidence_nodes: V8EvidenceNode[]
+  evidence_strength: number
+  missing_fields: string[]
+  stale_fields: string[]
+  risk_flags: string[]
+}
+
+export interface V8HoldingInput {
+  is_held: boolean
+  shares?: number
+  cost?: number
+  market_value?: number
+  account?: string
+  current_weight?: number
+  target_weight?: number
+  updated_at?: string
+  source?: string
+}
+
+export interface V8HoldingVersion {
+  schema_version: 'v8-holding-1'
+  holding_version: string
+  fund_code: string
+  user_state: V8UserState
+  shares: number | null
+  cost: number | null
+  market_value: number | null
+  account: string | null
+  current_weight: number | null
+  target_weight: number | null
+  updated_at: string | null
+  source: string
+  created_at: string
+}
+
+export interface V8PortfolioPolicy {
+  schema_version: 'v8-policy-1'
+  policy_version: string
+  name: string
+  target_allocations: Record<string, number>
+  target_ranges: Record<string, [number, number]>
+  max_single_fund_weight: number | null
+  max_theme_weight: number | null
+  rebalance_band: number | null
+  dca_rules: Record<string, unknown>
+  reduce_rules: Record<string, unknown>
+  sell_rules: Record<string, unknown>
+  effective_at: string
+  created_at: string
+  source: string
+  supersedes: string | null
+}
+
+export interface V8PositionGuidance {
+  current_weight: number | null
+  target_weight: number | null
+  target_range: [number, number] | null
+  suggested_change: number | null
+  suggested_range: [number, number] | null
+  method: string
+  amount: number | null
+  precise: boolean
+}
+
+export interface V8DecisionSnapshot {
+  schema_version: 'v8-decision-1'
+  decision_id: string
+  evidence_id: string
+  fund_code: string
+  holding_version: string | null
+  policy_version: string
+  strategy_version: string
+  user_state: V8UserState
+  action: V8Action
+  strength: number
+  confidence: number
+  summary: string
+  reason_codes: string[]
+  reasons: string[]
+  risks: string[]
+  invalidation_codes: string[]
+  invalidation_conditions: string[]
+  position_guidance: V8PositionGuidance | null
+  evidence_nodes: V8EvidenceNode[]
+  created_at: string
+}
+
+export interface V8DecisionDiff {
+  previous_decision_id: string | null
+  current_decision_id: string
+  previous_action: V8Action | null
+  current_action: V8Action
+  changed: boolean
+  drivers: string[]
+  driver_codes: string[]
+  unchanged: string[]
+}
+
+export interface V8DecisionResult {
+  code: string
+  name: string | null
+  type: string
+  action: V8Action
+  action_label: string
+  strength: number
+  confidence: number
+  summary: string
+  decision: V8DecisionSnapshot
+  evidence: V8EvidenceSnapshot
+  holding: V8HoldingVersion
+  policy: V8PortfolioPolicy
+  diff: V8DecisionDiff
+}
+
+export interface V8DecisionItem {
+  code: string
+  holding: V8HoldingInput
+  theme?: string
+  estimate_context?: Record<string, unknown>
+}
+
+export interface V8DecisionBatchRequest {
+  request_id?: string
+  items: V8DecisionItem[]
+  policy_version?: string
+  portfolio_value?: number
+}
+
+export interface V8DecisionBatchResponse {
+  decisions: V8DecisionResult[]
+  errors: { code: string; error: string }[]
+  total: number
+  requested: number
+  complete: boolean
+  allocation: {
+    complete: boolean
+    current_total: number | null
+    target_total: number | null
+    target_cash: number | null
+    status: string
+    missing_current_weights: string[]
+    missing_target_weights: string[]
+    warnings: string[]
+  }
+  rebalance: {
+    code: string; name: string | null; action: V8Action
+    current_weight: number | null; target_weight: number | null
+    suggested_change: number | null; suggested_range: [number, number] | null
+    amount: number | null; precise: boolean
+  }[]
+  policy_version: string
+  strategy_version: string
+  request_id: string | null
+  duplicate: boolean
+}
+
+export interface V8PortfolioRebalanceResponse {
+  request_id: string | null
+  duplicate: boolean
+  complete: boolean
+  allocation: V8DecisionBatchResponse['allocation']
+  rebalance: V8DecisionBatchResponse['rebalance']
+  policy_version: string
+  strategy_version: string
+}
+
+export interface V8FundOutcomes {
+  fund_code: string
+  total: number
+  items: {
+    decision: V8DecisionSnapshot
+    outcomes: Record<string, unknown>[]
+    pending_horizons: number[]
+    qdii_target_pending: boolean
+  }[]
+}
+
+export interface V8StrategyPerformance {
+  strategy_version: string
+  samples: number
+  metrics: {
+    horizon: number
+    samples: number
+    hit_rate: number
+    average_return: number
+    average_peer_excess: number | null
+    average_drawdown: number
+    worst_drawdown: number
+  }[]
+  auto_promotion: false
+  sample_gate: { minimum_total: number; minimum_primary_type: number }
+  eligible_for_review: boolean
+}
+
+/**
+ * V8 browser access is deliberately read-only. Snapshot creation, settlement,
+ * notification and rebalance routes require Worker/Admin credentials and must
+ * never be called from public frontend code.
+ */
+export const getV8Evidence = (code: string) =>
+  req<V8EvidenceSnapshot>(`/v2/fund/${encodeURIComponent(code)}/evidence`)
+
+export const getV8Decision = (code: string) =>
+  req<V8DecisionResult>(`/v2/fund/${encodeURIComponent(code)}/decision`)
+
+export const getV8DecisionDiff = (code: string) =>
+  req<V8DecisionDiff>(`/v2/fund/${encodeURIComponent(code)}/decision/diff`)
+
+export const getV8FundOutcomes = (code: string) =>
+  req<V8FundOutcomes>(`/v2/fund/${encodeURIComponent(code)}/outcomes`)
+
+export const getV8PortfolioPolicy = () => req<V8PortfolioPolicy>('/v2/portfolio/policy')
+export const getV8PortfolioPolicyHistory = () =>
+  req<{ total: number; items: V8PortfolioPolicy[] }>('/v2/portfolio/policy/history')
+
+export const getV8StrategyRegistry = () => req<Record<string, unknown>>('/v2/strategy/registry')
+export const getV8StrategyPerformance = (version: string) =>
+  req<V8StrategyPerformance>(`/v2/strategy/${encodeURIComponent(version)}/performance`)
 
 export interface PortfolioLabResp {
   backtest: {

@@ -74,6 +74,8 @@ const maxFee = ref('')
 const minQuality = ref('')
 const rankAll = ref<ScreenFund[]>([])
 const rankUpdated = ref('')
+const rankAgeDays = ref(0)
+const rankStale = ref(false)
 const rankLoading = ref(false)
 const rankErr = ref('')
 
@@ -83,6 +85,7 @@ async function ensureRank() {
   try {
     const d = await loadScreener()
     rankAll.value = d.funds; rankUpdated.value = d.updated
+    rankAgeDays.value = d.ageDays; rankStale.value = d.stale
   } catch {
     rankErr.value = '暂无排行数据（待富集任务生成后可用）'
   } finally {
@@ -102,12 +105,15 @@ const ranked = computed(() => {
     minR1y: Number.isFinite(minY) ? minY : undefined,
     minR3y: Number.isFinite(min3) ? min3 : undefined,
     maxFee: Number.isFinite(maxF) ? maxF : undefined,
-    minQuality: Number.isFinite(minQ) ? minQ : undefined,
-    sortKey: sortKey.value,
+    minQuality: !rankStale.value && Number.isFinite(minQ) ? minQ : undefined,
+    sortKey: rankStale.value && sortKey.value === 'quality' ? 'r1y' : sortKey.value,
   })
 })
 const rankedTop = computed(() => ranked.value.slice(0, 200))
-function metric(f: ScreenFund): number | null { return rankMetric(f, sortKey.value) }
+function metric(f: ScreenFund): number | null {
+  if (rankStale.value && sortKey.value === 'quality') return null
+  return rankMetric(f, sortKey.value)
+}
 
 function pickPreset(id: ScreenPresetId) {
   preset.value = id
@@ -160,14 +166,17 @@ async function runNlSearch() {
   nlLoading.value = true
   try {
     // 并行：解析 NL + 加载排行数据
-    const [spec, { funds }] = await Promise.all([parseQuery(q), loadScreener()])
+    const [spec, dataset] = await Promise.all([parseQuery(q), loadScreener()])
+    if (dataset.stale) throw new Error('排行数据已过期，AI 选基已暂停')
     nlSpec.value = spec
-    nlFiltered.value = applySpec(funds, spec)
+    nlFiltered.value = applySpec(dataset.funds, spec)
   } catch (e) {
     nlErr.value = e instanceof Error ? e.message : '解析失败'
   } finally {
     nlLoading.value = false; nlDone.value = true
-    if (!rankAll.value.length) rankAll.value = (await loadScreener().catch(() => ({ funds: [], updated: '' }))).funds
+    if (!rankAll.value.length) rankAll.value = (await loadScreener().catch(() => ({
+      funds: [], updated: '', ageDays: 0, stale: true,
+    }))).funds
   }
 }
 
@@ -232,6 +241,9 @@ onMounted(() => {
         <van-loading v-if="rankLoading" style="text-align:center;padding:40px" />
         <van-empty v-else-if="rankErr" :description="rankErr" />
         <template v-else>
+          <div v-if="rankStale" class="stale-warning">
+            排行数据已过期（{{ rankUpdated }}，{{ rankAgeDays }} 天），仅供历史参考；综合质量筛选和 AI 选基已停用。
+          </div>
           <div class="hint">命中 {{ ranked.length }} 只{{ ranked.length > 200 ? '（显示前 200，缩小筛选看更多）' : '' }} · 数据 {{ rankUpdated }}<span class="exp-link" @click="exportRankCSV(rankedTop)">导出 CSV</span></div>
           <van-cell v-for="f in rankedTop" :key="f.c" :title="f.n" :label="f.c + ' · ' + f.t" @click="router.push('/fund/' + f.c)">
             <template #value>
@@ -341,6 +353,7 @@ onMounted(() => {
 .filters label { font-size: 12px; color: var(--text-secondary); display: flex; align-items: center; gap: 4px; }
 .filters input { width: 64px; height: 28px; border: 1px solid var(--border); border-radius: 6px; padding: 0 8px; font-size: 13px; background: var(--card-bg); color: var(--text); }
 .hint { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+.stale-warning { margin-bottom: 8px; padding: 9px 11px; border: 1px solid rgba(200, 150, 62, 0.35); border-radius: 8px; background: var(--nl-tag-warn-bg); color: #9A6A1F; font-size: 12px; line-height: 1.55; }
 .exp-link { color: var(--teal); font-weight: 500; }
 .rk-val { display: flex; flex-direction: column; align-items: flex-end; }
 .rk-m { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }

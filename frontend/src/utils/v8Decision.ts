@@ -1,0 +1,1 @@
+export const V8_STRONG_ACTION_CONFIDENCE_GATE = 55

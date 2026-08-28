@@ -2,13 +2,31 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { showToast } from 'vant'
-import { getDecision, getFunds, type DecisionResp, type FundListItem } from '@/api/client'
+import {
+  ApiError,
+  getFunds,
+  getV8Decision,
+  getV8DecisionDiff,
+  type FundListItem,
+  type V8DecisionDiff,
+  type V8DecisionResult,
+} from '@/api/client'
 import { useWatchlistStore } from '@/stores/watchlist'
 import { fetchEstimates, loadCachedEstimates, type Estimate } from '@/utils/estimate'
 import { colorOf, pct } from '@/utils/format'
 import { getToken } from '@/utils/gist'
 import Icon from '@/components/Icon.vue'
-import { estimateChangeForDisplay, estimateFreshness, estimateTrustText, groupDecisions, WATCH_SECTIONS } from '@/utils/presentation'
+import WatchlistDecisionBoard from '@/components/watchlist/WatchlistDecisionBoard.vue'
+import {
+  filterAndSortWatchDecisions,
+  watchEstimateCaption,
+  watchEstimateSemanticLabel,
+  type WatchDecisionFilter,
+  type WatchDecisionLoadState,
+  type WatchDecisionSort,
+  type WatchDecisionSource,
+} from '@/components/watchlist/decisionView'
+import { estimateChangeForDisplay, estimateFreshness, estimateTrustText, WATCH_SECTIONS } from '@/utils/presentation'
 
 interface Row { name: string; type: string | null }
 
@@ -16,11 +34,18 @@ const router = useRouter()
 const watch = useWatchlistStore()
 const rows = reactive<Record<string, Row>>({})
 const estimates = reactive<Record<string, Estimate | null>>({})
-const decisions = reactive<Record<string, DecisionResp>>({})
+const decisions = reactive<Record<string, V8DecisionResult>>({})
+const decisionDiffs = reactive<Record<string, V8DecisionDiff>>({})
+const decisionLoadStates = reactive<Record<string, WatchDecisionLoadState>>({})
+const decisionDiffLoadStates = reactive<Record<string, WatchDecisionLoadState>>({})
 const loading = ref(watch.items.length === 0 && watch.hasToken)
 const refreshing = ref(false)
 const decisionsLoading = ref(false)
 const estimatesLoading = ref(false)
+const decisionFilter = ref<WatchDecisionFilter>('all')
+const decisionSort = ref<WatchDecisionSort>('action')
+const decisionEpochs: Record<string, number> = {}
+let decisionBatches = 0
 
 const showSync = ref(false)
 const token = ref(getToken())
@@ -30,31 +55,98 @@ const importResults = ref<FundListItem[]>([])
 const importLoading = ref(false)
 let importTimer: ReturnType<typeof setTimeout> | null = null
 
-const decisionSummary = computed(() => {
-  return groupDecisions(watch.items.map((item) => ({
-    code: item.code,
-    name: rows[item.code]?.name || item.name || item.code,
-  })), decisions)
+const decisionSources = computed<WatchDecisionSource[]>(() => {
+  return watch.items.map((item) => {
+    const estimate = estimates[item.code]
+    const typeOrName = rows[item.code]?.type || rows[item.code]?.name || item.name
+    return {
+      code: item.code,
+      name: rows[item.code]?.name || item.name || item.code,
+      type: rows[item.code]?.type || null,
+      result: decisions[item.code] || null,
+      diff: decisionDiffs[item.code] || null,
+      load: decisionLoadStates[item.code] || { kind: decisionsLoading.value ? 'loading' : 'idle' },
+      diffLoad: decisionDiffLoadStates[item.code] || { kind: decisionsLoading.value ? 'loading' : 'idle' },
+      change: displayChange(item.code),
+      changeCaption: watchEstimateCaption(typeOrName, estimate),
+    }
+  })
 })
 
+const decisionRows = computed(() => filterAndSortWatchDecisions(
+  decisionSources.value,
+  decisionFilter.value,
+  decisionSort.value,
+))
+
+function failedLoadState(error: unknown, kind: 'decision' | 'diff'): WatchDecisionLoadState {
+  if (error instanceof ApiError && error.status === 404) {
+    return {
+      kind: 'missing',
+      message: kind === 'decision' ? '尚未生成 V8 决策快照' : '尚无历史变化快照',
+    }
+  }
+  return {
+    kind: 'error',
+    message: kind === 'decision' ? 'V8 决策请求失败' : '历史变化请求失败',
+  }
+}
+
 async function loadDecisions(items = watch.items) {
-  const activeCodes = new Set(items.map((item) => item.code))
+  // items may be a one-fund incremental refresh; pruning must always follow the
+  // complete current watchlist or a new item would erase valid snapshots for all others.
+  const activeCodes = new Set(watch.items.map((item) => item.code))
   Object.keys(decisions).forEach((key) => { if (!activeCodes.has(key)) delete decisions[key] })
-  if (!items.length) return
+  Object.keys(decisionDiffs).forEach((key) => { if (!activeCodes.has(key)) delete decisionDiffs[key] })
+  Object.keys(decisionLoadStates).forEach((key) => { if (!activeCodes.has(key)) delete decisionLoadStates[key] })
+  Object.keys(decisionDiffLoadStates).forEach((key) => { if (!activeCodes.has(key)) delete decisionDiffLoadStates[key] })
+  if (!items.length) { decisionsLoading.value = false; return }
+  decisionBatches++
   decisionsLoading.value = true
   try {
     await Promise.allSettled(items.map(async (item) => {
-      const decision = await getDecision(item.code)
-      if (!watch.has(decision.code)) return
-      decisions[decision.code] = decision
-      rows[decision.code] = { name: decision.name || decision.code, type: decision.type ?? null }
+      const epoch = (decisionEpochs[item.code] || 0) + 1
+      decisionEpochs[item.code] = epoch
+      delete decisions[item.code]
+      delete decisionDiffs[item.code]
+      decisionLoadStates[item.code] = { kind: 'loading', message: '正在载入 V8 决策快照' }
+      decisionDiffLoadStates[item.code] = { kind: 'loading', message: '正在核对快照变化' }
+      const decisionTask = getV8Decision(item.code).then((decision) => {
+        if (decisionEpochs[item.code] !== epoch || !watch.has(item.code)) return
+        if (decision.code !== item.code || decision.decision?.fund_code !== item.code) {
+          decisionLoadStates[item.code] = { kind: 'error', message: 'V8 快照代码与自选基金不一致' }
+        } else {
+          decisions[decision.code] = decision
+          decisionLoadStates[item.code] = { kind: 'ready' }
+          rows[decision.code] = { name: decision.name || decision.code, type: decision.type ?? null }
+        }
+      }).catch((error) => {
+        if (decisionEpochs[item.code] !== epoch || !watch.has(item.code)) return
+        decisionLoadStates[item.code] = failedLoadState(error, 'decision')
+      })
+      const diffTask = getV8DecisionDiff(item.code).then((diff) => {
+        if (decisionEpochs[item.code] !== epoch || !watch.has(item.code)) return
+        decisionDiffs[item.code] = diff
+        decisionDiffLoadStates[item.code] = { kind: 'ready' }
+      }).catch((error) => {
+        if (decisionEpochs[item.code] !== epoch || !watch.has(item.code)) return
+        decisionDiffLoadStates[item.code] = failedLoadState(error, 'diff')
+      })
+      await Promise.allSettled([decisionTask, diffTask])
     }))
   } catch { /* 后端不可用时保留估值 */ }
-  finally { decisionsLoading.value = false }
+  finally {
+    decisionBatches = Math.max(0, decisionBatches - 1)
+    decisionsLoading.value = decisionBatches > 0
+  }
 }
 
 function loadOne(code: string, fallbackName: string | null) {
-  rows[code] = { name: fallbackName || code, type: null }
+  const current = rows[code]
+  rows[code] = {
+    name: current?.name || fallbackName || code,
+    type: current?.type ?? null,
+  }
 }
 
 function hydrateLocal(items = watch.items) {
@@ -116,9 +208,14 @@ function estimateMeta(code: string) {
   if (!estimate) return estimatesLoading.value ? '估值更新中' : '暂无估值'
   if (estimate.status === 'unavailable') return '数据不可用'
   if (estimateFreshness(estimate) === 'expired') return '数据过期'
-  const time = estimate.estTime ? estimate.estTime.slice(5) : ''
+  const sourceTime = estimate.kind === 'official_nav'
+    ? estimate.valueDate || estimate.estTime || estimate.navDate
+    : estimate.estTime
+  const time = sourceTime ? sourceTime.slice(5) : ''
   const label = estimate.cached ? '缓存估值' : estimate.label
-  return `${label}${time ? ' · ' + time : ''}`
+  const semanticLabel = watchEstimateSemanticLabel(rows[code]?.type || rows[code]?.name, estimate)
+  const cachePrefix = estimate.cached ? `${label} · ` : ''
+  return `${cachePrefix}${semanticLabel}${time ? ' · ' + time : ''}`
 }
 
 async function remove(code: string) {
@@ -126,6 +223,10 @@ async function remove(code: string) {
   delete rows[code]
   delete estimates[code]
   delete decisions[code]
+  delete decisionDiffs[code]
+  delete decisionLoadStates[code]
+  delete decisionDiffLoadStates[code]
+  decisionEpochs[code] = (decisionEpochs[code] || 0) + 1
   showToast('已移除')
 }
 
@@ -179,18 +280,19 @@ onMounted(refresh)
     <van-pull-refresh v-model="refreshing" @refresh="refresh">
       <div class="page-body">
         <div class="sec">{{ WATCH_SECTIONS[0] }}</div>
-        <section class="card decision-card">
-          <template v-if="decisionSummary.length">
-            <div v-for="group in decisionSummary" :key="group.action" class="decision-row">
-              <b>{{ group.action }}</b>
-              <div><span>{{ group.names.join('、') }}</span><em>{{ group.confidence }}置信 · {{ group.reason }}</em></div>
-            </div>
-          </template>
-          <div v-else-if="decisionsLoading" class="decision-loading"><van-loading size="15" /> 计算中</div>
-          <div v-else class="empty-line">暂无决策结果</div>
-        </section>
+        <WatchlistDecisionBoard
+          v-model:filter="decisionFilter"
+          v-model:sort="decisionSort"
+          :rows="decisionRows"
+          :total="watch.items.length"
+          :loading="decisionsLoading"
+          @open="router.push('/fund/' + $event)"
+        />
 
-        <div class="sec">{{ WATCH_SECTIONS[1] }}</div>
+        <div class="sec estimate-sec">
+          <span>{{ WATCH_SECTIONS[1] }}</span>
+          <small>QDII 的最新正式净值与下一净值估算分开标注</small>
+        </div>
         <div v-if="loading" class="estimate-list skeleton-list"><van-skeleton title :row="6" /></div>
         <van-empty v-else-if="!watch.items.length" description="还没有自选基金" />
         <section v-else class="estimate-list">
@@ -245,9 +347,7 @@ onMounted(refresh)
 <style scoped>
 .watch-page { --watch-estimate-column: clamp(140px, 34vw, 240px); }
 .nav-tool { width: 34px; height: 34px; display: inline-grid; place-items: center; padding: 0; border: 0; color: var(--teal); background: transparent; cursor: pointer; }
-.decision-card { min-height: 76px; padding: 10px 14px; }
-.decision-row { display: grid; grid-template-columns: 76px 1fr; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 12px; }.decision-row:last-child { border-bottom: 0; }.decision-row b { color: var(--teal-deep); }.decision-row span, .decision-row em { display: block; }.decision-row span { color: var(--text-secondary); line-height: 1.5; }.decision-row em { color: var(--text-hint); font-size: 9px; font-style: normal; margin-top: 3px; }
-.decision-loading, .empty-line { min-height: 54px; display: flex; align-items: center; justify-content: center; gap: 7px; color: var(--text-hint); font-size: 11px; }
+.estimate-sec { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }.estimate-sec small { color: var(--text-hint); font-size: 9px; font-weight: 400; letter-spacing: 0; text-align: right; }
 .estimate-list { overflow: hidden; background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); }
 .estimate-row { min-height: 76px; display: grid; grid-template-columns: minmax(0, 1fr) var(--watch-estimate-column); align-items: center; gap: 14px; padding: 13px 14px; border-bottom: 1px solid var(--border); cursor: pointer; }.van-swipe-cell:last-child .estimate-row { border-bottom: 0; }
 .fund-name { min-width: 0; }.fund-name b, .fund-name span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.fund-name b { color: var(--ink); font-size: 14px; font-weight: 600; }.fund-name span { color: var(--text-hint); font-family: var(--font-mono); font-size: 10px; margin-top: 6px; }

@@ -7,6 +7,7 @@ import { useWatchlistStore } from '@/stores/watchlist'
 import { pct, num, colorOf, signalColor } from '@/utils/format'
 import StarRating from '@/components/StarRating.vue'
 import DecisionCard from '@/components/DecisionCard.vue'
+import FundDetailV8Panel from '@/components/FundDetailV8Panel.vue'
 import Chart from '@/components/Chart.vue'
 import DcaCalc from '@/components/DcaCalc.vue'
 import { estimateDataFreshness, fetchEstimate, latestNavMove, preferredDailyMove, type Estimate } from '@/utils/estimate'
@@ -235,6 +236,12 @@ async function toggleWatch() {
       </van-empty>
       <template v-else-if="detail">
         <div v-if="detail.stale" class="data-warning">数据源暂不可用，当前展示 {{ detail.updated_at || detail.latest_nav_date }} 的历史缓存；评分与决策已降级。</div>
+        <FundDetailV8Panel :code="code" />
+
+        <div class="legacy-divider" role="separator">
+          <span>历史详情与旧版指标</span>
+          <em>与 V8 不可变决策快照分开展示</em>
+        </div>
         <div class="est card">
           <div class="est-head">
             <span class="est-label">{{ estimateExpired ? '估值数据过期' : (primaryMove?.label === '净' ? '最新净值涨跌' : (est?.label || '盘中估值')) }}</span>
@@ -267,10 +274,10 @@ async function toggleWatch() {
         <van-button class="report-btn" block plain icon="description" size="small"
           @click="router.push('/report/' + code)">生成体检报告</van-button>
 
-        <div class="sec">决策建议</div>
+        <div class="sec">旧版决策建议</div>
         <DecisionCard v-if="decision" :decision="decision" />
 
-        <div class="sec">智能解读</div>
+        <div class="sec">旧版智能解读</div>
         <div class="card interp" v-if="interp">
           <div class="verdict" :class="interp.tone">{{ interp.verdict }}</div>
           <div v-if="aiText" class="ai-box">
@@ -518,5 +525,13 @@ async function toggleWatch() {
 .sim-note { font-size: 11px; color: #A8B2A8; margin-top: 8px; line-height: 1.5; }
 .detail-skeleton { display: flex; flex-direction: column; gap: 12px; }
 .data-warning { margin-bottom: 10px; padding: 9px 11px; border: 1px solid var(--gold); border-radius: 8px; color: var(--gold); background: var(--gold-soft); font-size: 11px; line-height: 1.5; }
+.legacy-divider { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 11px 2px 8px; margin: 2px 0 8px; border-top: 1px solid var(--border-strong); }
+.legacy-divider span { color: var(--teal-deep); font-family: var(--font-display); font-size: 13px; font-weight: 600; }
+.legacy-divider em { color: var(--text-hint); font-size: 9px; font-style: normal; text-align: right; }
 .detail-skeleton .van-skeleton { background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px 12px; }
+
+@media (max-width: 560px) {
+  .legacy-divider { align-items: flex-start; flex-direction: column; gap: 3px; }
+  .legacy-divider em { text-align: left; }
+}
 </style>

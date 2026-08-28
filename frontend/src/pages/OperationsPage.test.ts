@@ -75,4 +75,10 @@ describe('operations worker degradation visibility', () => {
     const source = readFileSync(new URL('../../vite.config.ts', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
     expect(source).toContain("lang: 'zh-CN'")
   })
+
+  it('keeps API responses out of the service worker cache', () => {
+    const source = readFileSync(new URL('../../vite.config.ts', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+    expect(source).toContain("url.pathname.startsWith('/api')")
+    expect(source).toContain("handler: 'NetworkOnly'")
+  })
 })

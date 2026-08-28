@@ -50,3 +50,11 @@ def test_weight_cap_is_preserved_after_normalization():
     assert sum(weights) == pytest.approx(1)
     assert max(weights) <= cap + 1e-9
     assert cap == pytest.approx(0.4)
+
+
+def test_missing_weights_fail_closed_instead_of_becoming_zero(make_navs):
+    with pytest.raises(ValueError, match="不能按 0"):
+        analyze_portfolio(details(make_navs), [
+            {"code": "A", "current_weight": None, "target_weight": 50},
+            {"code": "B", "current_weight": 50, "target_weight": 50},
+        ])

@@ -6,7 +6,7 @@
   "scripts": {
     "check": "tsc --noEmit",
     "test": "vitest run",
-    "deploy": "wrangler deploy",
+    "deploy": "node scripts/deploy.mjs",
     "dev": "wrangler dev"
   },
   "devDependencies": {

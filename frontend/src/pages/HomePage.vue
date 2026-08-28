@@ -1,17 +1,18 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { getHealth } from '@/api/client'
+import { ApiError, getHealth, getV8Decision, type SignalResp, type V8DecisionResult } from '@/api/client'
 import { useAppStore } from '@/stores/app'
 import { useWatchlistStore } from '@/stores/watchlist'
 import { useFundsStore } from '@/stores/funds'
 import IndexBar from '@/components/IndexBar.vue'
+import HomeActionCenter from '@/components/HomeActionCenter.vue'
+import type { HomeDecisionError } from '@/components/homeActionCenter'
 import { getSourceSummary, recordSource, type SourceStatus } from '@/utils/resilience'
 import { fetchTaskStatuses, type TaskStatus } from '@/utils/taskStatus'
 import { alertFundTypeOrName, loadAlerts, runAllChecks, markRead, markAllRead, dismissAlert, type Alert } from '@/utils/alerts'
 import { APP_VERSION } from '@/version'
 import { combineTemperature, sourceFreshness, visibleUnreadAlerts } from '@/utils/presentation'
 import { fetchEstimates, isOverseasLike, latestNavMove, type NavMove } from '@/utils/estimate'
-import type { SignalResp } from '@/api/client'
 import { temperatureLabel, TEMPERATURE_DEFINITION } from '@/utils/terminology'
 
 const app = useAppStore()
@@ -25,6 +26,11 @@ const taskLoading = ref(false)
 const sigs = ref<Record<string, string>>({})
 const alerts = ref<Alert[]>(loadAlerts())
 const refreshing = ref(false)
+const v8Decisions = ref<V8DecisionResult[]>([])
+const v8Errors = ref<HomeDecisionError[]>([])
+const v8Requested = ref(watch.items.length)
+const v8Loading = ref(true)
+let v8RequestVersion = 0
 const SIGNAL_SNAPSHOT_KEY = 'sinan_signal_snapshot_v1'
 
 function loadSignalSnapshot(): Record<string, string> {
@@ -84,7 +90,6 @@ async function loadWatchSignals() {
   const previous = loadSignalSnapshot()
   const current: Record<string, SignalResp> = {}
   try {
-    await watch.load(false)
     await Promise.all(watch.items.map(async (item) => {
       try {
         const signal = await funds.signal(item.code)
@@ -127,6 +132,45 @@ async function loadWatchSignals() {
   })
 }
 
+async function loadV8ActionCenter() {
+  const requestVersion = ++v8RequestVersion
+  const items = [...watch.items]
+  v8Requested.value = items.length
+  v8Decisions.value = []
+  v8Errors.value = []
+  v8Loading.value = true
+
+  if (!items.length) {
+    v8Loading.value = false
+    return
+  }
+
+  await Promise.all(items.map(async (item) => {
+    try {
+      const decision = await getV8Decision(item.code)
+      if (requestVersion !== v8RequestVersion) return
+      v8Decisions.value = [...v8Decisions.value, decision]
+    } catch (error) {
+      if (requestVersion !== v8RequestVersion) return
+      const kind = error instanceof ApiError && error.kind === 'http' && error.status === 404
+        ? 'missing'
+        : 'failed'
+      v8Errors.value = [...v8Errors.value, {
+        code: item.code,
+        name: item.name,
+        kind,
+      }]
+    }
+  }))
+
+  if (requestVersion === v8RequestVersion) v8Loading.value = false
+}
+
+async function refreshWatchHome(force: boolean) {
+  try { await watch.load(force) } catch { /* keep the local watchlist */ }
+  await Promise.allSettled([loadWatchSignals(), loadV8ActionCenter()])
+}
+
 async function refreshBackend() {
   try {
     const result = await getHealth()
@@ -145,7 +189,7 @@ async function refreshHome(force = false) {
   await Promise.allSettled([
     refreshBackend(),
     app.loadMarketTemp(),
-    loadWatchSignals(),
+    refreshWatchHome(force),
     fetchTaskStatuses(force)
       .then((result) => { tasks.value = result })
       .catch(() => { tasks.value = [] }),
@@ -189,8 +233,16 @@ onMounted(() => { void refreshHome(false) })
 
     <van-pull-refresh v-model="refreshing" @refresh="refreshHome(true)">
       <div class="page-body">
-        <div class="sec">市场与持仓温度</div>
-        <section class="card climate-card" :title="TEMPERATURE_DEFINITION" @click="app.loadMarketTemp()">
+        <HomeActionCenter
+          :decisions="v8Decisions"
+          :errors="v8Errors"
+          :requested="v8Requested"
+          :loading="v8Loading"
+        />
+
+        <div class="secondary-home">
+          <div class="sec">市场与持仓温度</div>
+          <section class="card climate-card" :title="TEMPERATURE_DEFINITION" @click="app.loadMarketTemp()">
           <div class="climate-head">
             <div class="climate-score" :class="tempTone">
               <strong>{{ combinedTemp ?? '—' }}</strong><span>/100</span>
@@ -217,25 +269,26 @@ onMounted(() => { void refreshHome(false) })
           <div class="updated" v-if="app.marketTemp?.updated">
             {{ app.marketTemp.status === 'stale' ? '旧数据 · ' : app.marketTemp.status === 'unavailable' ? '数据不可用 · ' : '' }}{{ new Date(app.marketTemp.updated).toLocaleString('zh-CN') }}
           </div>
-        </section>
-
-        <template v-if="visibleAlerts.length">
-          <div class="sec alert-title"><span>持仓提醒 <b>{{ visibleAlerts.length }}</b></span><button @click="onMarkAllRead">全部已读</button></div>
-          <section class="card alert-card">
-            <article v-for="alert in visibleAlerts" :key="alert.id" class="alert-item" @click="onMarkOne(alert.id)">
-              <span class="alert-mark" :class="alert.level">{{ levelMark(alert.level) }}</span>
-              <div><b>{{ alert.title }}</b><p>{{ alert.body }}</p><time>{{ new Date(alert.time).toLocaleString('zh-CN') }}</time></div>
-              <button aria-label="关闭提醒" @click.stop="onDismiss(alert.id)">×</button>
-            </article>
           </section>
-        </template>
 
-        <div class="sec">系统状态</div>
-        <section class="card status-card">
-          <div v-for="light in statusLights" :key="light.label" class="status-item" :title="light.detail">
-            <i :class="light.state"></i><div><b>{{ light.label }}</b><span>{{ light.text }}</span></div>
-          </div>
-        </section>
+          <template v-if="visibleAlerts.length">
+            <div class="sec alert-title"><span>持仓提醒 <b>{{ visibleAlerts.length }}</b></span><button @click="onMarkAllRead">全部已读</button></div>
+            <section class="card alert-card">
+              <article v-for="alert in visibleAlerts" :key="alert.id" class="alert-item" @click="onMarkOne(alert.id)">
+                <span class="alert-mark" :class="alert.level">{{ levelMark(alert.level) }}</span>
+                <div><b>{{ alert.title }}</b><p>{{ alert.body }}</p><time>{{ new Date(alert.time).toLocaleString('zh-CN') }}</time></div>
+                <button aria-label="关闭提醒" @click.stop="onDismiss(alert.id)">×</button>
+              </article>
+            </section>
+          </template>
+
+          <div class="sec">系统状态</div>
+          <section class="card status-card">
+            <div v-for="light in statusLights" :key="light.label" class="status-item" :title="light.detail">
+              <i :class="light.state"></i><div><b>{{ light.label }}</b><span>{{ light.text }}</span></div>
+            </div>
+          </section>
+        </div>
       </div>
     </van-pull-refresh>
   </div>
@@ -245,6 +298,7 @@ onMounted(() => { void refreshHome(false) })
 .brand-title { text-align: center; line-height: 1.15; }
 .brand-title strong { display: block; color: var(--ink); font-family: var(--font-display); font-size: 19px; font-weight: 700; }
 .brand-title span { display: block; color: var(--text-hint); font-family: var(--font-mono); font-size: 9px; margin-top: 3px; }
+.secondary-home { max-width: 760px; margin: 28px auto 0; padding-top: 4px; border-top: 1px solid var(--border); }
 .climate-card { cursor: pointer; }
 .climate-head { display: flex; align-items: center; justify-content: space-between; }
 .climate-score { display: flex; align-items: baseline; gap: 6px; }
@@ -276,5 +330,5 @@ onMounted(() => { void refreshHome(false) })
 .alert-mark { width: 18px; height: 18px; display: grid; place-items: center; border: 1px solid currentColor; border-radius: 50%; font-family: var(--font-mono); font-size: 10px; }.alert-mark.info { color: var(--teal); }.alert-mark.warn { color: var(--gold); }.alert-mark.danger { color: var(--danger); }
 .status-card { display: grid; grid-template-columns: repeat(3, 1fr); padding: 14px 10px; }
 .status-item { display: flex; align-items: center; justify-content: center; gap: 8px; min-width: 0; }.status-item + .status-item { border-left: 1px solid var(--border); }.status-item > i { width: 10px; height: 10px; flex: 0 0 auto; border-radius: 50%; box-shadow: 0 0 0 3px var(--chip-bg); }.status-item > i.green { background: var(--success); }.status-item > i.yellow { background: var(--gold); }.status-item > i.red { background: var(--danger); }.status-item b, .status-item span { display: block; }.status-item b { color: var(--ink); font-size: 11px; }.status-item span { color: var(--text-hint); font-size: 9px; margin-top: 2px; }
-@media (min-width: 900px) { .home-page .page-body { max-width: 760px; } }
+@media (min-width: 900px) { .home-page .page-body { max-width: 1120px; } }
 </style>

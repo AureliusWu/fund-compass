@@ -14,6 +14,8 @@ declare module 'vue' {
     Chart: typeof import('./src/components/Chart.vue')['default']
     DcaCalc: typeof import('./src/components/DcaCalc.vue')['default']
     DecisionCard: typeof import('./src/components/DecisionCard.vue')['default']
+    FundDetailV8Panel: typeof import('./src/components/FundDetailV8Panel.vue')['default']
+    HomeActionCenter: typeof import('./src/components/HomeActionCenter.vue')['default']
     Icon: typeof import('./src/components/Icon.vue')['default']
     IndexBar: typeof import('./src/components/IndexBar.vue')['default']
     OverseasAccuracyPanel: typeof import('./src/components/OverseasAccuracyPanel.vue')['default']
@@ -43,5 +45,6 @@ declare module 'vue' {
     VanTabbar: typeof import('vant/es')['Tabbar']
     VanTabbarItem: typeof import('vant/es')['TabbarItem']
     VanTabs: typeof import('vant/es')['Tabs']
+    WatchlistDecisionBoard: typeof import('./src/components/watchlist/WatchlistDecisionBoard.vue')['default']
   }
 }

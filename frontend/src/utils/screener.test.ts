@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 async function digest(value: string): Promise<string> {
   const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
@@ -18,7 +18,13 @@ describe('catOf', () => {
 })
 
 describe('loadScreener and findSimilar', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-02T04:00:00Z'))
+  })
+
   afterEach(() => {
+    vi.useRealTimers()
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
     vi.resetModules()
@@ -103,6 +109,17 @@ describe('loadScreener and findSimilar', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  it('does not recommend similar funds from an expired ranking snapshot', async () => {
+    vi.setSystemTime(new Date('2026-07-20T04:00:00Z'))
+    mockLegacy([
+      { c: '000001', n: '基金A', t: '混合型', r1m: 1, r3m: 2, r6m: 3, r1y: 4, r3y: 5, ytd: 6, fee: 0.1 },
+    ])
+    const { findSimilar, loadScreener } = await import('./screener')
+
+    await expect(loadScreener()).resolves.toMatchObject({ ageDays: 19, stale: true })
+    await expect(findSimilar('混合型', 'SELF', null)).resolves.toEqual([])
+  })
+
   it('rejects a legacy monolith without schema v2', async () => {
     mockLegacy([
       { c: '000001', n: '基金A', t: '混合型', r1m: null, r3m: null, r6m: 1, r1y: 2, r3y: 3, ytd: null, fee: 0.1 },
@@ -114,6 +131,18 @@ describe('loadScreener and findSimilar', () => {
 })
 
 describe('screenQuality evidence gate', () => {
+  it('marks future-dated and older-than-budget datasets stale', async () => {
+    const { screenerFreshness, SCREENER_MAX_AGE_DAYS } = await import('./screener')
+    const now = new Date('2026-08-28T04:00:00Z')
+
+    expect(screenerFreshness('2026-08-28', now)).toEqual({ ageDays: 0, stale: false })
+    expect(screenerFreshness('2026-08-29', now)).toEqual({ ageDays: -1, stale: true })
+    expect(screenerFreshness('2026-08-17', now)).toEqual({
+      ageDays: SCREENER_MAX_AGE_DAYS + 1,
+      stale: true,
+    })
+  })
+
   it('does not publish a total score below 70% core-return coverage', async () => {
     const { screenQuality, screenQualityCoverage } = await import('./screener')
     const row = { c: 'A', n: '基金A', t: '混合型', r1m: 1, r3m: 3, r6m: 6, r1y: 10, r3y: null, ytd: 2, fee: 0.1 }

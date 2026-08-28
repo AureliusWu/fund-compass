@@ -358,11 +358,15 @@ def _decision_estimate_context(estimate_data):
             "diagnostics": diagnostics,
         }
         return {key: value for key, value in context.items() if value is not None}
+    source_time = estimate_data.get("gztime") or None
+    if precision == "datetime" and source_time is not None:
+        parsed_source_time = _parse_beijing_intraday(source_time)
+        source_time = parsed_source_time.isoformat(timespec="seconds") if parsed_source_time else source_time
     context = {
         "status": "modeled" if kind == "holdings_model" and status == "fresh" else status,
         "source": source[:80],
         "kind": kind,
-        "source_time": estimate_data.get("gztime") or None,
+        "source_time": source_time,
         "fetched_at": estimate_data.get("fetched_at") or None,
         "calculated_at": estimate_data.get("calculated_at") or None,
         "source_time_precision": precision,
@@ -379,14 +383,21 @@ def _decision_estimate_context(estimate_data):
         "diagnostics": diagnostics,
     }
     if kind == "holdings_model":
+        oldest = _parse_beijing_intraday(estimate_data.get("model_oldest_quote_time"))
+        newest = _parse_beijing_intraday(estimate_data.get("model_newest_quote_time"))
         context.update({
             "model_coverage": _to_float(estimate_data.get("model_coverage")),
             "model_quote_count": _to_int(estimate_data.get("model_quote_count")),
             "model_report_date": estimate_data.get("model_report_date") or None,
-            "model_oldest_quote_time": estimate_data.get("model_oldest_quote_time") or None,
-            "model_newest_quote_time": estimate_data.get("model_newest_quote_time") or None,
+            "model_oldest_quote_time": oldest.isoformat(timespec="seconds") if oldest else None,
+            "model_newest_quote_time": newest.isoformat(timespec="seconds") if newest else None,
             "model_rejected_count": _to_int(estimate_data.get("model_rejected_count")),
         })
+    elif kind == "official_nav":
+        # A published NAV is factual fallback evidence, not a zero-change
+        # intraday estimate. Keep its value/date but leave estimate fields null.
+        context["estimate_change"] = None
+        context["estimate_nav"] = None
     return {key: value for key, value in context.items() if value is not None}
 
 

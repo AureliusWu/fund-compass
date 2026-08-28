@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""用海外误差账本训练 Challenger；严格按时间切分，达标后才可晋级。"""
+"""用海外误差账本训练 Challenger；只生成候选与审计建议。"""
 import datetime as dt
 import hashlib
 import json
@@ -10,7 +10,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 REGISTRY = ROOT / "frontend" / "src" / "data" / "overseas-models.json"
 LEDGER = ROOT / "frontend" / "public" / "data" / "overseas-accuracy.json"
-AUTO_PROMOTE = os.environ.get("AUTO_PROMOTE_OVERSEAS", "").lower() in ("1", "true", "yes")
 MIN_SAMPLES = int(os.environ.get("OVERSEAS_MIN_SAMPLES", "20"))
 BUILTIN_NON_TRADING_DATES = {
     "2025-01-01", "2025-01-28", "2025-01-29", "2025-01-30", "2025-01-31",
@@ -225,6 +224,36 @@ def active_is_degraded(rows: list[dict], version: str) -> tuple[bool, dict]:
     }
 
 
+def review_policy(
+    *,
+    candidate_status: str,
+    degraded: bool,
+    poor_cycles: int,
+    rollback_available: bool,
+) -> dict:
+    """将 Challenger 和漂移证据转为人工审核建议，不改写 active/history。"""
+    eligible = candidate_status == "accepted" and not degraded
+    rollback_recommended = poor_cycles >= 2 and rollback_available
+    if rollback_recommended:
+        recommendation = "review_rollback"
+    elif poor_cycles >= 2:
+        recommendation = "investigate_active_degradation"
+    elif degraded:
+        recommendation = "monitor_active_degradation"
+    elif eligible:
+        recommendation = "review_candidate"
+    elif candidate_status == "collecting":
+        recommendation = "collect_more_evidence"
+    else:
+        recommendation = "keep_active_rejected_candidate"
+    return {
+        "active_change_policy": "explicit_admin_only",
+        "candidate_eligible_for_admin_review": eligible,
+        "rollback_recommended": rollback_recommended,
+        "recommendation": recommendation,
+    }
+
+
 def write_json_atomic(path: Path, value: dict) -> None:
     temp = path.with_suffix(path.suffix + ".tmp")
     temp.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -242,18 +271,51 @@ def main() -> None:
         fingerprint = data_fingerprint(rows)
         previous_candidate = entry.get("candidate") or {}
         if previous_candidate.get("data_fingerprint") == fingerprint:
+            governance = entry.get("governance") or {}
+            policy = review_policy(
+                candidate_status=previous_candidate.get("status") or "collecting",
+                degraded=governance.get("status") == "frozen",
+                poor_cycles=int(governance.get("poor_cycles") or 0),
+                rollback_available=bool(entry.get("history")),
+            )
+            candidate_updates = {
+                "eligible_for_admin_review": policy["candidate_eligible_for_admin_review"],
+                "admin_review_recommendation": (
+                    "consider_promotion" if policy["candidate_eligible_for_admin_review"] else "no_active_change"
+                ),
+            }
+            governance_updates = {
+                key: policy[key]
+                for key in ("active_change_policy", "rollback_recommended", "recommendation")
+            }
+            if any(previous_candidate.get(key) != value for key, value in candidate_updates.items()) or any(
+                governance.get(key) != value for key, value in governance_updates.items()
+            ):
+                entry["candidate"] = {**previous_candidate, **candidate_updates}
+                entry["governance"] = {**governance, **governance_updates}
+                changed += 1
             statuses[code] = previous_candidate.get("status") or "unchanged"
             continue
         result = calibrate(rows, entry["active"])
         degraded, drift = active_is_degraded(rows, entry["active"]["version"])
         previous_cycles = int((entry.get("governance") or {}).get("poor_cycles") or 0)
         poor_cycles = previous_cycles + 1 if degraded else 0
+        policy = review_policy(
+            candidate_status=result["status"],
+            degraded=degraded,
+            poor_cycles=poor_cycles,
+            rollback_available=bool(entry.get("history")),
+        )
         candidate = {
             "version": "candidate-" + now[:10].replace("-", ""),
             "created_at": now,
             "data_fingerprint": fingerprint,
             "data_effective_at": data_effective_at(rows),
             **result,
+            "eligible_for_admin_review": policy["candidate_eligible_for_admin_review"],
+            "admin_review_recommendation": (
+                "consider_promotion" if policy["candidate_eligible_for_admin_review"] else "no_active_change"
+            ),
         }
         entry["candidate"] = candidate
         entry["governance"] = {
@@ -261,25 +323,8 @@ def main() -> None:
             "min_samples": MIN_SAMPLES,
             "poor_cycles": poor_cycles,
             "drift_evidence": drift,
+            **policy,
         }
-        if result["status"] == "accepted" and AUTO_PROMOTE and not degraded:
-            previous = entry["active"]
-            promoted = json.loads(json.dumps(previous))
-            promoted.update(result["parameters"])
-            promoted["version"] = "auto-" + now[:10].replace("-", "")
-            promoted["promoted_at"] = now
-            promoted["evidence"] = {key: value for key, value in result.items() if key != "parameters"}
-            entry["history"] = ([previous] + entry.get("history", []))[:10]
-            entry["active"] = promoted
-            entry["candidate"]["status"] = "promoted"
-        if poor_cycles >= 2 and entry.get("history"):
-            failed = entry["active"]
-            entry["active"] = entry["history"].pop(0)
-            entry["history"] = ([failed] + entry["history"])[:10]
-            entry["governance"].update({
-                "status": "rolled-back", "poor_cycles": 0,
-                "rolled_back_from": failed["version"],
-            })
         statuses[code] = entry["candidate"]["status"]
         changed += 1
     if changed:
