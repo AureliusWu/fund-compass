@@ -51,19 +51,69 @@ def _write_artifact(tmp_path, monkeypatch, payload):
     monkeypatch.setenv("OVERSEAS_EVIDENCE_PATH", str(path))
 
 
+def _export_record(*, status="pending"):
+    return {
+        "code": "539002",
+        "name": "测试海外基金",
+        "prediction_date": "2026-08-24",
+        "target_nav_date": "2026-08-21",
+        "base_nav_date": "2026-08-20",
+        "base_nav": 2.384,
+        "predicted_change": -0.1242,
+        "predicted_nav": 2.381,
+        "coverage": 64.33,
+        "model_version": "v1-test",
+        "observed_at": "2026-08-24T14:20:00+08:00",
+        "quote_time": "2026-08-21T16:04:47+08:00",
+        "status": status,
+        "alignment_version": "observation-target-v2",
+        "features": {"usQQQ": -0.1242},
+        "feature_evidence": {
+            "usQQQ": {
+                "change": -0.1242,
+                "quote_date": "2026-08-21",
+                "quote_time": "2026-08-21T16:04:47+08:00",
+                "source": "test-quote",
+            }
+        },
+    }
+
+
+def _export_ledger(records):
+    return {
+        "schema": 2,
+        "updated_at": "2026-08-24T14:20:00+08:00",
+        "records": records,
+        "summary": {
+            "539002": {
+                "model_version": "v1-test",
+                "samples": 7,
+                "mae": 1.0,
+                "error_percentiles": {"p80": 1.401},
+                "direction_accuracy": 100.0,
+                "status": "collecting",
+            }
+        },
+    }
+
+
 def test_exporter_keeps_only_exact_audited_rows():
-    ledger = json.loads(
-        (ROOT / "frontend" / "public" / "data" / "overseas-accuracy.json").read_text(encoding="utf-8")
-    )
+    ledger = _export_ledger([_export_record(), _export_record(status="settled")])
 
     exported = build_export(ledger)
 
     assert exported["schema"] == 1
     assert exported["alignment_version"] == "observation-target-v2"
-    assert exported["models"]
+    assert set(exported["models"]) == {"539002"}
     for row in exported["models"].values():
         assert row["base_nav_date"] < row["target_nav_date"] <= row["prediction_date"]
         assert row["alignment_version"] == "observation-target-v2"
+
+
+def test_exporter_allows_empty_snapshot_after_all_predictions_settle():
+    exported = build_export(_export_ledger([_export_record(status="settled")]))
+
+    assert exported["models"] == {}
 
 
 def test_loader_fails_closed_when_detail_nav_does_not_match_model_base(tmp_path, monkeypatch):
