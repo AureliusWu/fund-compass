@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal
 
@@ -498,3 +499,142 @@ class NotificationEvent(FrozenModel):
         if self.status != "failed" and self.error_class is not None:
             raise ValueError("only failed events can include an error class")
         return self
+
+
+# ── Public/private read contracts ──────────────────────────────────────────
+#
+# The immutable domain models above intentionally retain the complete audit
+# chain.  They are not safe public response models: holdings, allocation
+# policy and portfolio outcomes contain personal financial data.  Keep the
+# stored models lossless and project them into these explicit API DTOs at the
+# HTTP boundary instead of mutating historical snapshots.
+
+
+class PublicHoldingReference(FrozenModel):
+    """Opaque marker: anonymous callers cannot learn whether a fund is held."""
+
+    redacted: Literal[True] = True
+
+
+class PublicPortfolioPolicyReference(FrozenModel):
+    """Stable public marker that never queries or fingerprints owner policy."""
+
+    available: Literal[False] = False
+    redacted: Literal[True] = True
+
+
+class PublicEvidenceResponse(FrozenModel):
+    """Anonymous evidence marker; owner-scoped evidence is never looked up."""
+
+    fund_code: str = Field(pattern=r"^\d{6}$")
+    available: Literal[False] = False
+    redacted: Literal[True] = True
+
+
+class PublicDecisionDiff(FrozenModel):
+    fund_code: str = Field(pattern=r"^\d{6}$")
+    available: Literal[False] = False
+    redacted: Literal[True] = True
+
+
+class PublicV8DecisionResponse(FrozenModel):
+    code: str = Field(pattern=r"^\d{6}$")
+    available: Literal[False] = False
+    redacted: Literal[True] = True
+
+
+class PrivateV8DecisionResponse(FrozenModel):
+    code: str = Field(pattern=r"^\d{6}$")
+    name: str | None = Field(default=None, max_length=200)
+    type: str = Field(min_length=1, max_length=120)
+    action: Action
+    action_label: str = Field(min_length=1, max_length=40)
+    strength: int = Field(ge=0, le=100)
+    confidence: int = Field(ge=0, le=100)
+    summary: str = Field(min_length=1, max_length=600)
+    decision: DecisionSnapshot
+    evidence: EvidenceSnapshot
+    holding: HoldingVersion
+    policy: PortfolioPolicy
+    diff: DecisionDiff
+
+
+class PublicFundOutcomesResponse(FrozenModel):
+    fund_code: str = Field(pattern=r"^\d{6}$")
+    total: None = None
+    items: list[dict[str, Any]] = Field(default_factory=list, max_length=0)
+    available: Literal[False] = False
+    redacted: Literal[True] = True
+
+
+class PrivateFundOutcomeItem(FrozenModel):
+    decision: DecisionSnapshot
+    outcomes: list[OutcomeEvaluation] = Field(default_factory=list, max_length=10)
+    pending_horizons: list[Literal[5, 20, 60]] = Field(default_factory=list)
+    unavailable_horizons: list[Literal[5, 20, 60]] = Field(default_factory=list)
+    qdii_target_pending: bool
+
+
+class PrivateFundOutcomesResponse(FrozenModel):
+    fund_code: str = Field(pattern=r"^\d{6}$")
+    total: int = Field(ge=0)
+    items: list[PrivateFundOutcomeItem] = Field(default_factory=list, max_length=200)
+
+
+class PublicPortfolioOutcomesResponse(FrozenModel):
+    """Stable empty shape without count, date, strategy or return side channels."""
+
+    total: None = None
+    mature: None = None
+    pending: None = None
+    unavailable: None = None
+    items: list[dict[str, Any]] = Field(default_factory=list, max_length=0)
+    redacted: Literal[True] = True
+
+
+class PublicPortfolioPolicyHistoryResponse(FrozenModel):
+    total: None = None
+    items: list[dict[str, Any]] = Field(default_factory=list, max_length=0)
+    available: Literal[False] = False
+    redacted: Literal[True] = True
+
+
+class PrivatePortfolioOutcomeItem(FrozenModel):
+    portfolio_decision: PortfolioDecisionSnapshot
+    outcomes: list[PortfolioOutcomeEvaluation] = Field(default_factory=list, max_length=3)
+    pending_horizons: list[Literal[5, 20, 60]] = Field(default_factory=list)
+    ready_horizons: list[Literal[5, 20, 60]] = Field(default_factory=list)
+    unavailable_horizons: list[Literal[5, 20, 60]] = Field(default_factory=list)
+    available_common_observations: int = Field(ge=0)
+
+
+class PrivatePortfolioOutcomesResponse(FrozenModel):
+    total: int = Field(ge=0)
+    mature: int = Field(ge=0)
+    pending: int = Field(ge=0)
+    unavailable: int = Field(ge=0)
+    items: list[PrivatePortfolioOutcomeItem] = Field(default_factory=list, max_length=10_000)
+
+
+class PublicWatchlistResponse(FrozenModel):
+    items: list[str] = Field(default_factory=list, max_length=0)
+    redacted: Literal[True] = True
+
+
+class PrivateWatchlistItem(FrozenModel):
+    code: str = Field(pattern=r"^\d{6}$")
+    name: str | None = Field(default=None, max_length=200)
+    type: str | None = Field(default=None, max_length=120)
+    added_at: str = Field(min_length=1, max_length=64)
+
+
+class PrivateWatchlistResponse(FrozenModel):
+    items: list[PrivateWatchlistItem] = Field(default_factory=list, max_length=10_000)
+
+    @field_validator("items")
+    @classmethod
+    def unique_codes(cls, values: list[PrivateWatchlistItem]) -> list[PrivateWatchlistItem]:
+        codes = [item.code for item in values]
+        if len(codes) != len(set(codes)):
+            raise ValueError("watchlist fund codes must be unique")
+        return values

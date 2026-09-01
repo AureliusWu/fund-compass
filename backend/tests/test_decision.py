@@ -185,10 +185,35 @@ def test_single_decision_context_uses_worker_resolver_without_relabeling_model(s
     assert context["market"] == "cn"
 
 
+def test_single_decision_fallback_uses_explicit_official_nav_contract(sample_detail, monkeypatch):
+    import main
+
+    sample_detail.update({"latest_nav": 1.2345, "latest_nav_date": "2026-08-11"})
+
+    def fail(_code):
+        raise RuntimeError("private upstream URL and response must not leak")
+
+    monkeypatch.setattr(main.eastmoney, "fetch_resolved_estimate", fail)
+    context = main._estimate_context(
+        sample_detail,
+        datetime(2026, 8, 12, 6, 30, tzinfo=timezone.utc),
+    )
+
+    assert context["kind"] == "official_nav"
+    assert context["status"] == "latest_official"
+    assert context["value_nav"] == sample_detail["latest_nav"]
+    assert context["nav_date"] == sample_detail["latest_nav_date"]
+    assert context["value_change"] is None
+    assert context["estimate_nav"] is None
+    assert context["estimate_change"] is None
+    assert context["fallback_reason"] == "estimate_upstream_unavailable"
+    assert "private" not in str(context)
+
+
 @pytest.mark.parametrize(("source_time", "expected_status", "keeps_value"), [
     ("2026-08-12T13:00:00+08:00", "delayed", True),
-    ("2026-08-12T12:59:59+08:00", "stale", False),
-    ("2026-08-12T14:36:00+08:00", "stale", False),
+    ("2026-08-12T12:59:59+08:00", "unavailable", False),
+    ("2026-08-12T14:36:00+08:00", "unavailable", False),
 ])
 def test_single_decision_hard_intraday_window(
     sample_detail, monkeypatch, source_time, expected_status, keeps_value,
@@ -196,7 +221,7 @@ def test_single_decision_hard_intraday_window(
     import main
 
     monkeypatch.setattr(main.eastmoney, "fetch_resolved_estimate", lambda _code: {
-        "status": "delayed", "source": "eastmoney_estimate_table", "kind": "estimate",
+        "status": "delayed", "source": "eastmoney_estimate_table", "kind": "intraday_estimate",
         "source_time": source_time, "source_time_precision": "datetime",
         "estimate_change": 1.0, "estimate_nav": 1.01, "value_nav": 1.01,
         "base_nav": 1.0, "base_nav_date": "2026-08-11", "value_date": "2026-08-12",

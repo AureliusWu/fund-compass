@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { normalizeWorkerRuntime, type WorkerHealth } from '@/api/client'
+import { normalizeWorkerRuntime, type WorkerCronReason, type WorkerHealth } from '@/api/client'
 
 describe('operations worker degradation visibility', () => {
   it('renders the latest Worker warning with warning styling', () => {
@@ -37,6 +37,19 @@ describe('operations worker degradation visibility', () => {
     expect(health.runtime?.last_cron_result).toBe('skipped')
     expect(health.runtime?.last_cron_reason).toBe('weekend')
     expect(health.runtime?.last_attempt_at).toBeNull()
+  })
+
+  it('recognizes and labels every fail-closed Worker cron reason', () => {
+    const reasons: Array<[WorkerCronReason, string]> = [
+      ['official_nav_only', '仅有正式净值'],
+      ['no_publishable_intraday', '无可发布盘中估值'],
+      ['notification_already_claimed', '通知已被其他运行领取'],
+    ]
+    const source = readFileSync(new URL('./OperationsPage.vue', import.meta.url), 'utf8')
+
+    for (const [reason, label] of reasons) {
+      expect(source).toContain(`${reason}: '${label}'`)
+    }
   })
 
   it('falls back only for absent legacy fields and preserves explicit nulls', () => {

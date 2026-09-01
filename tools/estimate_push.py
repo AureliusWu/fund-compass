@@ -317,14 +317,302 @@ def _to_int(value):
     return int(number)
 
 
+_KIND_ALIASES = {
+    "estimate": "intraday_estimate",
+    "intraday": "intraday_estimate",
+    "overseas_model": "qdii_next_nav_estimate",
+}
+_CANONICAL_KINDS = {
+    "intraday_estimate", "qdii_next_nav_estimate", "holdings_model",
+    "official_nav", "unavailable",
+}
+_VALID_ESTIMATE_STATUSES = {
+    "fresh", "modeled", "delayed", "degraded", "stale",
+    "latest_official", "unavailable",
+}
+
+
+class _WireConflict(ValueError):
+    """Untrusted Worker fields contradict their canonical representation."""
+
+
+def _canonical_kind(value):
+    text = str(value or "").strip()
+    return _KIND_ALIASES.get(text, text if text in _CANONICAL_KINDS else None)
+
+
+def _wire_kind(data):
+    canonical_present = "kind" in data and data.get("kind") not in (None, "")
+    legacy_present = "est_kind" in data and data.get("est_kind") not in (None, "")
+    canonical = _canonical_kind(data.get("kind")) if canonical_present else None
+    legacy = _canonical_kind(data.get("est_kind")) if legacy_present else None
+    if canonical_present and canonical is None:
+        raise _WireConflict("kind_invalid")
+    if legacy_present and legacy is None:
+        raise _WireConflict("legacy_kind_invalid")
+    if canonical and legacy and canonical != legacy and not (
+        canonical == "unavailable" and legacy == "intraday_estimate"
+    ):
+        raise _WireConflict("canonical_legacy_conflict")
+    kind = canonical or legacy
+    if kind is None:
+        raise _WireConflict("kind_missing")
+    return kind
+
+
+def _raw_number(data, key):
+    if key not in data:
+        return False, None
+    raw = data.get(key)
+    value = _to_float(raw)
+    if value is None and raw is not None and str(raw).strip():
+        raise _WireConflict(f"{key}_invalid")
+    return True, value
+
+
+def _pick_number(data, canonical, *aliases):
+    canonical_present, canonical_value = _raw_number(data, canonical)
+    alias_values = []
+    for alias in aliases:
+        present, value = _raw_number(data, alias)
+        if present:
+            alias_values.append(value)
+    non_null_aliases = [value for value in alias_values if value is not None]
+    if canonical_present:
+        if any(
+            canonical_value is None
+            or not math.isclose(canonical_value, value, rel_tol=1e-9, abs_tol=1e-9)
+            for value in non_null_aliases
+        ):
+            raise _WireConflict("canonical_legacy_conflict")
+        return canonical_value
+    if non_null_aliases and any(
+        not math.isclose(non_null_aliases[0], value, rel_tol=1e-9, abs_tol=1e-9)
+        for value in non_null_aliases[1:]
+    ):
+        raise _WireConflict("legacy_alias_conflict")
+    return non_null_aliases[0] if non_null_aliases else None
+
+
+def _text(value):
+    return str(value or "").strip() or None
+
+
+def _pick_text(data, canonical, *aliases):
+    canonical_present = canonical in data
+    canonical_value = _text(data.get(canonical)) if canonical_present else None
+    alias_values = [_text(data.get(alias)) for alias in aliases if alias in data]
+    non_null_aliases = [value for value in alias_values if value is not None]
+    if canonical_present:
+        if any(canonical_value is None or canonical_value != value for value in non_null_aliases):
+            raise _WireConflict("canonical_legacy_conflict")
+        return canonical_value
+    if non_null_aliases and any(value != non_null_aliases[0] for value in non_null_aliases[1:]):
+        raise _WireConflict("legacy_alias_conflict")
+    return non_null_aliases[0] if non_null_aliases else None
+
+
+def _unavailable_proxy_row(data, code, reason):
+    raw_diagnostics = data.get("diagnostics") if isinstance(data, dict) else None
+    diagnostics = dict(raw_diagnostics) if isinstance(raw_diagnostics, dict) else {}
+    diagnostics["primary_reason"] = str(reason or "valuation_unavailable")[:80]
+    diagnostics["source_time_precision"] = diagnostics.get("source_time_precision") or "date"
+    diagnostics["rejected"] = diagnostics.get("rejected") if isinstance(diagnostics.get("rejected"), dict) else {}
+    return {
+        "name": (data.get("name") if isinstance(data, dict) else None) or code,
+        "last_nav": None, "est_nav": None, "gszzl": None, "gztime": "",
+        "label": "数据不可用", "kind": "unavailable", "status": "unavailable",
+        "source": "unavailable", "note": "", "base_nav": None,
+        "base_nav_date": None, "value_nav": None, "value_change": None,
+        "value_date": None, "nav_date": None, "estimate_nav": None,
+        "estimate_change": None, "estimate_time": None, "target_nav_date": None,
+        "fetched_at": "", "calculated_at": "", "source_time": None,
+        "source_time_precision": diagnostics["source_time_precision"],
+        "is_fallback": True, "fallback_reason": diagnostics["primary_reason"],
+        "market": "unknown", "model_coverage": None, "model_quote_count": None,
+        "model_report_date": "", "model_oldest_quote_time": "",
+        "model_newest_quote_time": "", "model_rejected_count": None,
+        "estimate_model_version": None, "sample_count": None,
+        "mae": None, "error_p80": None, "direction_accuracy": None,
+        "diagnostics": diagnostics,
+    }
+
+
+def _normalize_proxy_estimate(d, code):
+    """Normalize the public Worker wire while failing closed on contradictions."""
+    if not isinstance(d, dict):
+        return _unavailable_proxy_row({}, code, "schema_invalid")
+    try:
+        kind = _wire_kind(d)
+        status = str(d.get("status") or "unavailable")
+        if status not in _VALID_ESTIMATE_STATUSES:
+            raise _WireConflict("status_invalid")
+        if kind == "unavailable" or status == "unavailable":
+            reason = d.get("fallback_reason") or d.get("unavailable_reason") or "valuation_unavailable"
+            return _unavailable_proxy_row(d, code, reason)
+
+        base_nav = _pick_number(d, "base_nav", "last_nav")
+        base_nav_date = _text(d.get("base_nav_date"))
+        old_kind = str(d.get("kind") or d.get("est_kind") or "") in ("estimate", "intraday", "overseas_model")
+        if base_nav_date is None and old_kind:
+            base_nav_date = _text(d.get("nav_date"))
+
+        source_time = _text(d.get("source_time"))
+        value_date = _text(d.get("value_date"))
+        nav_date = _text(d.get("nav_date"))
+        model_newest = _text(d.get("model_newest_quote_time"))
+
+        if kind == "official_nav":
+            if _pick_number(d, "estimate_nav") is not None or _pick_number(d, "estimate_change") is not None:
+                raise _WireConflict("official_estimate_conflict")
+            value_nav = _pick_number(d, "value_nav", "est_nav")
+            value_change = _pick_number(d, "value_change", "est_change")
+            canonical_nav_date = _pick_text(
+                d, "nav_date", "value_date", "source_time", "est_time", "gztime",
+            )
+            if value_nav is None or _valid_state_date(canonical_nav_date) is None:
+                raise _WireConflict("official_value_missing")
+
+            # The previous official NAV is optional. Incomplete or same/future
+            # pairs are discarded; never synthesize a same-day base merely to
+            # make an observed NAV look like a calculated 0% move.
+            if (
+                base_nav is None or _valid_state_date(base_nav_date) is None
+                or base_nav_date >= canonical_nav_date
+            ):
+                base_nav = None
+                base_nav_date = None
+                value_change = None
+            elif value_change is not None:
+                calculated = (value_nav / base_nav - 1) * 100
+                if abs(calculated - value_change) > 0.05 + 1e-9:
+                    raise _WireConflict("official_value_change_conflict")
+            source_time = source_time or canonical_nav_date
+            value_date = canonical_nav_date
+            nav_date = canonical_nav_date
+            estimate_nav = None
+            estimate_change = None
+            estimate_time = None
+            display_nav = value_nav
+            display_change = value_change
+        else:
+            estimate_nav = _pick_number(d, "estimate_nav", "est_nav")
+            value_nav = _pick_number(d, "value_nav")
+            if estimate_nav is None:
+                estimate_nav = value_nav
+            elif value_nav is None:
+                value_nav = estimate_nav
+            elif not math.isclose(estimate_nav, value_nav, rel_tol=1e-9, abs_tol=1e-9):
+                raise _WireConflict("estimate_value_conflict")
+            estimate_change = _pick_number(d, "estimate_change", "est_change", "gszzl")
+            if _pick_number(d, "value_change") is not None:
+                raise _WireConflict("estimate_official_field_conflict")
+            if not old_kind and nav_date is not None:
+                raise _WireConflict("estimate_official_field_conflict")
+            nav_date = None
+            estimate_time = _pick_text(
+                d, "estimate_time", "source_time", "est_time", "gztime",
+                "model_newest_quote_time",
+            )
+            source_time = source_time or estimate_time
+            target_nav_date = _text(d.get("target_nav_date"))
+            if kind == "qdii_next_nav_estimate":
+                if value_date and target_nav_date and value_date != target_nav_date:
+                    raise _WireConflict("qdii_target_date_conflict")
+                value_date = target_nav_date or value_date
+            value_change = None
+            display_nav = estimate_nav
+            display_change = estimate_change
+            if status in ("fresh", "modeled", "degraded") and (
+                base_nav is None or estimate_nav is None or estimate_change is None
+            ):
+                raise _WireConflict("estimate_values_incomplete")
+
+        default_label = {
+            "official_nav": "最近净值",
+            "holdings_model": "重仓模型估算",
+            "qdii_next_nav_estimate": "下一净值估算",
+        }.get(kind, "盘中估值")
+        raw_diagnostics = d.get("diagnostics") if isinstance(d.get("diagnostics"), dict) else {}
+        diagnostics = dict(raw_diagnostics)
+        precision = _text(d.get("source_time_precision"))
+        diagnostics["source_time_precision"] = precision
+        diagnostics["rejected"] = diagnostics.get("rejected") if isinstance(diagnostics.get("rejected"), dict) else {}
+        is_fallback = bool(d.get("is_fallback")) if "is_fallback" in d else kind in ("holdings_model", "official_nav")
+        raw_uncertainty = d.get("uncertainty")
+        if raw_uncertainty is not None and not isinstance(raw_uncertainty, dict):
+            raise _WireConflict("uncertainty_invalid")
+        uncertainty = raw_uncertainty or {}
+        coverage = _pick_number(d, "coverage", "model_coverage") if kind == "qdii_next_nav_estimate" else _to_float(d.get("model_coverage"))
+        model_version = _pick_text(d, "estimate_model_version", "model_version")
+        uncertainty_values = {}
+        for field in ("mae", "error_p80", "direction_accuracy"):
+            top_present, top_value = _raw_number(d, field)
+            nested_present, nested_value = _raw_number(uncertainty, field)
+            if top_present and nested_present and top_value != nested_value:
+                raise _WireConflict("canonical_legacy_conflict")
+            uncertainty_values[field] = top_value if top_present else nested_value
+        market = d.get("market") if d.get("market") in ("cn", "hk", "overseas", "gold") else "unknown"
+        if kind == "qdii_next_nav_estimate" and market == "unknown":
+            market = "overseas"
+        return {
+            "name": d.get("name") or code,
+            "last_nav": base_nav,
+            "est_nav": display_nav,
+            "gszzl": display_change,
+            "gztime": str(source_time or value_date or ""),
+            "label": str(d.get("est_label") or default_label),
+            "kind": kind,
+            "status": "modeled" if kind == "holdings_model" and status == "fresh" else status,
+            "source": str(d.get("source") or "unavailable"),
+            "note": str(d.get("note") or d.get("est_note") or ""),
+            "base_nav": base_nav,
+            "base_nav_date": base_nav_date,
+            "value_nav": value_nav,
+            "value_change": value_change,
+            "value_date": value_date,
+            "nav_date": nav_date,
+            "estimate_nav": estimate_nav,
+            "estimate_change": estimate_change,
+            "estimate_time": estimate_time,
+            "target_nav_date": _text(d.get("target_nav_date")),
+            "fetched_at": str(d.get("fetched_at") or ""),
+            "calculated_at": str(d.get("calculated_at") or ""),
+            "source_time": source_time,
+            "source_time_precision": precision,
+            "is_fallback": is_fallback,
+            "fallback_reason": str(d.get("fallback_reason") or "") or None,
+            "market": market,
+            "model_coverage": coverage,
+            "model_quote_count": _to_int(d.get("model_quote_count")),
+            "model_report_date": str(d.get("model_report_date") or ""),
+            "model_oldest_quote_time": str(d.get("model_oldest_quote_time") or ""),
+            "model_newest_quote_time": str(d.get("model_newest_quote_time") or ""),
+            "model_rejected_count": _to_int(d.get("model_rejected_count")),
+            "estimate_model_version": model_version,
+            "sample_count": _to_int(d.get("sample_count")),
+            "mae": uncertainty_values["mae"],
+            "error_p80": uncertainty_values["error_p80"],
+            "direction_accuracy": uncertainty_values["direction_accuracy"],
+            "diagnostics": diagnostics,
+        }
+    except _WireConflict as ex:
+        return _unavailable_proxy_row(d, code, str(ex))
+
+
 def _decision_estimate_context(estimate_data):
-    """Return only the typed evidence accepted by the protected API."""
+    """Return canonical typed evidence accepted by the protected API."""
     if not isinstance(estimate_data, dict):
         return None
-    kind = str(estimate_data.get("kind") or "")
+    if "kind" in estimate_data or "est_kind" in estimate_data:
+        estimate_data = _normalize_proxy_estimate(
+            estimate_data,
+            str(estimate_data.get("code") or estimate_data.get("name") or "unknown"),
+        )
+    kind = _canonical_kind(estimate_data.get("kind"))
     source = str(estimate_data.get("source") or "")
     status = str(estimate_data.get("status") or "")
-    if kind not in ("estimate", "holdings_model", "official_nav", "unavailable") or not source or not status:
+    if kind not in _CANONICAL_KINDS or not source or not status:
         return None
     precision = estimate_data.get("source_time_precision") or None
     raw_diagnostics = estimate_data.get("diagnostics")
@@ -343,38 +631,29 @@ def _decision_estimate_context(estimate_data):
         },
     }
     if kind == "unavailable":
-        reason = (
-            estimate_data.get("fallback_reason")
-            or diagnostics["primary_reason"]
-            or "valuation_unavailable"
-        )
+        reason = estimate_data.get("fallback_reason") or diagnostics["primary_reason"] or "valuation_unavailable"
         diagnostics["primary_reason"] = str(reason)[:80]
         diagnostics["source_time_precision"] = precision or "date"
-        context = {
+        return {
             "status": "unavailable", "source": source[:80], "kind": "unavailable",
             "source_time_precision": diagnostics["source_time_precision"],
             "is_fallback": True, "fallback_reason": str(reason)[:240],
-            "market": estimate_data.get("market") or "unknown",
-            "diagnostics": diagnostics,
+            "market": estimate_data.get("market") or "unknown", "diagnostics": diagnostics,
         }
-        return {key: value for key, value in context.items() if value is not None}
-    source_time = estimate_data.get("gztime") or None
+
+    source_time = estimate_data.get("source_time") or estimate_data.get("gztime") or None
     if precision == "datetime" and source_time is not None:
         parsed_source_time = _parse_beijing_intraday(source_time)
         source_time = parsed_source_time.isoformat(timespec="seconds") if parsed_source_time else source_time
     context = {
         "status": "modeled" if kind == "holdings_model" and status == "fresh" else status,
-        "source": source[:80],
-        "kind": kind,
-        "source_time": source_time,
+        "source": source[:80], "kind": kind, "source_time": source_time,
         "fetched_at": estimate_data.get("fetched_at") or None,
         "calculated_at": estimate_data.get("calculated_at") or None,
         "source_time_precision": precision,
         "is_fallback": bool(estimate_data.get("is_fallback")),
         "fallback_reason": estimate_data.get("fallback_reason") or None,
         "market": estimate_data.get("market") or "unknown",
-        "estimate_change": _to_float(estimate_data.get("gszzl")),
-        "estimate_nav": _to_float(estimate_data.get("est_nav")),
         "base_nav": _to_float(estimate_data.get("base_nav")),
         "base_nav_date": estimate_data.get("base_nav_date") or None,
         "value_nav": _to_float(estimate_data.get("value_nav")),
@@ -382,6 +661,23 @@ def _decision_estimate_context(estimate_data):
         "note": (estimate_data.get("note") or "")[:500] or None,
         "diagnostics": diagnostics,
     }
+    if kind == "official_nav":
+        context["nav_date"] = estimate_data.get("nav_date") or estimate_data.get("value_date") or None
+        # value_change is optional and can only be sent with a verifiable prior
+        # NAV pair; otherwise omit it instead of inventing zero.
+        if context["base_nav"] is not None and context["base_nav_date"] is not None:
+            context["value_change"] = _to_float(estimate_data.get("value_change"))
+    else:
+        estimate_time = estimate_data.get("estimate_time") or source_time
+        if precision == "datetime" and estimate_time is not None:
+            parsed_estimate_time = _parse_beijing_intraday(estimate_time)
+            estimate_time = parsed_estimate_time.isoformat(timespec="seconds") if parsed_estimate_time else estimate_time
+        context.update({
+            "estimate_change": _to_float(estimate_data.get("estimate_change")),
+            "estimate_nav": _to_float(estimate_data.get("estimate_nav")),
+            "estimate_time": estimate_time,
+            "value_change": None, "nav_date": None,
+        })
     if kind == "holdings_model":
         oldest = _parse_beijing_intraday(estimate_data.get("model_oldest_quote_time"))
         newest = _parse_beijing_intraday(estimate_data.get("model_newest_quote_time"))
@@ -393,81 +689,17 @@ def _decision_estimate_context(estimate_data):
             "model_newest_quote_time": newest.isoformat(timespec="seconds") if newest else None,
             "model_rejected_count": _to_int(estimate_data.get("model_rejected_count")),
         })
-    elif kind == "official_nav":
-        # A published NAV is factual fallback evidence, not a zero-change
-        # intraday estimate. Keep its value/date but leave estimate fields null.
-        context["estimate_change"] = None
-        context["estimate_nav"] = None
+    elif kind == "qdii_next_nav_estimate":
+        context.update({
+            "target_nav_date": estimate_data.get("target_nav_date") or None,
+            "estimate_model_version": estimate_data.get("estimate_model_version") or None,
+            "sample_count": _to_int(estimate_data.get("sample_count")),
+            "coverage": _to_float(estimate_data.get("model_coverage")),
+            "mae": _to_float(estimate_data.get("mae")),
+            "error_p80": _to_float(estimate_data.get("error_p80")),
+            "direction_accuracy": _to_float(estimate_data.get("direction_accuracy")),
+        })
     return {key: value for key, value in context.items() if value is not None}
-
-
-def _normalize_proxy_estimate(d, code):
-    """Map the public Worker estimate contract to the legacy push shape."""
-    status = str(d.get("status") or "unavailable")
-    kind = str(d.get("kind") or d.get("est_kind") or "estimate")
-    if kind not in ("estimate", "holdings_model", "official_nav", "unavailable"):
-        kind = "unavailable"
-        status = "unavailable"
-    if kind == "unavailable":
-        status = "unavailable"
-    if status not in ("fresh", "modeled", "delayed", "degraded", "stale", "latest_official", "unavailable"):
-        status = "unavailable"
-    default_label = "最近净值" if kind == "official_nav" else (
-        "重仓模型估算" if kind == "holdings_model" else
-        "数据不可用" if status == "unavailable" else "盘中估值"
-    )
-    last_nav = _to_float(d.get("base_nav"))
-    if last_nav is None:
-        last_nav = _to_float(d.get("last_nav"))
-    est_nav = _to_float(d.get("value_nav"))
-    if est_nav is None:
-        est_nav = _to_float(d.get("est_nav"))
-    change = _to_float(d.get("est_change"))
-    invalid_values = status in ("fresh", "modeled", "latest_official") and (
-        last_nav is None or est_nav is None or change is None
-    )
-    if invalid_values:
-        kind = "unavailable"
-        status = "unavailable"
-        default_label = "数据不可用"
-    if kind == "unavailable":
-        last_nav = est_nav = change = None
-    return {
-        "name": d.get("name") or code,
-        "last_nav": last_nav,
-        "est_nav": est_nav,
-        "gszzl": change,
-        "gztime": str(d.get("model_newest_quote_time") or d.get("est_time") or d.get("value_date") or ""),
-        "label": default_label if invalid_values else str(d.get("est_label") or default_label),
-        "kind": kind,
-        "status": status,
-        "source": str(d.get("source") or "unavailable"),
-        "note": str(d.get("est_note") or ""),
-        "base_nav": None if kind == "unavailable" else (
-            _to_float(d.get("base_nav")) if d.get("base_nav") is not None else last_nav
-        ),
-        "base_nav_date": str(d.get("base_nav_date") or d.get("nav_date") or ""),
-        "value_nav": None if kind == "unavailable" else (
-            _to_float(d.get("value_nav")) if d.get("value_nav") is not None else est_nav
-        ),
-        "value_date": str(d.get("value_date") or ""),
-        "fetched_at": str(d.get("fetched_at") or ""),
-        "calculated_at": str(d.get("calculated_at") or ""),
-        "source_time_precision": str(d.get("source_time_precision") or "") or None,
-        "is_fallback": bool(d.get("is_fallback") or kind != "estimate"),
-        "fallback_reason": str(
-            d.get("fallback_reason") or d.get("unavailable_reason")
-            or ("valuation_unavailable" if kind == "unavailable" else "")
-        ) or None,
-        "market": str(d.get("market") or "unknown") if d.get("market") in ("cn", "hk", "overseas", "gold") else "unknown",
-        "model_coverage": _to_float(d.get("model_coverage")),
-        "model_quote_count": _to_int(d.get("model_quote_count")),
-        "model_report_date": str(d.get("model_report_date") or ""),
-        "model_oldest_quote_time": str(d.get("model_oldest_quote_time") or ""),
-        "model_newest_quote_time": str(d.get("model_newest_quote_time") or ""),
-        "model_rejected_count": _to_int(d.get("model_rejected_count")),
-        "diagnostics": d.get("diagnostics") if isinstance(d.get("diagnostics"), dict) else {},
-    }
 
 
 def fetch_estimates(codes):
@@ -514,8 +746,8 @@ def _portfolio_evidence(estimate_data, today=None, now=None):
     """Use intraday evidence only inside its publish window; otherwise use formal base NAV."""
     if not isinstance(estimate_data, dict):
         return estimate_data
-    kind = estimate_data.get("kind")
-    if kind in ("estimate", "holdings_model"):
+    kind = _canonical_kind(estimate_data.get("kind"))
+    if kind in ("intraday_estimate", "qdii_next_nav_estimate", "holdings_model"):
         publishable = (
             _is_publishable_intraday(estimate_data, today, now)
             if today and now else estimate_data.get("status") in ("fresh", "modeled")
@@ -533,12 +765,21 @@ def _portfolio_evidence(estimate_data, today=None, now=None):
         )[:80]
         if base_nav is not None and base_nav > 0 and re.fullmatch(r"\d{4}-\d{2}-\d{2}", base_date):
             row = dict(estimate_data)
+            # This is a newly synthesized canonical official row. Deprecated
+            # estimate aliases from the expired source must not contradict it.
+            for key in ("est_kind", "est_change", "est_time"):
+                row.pop(key, None)
             row.update({
                 "kind": "official_nav", "status": "latest_official",
                 "source": "eastmoney_official_nav", "source_time_precision": "date",
-                "gztime": base_date, "last_nav": base_nav, "est_nav": base_nav,
-                "base_nav": base_nav, "base_nav_date": base_date,
-                "value_nav": base_nav, "value_date": base_date, "gszzl": 0.0,
+                "gztime": base_date, "source_time": base_date,
+                "last_nav": None, "est_nav": base_nav, "gszzl": None,
+                # One observed NAV is enough for portfolio value, but it is not
+                # a previous/current pair and therefore has no change or base.
+                "base_nav": None, "base_nav_date": None,
+                "value_nav": base_nav, "value_change": None,
+                "value_date": base_date, "nav_date": base_date,
+                "estimate_nav": None, "estimate_change": None, "estimate_time": None,
                 "is_fallback": True, "fallback_reason": reason,
                 "diagnostics": {
                     "primary_reason": reason, "model_reason": None,
@@ -636,8 +877,8 @@ def _recent_intraday_time(value, today, now):
 def _is_publishable_intraday(estimate_data, today, now=None):
     if not isinstance(estimate_data, dict):
         return False
-    kind = estimate_data.get("kind")
-    if kind not in ("estimate", "holdings_model"):
+    kind = _canonical_kind(estimate_data.get("kind"))
+    if kind not in ("intraday_estimate", "qdii_next_nav_estimate", "holdings_model"):
         return False
     if estimate_data.get("status") not in ("fresh", "modeled"):
         return False
@@ -653,7 +894,7 @@ def _is_publishable_intraday(estimate_data, today, now=None):
         newest = estimate_data.get("model_newest_quote_time") or estimate_data.get("gztime")
         return _recent_intraday_time(oldest, today, now) and _recent_intraday_time(newest, today, now)
     precision = estimate_data.get("source_time_precision")
-    source_time = estimate_data.get("gztime")
+    source_time = estimate_data.get("source_time") or estimate_data.get("gztime")
     if precision == "datetime":
         return _recent_intraday_time(source_time, today, now)
     return False
@@ -709,7 +950,8 @@ def fetch_portfolio_decisions(items, portfolio_value, request_id=None):
 def format_push_line(code, name, estimate_data, decision, today=None, now=None):
     """组合涨跌幅 + 决策动作为一行推送文案。"""
     nm = name or (estimate_data or {}).get("name") or code
-    if (estimate_data or {}).get("kind") in ("estimate", "holdings_model"):
+    kind = _canonical_kind((estimate_data or {}).get("kind"))
+    if kind in ("intraday_estimate", "qdii_next_nav_estimate", "holdings_model"):
         participates = (
             _is_publishable_intraday(estimate_data, today, now)
             if today and now else (estimate_data or {}).get("status") in ("fresh", "modeled")
@@ -724,7 +966,7 @@ def format_push_line(code, name, estimate_data, decision, today=None, now=None):
             chg_txt = f"{'+' if chg >= 0 else ''}{chg:.2f}%（{label}）"
         except (TypeError, ValueError):
             chg_txt = "—"
-    if decision and (estimate_data or {}).get("kind") in ("estimate", "holdings_model"):
+    if decision and kind in ("intraday_estimate", "qdii_next_nav_estimate", "holdings_model"):
         action = decision.get("action") or "观察"
         summary = (decision.get("summary") or "").strip()
         tail = f"，{summary}" if summary else ""

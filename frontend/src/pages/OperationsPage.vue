@@ -28,6 +28,9 @@ const CRON_REASON_LABELS: Record<WorkerCronReason, string> = {
   empty_watchlist: '自选为空',
   already_sent: '今日已发送',
   no_fresh_estimate: '无新鲜估值',
+  official_nav_only: '仅有正式净值',
+  no_publishable_intraday: '无可发布盘中估值',
+  notification_already_claimed: '通知已被其他运行领取',
 }
 
 const normalizedWorkerRuntime = computed(() => normalizeWorkerRuntime(worker.value?.runtime))

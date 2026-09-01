@@ -10,7 +10,7 @@
 首次运行只播种状态、不推送（避免上来就刷屏）。手动 force 运行会发一条「推送测试」便于校验通道。
 
 环境变量：
-  API_BASE     后端 API 基址（默认线上 Render）
+  API_BASE     后端 API 基址（必填，应包含 /api）
   GIST_ID      App 云同步使用的唯一 Gist ID（必填；禁止遍历账号 Gist）
   GIST_TOKEN   GitHub PAT（gist 权限，与 App 云同步用的同一个）
   SC_SENDKEY   Server酱 SENDKEY（必填）
@@ -24,7 +24,7 @@ import sys
 import urllib.parse
 import urllib.request
 
-API_BASE = os.environ.get("API_BASE", "https://fund-compass-api.onrender.com/api").rstrip("/")
+API_BASE = os.environ.get("API_BASE", "").strip().rstrip("/")
 GIST_ID = os.environ.get("GIST_ID", "").strip()
 GIST_TOKEN = os.environ.get("GIST_TOKEN", "").strip()
 SC_SENDKEY = os.environ.get("SC_SENDKEY", "").strip()
@@ -104,6 +104,7 @@ def notify(title, desp):
 
 def main() -> int:
     missing = [name for name, value in (
+        ("API_BASE", API_BASE),
         ("GIST_ID", GIST_ID),
         ("GIST_TOKEN", GIST_TOKEN),
         ("SC_SENDKEY", SC_SENDKEY),

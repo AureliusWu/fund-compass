@@ -11,15 +11,20 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 REGISTRY = ROOT / "frontend" / "src" / "data" / "overseas-models.json"
 LEDGER = ROOT / "frontend" / "public" / "data" / "overseas-accuracy.json"
-DEFAULT_FUND_API_BASE = "https://fund-compass-api.onrender.com"
 
 
 def normalize_api_base(value: str | None) -> str:
-    return (value or DEFAULT_FUND_API_BASE).rstrip("/")
+    return (value or "").strip().rstrip("/")
 
 
 FUND_API_BASE = normalize_api_base(os.environ.get("FUND_API_BASE"))
 CST = dt.timezone(dt.timedelta(hours=8))
+
+
+def require_api_base() -> str:
+    if not FUND_API_BASE:
+        raise RuntimeError("FUND_API_BASE is required")
+    return FUND_API_BASE
 
 
 def env_int(name: str, default: int) -> int:
@@ -625,10 +630,11 @@ def summarize(ledger: dict, registry: dict) -> dict:
 
 
 def fetch_details(codes: list[str]) -> dict[str, dict]:
+    api_base = require_api_base()
     output = {}
     for code in codes:
         try:
-            output[code] = json.loads(request_bytes(f"{FUND_API_BASE}/api/fund/{code}", timeout=90).decode("utf-8"))
+            output[code] = json.loads(request_bytes(f"{api_base}/api/fund/{code}", timeout=90).decode("utf-8"))
         except Exception as ex:
             print(f"detail unavailable {code}: {ex}")
     return output
@@ -671,6 +677,7 @@ def _number(value):
 
 
 def run_pipeline(now: dt.datetime | None = None, *, run_mode: str | None = None) -> dict:
+    require_api_base()
     now = now or dt.datetime.now(CST)
     now = now.astimezone(CST) if now.tzinfo else now.replace(tzinfo=CST)
     run = build_run_context(now, run_mode=run_mode or RUN_MODE)

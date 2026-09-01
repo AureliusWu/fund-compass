@@ -317,7 +317,7 @@ def build_decision(
     intraday_evidence = (
         context.get("kind") == "holdings_model" and context.get("status") == "modeled"
     ) or (
-        context.get("kind") == "estimate" and context.get("status") == "fresh"
+        context.get("kind") == "intraday_estimate" and context.get("status") == "fresh"
     )
     if estimate_change is not None and intraday_evidence:
         metric = "重仓模型估算" if context.get("kind") == "holdings_model" else "盘中估值"

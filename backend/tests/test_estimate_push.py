@@ -8,6 +8,7 @@ import pytest
 
 
 SCRIPT = Path(__file__).resolve().parents[2] / "tools" / "estimate_push.py"
+WIRE_CONTRACT = Path(__file__).resolve().parents[2] / "contracts" / "estimate-wire-v8.json"
 SPEC = importlib.util.spec_from_file_location("estimate_push", SCRIPT)
 estimate_push = importlib.util.module_from_spec(SPEC)
 assert SPEC and SPEC.loader
@@ -145,7 +146,9 @@ def test_fetch_estimates_uses_worker_proxy_and_preserves_status(monkeypatch):
     assert "fundgz" not in captured["url"]
     assert captured["headers"]["Accept"] == "application/json"
     assert result["000001"]["status"] == "fresh"
+    assert result["000001"]["kind"] == "intraday_estimate"
     assert result["000002"]["status"] == "latest_official"
+    assert result["000002"]["kind"] == "official_nav"
     assert result["000002"]["label"] == "最近净值"
 
 
@@ -175,6 +178,7 @@ def test_fetch_estimates_reads_unavailable_rows_outside_legacy_items(monkeypatch
     result = estimate_push.fetch_estimates(["000001", "000002"])
 
     assert result["000001"]["est_nav"] == 1.01
+    assert result["000001"]["kind"] == "intraday_estimate"
     assert result["000002"]["status"] == "unavailable"
     assert result["000002"]["kind"] == "unavailable"
     assert result["000002"]["est_nav"] is None
@@ -230,6 +234,185 @@ def test_proxy_normalizer_keeps_blank_and_null_values_missing():
     assert row["last_nav"] is None
     assert row["est_nav"] is None
     assert row["gszzl"] is None
+
+
+def test_shared_v8_wire_contract_normalizes_to_strict_backend_context():
+    from models.api import EstimateContext
+
+    contract = json.loads(WIRE_CONTRACT.read_text(encoding="utf-8"))
+    for case in contract["cases"]:
+        wire = case["wire"]
+        expected = case["expected"]
+        row = estimate_push._normalize_proxy_estimate(wire, wire["code"])
+        if not expected["accepted"]:
+            assert row["kind"] == "unavailable", case["id"]
+            assert row["fallback_reason"] == expected["reason"], case["id"]
+            assert all(row[field] is None for field in (
+                "last_nav", "est_nav", "gszzl", "base_nav", "value_nav",
+                "value_change", "estimate_nav", "estimate_change",
+            )), case["id"]
+            continue
+
+        context = estimate_push._decision_estimate_context(row)
+        validated = EstimateContext(**context).model_dump()
+        assert validated["kind"] == expected["kind"], case["id"]
+        for field in (
+            "nav_date", "value_nav", "value_change", "estimate_nav",
+            "estimate_change", "target_nav_date", "estimate_model_version",
+            "sample_count", "coverage", "error_p80",
+        ):
+            if field in expected:
+                assert validated[field] == expected[field], (case["id"], field)
+
+
+def test_new_worker_official_nav_with_null_legacy_aliases_needs_no_change_or_base():
+    from models.api import EstimateContext
+
+    row = estimate_push._normalize_proxy_estimate({
+        "code": "000001", "kind": "official_nav", "est_kind": "official_nav",
+        "status": "latest_official", "source": "eastmoney_official_nav",
+        "source_time": "2026-08-28", "source_time_precision": "date",
+        "nav_date": "2026-08-28", "value_nav": 1.02,
+        "estimate_nav": None, "estimate_change": None, "estimate_time": None,
+        "est_nav": None, "est_change": None, "est_time": "2026-08-28",
+        "is_fallback": True, "fallback_reason": "intraday_unavailable",
+        "diagnostics": {
+            "primary_reason": "intraday_unavailable",
+            "source_time_precision": "date", "rejected": {},
+        },
+    }, "000001")
+
+    assert row["kind"] == "official_nav"
+    assert row["est_nav"] == 1.02
+    assert row["gszzl"] is None
+    assert row["base_nav"] is None
+    assert row["base_nav_date"] is None
+    context = estimate_push._decision_estimate_context(row)
+    validated = EstimateContext(**context)
+    assert validated.value_nav == 1.02
+    assert validated.value_change is None
+    assert validated.estimate_nav is None
+    assert validated.estimate_change is None
+
+
+def test_official_same_day_base_pair_is_dropped_without_inventing_zero_change():
+    from models.api import EstimateContext
+
+    row = estimate_push._normalize_proxy_estimate({
+        "kind": "official_nav", "status": "latest_official",
+        "source": "eastmoney_official_nav", "source_time": "2026-08-28",
+        "source_time_precision": "date", "nav_date": "2026-08-28",
+        "value_nav": 1.02, "value_change": 0,
+        "base_nav": 1.02, "base_nav_date": "2026-08-28",
+        "is_fallback": True, "fallback_reason": "intraday_stale",
+        "diagnostics": {
+            "primary_reason": "intraday_stale", "source_time_precision": "date",
+            "rejected": {},
+        },
+    }, "000001")
+
+    assert row["base_nav"] is None
+    assert row["base_nav_date"] is None
+    assert row["value_change"] is None
+    assert row["gszzl"] is None
+    validated = EstimateContext(**estimate_push._decision_estimate_context(row))
+    assert validated.base_nav is None
+    assert validated.base_nav_date is None
+    assert validated.value_change is None
+
+
+def test_stale_legacy_estimate_falls_back_to_one_official_nav_without_zero_change():
+    from models.api import EstimateContext
+
+    stale = estimate_push._normalize_proxy_estimate({
+        "kind": "estimate", "est_kind": "estimate", "status": "stale",
+        "source": "eastmoney_estimate_table", "last_nav": 1,
+        "nav_date": "2026-08-27", "value_nav": 1.01,
+        "value_date": "2026-08-28", "est_nav": 1.01, "est_change": 1,
+        "est_time": "2026-08-28T12:00:00+08:00",
+        "source_time_precision": "datetime", "is_fallback": False,
+        "diagnostics": {
+            "primary_reason": "estimate_stale",
+            "source_time_precision": "datetime", "rejected": {},
+        },
+    }, "000001")
+    fallback = estimate_push._portfolio_evidence(
+        stale,
+        "2026-08-28",
+        datetime.datetime(2026, 8, 28, 14, 30, tzinfo=estimate_push.CST),
+    )
+
+    assert fallback["kind"] == "official_nav"
+    assert fallback["value_nav"] == 1
+    assert fallback["nav_date"] == "2026-08-27"
+    assert fallback["base_nav"] is None
+    assert fallback["base_nav_date"] is None
+    assert fallback["value_change"] is None
+    assert fallback["gszzl"] is None
+    validated = EstimateContext(**estimate_push._decision_estimate_context(fallback))
+    assert validated.kind == "official_nav"
+    assert validated.value_change is None
+
+
+def test_canonical_legacy_value_conflict_fails_closed_without_zero_values():
+    row = estimate_push._normalize_proxy_estimate({
+        "kind": "intraday_estimate", "est_kind": "estimate",
+        "status": "fresh", "source": "eastmoney_estimate_table",
+        "source_time": "2026-08-28T14:30:00+08:00",
+        "source_time_precision": "datetime", "base_nav": 1,
+        "base_nav_date": "2026-08-27", "value_nav": 1.01,
+        "value_date": "2026-08-28", "estimate_nav": 1.01,
+        "estimate_change": 1, "estimate_time": "2026-08-28T14:30:00+08:00",
+        "est_nav": 1.99, "est_change": 1,
+    }, "000001")
+
+    assert row["kind"] == "unavailable"
+    assert row["fallback_reason"] == "canonical_legacy_conflict"
+    assert all(row[field] is None for field in (
+        "last_nav", "est_nav", "gszzl", "base_nav", "value_nav",
+        "value_change", "estimate_nav", "estimate_change",
+    ))
+
+
+def test_legacy_overseas_model_normalizes_to_qdii_next_nav_estimate():
+    from models.api import EstimateContext
+
+    row = estimate_push._normalize_proxy_estimate({
+        "kind": "overseas_model", "status": "modeled", "source": "legacy_qdii",
+        "last_nav": 2.4, "base_nav_date": "2026-08-27",
+        "value_nav": 2.424, "value_date": "2026-08-31",
+        "est_nav": 2.424, "est_change": 1,
+        "est_time": "2026-08-28T16:04:47+08:00",
+        "source_time_precision": "datetime", "target_nav_date": "2026-08-31",
+        "model_version": "legacy-q-v1", "sample_count": 12,
+        "model_coverage": 75, "uncertainty": {"error_p80": 1.3},
+        "diagnostics": {"source_time_precision": "datetime", "rejected": {}},
+    }, "018147")
+
+    assert row["kind"] == "qdii_next_nav_estimate"
+    assert row["market"] == "overseas"
+    context = estimate_push._decision_estimate_context(row)
+    validated = EstimateContext(**context)
+    assert validated.kind == "qdii_next_nav_estimate"
+    assert validated.target_nav_date == "2026-08-31"
+    assert validated.estimate_model_version == "legacy-q-v1"
+    assert validated.sample_count == 12
+    assert validated.coverage == 75
+    assert validated.error_p80 == 1.3
+
+
+def test_unknown_status_fails_closed_and_never_synthesizes_zero():
+    row = estimate_push._normalize_proxy_estimate({
+        "kind": "intraday_estimate", "status": "unknown", "source": "test",
+        "base_nav": 1, "estimate_nav": 1.01, "estimate_change": 1,
+    }, "000001")
+
+    assert row["kind"] == "unavailable"
+    assert row["fallback_reason"] == "status_invalid"
+    assert all(row[field] is None for field in (
+        "last_nav", "est_nav", "gszzl", "base_nav", "value_nav",
+        "value_change", "estimate_nav", "estimate_change",
+    ))
 
 
 def test_safe_get_retries_once_and_caps_response_size(monkeypatch):
@@ -469,6 +652,10 @@ def test_mixed_fresh_and_expired_estimates_use_only_formal_nav_for_expired_fund(
     assert expired.current_weight == 49.75
     assert expired.estimate_context.kind == "official_nav"
     assert expired.estimate_context.estimate_nav is None
+    assert expired.estimate_context.estimate_change is None
+    assert expired.estimate_context.base_nav is None
+    assert expired.estimate_context.base_nav_date is None
+    assert expired.estimate_context.value_change is None
     line = estimate_push.format_push_line(
         "000002", "expired", estimates["000002"],
         {"action": "加仓", "summary": "should not appear"}, "2026-08-12", now,

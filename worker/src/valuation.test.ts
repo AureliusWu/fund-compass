@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import estimateWireFixture from '../../contracts/estimate-wire-v8.json'
+import { estimateFixture } from './estimate-fixtures.test-support'
 import { createExternalRequestBudget, ExternalDataError, externalGet, readBoundedText, readJson } from './external'
 import {
   calculateHoldingsModel,
   isOverseasLike,
   isPublishableIntraday,
   normalizeEstimate,
+  normalizeEstimateWire,
   parseEstimateTablePayload,
   parseFundHoldings,
   parseFundProfile,
@@ -49,6 +52,122 @@ function quotes(items: FundHoldings, overrides: Partial<HoldingQuote> = {}): Map
 }
 
 afterEach(() => vi.unstubAllGlobals())
+
+describe('v8 cross-runtime estimate wire contract', () => {
+  it.each(['qdii_next_nav_estimate_canonical', 'official_nav_change_unknown'])(
+    'matches the shared %s fixture from the real public serializer', (id) => {
+      const { wire, estimate } = estimateFixture(id)
+      const output = publicValuationItem(estimate)
+      expect(Object.fromEntries(Object.keys(wire).map((key) => [key, output[key]]))).toStrictEqual(wire)
+      expect(normalizeEstimateWire(output)).toMatchObject({ kind: wire.kind, legacy_alias_used: false })
+      expect(output.est_realtime).toBe(false)
+    },
+  )
+
+  it.each<Partial<Estimate>>([
+    { targetNavDate: null },
+    { targetNavDate: '2026-02-30' },
+    { targetNavDate: '2026-08-27', valueDate: '2026-08-27' },
+    { targetNavDate: '2026-09-01' },
+    { estimateModelVersion: null },
+    { estimateModelVersion: ' ' },
+    { estimateModelVersion: 123 as unknown as string },
+    { estimateModelVersion: 'x'.repeat(121) },
+    { sampleCount: null },
+    { sampleCount: -1 },
+    { sampleCount: 1.5 },
+    { sampleCount: 1_000_001 },
+    { coverage: null },
+    { coverage: -1 },
+    { coverage: 101 },
+    { uncertainty: null },
+    { uncertainty: { mae: NaN, error_p80: 1.3, direction_accuracy: 64.3 } },
+    { uncertainty: { mae: 0.74, error_p80: 1001, direction_accuracy: 64.3 } },
+    { uncertainty: { mae: 0.74, error_p80: 1.3, direction_accuracy: 101 } },
+    { sourceTime: '2026-08-28' },
+    { status: 'fresh' },
+    { change: null },
+  ])('rejects incomplete or contradictory next-NAV evidence: %j', (override) => {
+    const { estimate } = estimateFixture('qdii_next_nav_estimate_canonical')
+    expect(() => publicValuationItem({ ...estimate, ...override }))
+      .toThrowError(expect.objectContaining({ reason: 'schema_invalid' }))
+  })
+
+  it('does not promote serialized QDII evidence into the domestic intraday send gate', () => {
+    const { estimate } = estimateFixture('qdii_next_nav_estimate_canonical')
+    expect(isPublishableIntraday(estimate, '2026-08-31', new Date('2026-08-31T06:30:00Z'))).toBe(false)
+    expect(publicValuationItem({
+      ...estimate, sampleCount: 0, coverage: 0,
+      uncertainty: { mae: 0, error_p80: 0, direction_accuracy: 0 },
+    })).toMatchObject({ sample_count: 0, coverage: 0, uncertainty: { mae: 0, error_p80: 0, direction_accuracy: 0 } })
+  })
+
+  it('rejects an official NAV whose optional base pair is incomplete without fabricating a move', () => {
+    const { estimate } = estimateFixture('official_nav_change_unknown')
+    expect(() => publicValuationItem({ ...estimate, baseNav: 1 }))
+      .toThrowError(expect.objectContaining({ reason: 'schema_invalid' }))
+    expect(() => publicValuationItem({ ...estimate, change: 0 }))
+      .toThrowError(expect.objectContaining({ reason: 'schema_invalid' }))
+  })
+
+  it('accepts every canonical fixture without using deprecated aliases and rejects conflicts', () => {
+    expect(estimateWireFixture.canonical_kinds).toEqual([
+      'intraday_estimate', 'qdii_next_nav_estimate', 'holdings_model', 'official_nav', 'unavailable',
+    ])
+    for (const fixtureCase of estimateWireFixture.cases) {
+      if (!fixtureCase.expected.accepted) {
+        expect(() => normalizeEstimateWire(fixtureCase.wire), fixtureCase.id)
+          .toThrowError(expect.objectContaining({ reason: fixtureCase.expected.reason }))
+        continue
+      }
+      const normalized = normalizeEstimateWire(fixtureCase.wire)
+      expect(normalized.kind, fixtureCase.id).toBe(fixtureCase.expected.kind)
+      expect(normalized.legacy_alias_used, fixtureCase.id).toBe(false)
+      if ('value_nav' in fixtureCase.expected) {
+        expect(normalized.value_nav, fixtureCase.id).toBe(fixtureCase.expected.value_nav)
+      }
+      if ('value_change' in fixtureCase.expected) {
+        expect(normalized.value_change, fixtureCase.id).toBe(fixtureCase.expected.value_change)
+      }
+      if ('estimate_nav' in fixtureCase.expected) {
+        expect(normalized.estimate_nav, fixtureCase.id).toBe(fixtureCase.expected.estimate_nav)
+      }
+      if ('estimate_change' in fixtureCase.expected) {
+        expect(normalized.estimate_change, fixtureCase.id).toBe(fixtureCase.expected.estimate_change)
+      }
+      if ('target_nav_date' in fixtureCase.expected) {
+        expect(normalized.target_nav_date, fixtureCase.id).toBe(fixtureCase.expected.target_nav_date)
+      }
+      if (fixtureCase.id === 'qdii_next_nav_estimate_canonical') {
+        expect(normalized).toMatchObject({
+          estimate_model_version: 'qdii-fixture-v1', sample_count: 28, coverage: 78.5,
+          uncertainty: { mae: 0.74, error_p80: 1.3, direction_accuracy: 64.3 },
+        })
+      }
+      if (fixtureCase.id === 'stale_intraday_estimate') expect(normalized.status).toBe('stale')
+    }
+  })
+
+  it('serializes official NAV values without relabeling them as estimates', () => {
+    expect(publicValuationItem(official())).toMatchObject({
+      kind: 'official_nav', value_nav: 3.4509, value_change: -2.65, nav_date: '2026-08-11',
+      estimate_nav: null, estimate_change: null, estimate_time: null,
+      est_kind: 'official_nav', est_nav: null, est_change: null,
+    })
+  })
+
+  it('serializes intraday estimates under the canonical kind while retaining deprecated aliases', () => {
+    const item = normalizeEstimate({
+      name: '盘中样例', dwjz: 1, gsz: 1.01, gszzl: 1,
+      gzrq: '2026-08-11', gxrq: '2026-08-12 10:00:00',
+    }, '000001')
+    expect(publicValuationItem(item)).toMatchObject({
+      kind: 'intraday_estimate', value_nav: 1.01, value_change: null, nav_date: null,
+      estimate_nav: 1.01, estimate_change: 1, estimate_time: '2026-08-12T10:00:00+08:00',
+      est_kind: 'estimate', est_nav: 1.01, est_change: 1,
+    })
+  })
+})
 
 describe('valuation normalization and model boundaries', () => {
   it('keeps null and blank values missing and isolates a partial estimate table', () => {
@@ -186,7 +305,7 @@ describe('valuation normalization and model boundaries', () => {
       model_coverage: 80, model_quote_count: 10, model_report_date: '2026-06-30',
       est_time: '2026-08-12', est_realtime: false,
     })
-    expect(publicValuationItem(result.estimate!).source_time).toMatch(/^2026-08-12 \d{2}:\d{2}:\d{2}$/)
+    expect(publicValuationItem(result.estimate!).source_time).toMatch(/^2026-08-12T\d{2}:\d{2}:\d{2}\+08:00$/)
   })
 
   it('rejects stale, future and out-of-range quotes without treating them as today', () => {

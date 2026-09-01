@@ -14,6 +14,9 @@ export default defineConfig({
     Components({ resolvers: [VantResolver({ importStyle: true })] }),
     VitePWA({
       registerType: 'autoUpdate',
+      // Explicit external same-origin registration keeps the generated PWA
+      // compatible with index.html's script-src 'self' CSP (no inline script).
+      injectRegister: 'script-defer',
       workbox: {
         // 大的富集/排行数据不进安装期预缓存，改运行时按需缓存
         globIgnores: ['**/data/**', '**/assets/echarts-*.js', '**/pwa-*.png'],
@@ -50,7 +53,7 @@ export default defineConfig({
         name: '司南基金',
         short_name: '司南基金',
         lang: 'zh-CN',
-        description: '司南基金 v7.0.1 · 个人基金选基与择时辅助工具',
+        description: '司南基金 v8.0.0 · 个人基金选基与择时辅助工具',
         theme_color: '#3F765C',
         background_color: '#F8F7F1',
         display: 'standalone',

@@ -1,7 +1,7 @@
 # Render Blueprint: deploy backend on Render. Create a Blueprint from this repo.
 services:
   - type: web
-    name: fund-compass-api
+    name: fund-compass-api-v8-candidate
     runtime: python
     rootDir: backend
     plan: free
@@ -16,4 +16,6 @@ services:
       - key: ADMIN_TOKEN
         sync: false
       - key: WORKER_TOKEN
+        sync: false
+      - key: PRIVATE_READ_TOKEN
         sync: false

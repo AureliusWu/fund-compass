@@ -138,6 +138,17 @@ describe('watchlist V8 decision view', () => {
     expect(row.gated).toBe(false)
   })
 
+  it('keeps private reads distinct from nonexistent snapshots and unavailable statistics', () => {
+    const row = buildWatchDecisionRow(source({
+      result: null, diff: null, load: { kind: 'redacted' }, diffLoad: { kind: 'redacted' },
+    }))
+    expect(row).toMatchObject({
+      actionLabel: '未公开', dataLabel: '私人数据', changeLabel: '变化未公开',
+      action: null, strength: null, confidence: null, actionable: false, gated: true,
+    })
+    expect(row.mainReason).toContain('不表示快照不存在')
+  })
+
   it('filters action directions, abnormalities and non-null moves, then sorts nulls last', () => {
     const buy = source()
     const sellResult = result('sell', 90)

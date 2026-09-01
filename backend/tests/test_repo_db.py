@@ -72,6 +72,42 @@ def test_get_detail_persists_and_reads_source(temp_db, monkeypatch):
     assert d2["data_age_hours"] >= 0
 
 
+def test_nav_history_retention_is_a_rolling_database_window(temp_db, monkeypatch):
+    from service import repo
+
+    monkeypatch.setattr(repo, "HIST_KEEP", 2)
+    conn = temp_db.get_conn()
+    try:
+        first = {
+            "code": "000009", "name": "窗口基金", "source": "fixture",
+            "latest_nav": 1.02, "latest_nav_date": "2026-08-02",
+            "nav_history": [
+                {"date": "2026-08-01", "nav": 1.01},
+                {"date": "2026-08-02", "nav": 1.02},
+            ],
+        }
+        second = {
+            **first,
+            "latest_nav": 1.03,
+            "latest_nav_date": "2026-08-03",
+            "nav_history": [
+                {"date": "2026-08-02", "nav": 1.02},
+                {"date": "2026-08-03", "nav": 1.03},
+            ],
+        }
+        repo._save_detail(conn, first)
+        repo._save_detail(conn, second)
+        conn.commit()
+        rows = conn.execute(
+            "SELECT date FROM nav_history WHERE code=? ORDER BY date",
+            ("000009",),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    assert [row["date"] for row in rows] == ["2026-08-02", "2026-08-03"]
+
+
 def test_fresh_cache_reports_real_data_age(temp_db, monkeypatch):
     from service import repo
 

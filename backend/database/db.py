@@ -11,8 +11,11 @@ import os
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Iterator
+from urllib.parse import parse_qs, urlsplit
+from urllib.request import url2pathname
 
 log = logging.getLogger(__name__)
 
@@ -351,6 +354,50 @@ V8_IMMUTABLE_TABLES = (
     "notification_events",
 )
 
+V8_SCHEMA_TABLES = (*V8_IMMUTABLE_TABLES, "idempotency_responses")
+
+REQUIRED_SCHEMA_OBJECTS = {
+    "table": {
+        "funds",
+        "fund_detail",
+        "nav_history",
+        "watchlist",
+        "decision_history",
+        "portfolio_decision_history",
+        "idempotency_requests",
+        "evidence_snapshots",
+        "source_health_events",
+        "holding_versions",
+        "portfolio_policy_versions",
+        "decision_snapshots",
+        "outcome_evaluations",
+        "portfolio_decision_snapshots",
+        "portfolio_outcome_evaluations",
+        "notification_events",
+        "idempotency_responses",
+    },
+    "index": {
+        "idx_funds_type",
+        "idx_decision_history_date",
+        "idx_portfolio_decision_date",
+        "idx_evidence_fund_created",
+        "idx_evidence_target_nav_date",
+        "idx_source_health_source_observed",
+        "idx_holding_fund_created",
+        "idx_policy_effective",
+        "idx_decision_fund_created",
+        "idx_decision_versions",
+        "idx_outcome_decision_horizon",
+        "idx_outcome_evaluation_date",
+        "idx_portfolio_decision_snapshot_created",
+        "idx_portfolio_decision_snapshot_versions",
+        "idx_portfolio_outcome_decision",
+        "idx_portfolio_outcome_evaluation_date",
+        "idx_notification_event",
+        "idx_notification_decision",
+    },
+}
+
 
 def _misconfigured_persistence(warning: str) -> dict:
     """Return a path-free persistent-disk configuration warning."""
@@ -462,10 +509,19 @@ def _ensure_parent_directory(path: str) -> None:
 
 def _database_file() -> Path | None:
     """Return a concrete SQLite file path when DB_PATH is file-backed."""
-    if DB_PATH == ":memory:" or DB_PATH.startswith("file:"):
+    if DB_PATH == ":memory:":
         return None
     try:
-        return Path(DB_PATH).expanduser().resolve()
+        if not DB_PATH.startswith("file:"):
+            return Path(DB_PATH).expanduser().resolve()
+        parsed = urlsplit(DB_PATH)
+        query = parse_qs(parsed.query)
+        if "memory" in query.get("mode", []) or parsed.path in {"", ":memory:"}:
+            return None
+        raw_path = parsed.path
+        if parsed.netloc:
+            raw_path = f"//{parsed.netloc}{raw_path}"
+        return Path(url2pathname(raw_path)).expanduser().resolve()
     except (OSError, RuntimeError, ValueError):
         return None
 
@@ -512,6 +568,301 @@ def _portfolio_outcome_schema_needs_repair(conn: sqlite3.Connection) -> bool:
     return not foreign_key_ok or not unique_ok
 
 
+def _pragma_name(name: str) -> str:
+    """Quote a trusted schema object name for SQLite's PRAGMA function syntax."""
+    return "'" + name.replace("'", "''") + "'"
+
+
+def _table_column_contract(
+    conn: sqlite3.Connection,
+    table: str,
+) -> dict[str, tuple[str, int, object, int]]:
+    return {
+        str(row[1]): (str(row[2]).upper(), int(row[3]), row[4], int(row[5]))
+        for row in conn.execute(f"PRAGMA table_info({_pragma_name(table)})")
+    }
+
+
+def _table_index_contract(
+    conn: sqlite3.Connection,
+    table: str,
+) -> dict[str, tuple[bool, bool, tuple[tuple[str, bool], ...]]]:
+    indexes: dict[str, tuple[bool, bool, tuple[tuple[str, bool], ...]]] = {}
+    for row in conn.execute(f"PRAGMA index_list({_pragma_name(table)})"):
+        index_name = str(row[1])
+        key_columns = tuple(
+            (str(column[2]), bool(column[3]))
+            for column in conn.execute(
+                f"PRAGMA index_xinfo({_pragma_name(index_name)})"
+            )
+            if int(column[5]) == 1 and column[2] is not None
+        )
+        indexes[index_name] = (
+            bool(row[2]),
+            bool(row[4]) if len(row) > 4 else False,
+            key_columns,
+        )
+    return indexes
+
+
+def _table_foreign_key_contract(
+    conn: sqlite3.Connection,
+    table: str,
+) -> frozenset[tuple[str, str, str, str, str, str]]:
+    return frozenset(
+        (
+            str(row[2]),
+            str(row[3]),
+            str(row[4]),
+            str(row[5]).upper(),
+            str(row[6]).upper(),
+            str(row[7]).upper(),
+        )
+        for row in conn.execute(f"PRAGMA foreign_key_list({_pragma_name(table)})")
+    )
+
+
+@lru_cache(maxsize=1)
+def _expected_v8_schema_contract() -> tuple[dict, dict, dict, dict]:
+    """Build the V8 contract from the canonical schema statements themselves."""
+    reference = sqlite3.connect(":memory:")
+    try:
+        reference.execute("PRAGMA foreign_keys = ON")
+        for statement in V8_SCHEMA_STATEMENTS:
+            reference.execute(statement)
+
+        columns: dict[str, dict] = {}
+        unique_indexes: dict[str, frozenset] = {}
+        foreign_keys: dict[str, frozenset] = {}
+        named_indexes: dict[str, tuple] = {}
+        for table in V8_SCHEMA_TABLES:
+            columns[table] = _table_column_contract(reference, table)
+            table_indexes = _table_index_contract(reference, table)
+            unique_indexes[table] = frozenset(
+                (partial, key_columns)
+                for unique, partial, key_columns in table_indexes.values()
+                if unique
+            )
+            foreign_keys[table] = _table_foreign_key_contract(reference, table)
+            for index_name, contract in table_indexes.items():
+                if not index_name.startswith("sqlite_autoindex_"):
+                    named_indexes[index_name] = (table, contract)
+        return columns, unique_indexes, foreign_keys, named_indexes
+    finally:
+        reference.close()
+
+
+def _format_index_signature(signature: tuple) -> str:
+    partial, key_columns = signature
+    columns = ",".join(
+        f"{name} DESC" if descending else name
+        for name, descending in key_columns
+    )
+    suffix = " WHERE <partial>" if partial else ""
+    return f"({columns}){suffix}"
+
+
+def _v8_schema_contract_errors(conn: sqlite3.Connection) -> list[str]:
+    """Return structural V8 drift without reading or exposing application rows."""
+    expected_columns, expected_unique, expected_fks, expected_named = (
+        _expected_v8_schema_contract()
+    )
+    actual_tables = {
+        str(row[0])
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    errors: list[str] = []
+    actual_indexes_by_table: dict[str, dict] = {}
+
+    for table in V8_SCHEMA_TABLES:
+        if table not in actual_tables:
+            errors.append(f"{table} missing table")
+            continue
+
+        actual_columns = _table_column_contract(conn, table)
+        missing_columns = sorted(set(expected_columns[table]) - set(actual_columns))
+        if missing_columns:
+            errors.append(f"{table} missing columns: {','.join(missing_columns)}")
+        mismatched_columns = sorted(
+            column
+            for column in set(expected_columns[table]) & set(actual_columns)
+            if expected_columns[table][column] != actual_columns[column]
+        )
+        if mismatched_columns:
+            errors.append(
+                f"{table} column definitions mismatch: {','.join(mismatched_columns)}"
+            )
+
+        actual_indexes = _table_index_contract(conn, table)
+        actual_indexes_by_table[table] = actual_indexes
+        actual_unique = frozenset(
+            (partial, key_columns)
+            for unique, partial, key_columns in actual_indexes.values()
+            if unique
+        )
+        missing_unique = sorted(
+            expected_unique[table] - actual_unique,
+            key=_format_index_signature,
+        )
+        if missing_unique:
+            errors.append(
+                f"{table} missing unique indexes: "
+                + ",".join(_format_index_signature(item) for item in missing_unique)
+            )
+
+        actual_fks = _table_foreign_key_contract(conn, table)
+        missing_fks = sorted(expected_fks[table] - actual_fks)
+        if missing_fks:
+            errors.append(
+                f"{table} missing foreign keys: "
+                + ",".join(
+                    f"{child}->{parent}.{parent_column} ON DELETE {on_delete}"
+                    for parent, child, parent_column, _on_update, on_delete, _match in missing_fks
+                )
+            )
+
+    for index_name, (table, expected_index) in sorted(expected_named.items()):
+        actual_index = actual_indexes_by_table.get(table, {}).get(index_name)
+        if actual_index is None:
+            errors.append(f"{index_name} missing index on {table}")
+        elif actual_index != expected_index:
+            errors.append(f"{index_name} index definition mismatch on {table}")
+    return errors
+
+
+def _verify_v8_schema_contract(conn: sqlite3.Connection) -> None:
+    errors = _v8_schema_contract_errors(conn)
+    if not errors:
+        return
+    shown = errors[:12]
+    suffix = f"; and {len(errors) - len(shown)} more" if len(errors) > len(shown) else ""
+    raise sqlite3.DatabaseError(
+        "SQLite V8 schema contract failed: " + "; ".join(shown) + suffix
+    )
+
+
+def _schema_needs_migration(conn: sqlite3.Connection) -> bool:
+    """Mirror every idempotent schema mutation performed during startup."""
+    rows = conn.execute(
+        "SELECT type,name FROM sqlite_master WHERE type IN ('table','index','trigger')"
+    ).fetchall()
+    names_by_type: dict[str, set[str]] = {"table": set(), "index": set(), "trigger": set()}
+    for row in rows:
+        names_by_type.setdefault(str(row[0]), set()).add(str(row[1]))
+    for object_type, required_names in REQUIRED_SCHEMA_OBJECTS.items():
+        if not required_names <= names_by_type.get(object_type, set()):
+            return True
+
+    fund_detail_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(fund_detail)")
+    }
+    if not {"source", "manager_id"} <= fund_detail_columns:
+        return True
+    decision_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(decision_history)")
+    }
+    if not {
+        "score_version",
+        "signal_version",
+        "score_coverage",
+        "signal_coverage",
+        "evidence_strength",
+        "region",
+    } <= decision_columns:
+        return True
+    idempotency_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(idempotency_responses)")
+    }
+    if not {"owner_token", "lease_expires_at"} <= idempotency_columns:
+        return True
+    if _portfolio_outcome_schema_needs_repair(conn):
+        return True
+    if _v8_schema_contract_errors(conn):
+        return True
+
+    required_triggers = {
+        f"immutable_{table}_{operation}"
+        for table in V8_IMMUTABLE_TABLES
+        for operation in ("update", "delete")
+    }
+    if not required_triggers <= names_by_type.get("trigger", set()):
+        return True
+    if "portfolio_outcome_evaluations_legacy_v8" in names_by_type["table"]:
+        if not {
+            "immutable_portfolio_outcome_legacy_update",
+            "immutable_portfolio_outcome_legacy_delete",
+        } <= names_by_type.get("trigger", set()):
+            return True
+    return False
+
+
+def _assert_supported_schema_version(conn: sqlite3.Connection) -> int:
+    version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+    if version > V8_SCHEMA_VERSION:
+        raise sqlite3.DatabaseError(
+            f"SQLite schema version {version} is newer than supported {V8_SCHEMA_VERSION}"
+        )
+    return version
+
+
+def _verify_sqlite_integrity(
+    conn: sqlite3.Connection,
+    *,
+    context: str,
+    check_foreign_keys: bool,
+) -> None:
+    """Fail closed unless SQLite's structural and relational checks pass."""
+    if check_foreign_keys:
+        foreign_key_errors = conn.execute("PRAGMA foreign_key_check").fetchall()
+        if foreign_key_errors:
+            raise sqlite3.DatabaseError(
+                f"{context} foreign_key_check failed: {len(foreign_key_errors)} row(s)"
+            )
+    check_row = conn.execute("PRAGMA quick_check(1)").fetchone()
+    check = check_row[0] if check_row is not None else "missing result"
+    if check != "ok":
+        raise sqlite3.DatabaseError(f"{context} quick_check failed: {check}")
+    integrity_row = conn.execute("PRAGMA integrity_check(1)").fetchone()
+    integrity = integrity_row[0] if integrity_row is not None else "missing result"
+    if integrity != "ok":
+        raise sqlite3.DatabaseError(f"{context} integrity_check failed: {integrity}")
+
+
+def _publish_verified_backup(
+    source: sqlite3.Connection,
+    backup_path: Path,
+    *,
+    context: str,
+) -> Path:
+    """Publish a verified SQLite backup without exposing a partial as valid."""
+    backup_path = backup_path.expanduser().resolve()
+    partial_path = backup_path.with_name(f"{backup_path.name}.partial")
+    if backup_path.exists() or partial_path.exists():
+        raise FileExistsError("backup target already exists")
+    backup_path.parent.mkdir(parents=True, exist_ok=True)
+    backup: sqlite3.Connection | None = None
+    try:
+        backup = sqlite3.connect(str(partial_path), timeout=_timeout_seconds())
+        source.backup(backup)
+        _verify_sqlite_integrity(
+            backup,
+            context=context,
+            check_foreign_keys=True,
+        )
+        backup.close()
+        backup = None
+        partial_path.replace(backup_path)
+    except Exception:
+        if backup is not None:
+            backup.close()
+        try:
+            partial_path.unlink(missing_ok=True)
+        except OSError:
+            log.warning("failed to remove an invalid partial SQLite backup")
+        raise
+    return backup_path
+
+
 def _backup_before_v8_migration() -> Path | None:
     """Create and verify a point-in-time backup before changing an old DB.
 
@@ -523,40 +874,30 @@ def _backup_before_v8_migration() -> Path | None:
         return None
     source = sqlite3.connect(str(source_path), timeout=_timeout_seconds())
     try:
-        version = int(source.execute("PRAGMA user_version").fetchone()[0])
+        version = _assert_supported_schema_version(source)
         table_count = int(source.execute(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
         ).fetchone()[0])
-        portfolio_snapshot_missing = not source.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='portfolio_decision_snapshots'"
-        ).fetchone()
-        schema_repair = (
-            portfolio_snapshot_missing
-            or _portfolio_outcome_schema_needs_repair(source)
-        )
-        if (version >= V8_SCHEMA_VERSION and not schema_repair) or table_count == 0:
+        if table_count == 0 or (
+            version == V8_SCHEMA_VERSION and not _schema_needs_migration(source)
+        ):
             return None
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        backup_path = source_path.with_name(f"{source_path.name}.pre-v8-{stamp}.bak")
-        suffix = 1
-        while backup_path.exists():
-            backup_path = source_path.with_name(f"{source_path.name}.pre-v8-{stamp}-{suffix}.bak")
+        suffix = 0
+        while True:
+            marker = f"-{suffix}" if suffix else ""
+            backup_path = source_path.with_name(
+                f"{source_path.name}.pre-v8-{stamp}{marker}.bak"
+            )
+            partial_path = backup_path.with_name(f"{backup_path.name}.partial")
+            if not backup_path.exists() and not partial_path.exists():
+                break
             suffix += 1
-        backup = sqlite3.connect(str(backup_path))
-        try:
-            source.backup(backup)
-            check = backup.execute("PRAGMA quick_check(1)").fetchone()[0]
-            if check != "ok":
-                raise sqlite3.DatabaseError(f"pre-v8 backup quick_check failed: {check}")
-        except Exception:
-            backup.close()
-            try:
-                backup_path.unlink(missing_ok=True)
-            except OSError:
-                pass
-            raise
-        else:
-            backup.close()
+        _publish_verified_backup(
+            source,
+            backup_path,
+            context="pre-v8 backup",
+        )
         log.info("created verified pre-v8 SQLite backup: %s", backup_path.name)
         return backup_path
     finally:
@@ -656,15 +997,19 @@ def _migrate(conn: sqlite3.Connection) -> None:
               SELECT RAISE(ABORT, '{table} is immutable');
             END
         """)
-    if repaired_portfolio_outcome:
+    legacy_portfolio_outcome = repaired_portfolio_outcome or bool(conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='portfolio_outcome_evaluations_legacy_v8'"
+    ).fetchone())
+    if legacy_portfolio_outcome:
         for operation in ("UPDATE", "DELETE"):
             conn.execute(f"""
-                CREATE TRIGGER immutable_portfolio_outcome_legacy_{operation.lower()}
+                CREATE TRIGGER IF NOT EXISTS immutable_portfolio_outcome_legacy_{operation.lower()}
                 BEFORE {operation} ON portfolio_outcome_evaluations_legacy_v8
                 BEGIN
                   SELECT RAISE(ABORT, 'legacy portfolio outcomes are immutable');
                 END
             """)
+    _verify_v8_schema_contract(conn)
     if version < V8_SCHEMA_VERSION:
         conn.execute(f"PRAGMA user_version = {V8_SCHEMA_VERSION}")
 
@@ -679,6 +1024,7 @@ def init_db() -> None:
     _backup_before_v8_migration()
     settings = get_conn()
     try:
+        _assert_supported_schema_version(settings)
         try:
             journal_mode = settings.execute("PRAGMA journal_mode = WAL").fetchone()[0]
             if str(journal_mode).lower() != "wal":
@@ -697,10 +1043,9 @@ def init_db() -> None:
             if statement.strip():
                 conn.execute(statement)
         _migrate(conn)
-        foreign_key_errors = conn.execute("PRAGMA foreign_key_check").fetchall()
-        if foreign_key_errors:
-            raise sqlite3.DatabaseError(f"SQLite foreign_key_check failed: {len(foreign_key_errors)} row(s)")
-        check = conn.execute("PRAGMA quick_check(1)").fetchone()[0]
-        if check != "ok":
-            raise sqlite3.DatabaseError(f"SQLite quick_check failed: {check}")
+        _verify_sqlite_integrity(
+            conn,
+            context="SQLite",
+            check_foreign_keys=True,
+        )
         conn.execute("PRAGMA optimize")

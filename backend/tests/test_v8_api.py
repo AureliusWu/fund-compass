@@ -18,9 +18,15 @@ from models.api import (
 def isolated_v8_api_db(tmp_path, monkeypatch):
     from database import db
 
+    fixed_now = datetime(2026, 8, 25, 6, 30, tzinfo=timezone.utc)
     monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "v8-api.db"))
+    monkeypatch.setattr(
+        main.v8_decisions,
+        "_now",
+        lambda: fixed_now,
+    )
     db.init_db()
-    main.v8_repo.ensure_default_policy()
+    main.v8_repo.ensure_default_policy(fixed_now)
 
 
 def official_context():
@@ -34,10 +40,10 @@ def official_context():
         "fallback_reason": "intraday_unavailable",
         "estimate_change": None,
         "estimate_nav": None,
-        "base_nav": 1.0,
-        "base_nav_date": "2026-08-22",
+        "base_nav": None,
+        "base_nav_date": None,
         "value_nav": 1.0,
-        "value_date": "2026-08-22",
+        "nav_date": "2026-08-22",
         "diagnostics": {
             "primary_reason": "intraday_unavailable",
             "source_time_precision": "date",
@@ -77,7 +83,7 @@ def test_openapi_exposes_additive_v2_contracts():
         "/api/v2/strategy/candidates",
         "/api/v2/outcomes/settle",
     } <= set(paths)
-    assert main.app.version == "7.0.1"
+    assert main.app.version == "8.0.0"
 
 
 def test_v2_batch_does_not_convert_missing_target_weight_to_zero(sample_detail, monkeypatch):
@@ -201,7 +207,7 @@ def test_v2_request_id_replays_original_snapshot_response(sample_detail, monkeyp
 
 
 def test_policy_post_creates_new_version_and_preserves_default():
-    default = main.v8_portfolio_policy()
+    default = main.v8_private_portfolio_policy("private_reader")
     request = V8PolicyRequest(
         name="长期配置",
         target_allocations={"510300": 20},
@@ -212,7 +218,7 @@ def test_policy_post_creates_new_version_and_preserves_default():
     )
 
     custom = main.v8_post_portfolio_policy(request, "admin")
-    history = main.v8_portfolio_policy_history()
+    history = main.v8_private_portfolio_policy_history("private_reader")
 
     assert custom["policy_version"] != default["policy_version"]
     assert custom["supersedes"] == default["policy_version"]
@@ -221,18 +227,26 @@ def test_policy_post_creates_new_version_and_preserves_default():
 
 def test_qdii_context_requires_exact_valid_target_date():
     context = {
-        "status": "fresh", "source": "qdii-test", "kind": "estimate",
+        "status": "modeled", "source": "qdii-test", "kind": "qdii_next_nav_estimate",
         "source_time": "2026-08-25T14:29:00+08:00", "source_time_precision": "datetime",
         "is_fallback": False, "estimate_change": 1.0, "estimate_nav": 1.01,
         "base_nav": 1.0, "base_nav_date": "2026-08-22", "value_nav": 1.01,
         "value_date": "2026-08-25", "target_nav_date": "2026-08-25",
-        "market_time": "2026-08-25T14:29:00+08:00", "model_version": "US_TEST",
+        "market": "overseas", "market_time": "2026-08-25T14:29:00+08:00",
+        "estimate_model_version": "US_TEST", "coverage": 85,
         "sample_count": 30, "mae": 0.4, "error_p80": 0.8, "direction_accuracy": 62,
         "diagnostics": {"source_time_precision": "datetime"},
     }
     assert EstimateContext.model_validate(context).target_nav_date == "2026-08-25"
     with pytest.raises(ValidationError, match="target_nav_date"):
         EstimateContext.model_validate({**context, "target_nav_date": "2026-02-30"})
+    with pytest.raises(ValidationError, match="误差或不确定性"):
+        EstimateContext.model_validate({
+            **context,
+            "sample_count": 0,
+            "mae": None,
+            "error_p80": None,
+        })
 
 
 def test_unheld_contract_rejects_positive_weight():
@@ -263,16 +277,22 @@ def test_v2_public_gets_only_read_existing_snapshots(sample_detail, monkeypatch)
     finally:
         conn.close()
 
-    evidence = main.v8_fund_evidence("510300")
-    decision = main.v8_fund_decision("510300")
-    diff = main.v8_fund_decision_diff("510300")
-    outcomes = main.v8_fund_outcomes("510300")
+    evidence = main.v8_private_fund_evidence("510300", "private_reader")
+    decision = main.v8_private_fund_decision("510300", "private_reader")
+    diff = main.v8_private_fund_decision_diff("510300", "private_reader")
+    outcomes = main.v8_private_fund_outcomes("510300", "private_reader")
 
     assert evidence["evidence_id"] == created["decisions"][0]["evidence"]["evidence_id"]
     assert decision["decision"]["decision_id"] == created["decisions"][0]["decision"]["decision_id"]
     assert diff["current_decision_id"] == decision["decision"]["decision_id"]
     assert outcomes["items"][0]["pending_horizons"] == []
     assert outcomes["items"][0]["unavailable_horizons"] == [5, 20, 60]
+    assert main.v8_fund_evidence("510300") == {
+        "fund_code": "510300", "available": False, "redacted": True,
+    }
+    assert main.v8_fund_decision("510300") == {
+        "code": "510300", "available": False, "redacted": True,
+    }
     conn = db.get_conn()
     try:
         after = {

@@ -6,7 +6,7 @@ const REQUEST_TIMEOUT_MS = 12_000
 export class ApiError extends Error {
   constructor(
     message: string,
-    readonly kind: 'timeout' | 'network' | 'http',
+    readonly kind: 'timeout' | 'network' | 'http' | 'redacted',
     readonly status?: number,
   ) {
     super(message)
@@ -42,6 +42,24 @@ export async function request<T>(
 
 const req = request
 
+interface RedactedOwnerRead {
+  redacted?: boolean
+}
+
+/**
+ * Current owner-scoped GETs keep their legacy public URL only as a stable
+ * redacted marker. A mixed rollout against an older backend may still return
+ * the former full shape; reject it as an unsafe contract instead of rendering
+ * private values in an anonymous browser.
+ */
+async function readOwnerScoped<T>(path: string): Promise<T> {
+  const payload = await req<T | RedactedOwnerRead>(path)
+  if (payload && typeof payload === 'object' && (payload as RedactedOwnerRead).redacted === true) {
+    throw new ApiError('私人数据未公开', 'redacted')
+  }
+  throw new ApiError('匿名读取返回了不安全的旧契约', 'http', 502)
+}
+
 export interface Health {
   status: string; service: string; version: string; universe: number; started_at?: string
   source?: Record<string, unknown>
@@ -61,7 +79,14 @@ export interface Health {
 }
 
 export type WorkerCronResult = 'sent' | 'sent_with_warning' | 'skipped' | 'failed'
-export type WorkerCronReason = 'weekend' | 'empty_watchlist' | 'already_sent' | 'no_fresh_estimate'
+export type WorkerCronReason =
+  | 'weekend'
+  | 'empty_watchlist'
+  | 'already_sent'
+  | 'no_fresh_estimate'
+  | 'official_nav_only'
+  | 'no_publishable_intraday'
+  | 'notification_already_claimed'
 
 export interface WorkerHealthRuntime {
   state_available?: boolean
@@ -266,7 +291,7 @@ export interface StrategyOutcomesResp {
     type: OutcomeMetric[]
   }
 }
-export const getStrategyOutcomes = () => req<StrategyOutcomesResp>('/strategy/outcomes')
+export const getStrategyOutcomes = () => readOwnerScoped<StrategyOutcomesResp>('/strategy/outcomes')
 
 export interface DecisionResp {
   code: string; name: string; type?: string | null
@@ -301,6 +326,7 @@ export interface DecisionContextParams {
   held?: boolean
   target_weight?: number
   current_weight?: number
+  /** @deprecated Public reads refresh only through the backend TTL policy. */
   force?: boolean
 }
 export const getDecision = (code: string, p?: DecisionContextParams) => {
@@ -308,7 +334,6 @@ export const getDecision = (code: string, p?: DecisionContextParams) => {
   if (p?.held != null) u.set('held', String(p.held))
   if (p?.target_weight != null) u.set('target_weight', String(p.target_weight))
   if (p?.current_weight != null) u.set('current_weight', String(p.current_weight))
-  if (p?.force) u.set('force', 'true')
   const q = u.toString()
   return req<DecisionResp>(`/fund/${code}/decision` + (q ? '?' + q : ''))
 }
@@ -599,29 +624,31 @@ export interface V8StrategyPerformance {
 }
 
 /**
- * V8 browser access is deliberately read-only. Snapshot creation, settlement,
- * notification and rebalance routes require Worker/Admin credentials and must
- * never be called from public frontend code.
+ * Owner-scoped V8 reads are deliberately unavailable to anonymous browser
+ * clients. The legacy public URLs return a stable redacted marker, which
+ * readOwnerScoped maps to the existing missing-data UI. Snapshot creation,
+ * settlement, notification and rebalance routes require Worker/Admin
+ * credentials and must never be called from public frontend code.
  */
 export const getV8Evidence = (code: string) =>
-  req<V8EvidenceSnapshot>(`/v2/fund/${encodeURIComponent(code)}/evidence`)
+  readOwnerScoped<V8EvidenceSnapshot>(`/v2/fund/${encodeURIComponent(code)}/evidence`)
 
 export const getV8Decision = (code: string) =>
-  req<V8DecisionResult>(`/v2/fund/${encodeURIComponent(code)}/decision`)
+  readOwnerScoped<V8DecisionResult>(`/v2/fund/${encodeURIComponent(code)}/decision`)
 
 export const getV8DecisionDiff = (code: string) =>
-  req<V8DecisionDiff>(`/v2/fund/${encodeURIComponent(code)}/decision/diff`)
+  readOwnerScoped<V8DecisionDiff>(`/v2/fund/${encodeURIComponent(code)}/decision/diff`)
 
 export const getV8FundOutcomes = (code: string) =>
-  req<V8FundOutcomes>(`/v2/fund/${encodeURIComponent(code)}/outcomes`)
+  readOwnerScoped<V8FundOutcomes>(`/v2/fund/${encodeURIComponent(code)}/outcomes`)
 
-export const getV8PortfolioPolicy = () => req<V8PortfolioPolicy>('/v2/portfolio/policy')
+export const getV8PortfolioPolicy = () => readOwnerScoped<V8PortfolioPolicy>('/v2/portfolio/policy')
 export const getV8PortfolioPolicyHistory = () =>
-  req<{ total: number; items: V8PortfolioPolicy[] }>('/v2/portfolio/policy/history')
+  readOwnerScoped<{ total: number; items: V8PortfolioPolicy[] }>('/v2/portfolio/policy/history')
 
-export const getV8StrategyRegistry = () => req<Record<string, unknown>>('/v2/strategy/registry')
+export const getV8StrategyRegistry = () => readOwnerScoped<Record<string, unknown>>('/v2/strategy/registry')
 export const getV8StrategyPerformance = (version: string) =>
-  req<V8StrategyPerformance>(`/v2/strategy/${encodeURIComponent(version)}/performance`)
+  readOwnerScoped<V8StrategyPerformance>(`/v2/strategy/${encodeURIComponent(version)}/performance`)
 
 export interface PortfolioLabResp {
   backtest: {
@@ -664,7 +691,7 @@ export interface PortfolioOutcomesResp {
     returns: Record<string, { date: string; return: number; components: number }>
   }[]
 }
-export const getPortfolioOutcomes = () => req<PortfolioOutcomesResp>('/strategy/portfolio-outcomes')
+export const getPortfolioOutcomes = () => readOwnerScoped<PortfolioOutcomesResp>('/strategy/portfolio-outcomes')
 
 // 聚合分析：一次往返取齐详情 + 评分 + 信号 + 回测 + 决策，详情页据此把四次请求收敛为一次。
 export interface AnalyzeResp {
@@ -680,12 +707,11 @@ export const getAnalyze = (code: string, p?: DecisionContextParams) => {
   if (p?.held != null) u.set('held', String(p.held))
   if (p?.target_weight != null) u.set('target_weight', String(p.target_weight))
   if (p?.current_weight != null) u.set('current_weight', String(p.current_weight))
-  if (p?.force) u.set('force', 'true')
   const query = u.toString()
   return req<AnalyzeResp>(`/fund/${code}/analyze${query ? '?' + query : ''}`)
 }
 
-export const getWatchlist = () => req<{ items: WatchItem[] }>('/watchlist')
+export const getWatchlist = () => readOwnerScoped<{ items: WatchItem[] }>('/watchlist')
 export const addWatch = (code: string) =>
   req<{ ok: boolean }>('/watchlist', {
     method: 'POST',

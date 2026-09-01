@@ -78,6 +78,7 @@ jobs:
             backend/requirements.txt
             backend/requirements-dev.txt
       - run: pip install -r requirements.txt -r requirements-dev.txt
+      - run: pip check
       - run: pytest
 
   frontend:

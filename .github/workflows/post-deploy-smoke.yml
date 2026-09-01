@@ -21,6 +21,7 @@ jobs:
     timeout-minutes: 25
     env:
       FUND_API_BASE: ${{ secrets.FUND_API_BASE }}
+      VITE_API_BASE: ${{ vars.VITE_API_BASE }}
       WORKER_BASE: https://sinan-estimate-push.ligugu69.workers.dev
     steps:
       - uses: actions/checkout@v7
@@ -42,6 +43,22 @@ jobs:
           grep -Fq "version=\"$version\"" backend/main.py
           grep -Fq "version: '$version'" worker/src/index.ts
           echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: 校验三端 API 指向一致
+        shell: bash
+        run: |
+          test -n "${FUND_API_BASE:-}" || { echo "FUND_API_BASE secret is required" >&2; exit 1; }
+          test -n "${VITE_API_BASE:-}" || { echo "VITE_API_BASE variable is required" >&2; exit 1; }
+          api="${FUND_API_BASE%/}"
+          frontend_api="${VITE_API_BASE%/}"
+          [[ "$frontend_api" == "$api/api" ]] || {
+            echo "VITE_API_BASE must equal FUND_API_BASE plus /api" >&2
+            exit 1
+          }
+          worker_api=$(sed -n 's/^[[:space:]]*FUND_API_BASE[[:space:]]*=[[:space:]]*"\([^"]*\)"[[:space:]]*$/\1/p' worker/wrangler.toml)
+          [[ "${worker_api%/}" == "$api" ]] || {
+            echo "worker/wrangler.toml FUND_API_BASE must equal the deployed API" >&2
+            exit 1
+          }
       - name: 检查 GitHub Pages 版本
         env:
           EXPECTED_VERSION: ${{ steps.release.outputs.version }}
@@ -211,7 +228,21 @@ jobs:
               if row.get("name") in core:
                   assert all(isinstance(row.get(field), (int, float)) for field in ("pe", "pb", "pe_pct", "pb_pct"))
           assert valuation["updated"] == min(row["date"] for row in indices)
-          print(f"index-valuation: indices={len(indices)} core={len(core)} schema-v2")
+          valuation_date = datetime.date.fromisoformat(valuation["updated"])
+          beijing_today = datetime.datetime.now(
+              datetime.timezone(datetime.timedelta(hours=8))
+          ).date()
+          valuation_age_days = (beijing_today - valuation_date).days
+          assert valuation_age_days >= 0
+          if valuation_age_days > 7:
+              print(
+                  "::warning title=Index valuation stale::"
+                  f"源数据已过期 {valuation_age_days} 天；生产后端必须报告 stale=true/usable=false 并降级"
+              )
+          print(
+              f"index-valuation: indices={len(indices)} core={len(core)} "
+              f"schema-v2 age_days={valuation_age_days}"
+          )
           PY
       - name: 检查后端基金全集真实产物契约
         env:
@@ -278,7 +309,11 @@ jobs:
           EXPECTED_SHA: ${{ inputs.target_sha }}
         shell: bash
         run: |
-          api=${FUND_API_BASE:-https://fund-compass-api.onrender.com}
+          test -n "${FUND_API_BASE:-}" || {
+            echo "FUND_API_BASE secret must identify the real API deployment" >&2
+            exit 1
+          }
+          api="${FUND_API_BASE%/}"
           for attempt in {1..40}; do
             health=$(curl --fail --silent --show-error "$api/api/health" || true)
             deployment_commit=$(jq -r '.deployment.commit // empty' <<<"$health" 2>/dev/null || true)
@@ -308,27 +343,20 @@ jobs:
             and .universe_ready == true
             and (.universe | type) == "number"
             and .universe >= 1000
+            and .index_valuation.loaded == true
+            and (.index_valuation.age_days | type) == "number"
+            and (.index_valuation.max_age_days | type) == "number"
+            and (
+              (.index_valuation.age_days <= .index_valuation.max_age_days
+                and .index_valuation.usable == true
+                and .index_valuation.stale == false)
+              or
+              (.index_valuation.age_days > .index_valuation.max_age_days
+                and .index_valuation.usable == false
+                and .index_valuation.stale == true)
+            )
           ' <<<"$health" >/dev/null
-          expected_major=${EXPECTED_VERSION%%.*}
-          [[ "$expected_major" =~ ^[0-9]+$ ]] || { echo "无法解析目标主版本: $EXPECTED_VERSION" >&2; exit 1; }
-          if (( 10#$expected_major >= 8 )); then
-            jq -e '
-              (.database.persistence | type) == "string"
-              and .database.persistence != "ephemeral"
-              and .database.persistence != "misconfigured"
-              and .database.durable == true
-            ' <<<"$health" >/dev/null
-          else
-            jq -e '
-              (.database.persistence == "ephemeral" and .database.durable == false)
-              or (
-                (.database.persistence | type) == "string"
-                and .database.persistence != "ephemeral"
-                and .database.persistence != "misconfigured"
-                and .database.durable == true
-              )
-            ' <<<"$health" >/dev/null
-          fi
+          python tools/persistence_gate.py --expected-version "$EXPECTED_VERSION" <<<"$health"
           fund=$(curl --fail --silent --show-error "$api/api/fund/005844")
           jq -e '
             .code == "005844"
@@ -411,6 +439,8 @@ jobs:
           jq -e '
             .requested == 2
             and (.returned + .unavailable == .requested)
+            and .returned == (.items | length)
+            and .unavailable == (.unavailable_items | length)
             and (.status == "ok" or .status == "degraded" or .status == "unavailable")
             and (.source | type) == "string"
             and (.fetched_at | type) == "string"
@@ -422,25 +452,54 @@ jobs:
             and (.accounting.primary + .accounting.model + .accounting.official + .accounting.unavailable == .requested)
             and all(.items[];
               (.code | test("^[0-9]{6}$"))
-              and (.last_nav | type) == "number"
-              and (.est_nav | type) == "number"
-              and (.est_change | type) == "number"
               and (.est_realtime | type) == "boolean"
-              and (.est_kind == "estimate" or .est_kind == "holdings_model" or .est_kind == "official_nav")
-              and (if .est_kind == "estimate" then
-                ((.source_time_precision == "datetime" and .status == "fresh" and .est_realtime == true)
+              and (.kind == "intraday_estimate" or .kind == "qdii_next_nav_estimate"
+                or .kind == "holdings_model" or .kind == "official_nav")
+              and (if .kind == "intraday_estimate" then
+                (.value_nav | type) == "number"
+                and (.estimate_nav | type) == "number"
+                and (.estimate_change | type) == "number"
+                and (.estimate_time | type) == "string"
+                and .value_change == null
+                and .nav_date == null
+                and ((.source_time_precision == "datetime" and .status == "fresh" and .est_realtime == true)
                   or ((.source_time_precision == "date" or .source_time_precision == "datetime")
                     and .status == "delayed" and .est_realtime == false))
-              elif .est_kind == "holdings_model" then
+              elif .kind == "qdii_next_nav_estimate" then
+                (.status == "modeled" or .status == "degraded" or .status == "stale")
+                and .est_realtime == false
+                and .source_time_precision == "datetime"
+                and (.value_nav | type) == "number"
+                and (.estimate_nav | type) == "number"
+                and (.estimate_change | type) == "number"
+                and (.estimate_time | type) == "string"
+                and .value_change == null
+                and .nav_date == null
+                and (.target_nav_date | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$"))
+                and .value_date == .target_nav_date
+                and (.estimate_model_version | type) == "string"
+                and (.estimate_model_version | length) > 0
+                and (.sample_count | type) == "number"
+                and .sample_count >= 0
+                and (.coverage | type) == "number"
+                and .coverage >= 0 and .coverage <= 100
+                and (.uncertainty.mae | type) == "number"
+                and (.uncertainty.error_p80 | type) == "number"
+                and (.uncertainty.direction_accuracy | type) == "number"
+              elif .kind == "holdings_model" then
                 .status == "modeled"
                 and .source == "eastmoney_holdings_model"
                 and .est_realtime == false
                 and .source_time_precision == "datetime"
+                and (.estimate_nav | type) == "number"
+                and (.estimate_change | type) == "number"
+                and (.estimate_time | type) == "string"
                 and (.base_nav | type) == "number"
                 and (.base_nav_date | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$"))
                 and (.value_nav | type) == "number"
+                and .value_change == null
+                and .nav_date == null
                 and (.value_date | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$"))
-                and (.est_time | type) == "string"
                 and (.model_coverage | type) == "number"
                 and .model_coverage >= 0 and .model_coverage <= 100
                 and (.model_quote_count | type) == "number"
@@ -451,15 +510,44 @@ jobs:
                 and (.model_rejected_count | type) == "number"
                 and (.est_note | type) == "string"
                 and ((.est_note | contains("非官方")) or (.est_note | contains("不是基金公司官方")))
-              elif .est_kind == "official_nav" then
+              elif .kind == "official_nav" then
                 .est_realtime == false
                 and .status == "latest_official"
                 and .source == "eastmoney_official_nav"
+                and .source_time_precision == "date"
+                and (.value_nav | type) == "number"
+                and (.nav_date | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$"))
+                and .value_date == .nav_date
+                and .source_time == .nav_date
+                and (
+                  (.base_nav == null and .base_nav_date == null and .value_change == null)
+                  or (
+                    (.base_nav | type) == "number"
+                    and (.base_nav_date | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$"))
+                    and .base_nav_date < .nav_date
+                    and ((.value_change == null) or ((.value_change | type) == "number"))
+                  )
+                )
+                and .estimate_nav == null
+                and .estimate_change == null
+                and .estimate_time == null
+                and .est_nav == null
+                and .est_change == null
                 and (.fallback_reason | type) == "string"
               else true end)
             )
             and all(.unavailable_items[];
-              .status == "unavailable"
+              .kind == "unavailable"
+              and .status == "unavailable"
+              and .source == "unavailable"
+              and .is_fallback == true
+              and .value_nav == null
+              and .value_change == null
+              and .estimate_nav == null
+              and .estimate_change == null
+              and .estimate_time == null
+              and .nav_date == null
+              and .target_nav_date == null
               and .last_nav == null
               and .est_nav == null
               and .est_change == null

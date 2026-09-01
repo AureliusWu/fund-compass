@@ -28,7 +28,9 @@ def persist(target_nav_date=None):
         "latest_nav": 1.0, "latest_nav_date": "2026-08-22",
         "source": "test", "updated_at": "2026-08-25T06:00:00+00:00",
         "decision_context": {
-            "status": "fresh", "kind": "estimate", "source": "quote",
+            "status": "modeled" if target_nav_date else "fresh",
+            "kind": "qdii_next_nav_estimate" if target_nav_date else "intraday_estimate",
+            "source": "quote",
             "source_time": "2026-08-25T14:29:00+08:00", "source_time_precision": "datetime",
             "base_nav": 1.0, "base_nav_date": "2026-08-22",
             "estimate_change": 1.0, "target_nav_date": target_nav_date,

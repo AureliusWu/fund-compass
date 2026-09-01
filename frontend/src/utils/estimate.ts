@@ -3,8 +3,16 @@
 
 import { recordSource } from './resilience'
 import { getHoldings, type Holding } from './holdings'
+import { fetchMarketQuotes } from './marketQuotes'
 import overseasRegistry from '@/data/overseas-models.json'
 import { attachAccuracy } from './overseasAccuracy'
+
+export type EstimateContractKind =
+  | 'intraday_estimate'
+  | 'qdii_next_nav_estimate'
+  | 'holdings_model'
+  | 'official_nav'
+  | 'unavailable'
 
 export interface Estimate {
   code: string
@@ -14,13 +22,16 @@ export interface Estimate {
   baseNavDate: string
   /** 当前用于展示/市值计算的估算净值及归属日。 */
   valueNav: number | null
+  /** 已观察正式净值的涨跌；估算记录保持 null。 */
+  valueChange?: number | null
   valueDate: string
   lastNav: number | null
   estNav: number | null
   estChange: number | null // 估算涨跌% gszzl
   navDate: string
   estTime: string
-  kind: 'intraday' | 'holdings_model' | 'overseas' | 'overseas_model' | 'official_nav'
+  kind: 'intraday' | 'holdings_model' | 'overseas' | 'overseas_model' | 'official_nav' | 'unavailable'
+  contractKind?: EstimateContractKind
   label: '盘中估值' | '延迟估值' | '重仓模型估算' | '海外估值' | '海外模型估算' | '最近净值' | '数据不可用'
   isRealtime: boolean
   sourceNote: string
@@ -41,6 +52,13 @@ export interface Estimate {
   modelOldestQuoteTime?: string | null
   modelNewestQuoteTime?: string | null
   modelRejectedCount?: number | null
+  targetNavDate?: string | null
+  marketTime?: string | null
+  sampleCount?: number | null
+  mae?: number | null
+  errorP80?: number | null
+  directionAccuracy?: number | null
+  legacyEstimateAliasUsed?: boolean
   modelCode?: string
   modelVersion?: string
   confidence?: string
@@ -85,9 +103,11 @@ const PRECISE_ESTIMATE_EXPIRE_MS = 90 * 60 * 1000
 export interface Gz {
   fundcode?: string; name?: string
   dwjz?: unknown; gsz?: unknown; gszzl?: unknown; jzrq?: string; gztime?: string
-  baseNav?: unknown; baseNavDate?: string; valueNav?: unknown; valueDate?: string
+  baseNav?: unknown; baseNavDate?: string; valueNav?: unknown; valueChange?: unknown; valueDate?: string
+  estimateNav?: unknown; estimateChange?: unknown
   sourcePrecision?: 'date' | 'datetime'
-  estKind?: 'estimate' | 'holdings_model' | 'overseas_model' | 'official_nav'
+  estKind?: 'estimate' | 'holdings_model' | 'overseas_model' | 'official_nav' | 'unavailable'
+  contractKind?: EstimateContractKind
   estLabel?: string
   estNote?: string
   estRealtime?: boolean
@@ -107,6 +127,14 @@ export interface Gz {
   modelOldestQuoteTime?: string | null
   modelNewestQuoteTime?: string | null
   modelRejectedCount?: unknown
+  targetNavDate?: string | null
+  marketTime?: string | null
+  estimateModelVersion?: string | null
+  sampleCount?: unknown
+  mae?: unknown
+  errorP80?: unknown
+  directionAccuracy?: unknown
+  legacyEstimateAliasUsed?: boolean
 }
 
 const cache = new Map<string, { e: Estimate | null; t: number }>()
@@ -261,10 +289,9 @@ function fmt(n: number): string {
   return Number.isFinite(n) ? n.toFixed(2).replace(/\.?0+$/, '') : '--'
 }
 
-function isOverseasEstimate(name: string, estTime: string): boolean {
-  const overseasFund = /QDII|全球|海外|新兴市场|纳斯达克|标普|恒生|港股|美元|国际|日经|德国|越南|印度|香港/i.test(name)
-  const hour = Number((estTime.match(/\s(\d{1,2}):\d{2}$/) || [])[1])
-  return overseasFund && Number.isFinite(hour) && (hour < 9 || hour >= 15)
+function isOverseasEstimate(name: string, targetNavDate?: string | null): boolean {
+  return Boolean(targetNavDate)
+    || /QDII|全球|海外|新兴市场|纳斯达克|标普|恒生|港股|美元|国际|日经|德国|越南|印度|香港/i.test(name)
 }
 
 export function latestNavMove(
@@ -400,14 +427,14 @@ export function preferredDailyMove(
     }
   }
   if (estimate?.kind === 'official_nav'
-    && estimate.estChange != null
+    && estimate.valueChange != null
     && estimateDataFreshness(estimate, now) !== 'expired') {
     return {
-      change: estimate.estChange,
-      baseNav: estimate.lastNav,
+      change: estimate.valueChange,
+      baseNav: estimate.baseNav,
       label: '净',
       sourceNote: estimate.sourceNote,
-      date: estimate.estTime || estimate.navDate,
+      date: estimate.valueDate || estimate.navDate,
     }
   }
   if (!estimate
@@ -419,7 +446,9 @@ export function preferredDailyMove(
     baseNav: estimate.lastNav,
     label: estimate.kind === 'holdings_model'
       ? '重仓模型'
-      : estimate.isRealtime ? '估' : (estimate.kind === 'overseas' ? '海外非实时' : '延迟估值'),
+      : estimate.isRealtime
+        ? '估'
+        : (estimate.kind === 'overseas' || estimate.kind === 'overseas_model' ? '海外非实时' : '延迟估值'),
     sourceNote: estimate.sourceNote,
     date: estimate.estTime || estimate.navDate,
   }
@@ -427,48 +456,79 @@ export function preferredDailyMove(
 
 export function normalizeEstimate(d: Gz): Estimate {
   const hasOwn = (key: keyof Gz) => Object.prototype.hasOwnProperty.call(d, key)
-  const valueNavProvided = hasOwn('valueNav') || hasOwn('gsz')
-  const changeProvided = hasOwn('gszzl')
-  const baseNav = num(hasOwn('baseNav') ? d.baseNav : d.dwjz)
-  let valueNav = num(hasOwn('valueNav') ? d.valueNav : d.gsz)
-  let estChange = num(d.gszzl)
-
-  if (!changeProvided && estChange == null && usableNav(baseNav) && usableNav(valueNav)) {
-    estChange = (valueNav - baseNav) / baseNav * 100
-  }
-  if (!valueNavProvided && !usableNav(valueNav) && usableNav(baseNav) && estChange != null) {
-    valueNav = baseNav * (1 + estChange / 100)
-  }
-
   const code = cleanText(d.fundcode)
   const name = cleanText(d.name) || code
+  const unavailable = d.status === 'unavailable' || d.estKind === 'unavailable' || d.contractKind === 'unavailable'
+  const official = d.estKind === 'official_nav' || d.contractKind === 'official_nav'
+  const holdingsModel = d.estKind === 'holdings_model' || d.contractKind === 'holdings_model'
+  const upstreamOverseasModel = d.estKind === 'overseas_model' || d.contractKind === 'qdii_next_nav_estimate'
+  const targetNavDate = nullableText(d.targetNavDate)
+
+  const parsedBaseNav = num(hasOwn('baseNav') ? d.baseNav : d.dwjz)
+  const baseNav = usableNav(parsedBaseNav) ? parsedBaseNav : null
+  const valueNavProvided = hasOwn('valueNav') || hasOwn('estimateNav') || hasOwn('gsz')
+  const valueNavInput = hasOwn('valueNav') ? d.valueNav : hasOwn('estimateNav') ? d.estimateNav : d.gsz
+  const parsedValueNav = num(valueNavInput)
+  let valueNav = usableNav(parsedValueNav) ? parsedValueNav : null
+
+  const changeProvided = official
+    ? hasOwn('valueChange') || hasOwn('gszzl')
+    : hasOwn('estimateChange') || hasOwn('gszzl')
+  let valueChange = official
+    ? num(hasOwn('valueChange') ? d.valueChange : d.gszzl)
+    : null
+  let estChange = official || unavailable
+    ? null
+    : num(hasOwn('estimateChange') ? d.estimateChange : d.gszzl)
+  const selectedChange = official ? valueChange : estChange
+
+  if (!changeProvided && selectedChange == null && usableNav(baseNav) && usableNav(valueNav)) {
+    const derived = (valueNav - baseNav) / baseNav * 100
+    if (official) valueChange = derived
+    else estChange = derived
+  }
+  const changeForNav = official ? valueChange : estChange
+  if (!valueNavProvided && !usableNav(valueNav) && usableNav(baseNav) && changeForNav != null) {
+    const derived = baseNav * (1 + changeForNav / 100)
+    valueNav = usableNav(derived) ? derived : null
+  }
+
   const baseNavDate = cleanText(d.baseNavDate) || cleanText(d.jzrq)
-  const valueDate = cleanText(d.valueDate) || cleanText(d.gztime)
+  const valueDate = cleanText(d.valueDate) || targetNavDate || cleanText(d.gztime)
   const modelNewestQuoteTime = nullableText(d.modelNewestQuoteTime)
   const estTime = cleanText(d.gztime) || modelNewestQuoteTime || valueDate
-  const overseas = isOverseasEstimate(name, estTime)
+  const overseas = upstreamOverseasModel || isOverseasEstimate(name, targetNavDate)
+  const boundOverseasModel = upstreamOverseasModel && targetNavDate != null
   const dateOnly = d.sourcePrecision === 'date'
-  const official = d.estKind === 'official_nav'
-  const holdingsModel = d.estKind === 'holdings_model'
-  const upstreamOverseasModel = d.estKind === 'overseas_model'
-  const unavailable = d.status === 'unavailable'
-  const isRealtime = holdingsModel || official || unavailable
+  const isRealtime = holdingsModel || official || unavailable || overseas
     ? false
-    : d.estRealtime === true || (d.estRealtime !== false && !overseas && !dateOnly)
-  const kind: Estimate['kind'] = official
-    ? 'official_nav'
-    : holdingsModel
-      ? 'holdings_model'
-      : upstreamOverseasModel
-        ? 'overseas_model'
-        : overseas ? 'overseas' : 'intraday'
+    : d.estRealtime === true || (d.estRealtime !== false && !dateOnly)
+  const kind: Estimate['kind'] = unavailable
+    ? 'unavailable'
+    : official
+      ? 'official_nav'
+      : holdingsModel
+        ? 'holdings_model'
+        : boundOverseasModel
+          ? 'overseas_model'
+          : overseas ? 'overseas' : 'intraday'
+  const explicitContractKind = d.contractKind === 'qdii_next_nav_estimate' && !targetNavDate
+    ? undefined
+    : d.contractKind
+  const contractKind: EstimateContractKind | undefined = explicitContractKind || (unavailable
+    ? 'unavailable'
+    : official
+      ? 'official_nav'
+      : holdingsModel
+        ? 'holdings_model'
+        : targetNavDate ? 'qdii_next_nav_estimate' : overseas ? undefined : 'intraday_estimate')
   const label: Estimate['label'] = unavailable
     ? '数据不可用'
     : official
       ? '最近净值'
       : holdingsModel
         ? '重仓模型估算'
-        : upstreamOverseasModel
+        : boundOverseasModel
           ? '海外模型估算'
           : overseas ? '海外估值' : (dateOnly ? '延迟估值' : '盘中估值')
   const modelCoverage = num(d.modelCoverage)
@@ -480,13 +540,15 @@ export function normalizeEstimate(d: Gz): Estimate {
     baseNav,
     baseNavDate,
     valueNav,
+    valueChange,
     valueDate,
     lastNav: baseNav,
-    estNav: valueNav,
+    estNav: official || unavailable ? null : valueNav,
     estChange,
-    navDate: baseNavDate,
+    navDate: official ? (valueDate || cleanText(d.jzrq)) : baseNavDate,
     estTime,
     kind,
+    contractKind,
     label,
     isRealtime,
     status: d.status,
@@ -506,6 +568,16 @@ export function normalizeEstimate(d: Gz): Estimate {
     modelOldestQuoteTime: nullableText(d.modelOldestQuoteTime),
     modelNewestQuoteTime,
     modelRejectedCount,
+    targetNavDate,
+    marketTime: nullableText(d.marketTime),
+    modelVersion: nullableText(d.estimateModelVersion) ?? undefined,
+    sampleCount: wholeNumberOrNull(d.sampleCount),
+    accuracySamples: wholeNumberOrNull(d.sampleCount) ?? undefined,
+    mae: num(d.mae),
+    errorP80: num(d.errorP80),
+    errorBand: num(d.errorP80),
+    directionAccuracy: num(d.directionAccuracy),
+    legacyEstimateAliasUsed: d.legacyEstimateAliasUsed === true,
     sourceNote: cleanText(d.estNote) || (unavailable
       ? '盘中估值与安全降级均不可用'
       : official
@@ -551,54 +623,6 @@ export function holdingsToOverseasModel(
   return { label: '十大重仓穿透模型', minWeight: HOLDINGS_MODEL_MIN_WEIGHT, legs }
 }
 
-function parseTencentQuote(raw: string | undefined): { price: number; changePct: number } | null {
-  if (!raw) return null
-  const fields = raw.split('~')
-  if (fields.length < 4) return null
-  const price = Number(fields[3])
-  if (!Number.isFinite(price) || price <= 0) return null
-  let changePct = Number(fields[32])
-  if (!Number.isFinite(changePct)) {
-    const prevClose = Number(fields[4])
-    if (Number.isFinite(prevClose) && prevClose > 0) changePct = (price - prevClose) / prevClose * 100
-  }
-  return { price, changePct: Number.isFinite(changePct) ? changePct : NaN }
-}
-
-function fetchTencentQuotes(codes: string[]): Promise<Record<string, { price: number; changePct: number }>> {
-  const uniq = Array.from(new Set(codes.filter(Boolean)))
-  if (!uniq.length || typeof document === 'undefined') return Promise.resolve({})
-
-  return new Promise((resolve) => {
-    const script = document.createElement('script')
-    let done = false
-    const timer = window.setTimeout(finish, TIMEOUT)
-
-    function finish() {
-      if (done) return
-      done = true
-      clearTimeout(timer)
-      script.remove()
-      const out: Record<string, { price: number; changePct: number }> = {}
-      uniq.forEach((code) => {
-        try {
-          const varName = 'v_' + code.replace(/\./g, '_')
-          const parsed = parseTencentQuote((window as unknown as Record<string, string | undefined>)[varName])
-          delete (window as unknown as Record<string, string | undefined>)[varName]
-          if (parsed && Number.isFinite(parsed.changePct)) out[code] = parsed
-        } catch { /* ignore bad quote */ }
-      })
-      recordSource('tencent', '腾讯行情', Object.keys(out).length > 0)
-      resolve(out)
-    }
-
-    script.onload = finish
-    script.onerror = finish
-    script.src = `https://qt.gtimg.cn/q=${uniq.join(',')}&_t=${Date.now()}`
-    document.head.appendChild(script)
-  })
-}
-
 function calcModelChange(model: OverseasModel, quotes: Record<string, { changePct: number }>) {
   let sum = 0
   let weight = 0
@@ -621,7 +645,7 @@ export function applyOverseasModelEstimate(
   quotes: Record<string, { changePct: number }>,
   modelOverride?: OverseasModel | null,
 ): Estimate {
-  if (!estimate || estimate.isRealtime || estimate.kind !== 'overseas') return estimate
+  if (!estimate || estimate.isRealtime || estimate.kind !== 'overseas' || !estimate.targetNavDate) return estimate
   let model = modelOverride || OVERSEAS_MODEL_BY_CODE[estimate.code]
   if (!model) return estimate
 
@@ -639,12 +663,17 @@ export function applyOverseasModelEstimate(
   return {
     ...estimate,
     valueNav: estNav,
-    valueDate: generatedAt,
+    // The modeled value belongs to the declared target NAV date.  Calculation
+    // time is separate and must never replace NAV date semantics.
+    valueDate: estimate.targetNavDate,
     estNav,
     estChange: result.changePct,
+    estTime: generatedAt,
     kind: 'overseas_model',
     label: '海外模型估算',
-    isRealtime: true,
+    // 这是“下一正式净值”模型，即使市场输入刚更新也不是盘中基金净值。
+    isRealtime: false,
+    contractKind: 'qdii_next_nav_estimate',
     modelWeight: result.weight,
     modelCoverage: result.weight,
     modelCode: model.legs.map((leg) => `${leg.code}:${leg.weight}`).join(','),
@@ -655,7 +684,7 @@ export function applyOverseasModelEstimate(
 }
 
 async function enhanceOverseasEstimate(e: Estimate): Promise<Estimate> {
-  if (e.isRealtime || e.kind !== 'overseas') return e
+  if (e.isRealtime || e.kind !== 'overseas' || !e.targetNavDate) return e
   const configuredModel = OVERSEAS_MODEL_BY_CODE[e.code]
   let holdingsModel: OverseasModel | null = null
   if (!configuredModel) {
@@ -668,55 +697,173 @@ async function enhanceOverseasEstimate(e: Estimate): Promise<Estimate> {
   const codes = new Set<string>()
   collectModelCodes(configuredModel, codes)
   collectModelCodes(holdingsModel, codes)
-  const quotes = await fetchTencentQuotes(Array.from(codes))
+  const quoteRows = await fetchMarketQuotes(codes).catch(() => null)
+  if (!quoteRows) {
+    recordSource('tencent', '司南行情代理', false)
+    return e
+  }
+  const quotes: Record<string, { price: number; changePct: number }> = {}
+  quoteRows.forEach((quote, code) => {
+    if (quote.changePct != null) quotes[code] = { price: quote.price, changePct: quote.changePct }
+  })
+  recordSource('tencent', '司南行情代理', Object.keys(quotes).length > 0)
   const configured = configuredModel ? applyOverseasModelEstimate(e, quotes, configuredModel) : e
   if (configured !== e || !holdingsModel) return attachAccuracy(configured)
   return attachAccuracy(applyOverseasModelEstimate(e, quotes, holdingsModel))
 }
 
-interface EstimateEnvelope {
+export interface EstimateEnvelope {
   status: string
   source: string
   fallback: string | null
   fetchedAt: string | null
 }
 
-function ownValue(row: Record<string, unknown>, primary: string, legacy: string): unknown {
-  return Object.prototype.hasOwnProperty.call(row, primary) ? row[primary] : row[legacy]
+function owns(row: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(row, key)
 }
 
-function wireKind(value: unknown): Gz['estKind'] {
-  return value === 'official_nav' || value === 'holdings_model' || value === 'overseas_model'
-    ? value
-    : 'estimate'
+function firstOwned(row: Record<string, unknown>, keys: string[]): unknown {
+  const key = keys.find((candidate) => owns(row, candidate))
+  return key == null ? undefined : row[key]
 }
 
-function wireRow(row: Record<string, unknown>, envelope: EstimateEnvelope): Gz | null {
+function wireNumbersConflict(row: Record<string, unknown>, canonical: string, legacy: string): boolean {
+  if (!owns(row, canonical) || !owns(row, legacy) || row[canonical] == null || row[legacy] == null) return false
+  const left = num(row[canonical])
+  const right = num(row[legacy])
+  if (left == null || right == null) return true
+  return Math.abs(left - right) > 1e-9
+}
+
+function inferredContractKind(row: Record<string, unknown>): EstimateContractKind | null {
+  const value = cleanText(row.kind)
+  if (value === 'intraday_estimate' || value === 'qdii_next_nav_estimate'
+    || value === 'holdings_model' || value === 'official_nav' || value === 'unavailable') return value
+  // Compatibility with the pre-v8 Worker. Canonical responses must use one of
+  // the explicit kinds above; the generic estimate value is not propagated.
+  if (value && value !== 'estimate' && value !== 'overseas_model') return null
+  const legacy = cleanText(row.est_kind) || value
+  if (legacy === 'official_nav') return 'official_nav'
+  if (legacy === 'holdings_model') return 'holdings_model'
+  if (legacy === 'unavailable' || cleanText(row.status) === 'unavailable') return 'unavailable'
+  if (legacy === 'overseas_model' || nullableText(row.target_nav_date)
+    || isOverseasEstimate(cleanText(row.name), nullableText(row.target_nav_date))) {
+    return 'qdii_next_nav_estimate'
+  }
+  return 'intraday_estimate'
+}
+
+function legacyKindMatches(contractKind: EstimateContractKind, value: unknown): boolean {
+  const legacy = cleanText(value)
+  if (!legacy) return true
+  if (contractKind === 'intraday_estimate') return legacy === 'estimate'
+  if (contractKind === 'qdii_next_nav_estimate') return legacy === 'estimate' || legacy === 'overseas_model'
+  if (contractKind === 'unavailable') return legacy === 'estimate' || legacy === 'unavailable'
+  return legacy === contractKind
+}
+
+export function parseEstimateWireRow(row: Record<string, unknown>, envelope: EstimateEnvelope): Gz | null {
   const code = cleanText(row.code || row.bzdm)
   if (!/^\d{6}$/.test(code)) return null
+  const contractKind = inferredContractKind(row)
+  if (!contractKind || !legacyKindMatches(contractKind, row.est_kind)) return null
+  const declaredKind = cleanText(row.kind)
+  const canonicalKindDeclared = declaredKind === 'intraday_estimate'
+    || declaredKind === 'qdii_next_nav_estimate' || declaredKind === 'holdings_model'
+    || declaredKind === 'official_nav' || declaredKind === 'unavailable'
+
+  const official = contractKind === 'official_nav'
+  const estimated = contractKind === 'intraday_estimate'
+    || contractKind === 'qdii_next_nav_estimate' || contractKind === 'holdings_model'
+  const unavailable = contractKind === 'unavailable'
+  if (official && (row.estimate_nav != null || row.estimate_change != null || row.estimate_time != null)) return null
+  if (canonicalKindDeclared && estimated && (row.value_change != null || row.nav_date != null)) return null
+  if (canonicalKindDeclared && official && (num(row.value_nav) == null || num(row.value_nav)! <= 0
+    || (row.value_change != null && num(row.value_change) == null)
+    || !nullableText(row.nav_date))) return null
+  if (canonicalKindDeclared && estimated && (num(row.estimate_nav) == null || num(row.estimate_nav)! <= 0
+    || num(row.estimate_change) == null || !nullableText(row.estimate_time))) return null
+  if (canonicalKindDeclared && estimated && owns(row, 'value_nav') && row.value_nav != null
+    && wireNumbersConflict(row, 'estimate_nav', 'value_nav')) return null
+  if (canonicalKindDeclared && unavailable && [
+    'value_nav', 'value_change', 'nav_date', 'estimate_nav', 'estimate_change',
+    'estimate_time', 'target_nav_date', 'est_nav', 'est_change',
+  ].some((field) => row[field] != null)) return null
+  if (wireNumbersConflict(row, official ? 'value_nav' : 'estimate_nav', 'est_nav')
+    || wireNumbersConflict(row, official ? 'value_change' : 'estimate_change', 'est_change')) return null
+
+  const targetNavDate = nullableText(row.target_nav_date)
+  if (contractKind === 'qdii_next_nav_estimate' && canonicalKindDeclared) {
+    const uncertainty = row.uncertainty && typeof row.uncertainty === 'object' && !Array.isArray(row.uncertainty)
+      ? row.uncertainty as Record<string, unknown>
+      : {}
+    const sampleCount = wholeNumberOrNull(row.sample_count ?? row.estimate_sample_count)
+    const coverage = num(row.coverage ?? row.estimate_coverage)
+    const mae = num(row.mae ?? row.estimate_mae ?? uncertainty.mae)
+    const errorP80 = num(row.error_p80 ?? row.estimate_error_p80 ?? uncertainty.error_p80)
+    const directionAccuracy = num(row.direction_accuracy
+      ?? row.estimate_direction_accuracy ?? uncertainty.direction_accuracy)
+    if (!targetNavDate || !nullableText(row.estimate_model_version ?? row.model_version)
+      || sampleCount == null || coverage == null || coverage < 0 || coverage > 100
+      || mae == null || mae < 0 || errorP80 == null || errorP80 < 0
+      || directionAccuracy == null || directionAccuracy < 0 || directionAccuracy > 100) return null
+  } else if (contractKind !== 'qdii_next_nav_estimate' && targetNavDate) return null
+  const unboundLegacyQdii = contractKind === 'qdii_next_nav_estimate'
+    && !canonicalKindDeclared && !targetNavDate
+
   const diagnostics = normalizeProviderDiagnostics(
     row.provider_diagnostics ?? row.providers ?? row.provider_diagnostic ?? row.diagnostics,
   )
   const precision = row.source_time_precision === 'datetime' ? 'datetime' : 'date'
-  const estKind = wireKind(row.est_kind)
-  const valueDate = cleanText(ownValue(row, 'value_date', 'est_time'))
+  const estKind: Gz['estKind'] = contractKind === 'official_nav'
+    ? 'official_nav'
+    : contractKind === 'holdings_model'
+      ? 'holdings_model'
+      : contractKind === 'qdii_next_nav_estimate' && !unboundLegacyQdii
+        ? 'overseas_model'
+        : contractKind === 'unavailable' ? 'unavailable' : 'estimate'
+  const valueNav = official
+    ? firstOwned(row, ['value_nav', 'est_nav'])
+    : firstOwned(row, ['estimate_nav', 'value_nav', 'est_nav'])
+  const change = official
+    ? firstOwned(row, ['value_change', 'est_change'])
+    : firstOwned(row, ['estimate_change', 'est_change'])
+  const legacyEstimateAliasUsed = official
+    ? (!owns(row, 'value_nav') && owns(row, 'est_nav')) || (!owns(row, 'value_change') && owns(row, 'est_change'))
+    : (!owns(row, 'estimate_nav') && !owns(row, 'value_nav') && owns(row, 'est_nav'))
+      || (!owns(row, 'estimate_change') && owns(row, 'est_change'))
+  const canonicalKindPresent = owns(row, 'kind') && cleanText(row.kind) !== 'estimate'
+  const valueDate = official
+    ? canonicalKindPresent
+      ? cleanText(row.nav_date) || cleanText(row.value_date) || cleanText(row.est_time)
+      : cleanText(row.value_date) || cleanText(row.est_time) || cleanText(row.nav_date)
+    : cleanText(row.value_date) || targetNavDate || cleanText(row.est_time)
   const newestQuote = nullableText(row.model_newest_quote_time ?? row.newest_quote_time)
+  const uncertainty = row.uncertainty && typeof row.uncertainty === 'object' && !Array.isArray(row.uncertainty)
+    ? row.uncertainty as Record<string, unknown>
+    : {}
   return {
     fundcode: code,
     name: cleanText(row.name) || code,
-    baseNav: ownValue(row, 'base_nav', 'last_nav'),
-    baseNavDate: cleanText(ownValue(row, 'base_nav_date', 'nav_date')),
-    valueNav: ownValue(row, 'value_nav', 'est_nav'),
+    baseNav: firstOwned(row, ['base_nav', 'last_nav']),
+    baseNavDate: cleanText(row.base_nav_date)
+      || (!owns(row, 'kind') ? cleanText(row.nav_date) : ''),
+    valueNav,
+    valueChange: official ? change : null,
+    estimateNav: official ? null : valueNav,
+    estimateChange: official ? null : change,
     valueDate,
     dwjz: row.last_nav,
     gsz: row.est_nav,
-    gszzl: ownValue(row, 'value_change', 'est_change'),
-    jzrq: cleanText(row.nav_date),
-    gztime: cleanText(row.est_time) || newestQuote || valueDate,
+    gszzl: change,
+    jzrq: official ? valueDate : cleanText(row.base_nav_date) || cleanText(row.nav_date),
+    gztime: cleanText(row.source_time) || cleanText(row.estimate_time) || cleanText(row.est_time) || newestQuote || valueDate,
     sourcePrecision: precision,
     estKind,
-    estLabel: cleanText(row.est_label),
-    estNote: cleanText(row.est_note),
+    contractKind: unboundLegacyQdii ? undefined : contractKind,
+    estLabel: cleanText(row.est_label || row.label),
+    estNote: cleanText(row.est_note || row.note),
     estRealtime: row.est_realtime === true,
     status: cleanText(row.status) || (estKind === 'holdings_model' ? 'modeled' : ''),
     source: cleanText(row.source) || envelope.source,
@@ -734,6 +881,14 @@ function wireRow(row: Record<string, unknown>, envelope: EstimateEnvelope): Gz |
     modelOldestQuoteTime: nullableText(row.model_oldest_quote_time ?? row.oldest_quote_time),
     modelNewestQuoteTime: newestQuote,
     modelRejectedCount: row.model_rejected_count ?? row.rejected_count,
+    targetNavDate,
+    marketTime: nullableText(row.market_time),
+    estimateModelVersion: nullableText(row.estimate_model_version ?? row.model_version),
+    sampleCount: row.sample_count ?? row.estimate_sample_count,
+    mae: row.mae ?? uncertainty.mae,
+    errorP80: row.error_p80 ?? row.estimate_error_p80 ?? uncertainty.error_p80,
+    directionAccuracy: row.direction_accuracy ?? uncertainty.direction_accuracy,
+    legacyEstimateAliasUsed,
   }
 }
 
@@ -765,7 +920,7 @@ function fetchEstimateBatch(codes: string[], force = false): Promise<Map<string,
       const unavailable = Array.isArray(payload.unavailable_items) ? payload.unavailable_items : []
       for (const raw of [...payload.items, ...unavailable]) {
         if (!raw || typeof raw !== 'object') continue
-        const normalized = wireRow(raw as Record<string, unknown>, envelope)
+        const normalized = parseEstimateWireRow(raw as Record<string, unknown>, envelope)
         if (normalized && ordered.includes(normalized.fundcode || '')) rows.set(normalized.fundcode!, normalized)
       }
       const merged = new Map(tableCache?.rows || [])

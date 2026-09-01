@@ -141,8 +141,8 @@ def test_qdii_evidence_uses_exact_target_and_accuracy_gates(tmp_path, monkeypatc
         "source": "test",
         "updated_at": "2026-08-25T06:00:00+00:00",
         "decision_context": {
-            "status": "fresh",
-            "kind": "estimate",
+            "status": "modeled",
+            "kind": "qdii_next_nav_estimate",
             "source": "worker-live",
             "source_time": "2026-08-24T14:29:00+08:00",
             "source_time_precision": "datetime",

@@ -1,11 +1,26 @@
-// 指数行情条（移植自蜉蝣基金 FundVal，纯前端、不依赖后端）。
-// 指数：腾讯 qt.gtimg.cn JSONP（<script> 注入，window.v_*），"~" 分割，field[3]=现价/[32]=涨跌%/[4]=昨收。
-// 黄金：东方财富 push2 fetch（CORS 友好），secid=118/113/114.AU9999，f43/f57/f60=价、f170=涨跌%。
-// A 股休市时接口自带返回上一交易日收盘价；30s 刷新；离线回退本地缓存。
+// 指数行情条。浏览器只访问受限 Worker JSON 代理，第三方响应不会
+// 再作为脚本在本应用 origin 执行。30s 刷新；失败时仅回退短时新鲜缓存。
 
 import { recordSource } from './resilience'
+import { fetchMarketQuotes, type MarketQuote } from './marketQuotes'
 
-export interface IndexQuote { name: string; price: number; changePct: number }
+export type IndexQuoteStatus = 'fresh' | 'cached' | 'stale' | 'unavailable'
+
+export interface IndexQuote {
+  name: string
+  price: number | null
+  changePct: number | null
+  status: IndexQuoteStatus
+  sourceTime: string | null
+}
+
+interface CachedQuote {
+  name: string
+  price: number
+  changePct: number | null
+  sourceTime: string | null
+  cachedAt: number
+}
 
 interface Cfg { code: string; name: string; gold?: boolean }
 const CONFIG: Cfg[] = [
@@ -16,109 +31,122 @@ const CONFIG: Cfg[] = [
   { code: 'sh000300', name: '沪深300' },
 ]
 
-const LS = 'sinan_index_cache_v1'
-const TIMEOUT = 8000
-const num = (s: unknown): number => parseFloat(String(s))
+const LS = 'sinan_index_cache_v2'
+export const INDEX_CACHE_MAX_AGE_MS = 5 * 60 * 1000
 
-function loadCache(): IndexQuote[] {
-  try { const a = JSON.parse(localStorage.getItem(LS) || '[]'); return Array.isArray(a) ? a : [] } catch { return [] }
-}
-function saveCache(q: IndexQuote[]) { try { localStorage.setItem(LS, JSON.stringify(q)) } catch { /* 容量满忽略 */ } }
-
-function parseGtimg(raw: string | undefined): { price: number; changePct: number } | null {
-  if (!raw || typeof raw !== 'string') return null
-  const f = raw.split('~')
-  if (f.length < 4) return null
-  const price = parseFloat(f[3])
-  if (!Number.isFinite(price) || price <= 0) return null
-  let chg = parseFloat(f[32])
-  if (!Number.isFinite(chg)) {
-    const pc = parseFloat(f[4])
-    if (Number.isFinite(pc) && pc > 0) chg = ((price - pc) / pc) * 100
-  }
-  return { price, changePct: Number.isFinite(chg) ? chg : NaN }
+function nullableNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
-// 一次 JSONP 请求拉多只指数，返回 code → {price,changePct}|null
-function fetchIndices(codes: string[]): Promise<Record<string, { price: number; changePct: number } | null>> {
-  return new Promise((resolve) => {
-    const w = window as unknown as Record<string, string | undefined>
-    const script = document.createElement('script')
-    let done = false
-    const finish = (ok: boolean) => {
-      if (done) return
-      done = true
-      clearTimeout(timer)
-      script.remove()
-      const out: Record<string, { price: number; changePct: number } | null> = {}
-      for (const c of codes) {
-        out[c] = ok ? parseGtimg(w['v_' + c]) : null
-        try { delete w['v_' + c] } catch { /* ignore */ }
-      }
-      resolve(out)
+function loadCache(): Map<string, CachedQuote> {
+  const out = new Map<string, CachedQuote>()
+  try {
+    const raw = JSON.parse(localStorage.getItem(LS) || '[]')
+    if (!Array.isArray(raw)) return out
+    for (const value of raw) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) continue
+      const row = value as Record<string, unknown>
+      const name = typeof row.name === 'string' ? row.name : ''
+      const price = nullableNumber(row.price)
+      const cachedAt = nullableNumber(row.cachedAt)
+      if (!CONFIG.some((item) => item.name === name) || price == null || price <= 0
+        || cachedAt == null || cachedAt <= 0) continue
+      out.set(name, {
+        name,
+        price,
+        changePct: nullableNumber(row.changePct),
+        sourceTime: typeof row.sourceTime === 'string' && row.sourceTime.trim()
+          ? row.sourceTime.trim()
+          : null,
+        cachedAt,
+      })
     }
-    const timer = setTimeout(() => finish(false), TIMEOUT)
-    script.onload = () => finish(true)
-    script.onerror = () => finish(false)
-    script.src = 'https://qt.gtimg.cn/q=' + codes.join(',') + '&_t=' + Date.now()
-    document.head.appendChild(script)
-  })
-}
-
-// 黄金 AU9999（东方财富 push2，多 secid 兜底）。
-// 关键：fetch 必须带超时（AbortController），否则请求卡住会让页面网络永不空闲。
-async function fetchGold(): Promise<{ price: number; changePct: number } | null> {
-  for (const secid of ['118.AU9999', '113.AU9999', '114.AU9999']) {
-    const ctrl = new AbortController()
-    const t = setTimeout(() => ctrl.abort(), TIMEOUT)
-    try {
-      const r = await fetch(
-        `https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&fields=f43,f57,f60,f170&fltt=2&_=${Date.now()}`,
-        { signal: ctrl.signal },
-      )
-      clearTimeout(t)
-      if (!r.ok) continue
-      const j = await r.json()
-      const d = j?.data
-      if (!d) continue
-      let price = num(d.f43)
-      if (!(price > 0)) price = num(d.f57)
-      if (!(price > 0)) price = num(d.f60)
-      if (!(price > 0)) continue
-      let chg = num(d.f170)
-      if (!Number.isFinite(chg)) { const pc = num(d.f60); chg = pc > 0 ? ((price - pc) / pc) * 100 : NaN }
-      return { price, changePct: Number.isFinite(chg) ? chg : NaN }
-    } catch { clearTimeout(t) /* 超时/网络错误 → 下一个 secid */ }
-  }
-  return null
-}
-
-// 拉全部行情（指数 + 黄金并行），失败的项回退缓存；有任一成功就刷新缓存。
-// V3-9：记录各数据源状态到 resilience 框架，供 HomePage 源状态点灯。
-export async function getIndices(): Promise<IndexQuote[]> {
-  const cache = loadCache()
-  const gtimgCodes = CONFIG.filter((c) => !c.gold).map((c) => c.code)
-  const [idx, gold] = await Promise.all([fetchIndices(gtimgCodes), fetchGold()])
-
-  // 记录腾讯行情状态（任一指数有有效数据即算成功）
-  const tencentOk = Object.values(idx).some((v) => v && Number.isFinite(v.price))
-  recordSource('tencent', '腾讯行情', tencentOk)
-
-  // 记录东方财富状态（黄金或 jjcc/ulist 共享同一个 eastmoney 源 ID）
-  const eastmoneyOk = gold != null && Number.isFinite(gold.price)
-  if (gold !== null) recordSource('eastmoney', '东方财富', eastmoneyOk)
-
-  const out: IndexQuote[] = CONFIG.map((c, i) => {
-    const got = c.gold ? gold : idx[c.code]
-    if (got && Number.isFinite(got.price)) return { name: c.name, price: got.price, changePct: got.changePct }
-    return cache[i] && cache[i].name === c.name ? cache[i] : { name: c.name, price: NaN, changePct: NaN }
-  })
-  if (out.some((o) => Number.isFinite(o.price))) saveCache(out)
+  } catch { /* 损坏缓存按空处理 */ }
   return out
 }
 
-// 初次渲染用的占位（缓存或空骨架）
+function saveCache(cache: Map<string, CachedQuote>) {
+  try { localStorage.setItem(LS, JSON.stringify([...cache.values()])) } catch { /* 容量满忽略 */ }
+}
+
+function cacheState(row: CachedQuote | undefined, now: number): IndexQuoteStatus {
+  if (!row) return 'unavailable'
+  return now - row.cachedAt <= INDEX_CACHE_MAX_AGE_MS ? 'cached' : 'stale'
+}
+
+function fromCache(name: string, row: CachedQuote | undefined, now: number): IndexQuote {
+  const status = cacheState(row, now)
+  if (row && status === 'cached') {
+    return {
+      name,
+      price: row.price,
+      changePct: row.changePct,
+      status,
+      sourceTime: row.sourceTime,
+    }
+  }
+  return {
+    name,
+    price: null,
+    changePct: null,
+    status,
+    sourceTime: row?.sourceTime ?? null,
+  }
+}
+
+type FreshMarketQuote = MarketQuote & { status: 'fresh' }
+
+function isFresh(quote: MarketQuote | undefined): quote is FreshMarketQuote {
+  return quote?.status === 'fresh' && Number.isFinite(quote.price) && quote.price > 0
+}
+
+// 拉全部行情（指数 + 黄金并行）。上游明确 stale 时隐藏数值；网络失败时
+// 只允许使用 5 分钟内的本地缓存，且不会刷新原缓存时间。
+export async function getIndices(): Promise<IndexQuote[]> {
+  const now = Date.now()
+  const cache = loadCache()
+  let quotes = new Map<string, MarketQuote>()
+  try { quotes = await fetchMarketQuotes(CONFIG.map((item) => item.code)) }
+  catch { /* 代理失败时逐项按时间边界回退缓存 */ }
+
+  const tencentOk = CONFIG.some((item) => !item.gold && isFresh(quotes.get(item.code)))
+  recordSource('tencent', '腾讯行情', tencentOk)
+  recordSource('eastmoney', '东方财富', isFresh(quotes.get('AU9999')))
+
+  let receivedFresh = false
+  const out = CONFIG.map((cfg): IndexQuote => {
+    const got = quotes.get(cfg.code)
+    if (isFresh(got)) {
+      receivedFresh = true
+      const row: CachedQuote = {
+        name: cfg.name,
+        price: got.price,
+        changePct: got.changePct,
+        sourceTime: got.sourceTime,
+        cachedAt: now,
+      }
+      cache.set(cfg.name, row)
+      return { ...row, status: 'fresh' }
+    }
+    if (got?.status === 'stale') {
+      return {
+        name: cfg.name,
+        price: null,
+        changePct: null,
+        status: 'stale',
+        sourceTime: got.sourceTime,
+      }
+    }
+    return fromCache(cfg.name, cache.get(cfg.name), now)
+  })
+
+  if (receivedFresh) saveCache(cache)
+  return out
+}
+
+// 初次渲染仅展示 5 分钟内的缓存；过期缓存保留时间标签但不展示价格。
 export function cachedIndices(): IndexQuote[] {
-  const c = loadCache()
-  return c.length === CONFIG.length ? c : CONFIG.map((x) => ({ name: x.name, price: NaN, changePct: NaN }))
+  const now = Date.now()
+  const cache = loadCache()
+  return CONFIG.map((cfg) => fromCache(cfg.name, cache.get(cfg.name), now))
 }

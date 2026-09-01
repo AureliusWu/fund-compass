@@ -152,7 +152,8 @@ async function loadV8ActionCenter() {
       v8Decisions.value = [...v8Decisions.value, decision]
     } catch (error) {
       if (requestVersion !== v8RequestVersion) return
-      const kind = error instanceof ApiError && error.kind === 'http' && error.status === 404
+      const kind = error instanceof ApiError && error.kind === 'redacted' ? 'redacted'
+        : error instanceof ApiError && error.kind === 'http' && error.status === 404
         ? 'missing'
         : 'failed'
       v8Errors.value = [...v8Errors.value, {

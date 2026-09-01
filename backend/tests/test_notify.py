@@ -18,6 +18,7 @@ def load_notify():
 
 def test_missing_required_configuration_fails_before_network(monkeypatch, capsys) -> None:
     notify = load_notify()
+    monkeypatch.setattr(notify, "API_BASE", "")
     monkeypatch.setattr(notify, "GIST_ID", "")
     monkeypatch.setattr(notify, "GIST_TOKEN", "")
     monkeypatch.setattr(notify, "SC_SENDKEY", "")
@@ -27,13 +28,23 @@ def test_missing_required_configuration_fails_before_network(monkeypatch, capsys
 
     assert notify.main() == 2
     error = capsys.readouterr().err
+    assert "API_BASE" in error
     assert "GIST_ID" in error
     assert "GIST_TOKEN" in error
     assert "SC_SENDKEY" in error
 
 
+def test_api_base_has_no_legacy_default(monkeypatch) -> None:
+    monkeypatch.delenv("API_BASE", raising=False)
+
+    notify = load_notify()
+
+    assert notify.API_BASE == ""
+
+
 def test_malformed_gist_id_fails_closed(monkeypatch) -> None:
     notify = load_notify()
+    monkeypatch.setattr(notify, "API_BASE", "https://api.test/api")
     monkeypatch.setattr(notify, "GIST_ID", "not-a-gist")
     monkeypatch.setattr(notify, "GIST_TOKEN", "configured")
     monkeypatch.setattr(notify, "SC_SENDKEY", "configured")
@@ -65,6 +76,7 @@ def test_notify_reads_only_the_explicit_gist(monkeypatch) -> None:
         raise AssertionError(f"unexpected request: {url}")
 
     monkeypatch.setattr(notify, "GIST_ID", gist_id)
+    monkeypatch.setattr(notify, "API_BASE", "https://api.test/api")
     monkeypatch.setattr(notify, "GIST_TOKEN", "configured")
     monkeypatch.setattr(notify, "SC_SENDKEY", "configured")
     monkeypatch.setattr(notify, "FORCE", False)

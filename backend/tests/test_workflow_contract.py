@@ -56,6 +56,34 @@ def test_ci_validates_and_checks_out_one_exact_sha() -> None:
     assert "target_sha: ${{ needs.resolve.outputs.target_sha }}" in ci
 
 
+def test_ci_runs_dependency_and_runtime_contract_gates() -> None:
+    ci = workflow("ci.yml")
+
+    assert "pip check" in ci
+    assert "pytest" in ci
+    assert "npm run type-check" in ci
+    assert "npm run test" in ci
+    assert "npm run build" in ci
+    assert "npm run check" in ci
+    assert "npx wrangler deploy --dry-run" in ci
+
+
+def test_frontend_deploy_requires_an_explicit_public_api_endpoint() -> None:
+    deploy = workflow("deploy.yml")
+    index = (ROOT / "frontend" / "index.html").read_text(encoding="utf-8")
+
+    endpoint_gate = "- name: Verify production API endpoint"
+    build_step = "- run: npm run build"
+    assert endpoint_gate in deploy
+    assert deploy.index(endpoint_gate) < deploy.index(build_step)
+    assert 'test -n "${VITE_API_BASE:-}"' in deploy
+    assert '/api|./api|../api|http://*' in deploy
+    assert '[[ "$VITE_API_BASE" =~ ^https://[^/?#[:space:]]+/api$ ]]' in deploy
+    assert "未设时为空" not in deploy
+    assert "前端回退 /api" not in deploy
+    assert "fund-compass-api.onrender.com" not in index
+
+
 def test_generated_data_writers_are_serial_and_dispatch_ci_once() -> None:
     for name in AUTO_COMMIT_WORKFLOWS:
         source = workflow(name)
@@ -127,11 +155,33 @@ def test_manual_signal_notification_requires_explicit_gist_id() -> None:
     assert "/gists?per_page" not in script
 
 
+def test_backend_consumers_never_fall_back_to_the_old_free_api() -> None:
+    calibration = workflow("calibrate-strategy.yml")
+    notification = workflow("notify.yml")
+    overseas = workflow("overseas-accuracy.yml")
+    overseas_tool = (ROOT / "tools" / "overseas_accuracy.py").read_text(encoding="utf-8")
+    notification_tool = (ROOT / "tools" / "notify.py").read_text(encoding="utf-8")
+
+    assert "FUND_API_BASE: ${{ secrets.FUND_API_BASE }}" in calibration
+    assert "secrets.FUND_API_BASE ||" not in calibration
+    assert "API_BASE: ${{ vars.VITE_API_BASE }}" in notification
+    assert "vars.VITE_API_BASE ||" not in notification
+    assert 'test -n "$API_BASE"' in notification
+    assert "FUND_API_BASE: ${{ secrets.FUND_API_BASE }}" in overseas
+    assert 'test -n "${FUND_API_BASE:-}"' in overseas
+    assert "secrets.FUND_API_BASE ||" not in overseas
+    assert "fund-compass-api.onrender.com" not in overseas_tool
+    assert "fund-compass-api.onrender.com" not in notification_tool
+
+
 def test_post_deploy_smoke_verifies_exact_api_and_complete_static_data() -> None:
     source = workflow("post-deploy-smoke.yml")
 
     assert 'git merge-base --is-ancestor "$deployment_commit" "$EXPECTED_SHA"' in source
-    assert 'git diff --quiet "$deployment_commit" "$EXPECTED_SHA" -- backend render.yaml' in source
+    assert (
+        'git diff --quiet "$deployment_commit" "$EXPECTED_SHA" -- '
+        'backend render.yaml'
+    ) in source
     assert 'backend_source_matches=true' in source
     assert '.universe_ready == true' in source
     assert '.universe >= 1000' in source
@@ -150,16 +200,62 @@ def test_post_deploy_smoke_verifies_exact_api_and_complete_static_data() -> None
     assert 'len(funds) == meta["fund_count"]' in source
     assert 'codes == sorted(codes)' in source
     assert 'len(codes) == len(set(codes))' in source
-    assert 'if (( 10#$expected_major >= 8 )); then' in source
-    assert '.database.persistence != "ephemeral"' in source
-    assert '.database.durable == true' in source
-    assert '.database.persistence == "ephemeral" and .database.durable == false' in source
+    assert "valuation_age_days = (beijing_today - valuation_date).days" in source
+    assert "assert valuation_age_days >= 0" in source
+    assert "Index valuation stale" in source
+    assert ".index_valuation.age_days <= .index_valuation.max_age_days" in source
+    assert ".index_valuation.usable == false" in source
+    assert ".index_valuation.stale == true" in source
+    assert 'python tools/persistence_gate.py --expected-version "$EXPECTED_VERSION" <<<"$health"' in source
     assert '.build_sha == $sha' in source
     assert 'git diff --quiet "$worker_deployment_sha" "$EXPECTED_SHA" -- worker' in source
     assert '[[ "$worker_source_matches" == "true" ]]' in source
     assert '.runtime.last_cron_build_sha == $sha' in source
     assert 'Worker natural schedule: NOT_RUN' in source
     assert '待下一个自然窗口验证' in source
+    assert '.kind == "intraday_estimate"' in source
+    assert '.kind == "qdii_next_nav_estimate"' in source
+    assert '.kind == "holdings_model"' in source
+    assert '.kind == "official_nav"' in source
+    assert '.estimate_nav == null' in source
+    assert '.estimate_change == null' in source
+    assert '(.nav_date | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$"))' in source
+    assert '.value_date == .nav_date' in source
+    assert '.source_time == .nav_date' in source
+    assert '.kind == "unavailable"' in source
+    assert '.value_nav == null' in source
+    assert '.target_nav_date == null' in source
+    assert 'and (.est_nav | type) == "number"' not in source
+    assert 'and (.est_change | type) == "number"' not in source
+
+
+def test_post_deploy_smoke_runs_v8_persistence_gate_against_configured_api() -> None:
+    source = workflow("post-deploy-smoke.yml")
+
+    required_target = 'test -n "${FUND_API_BASE:-}"'
+    normalized_target = 'api="${FUND_API_BASE%/}"'
+    health_request = 'health=$(curl --fail --silent --show-error "$api/api/health" || true)'
+    persistence_gate = (
+        'python tools/persistence_gate.py --expected-version '
+        '"$EXPECTED_VERSION" <<<"$health"'
+    )
+
+    assert required_target in source
+    assert normalized_target in source
+    assert "api=${FUND_API_BASE:-" not in source
+    assert source.index(required_target) < source.index(normalized_target)
+    assert source.index(normalized_target) < source.index(health_request)
+    assert source.index(health_request) < source.index(persistence_gate)
+
+
+def test_post_deploy_smoke_requires_frontend_worker_and_api_to_share_one_origin() -> None:
+    source = workflow("post-deploy-smoke.yml")
+
+    assert "VITE_API_BASE: ${{ vars.VITE_API_BASE }}" in source
+    assert 'test -n "${VITE_API_BASE:-}"' in source
+    assert '[[ "$frontend_api" == "$api/api" ]]' in source
+    assert "worker_api=$(sed -n" in source
+    assert 'worker/wrangler.toml FUND_API_BASE must equal the deployed API' in source
 
 
 def test_worker_deploy_injects_exact_clean_git_identity() -> None:

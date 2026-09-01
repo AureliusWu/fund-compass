@@ -39,7 +39,7 @@ def _evidence(code: str, *, created_at: datetime = T0):
         "updated_at": "2026-08-25T06:00:00+00:00",
         "decision_context": {
             "status": "fresh",
-            "kind": "estimate",
+            "kind": "intraday_estimate",
             "source": "test",
             "source_time": "2026-08-25T14:29:00+08:00",
             "source_time_precision": "datetime",
@@ -255,7 +255,7 @@ def test_portfolio_outcomes_use_only_common_dates_and_explicit_cash(portfolio_db
         "SELECT COUNT(*) FROM portfolio_outcome_evaluations"
     ).fetchone()[0]
     conn.close()
-    response = main.v8_portfolio_outcomes(10)
+    response = main.v8_private_portfolio_outcomes(10, "private_reader")
     assert response["items"][0]["pending_horizons"] == []
     assert v8_repo.settle_all_portfolio_outcomes(1)["scanned"] == 0
     conn = portfolio_db.get_conn()

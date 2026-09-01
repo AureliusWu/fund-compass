@@ -97,7 +97,8 @@ def _estimate_context(**updates):
     },
 ])
 def test_estimate_context_accepts_each_coherent_kind(context):
-    assert EstimateContext.model_validate(context).kind == context["kind"]
+    expected = "intraday_estimate" if context["kind"] == "estimate" else context["kind"]
+    assert EstimateContext.model_validate(context).kind == expected
 
 
 @pytest.mark.parametrize("context", [
@@ -134,6 +135,16 @@ def test_estimate_context_accepts_each_coherent_kind(context):
             status="latest_official", kind="official_nav", source="eastmoney_official_nav",
             source_time="2026-08-11", source_time_precision="date", is_fallback=True,
             value_date="2026-08-11", base_nav_date="2026-08-08", model_quote_count=5,
+            estimate_change=None, estimate_nav=None,
+            fallback_reason="estimate_missing",
+            diagnostics={"primary_reason": "estimate_missing", "source_time_precision": "date"},
+        ),
+    },
+    {
+        **_estimate_context(
+            status="latest_official", kind="official_nav", source="eastmoney_official_nav",
+            source_time="2026-08-10", source_time_precision="date", is_fallback=True,
+            value_date="2026-08-11", base_nav_date="2026-08-08",
             estimate_change=None, estimate_nav=None,
             fallback_reason="estimate_missing",
             diagnostics={"primary_reason": "estimate_missing", "source_time_precision": "date"},

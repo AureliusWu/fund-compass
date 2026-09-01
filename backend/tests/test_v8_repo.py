@@ -1,4 +1,6 @@
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from threading import Barrier, Event, Lock
 
 import pytest
 
@@ -56,6 +58,42 @@ def evidence(*, valuation=20, score=82, created_at=T0, target_nav_date=None):
     )
 
 
+def concurrent_saves(monkeypatch, *, table, save):
+    """Widen the read-before-insert window without swallowing either result."""
+    original_existing_model = v8_repo._existing_model
+    start = Barrier(2)
+    both_read_missing = Event()
+    readers_lock = Lock()
+    missing_readers = 0
+
+    def delayed_existing_model(conn, candidate_table, id_column, identifier, model_type):
+        nonlocal missing_readers
+        result = original_existing_model(
+            conn, candidate_table, id_column, identifier, model_type,
+        )
+        if candidate_table == table and result is None:
+            with readers_lock:
+                missing_readers += 1
+                if missing_readers == 2:
+                    both_read_missing.set()
+            # With BEGIN IMMEDIATE the second writer waits before this read, so
+            # only the first caller reaches this bounded wait. With deferred
+            # BEGIN both callers read the gap and deterministically expose the
+            # lock-upgrade race.
+            both_read_missing.wait(timeout=2)
+        return result
+
+    monkeypatch.setattr(v8_repo, "_existing_model", delayed_existing_model)
+
+    def worker():
+        start.wait(timeout=5)
+        return save()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(worker) for _ in range(2)]
+        return [future.result(timeout=10) for future in futures]
+
+
 def persist_decision(*, snapshot=None, held=False, current=None, target=None, created_at=T0):
     snapshot = v8_repo.save_evidence(snapshot or evidence(created_at=created_at))
     policy = v8_repo.ensure_default_policy(created_at)
@@ -93,6 +131,55 @@ def test_snapshot_id_payload_conflict_fails_closed(v8_db):
 
     with pytest.raises(v8_repo.SnapshotConflictError, match="deterministic id"):
         v8_repo.save_evidence(forged)
+
+
+def test_holding_idempotent_save_serializes_concurrent_claims(v8_db, monkeypatch):
+    holding = build_holding_version(
+        "510300", is_held=True, current_weight=15, target_weight=20,
+        source="concurrency-test", created_at=T0,
+    )
+
+    results = concurrent_saves(
+        monkeypatch,
+        table="holding_versions",
+        save=lambda: v8_repo.save_holding(holding),
+    )
+
+    assert [result.holding_version for result in results] == [
+        holding.holding_version,
+        holding.holding_version,
+    ]
+    with v8_db.get_conn() as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM holding_versions WHERE holding_version=?",
+            (holding.holding_version,),
+        ).fetchone()[0] == 1
+
+
+def test_decision_idempotent_save_serializes_concurrent_claims(v8_db, monkeypatch):
+    snapshot = v8_repo.save_evidence(evidence())
+    policy = v8_repo.ensure_default_policy(T0)
+    holding = v8_repo.save_holding(build_holding_version(
+        "510300", is_held=False, current_weight=None, target_weight=None,
+        source="concurrency-test", created_at=T0,
+    ))
+    decision = build_decision_snapshot(snapshot, holding, policy, created_at=T0)
+
+    results = concurrent_saves(
+        monkeypatch,
+        table="decision_snapshots",
+        save=lambda: v8_repo.save_decision(decision),
+    )
+
+    assert [result.decision_id for result in results] == [
+        decision.decision_id,
+        decision.decision_id,
+    ]
+    with v8_db.get_conn() as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM decision_snapshots WHERE decision_id=?",
+            (decision.decision_id,),
+        ).fetchone()[0] == 1
 
 
 def test_decision_diff_uses_persisted_structured_snapshots(v8_db):

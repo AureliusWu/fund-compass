@@ -187,7 +187,7 @@ def test_resolved_estimate_rejects_null_blank_and_ambiguous_rows(monkeypatch):
             }]}
 
     monkeypatch.setattr(em.requests, "get", lambda *args, **kwargs: Response())
-    with pytest.raises(ValueError, match="数值无效"):
+    with pytest.raises(ValueError, match="无效"):
         em.fetch_resolved_estimate("000001")
 
 

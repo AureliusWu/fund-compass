@@ -5,14 +5,14 @@
   <link rel="icon" type="image/png" href="/favicon.png" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <!-- GitHub Pages cannot set response headers. Keep scripts and PWA workers
+       same-origin; connect-src remains HTTPS-wide for the user-configured LLM provider. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https: ws://localhost:* ws://127.0.0.1:*; worker-src 'self' blob:; child-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src 'none'" />
   <meta name="theme-color" content="#4C7E67" />
   <meta name="description" content="司南基金 · 有东方气质的专业基金投研系统" />
   <!-- DNS 预解析 -->
-  <link rel="dns-prefetch" href="https://fund-compass-api.onrender.com" />
   <link rel="preconnect" href="https://sinan-estimate-push.ligugu69.workers.dev" crossorigin />
-  <link rel="preconnect" href="https://qt.gtimg.cn" crossorigin />
   <link rel="dns-prefetch" href="https://push2.eastmoney.com" />
-  <link rel="dns-prefetch" href="https://fundf10.eastmoney.com" />
   <title>司南基金</title>
 </head>
 <body>

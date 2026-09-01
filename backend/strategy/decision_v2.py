@@ -215,7 +215,11 @@ def _evidence_strength(
         value = min(value, 55)
     if estimate_status in {"stale", "unavailable"}:
         value = min(value, 30)
-    return round(value, 2)
+    # Keep the pre-validation identity payload type-identical to the persisted
+    # EvidenceSnapshot.  A cap such as ``min(value, 30)`` can otherwise leave
+    # an ``int`` here while Pydantic normalizes the field to ``float``, causing
+    # the deterministic evidence ID to reject its own immutable payload.
+    return float(round(value, 2))
 
 
 def _evidence_nodes(
@@ -422,7 +426,9 @@ def build_evidence_snapshot(
 
     accuracy = model_evidence if model_accuracy_matches else context.get("accuracy") or {}
     estimate_coverage = _bounded(
-        _first_present(context.get("model_coverage"), context.get("estimate_coverage")), 0, 100,
+        _first_present(
+            context.get("coverage"), context.get("model_coverage"), context.get("estimate_coverage"),
+        ), 0, 100,
     )
     estimate_model_version = context.get("model_version") or context.get("estimate_model_version")
     if model_accuracy_matches:
@@ -540,7 +546,9 @@ def build_evidence_snapshot(
         "timing_coverage": timing_coverage,
         "estimate": _number(
             context.get("estimate_change")
-            if context.get("kind") in {"estimate", "holdings_model"}
+            if context.get("kind") in {
+                "intraday_estimate", "qdii_next_nav_estimate", "holdings_model",
+            }
             else None,
         ),
         "estimate_status": estimate_status,

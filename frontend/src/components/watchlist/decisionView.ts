@@ -2,7 +2,7 @@ import type { V8Action, V8DecisionDiff, V8DecisionResult } from '@/api/client'
 import { V8_STRONG_ACTION_CONFIDENCE_GATE } from '@/utils/v8Decision'
 import { isOverseasLike, type Estimate } from '@/utils/estimate'
 
-export type WatchDecisionLoadKind = 'idle' | 'loading' | 'ready' | 'missing' | 'error'
+export type WatchDecisionLoadKind = 'idle' | 'loading' | 'ready' | 'missing' | 'error' | 'redacted'
 export type WatchDecisionFilter = 'all' | 'action' | 'buy' | 'sell' | 'abnormal' | 'rise' | 'fall'
 export type WatchDecisionSort = 'action' | 'confidence' | 'change'
 
@@ -173,6 +173,7 @@ function diffText(source: WatchDecisionSource): { label: string; detail: string 
     return { label: '变化载入中', detail: null }
   }
   if (source.diffLoad.kind === 'missing') return { label: '首次记录', detail: null }
+  if (source.diffLoad.kind === 'redacted') return { label: '变化未公开', detail: '私人历史不对匿名请求公开' }
   if (source.diffLoad.kind === 'error' || !source.diff) {
     return { label: '变化不可用', detail: source.diffLoad.message || '无法核对历史快照' }
   }
@@ -207,7 +208,8 @@ export function buildWatchDecisionRow(source: WatchDecisionSource): WatchDecisio
   const diff = diffText(source)
   const diffUnavailable = diff.label === '变化不可用'
   const loadMessage = source.load.message || (
-    source.load.kind === 'missing' ? '尚未生成 V8 快照' :
+    source.load.kind === 'redacted' ? '私人数据未公开；不表示快照不存在' :
+      source.load.kind === 'missing' ? '尚未生成 V8 快照' :
       source.load.kind === 'error' ? 'V8 快照不可用' :
         source.load.kind === 'loading' || source.load.kind === 'idle' ? '正在载入 V8 快照' : ''
   )
@@ -220,7 +222,7 @@ export function buildWatchDecisionRow(source: WatchDecisionSource): WatchDecisio
   return {
     ...source,
     action,
-    actionLabel: unavailable ? '等待快照' : gated ? '暂停动作' : snapshotActionLabel || '等待数据',
+    actionLabel: source.load.kind === 'redacted' ? '未公开' : unavailable ? '等待快照' : gated ? '暂停动作' : snapshotActionLabel || '等待数据',
     snapshotActionLabel,
     actionTone: actionTone(action, unavailable || gated),
     actionable: !unavailable && !gated && action != null && !['watch', 'hold'].includes(action),
@@ -228,7 +230,7 @@ export function buildWatchDecisionRow(source: WatchDecisionSource): WatchDecisio
     strength: result ? finitePercent(result.strength) : null,
     confidence: result ? finitePercent(result.confidence) : null,
     dataLabel: unavailable
-      ? source.load.kind === 'missing' ? '无快照' : source.load.kind === 'error' ? '请求失败' : '载入中'
+      ? source.load.kind === 'redacted' ? '私人数据' : source.load.kind === 'missing' ? '无快照' : source.load.kind === 'error' ? '请求失败' : '载入中'
       : hard.length ? '数据异常' : diffUnavailable ? '变化异常' : soft.length ? '部分降级' : '数据正常',
     dataDetail: unavailable
       ? loadMessage

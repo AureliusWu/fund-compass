@@ -71,6 +71,7 @@ describe('HomeActionCenter decision semantics', () => {
       dataIssues: 3,
       missing: 1,
       failed: 1,
+      redacted: 0,
     })
     expect(homeDisplayAction(decisions[3])).toBe('观察')
     expect(homeDisplayAction(decisions[4])).toBe('暂停动作')
@@ -94,6 +95,12 @@ describe('HomeActionCenter decision semantics', () => {
     expect(ordered.map((item) => item.code)).toEqual(['000001', '000002', '000004', '000003'])
   })
 
+  it('does not count redacted private snapshots as missing records or failed requests', () => {
+    expect(summarizeHomeActions([], [{ code: '000001', name: null, kind: 'redacted' }])).toMatchObject({
+      missing: 0, failed: 0, redacted: 1,
+    })
+  })
+
   it('renders missing values as an em dash while preserving a real zero', () => {
     expect(formatNullableNumber(null)).toBe('—')
     expect(formatNullableNumber(Number.NaN)).toBe('—')
@@ -113,7 +120,8 @@ describe('HomeActionCenter page contract', () => {
     expect(home).toContain('fetchTaskStatuses(force)')
 
     expect(component).toContain('尚无 V8 决策（404）')
-    expect(component).toContain('部分结果未生成')
+    expect(component).toContain('部分结果不可读取')
+    expect(component).toContain('私人数据未公开')
     expect(component).toContain('变化原因')
     expect(component).toContain('什么情况下会改变')
     expect(component).toContain('数据边界')

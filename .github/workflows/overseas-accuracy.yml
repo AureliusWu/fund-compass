@@ -38,6 +38,7 @@ jobs:
           PYTHONUNBUFFERED: '1'
         shell: bash
         run: |
+          test -n "${FUND_API_BASE:-}" || { echo "FUND_API_BASE secret is required" >&2; exit 1; }
           export GITHUB_RUN_STARTED_AT=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
           python tools/overseas_accuracy.py
       - name: 校准海外 Challenger

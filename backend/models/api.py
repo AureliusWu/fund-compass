@@ -30,7 +30,10 @@ class EstimateContext(BaseModel):
         "latest_official", "unavailable",
     ]
     source: str = Field(min_length=1, max_length=80)
-    kind: Literal["estimate", "holdings_model", "official_nav", "unavailable"]
+    kind: Literal[
+        "intraday_estimate", "qdii_next_nav_estimate",
+        "holdings_model", "official_nav", "unavailable",
+    ]
     source_time: str | None = Field(default=None, max_length=64)
     fetched_at: str | None = Field(default=None, max_length=64)
     calculated_at: str | None = Field(default=None, max_length=64)
@@ -40,10 +43,14 @@ class EstimateContext(BaseModel):
     market: Literal["cn", "hk", "overseas", "gold", "unknown"] = "unknown"
     estimate_change: float | None = Field(default=None, ge=-100, le=1000)
     estimate_nav: float | None = Field(default=None, gt=0)
+    estimate_time: str | None = Field(default=None, max_length=64)
     base_nav: float | None = Field(default=None, gt=0)
     base_nav_date: str | None = Field(default=None, max_length=32)
     value_nav: float | None = Field(default=None, gt=0)
+    value_change: float | None = Field(default=None, ge=-100, le=1000)
     value_date: str | None = Field(default=None, max_length=32)
+    nav_date: str | None = Field(default=None, max_length=32)
+    coverage: float | None = Field(default=None, ge=0, le=100)
     model_coverage: float | None = Field(default=None, ge=0, le=100)
     model_quote_count: int | None = Field(default=None, ge=0, le=100)
     model_report_date: str | None = Field(default=None, max_length=32)
@@ -52,6 +59,7 @@ class EstimateContext(BaseModel):
     model_rejected_count: int | None = Field(default=None, ge=0, le=100)
     target_nav_date: str | None = Field(default=None, max_length=32)
     market_time: str | None = Field(default=None, max_length=64)
+    estimate_model_version: str | None = Field(default=None, max_length=120)
     model_version: str | None = Field(default=None, max_length=120)
     sample_count: int | None = Field(default=None, ge=0, le=1_000_000)
     mae: float | None = Field(default=None, ge=0, le=1000)
@@ -59,6 +67,130 @@ class EstimateContext(BaseModel):
     direction_accuracy: float | None = Field(default=None, ge=0, le=100)
     note: str | None = Field(default=None, max_length=500)
     diagnostics: EstimateDiagnostics = Field(default_factory=EstimateDiagnostics)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_deprecated_wire_aliases(cls, raw: Any) -> Any:
+        """Accept documented legacy aliases while emitting one canonical DTO.
+
+        Old clients used ``kind=estimate``/``est_*`` and sometimes
+        ``overseas_model``.  They remain accepted only when they do not
+        contradict the canonical fields.  Model dumps always use the new kind
+        and field names, so new backend code cannot continue depending on an
+        ambiguous alias.
+        """
+        if not isinstance(raw, dict):
+            return raw
+        value = dict(raw)
+        kind_aliases = {
+            "estimate": "intraday_estimate",
+            "intraday": "intraday_estimate",
+            "overseas_model": "qdii_next_nav_estimate",
+        }
+
+        canonical_kind = value.get("kind")
+        legacy_kind = value.pop("est_kind", None)
+        canonical_kind = kind_aliases.get(canonical_kind, canonical_kind)
+        legacy_kind = kind_aliases.get(legacy_kind, legacy_kind)
+        if canonical_kind is None:
+            canonical_kind = legacy_kind
+        elif (
+            legacy_kind is not None
+            and legacy_kind != canonical_kind
+            and not (
+                canonical_kind == "unavailable"
+                and legacy_kind == "intraday_estimate"
+            )
+        ):
+            raise ValueError("kind 与 deprecated est_kind 冲突")
+        if canonical_kind is not None:
+            value["kind"] = canonical_kind
+
+        def reconcile(canonical: str, aliases: tuple[str, ...]) -> None:
+            present = canonical in value
+            chosen = value.get(canonical)
+            for alias in aliases:
+                if alias not in value:
+                    continue
+                alias_value = value.pop(alias)
+                if not present:
+                    chosen = alias_value
+                    present = True
+                elif chosen is not None and alias_value is not None and chosen != alias_value:
+                    raise ValueError(f"{canonical} 与 deprecated {alias} 冲突")
+            if present:
+                value[canonical] = chosen
+
+        if canonical_kind == "official_nav":
+            reconcile("value_nav", ("est_nav",))
+            reconcile("value_change", ("est_change",))
+            reconcile("nav_date", ("value_date",))
+            if value.get("estimate_nav") is not None or value.get("estimate_change") is not None:
+                raise ValueError("official_nav 不接受 estimate_* 字段")
+            # Keep the former unambiguous internal date field synchronized for
+            # strategy code during the compatibility window.
+            if value.get("nav_date") is not None:
+                value["value_date"] = value["nav_date"]
+            value.pop("est_time", None)
+        else:
+            # ``nav_date`` was historically the base NAV date on estimate
+            # rows.  The canonical contract uses ``base_nav_date`` instead;
+            # consume and discard this ambiguous alias so it cannot leak back
+            # out of the normalized DTO.
+            value.pop("nav_date", None)
+            reconcile("estimate_nav", ("est_nav",))
+            reconcile("estimate_change", ("est_change",))
+            reconcile("estimate_time", ("est_time",))
+            if value.get("estimate_nav") is None and value.get("value_nav") is not None:
+                value["estimate_nav"] = value["value_nav"]
+            elif value.get("value_nav") is None and value.get("estimate_nav") is not None:
+                value["value_nav"] = value["estimate_nav"]
+            elif (
+                value.get("estimate_nav") is not None
+                and value.get("value_nav") is not None
+                and value["estimate_nav"] != value["value_nav"]
+            ):
+                raise ValueError("estimate_nav 与 value_nav 冲突")
+            if value.get("estimate_time") is None and value.get("source_time") is not None:
+                value["estimate_time"] = value["source_time"]
+            elif value.get("source_time") is None and value.get("estimate_time") is not None:
+                value["source_time"] = value["estimate_time"]
+            elif (
+                value.get("estimate_time") is not None
+                and value.get("source_time") is not None
+                and value["estimate_time"] != value["source_time"]
+            ):
+                raise ValueError("estimate_time 与 source_time 冲突")
+
+        if canonical_kind == "qdii_next_nav_estimate":
+            reconcile("estimate_model_version", ("model_version",))
+            reconcile("coverage", ("model_coverage",))
+            if value.get("estimate_model_version") is not None:
+                value["model_version"] = value["estimate_model_version"]
+            if value.get("coverage") is not None:
+                value["model_coverage"] = value["coverage"]
+            if value.get("target_nav_date") is not None:
+                if value.get("value_date") not in (None, value["target_nav_date"]):
+                    raise ValueError("QDII value_date 与 target_nav_date 冲突")
+                value["value_date"] = value["target_nav_date"]
+            uncertainty = value.pop("uncertainty", None)
+            if uncertainty is not None:
+                if not isinstance(uncertainty, dict):
+                    raise ValueError("QDII uncertainty 必须为对象")
+                for field in ("mae", "error_p80", "direction_accuracy"):
+                    if field not in uncertainty:
+                        continue
+                    if (
+                        value.get(field) is not None
+                        and uncertainty[field] is not None
+                        and value[field] != uncertainty[field]
+                    ):
+                        raise ValueError(f"{field} 与 uncertainty.{field} 冲突")
+                    if value.get(field) is None:
+                        value[field] = uncertainty[field]
+        else:
+            value.pop("uncertainty", None)
+        return value
 
     @model_validator(mode="after")
     def validate_kind_contract(self) -> "EstimateContext":
@@ -101,6 +233,14 @@ class EstimateContext(BaseModel):
                 raise ValueError("target_nav_date 必须晚于 base_nav_date")
         if self.market_time is not None and not valid_datetime(self.market_time):
             raise ValueError("market_time 必须为有效日期时间")
+        if self.estimate_time is not None:
+            valid_estimate_time = (
+                valid_date(self.estimate_time)
+                if self.source_time_precision == "date"
+                else valid_datetime(self.estimate_time)
+            )
+            if not valid_estimate_time:
+                raise ValueError("estimate_time 与声明的时间精度不一致")
         if self.kind in {"official_nav", "unavailable"} and self.target_nav_date is not None:
             raise ValueError("正式净值或不可用证据不得声明下一目标净值日")
 
@@ -148,15 +288,17 @@ class EstimateContext(BaseModel):
                 raise ValueError("持仓模型必须携带一致的降级原因")
             return self
 
-        if self.kind == "estimate":
+        if self.kind == "intraday_estimate":
             valid_estimate_time = (
                 self.status == "fresh" and self.source_time_precision == "datetime"
             ) or (
                 self.status == "delayed" and self.source_time_precision in {"date", "datetime"}
+            ) or (
+                self.status == "stale" and self.source_time_precision in {"date", "datetime"}
             )
             if not valid_estimate_time or self.is_fallback:
                 raise ValueError("主估值状态、时间精度或 fallback 标记不一致")
-            required = ("source_time", *valuation_fields, "base_nav_date", "value_date")
+            required = ("source_time", "estimate_time", *valuation_fields, "base_nav_date", "value_date")
             if any(missing(field) for field in required):
                 raise ValueError("主估值证据字段不完整")
             if not valuation_numbers_consistent():
@@ -167,20 +309,58 @@ class EstimateContext(BaseModel):
                 raise ValueError("主估值不得携带降级原因")
             if any(getattr(self, field) is not None for field in model_fields):
                 raise ValueError("主估值不得携带持仓模型字段")
+            if any(getattr(self, field) is not None for field in (
+                "target_nav_date", "estimate_model_version", "coverage", "value_change", "nav_date",
+            )):
+                raise ValueError("盘中估值不得携带正式净值或 QDII 下一净值字段")
+            return self
+
+        if self.kind == "qdii_next_nav_estimate":
+            if self.status not in {"modeled", "degraded", "stale"}:
+                raise ValueError("QDII 下一净值估算状态无效")
+            if self.market != "overseas" or self.source_time_precision != "datetime":
+                raise ValueError("QDII 下一净值估算必须为 overseas/datetime")
+            required = (
+                "source_time", "estimate_time", *valuation_fields, "base_nav_date",
+                "value_date", "target_nav_date", "estimate_model_version",
+                "sample_count", "coverage",
+            )
+            if any(missing(field) for field in required):
+                raise ValueError("QDII 下一净值估算字段不完整")
+            if not valuation_numbers_consistent():
+                raise ValueError("QDII 下一净值估算数值不一致")
+            if self.value_date != self.target_nav_date:
+                raise ValueError("QDII 估算值必须绑定 target_nav_date")
+            if self.error_p80 is None and self.mae is None:
+                raise ValueError("QDII 估算必须声明误差或不确定性")
+            if self.value_change is not None or self.nav_date is not None:
+                raise ValueError("QDII 下一净值估算不得伪装为正式净值")
             return self
 
         if self.kind == "official_nav":
             if self.status != "latest_official" or self.source_time_precision != "date" or not self.is_fallback:
                 raise ValueError("正式净值必须为 latest_official/date/fallback")
-            required = ("source_time", "value_nav", "value_date")
+            required = ("source_time", "value_nav", "value_date", "nav_date")
             if any(missing(field) for field in required):
                 raise ValueError("正式净值证据字段不完整")
             if self.estimate_change is not None or self.estimate_nav is not None:
                 raise ValueError("正式净值不得伪装为盘中估值")
-            if not valid_date(self.base_nav_date) or not valid_date(self.value_date):
+            if not valid_date(self.value_date) or self.nav_date != self.value_date:
                 raise ValueError("正式净值日期字段格式无效")
+            if self.source_time != self.nav_date:
+                raise ValueError("正式净值 source_time 必须等于 nav_date")
             if (self.base_nav is None) != (self.base_nav_date is None):
                 raise ValueError("正式净值的可选基准净值与日期必须成对出现")
+            if self.base_nav_date is not None and not valid_date(self.base_nav_date):
+                raise ValueError("正式净值基准日期格式无效")
+            if self.base_nav_date is not None and self.base_nav_date >= self.nav_date:
+                raise ValueError("正式净值基准日期必须早于 nav_date")
+            if self.value_change is not None:
+                if self.base_nav is None:
+                    raise ValueError("正式净值变化需要成对的前一净值")
+                calculated = (self.value_nav / self.base_nav - 1) * 100
+                if abs(calculated - self.value_change) > 0.05 + 1e-9:
+                    raise ValueError("正式净值变化与净值不一致")
             if not self.fallback_reason or self.diagnostics.primary_reason != self.fallback_reason:
                 raise ValueError("正式净值必须携带一致的降级原因")
             if any(getattr(self, field) is not None for field in model_fields):
@@ -189,7 +369,10 @@ class EstimateContext(BaseModel):
 
         if self.status != "unavailable" or not self.is_fallback:
             raise ValueError("不可用估值必须为 unavailable/fallback")
-        numeric_fields = (*valuation_fields, "model_coverage", "model_quote_count", "model_rejected_count")
+        numeric_fields = (
+            *valuation_fields, "value_change", "coverage", "model_coverage",
+            "model_quote_count", "model_rejected_count", "sample_count", "mae", "error_p80",
+        )
         if any(getattr(self, field) is not None for field in numeric_fields):
             raise ValueError("不可用估值的数值字段必须为空")
         if not self.fallback_reason or self.diagnostics.primary_reason != self.fallback_reason:

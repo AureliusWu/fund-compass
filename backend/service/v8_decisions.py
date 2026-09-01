@@ -34,6 +34,7 @@ def _now() -> datetime:
 
 MAX_FUTURE_SKEW = timedelta(minutes=5)
 MAX_LIVE_QUOTE_AGE = timedelta(minutes=90)
+MAX_OFFICIAL_NAV_AGE = timedelta(days=7)
 BEIJING = timezone(timedelta(hours=8))
 
 
@@ -87,7 +88,7 @@ def _validated_estimate_context(detail: dict, context: dict | None, stamp: datet
     if kind == "unavailable" or raw.get("status") == "unavailable":
         return raw or _unavailable_context({}, "estimate_unavailable")
 
-    if kind in {"estimate", "holdings_model", "official_nav"}:
+    if kind in {"intraday_estimate", "qdii_next_nav_estimate", "holdings_model", "official_nav"}:
         base_nav = raw.get("value_nav") if kind == "official_nav" else raw.get("base_nav")
         detail_nav = detail.get("latest_nav")
         base_date = _parse_date(raw.get("value_date") if kind == "official_nav" else raw.get("base_nav_date"))
@@ -114,12 +115,19 @@ def _validated_estimate_context(detail: dict, context: dict | None, stamp: datet
         source_time = _parse_datetime(raw.get("source_time"))
         if source_time is None or source_time > stamp + MAX_FUTURE_SKEW:
             return _unavailable_context(raw, "source_time_invalid")
-        if kind in {"estimate", "holdings_model"} and stamp - source_time > MAX_LIVE_QUOTE_AGE:
+        if kind in {"intraday_estimate", "qdii_next_nav_estimate", "holdings_model"} and stamp - source_time > MAX_LIVE_QUOTE_AGE:
             return _unavailable_context(raw, "source_time_stale")
     elif precision == "date" and raw.get("source_time") is not None:
         source_date = _parse_date(raw.get("source_time"))
-        if source_date is None or source_date > stamp.astimezone(BEIJING).date():
+        beijing_date = stamp.astimezone(BEIJING).date()
+        if source_date is None or source_date > beijing_date:
             return _unavailable_context(raw, "source_date_invalid")
+        if kind == "official_nav":
+            detail_date = _parse_date(detail.get("latest_nav_date"))
+            if source_date != detail_date:
+                return _unavailable_context(raw, "source_date_mismatch")
+            if beijing_date - source_date > MAX_OFFICIAL_NAV_AGE:
+                return _unavailable_context(raw, "official_nav_stale")
 
     for field in (
         "fetched_at", "calculated_at", "market_time",
@@ -130,6 +138,8 @@ def _validated_estimate_context(detail: dict, context: dict | None, stamp: datet
         value = _parse_datetime(raw.get(field))
         if value is None or value > stamp + MAX_FUTURE_SKEW:
             return _unavailable_context(raw, f"{field}_invalid")
+    if raw.get("status") == "stale":
+        return _unavailable_context(raw, "source_reported_stale")
     return raw
 
 

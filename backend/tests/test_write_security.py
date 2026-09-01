@@ -1,5 +1,6 @@
 import pytest
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 
 import main
 from models.api import PortfolioDecisionRequest
@@ -34,18 +35,35 @@ def test_admin_and_worker_permissions():
 
 
 def test_portfolio_request_id_is_idempotent(monkeypatch):
-    decisions = [{"code": "510300", "action": "持有", "summary": "维持计划"}]
-    monkeypatch.setattr(main, "decide_portfolio", lambda items, value: {
-        "decisions": decisions, "errors": [], "total": len(items), "allocation": {}, "rebalance": [],
-    })
+    calls = 0
+
+    def decide(items, value):
+        nonlocal calls
+        calls += 1
+        return {
+            "decisions": [{"code": "510300", "action": "持有", "summary": f"首次结果-{calls}"}],
+            "errors": [], "total": len(items), "allocation": {}, "rebalance": [],
+        }
+
+    monkeypatch.setattr(main, "decide_portfolio", decide)
     payload = {"request_id": "2026-07-11-14:30", "items": [{"code": "510300"}]}
     request = PortfolioDecisionRequest(**payload)
     first = main.portfolio_decisions(request, "worker")
     second = main.portfolio_decisions(request, "worker")
     assert first["duplicate"] is False
     assert second["duplicate"] is True
-    assert second["decisions"] == decisions
+    assert second["decisions"] == first["decisions"]
+    assert second["decisions"][0]["summary"] == "首次结果-1"
     assert second["total"] == 1
+    assert calls == 1
+
+    conflicting = PortfolioDecisionRequest(**{
+        "request_id": payload["request_id"],
+        "items": [{"code": "159915"}],
+    })
+    with pytest.raises(HTTPException) as error:
+        main.portfolio_decisions(conflicting, "worker")
+    assert error.value.status_code == 409
 
 
 def test_portfolio_endpoint_preserves_validated_estimate_context(monkeypatch):
@@ -129,7 +147,7 @@ def test_failed_persistence_releases_claim_and_retry_completes_missing_write(mon
     from database import db
     conn = db.get_conn()
     try:
-        assert conn.execute("SELECT COUNT(*) FROM idempotency_requests").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM idempotency_responses").fetchone()[0] == 0
         assert conn.execute("SELECT COUNT(*) FROM decision_history").fetchone()[0] == 1
         assert conn.execute("SELECT COUNT(*) FROM portfolio_decision_history").fetchone()[0] == 0
     finally:
@@ -140,16 +158,47 @@ def test_failed_persistence_releases_claim_and_retry_completes_missing_write(mon
     assert attempts == 2
     conn = db.get_conn()
     try:
-        assert conn.execute("SELECT COUNT(*) FROM idempotency_requests").fetchone()[0] == 1
+        row = conn.execute(
+            "SELECT state,response_json FROM idempotency_responses WHERE endpoint=?",
+            ("legacy_portfolio_decisions",),
+        ).fetchone()
+        assert row["state"] == "complete"
+        assert row["response_json"] is not None
         assert conn.execute("SELECT COUNT(*) FROM decision_history").fetchone()[0] == 1
         assert conn.execute("SELECT COUNT(*) FROM portfolio_decision_history").fetchone()[0] == 1
     finally:
         conn.close()
 
 
-def test_public_read_function_stays_unprotected(monkeypatch):
-    monkeypatch.setattr(repo, "list_watchlist", lambda: [])
-    assert main.get_watchlist() == {"items": []}
+def test_public_watchlist_compatibility_route_is_always_redacted(monkeypatch):
+    monkeypatch.setattr(repo, "list_watchlist", lambda: ["510300"])
+    assert main.get_watchlist() == {"items": [], "redacted": True}
+
+
+def test_anonymous_fund_force_query_cannot_bypass_repository_ttl(monkeypatch):
+    force_values = []
+
+    def detail(code, *, force=False):
+        force_values.append(force)
+        return {"code": code, "name": "测试基金", "type": "指数型", "nav_history": []}
+
+    monkeypatch.setattr(repo, "get_detail", detail)
+    response = TestClient(main.app).get("/api/fund/510300?force=true")
+
+    assert response.status_code == 200
+    assert response.json()["code"] == "510300"
+    assert force_values == [False]
+
+
+def test_public_fund_error_does_not_echo_upstream_detail(monkeypatch):
+    secret_detail = "private-upstream-url?token=do-not-leak"
+    monkeypatch.setattr(repo, "get_detail", lambda code, *, force=False: (_ for _ in ()).throw(RuntimeError(secret_detail)))
+
+    response = TestClient(main.app).get("/api/fund/510300")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "基金数据暂不可用"}
+    assert secret_detail not in response.text
 
 
 def test_rate_limit_is_bounded(monkeypatch):

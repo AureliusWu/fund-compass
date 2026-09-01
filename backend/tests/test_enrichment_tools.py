@@ -430,6 +430,42 @@ def test_index_fetch_rejects_pe_pb_source_date_mismatch(monkeypatch):
     assert index_valuation._fetch_one_index(object(), "沪深300", ["沪深300"], False) is None
 
 
+def test_index_fetch_retries_transient_akshare_parse_failure(monkeypatch):
+    attempts = {"pe": 0}
+
+    def transient_series(ak, fn_name, sym, prefer, dump_cols):
+        if fn_name == "stock_index_pe_lg":
+            attempts["pe"] += 1
+        if attempts["pe"] == 1:
+            return None, None, None, None
+        if fn_name == "stock_index_pe_lg":
+            return 12.0, 50.0, "2026-08-31", "滚动市盈率"
+        return 1.2, 40.0, "2026-08-31", "市净率"
+
+    monkeypatch.setattr(index_valuation, "_series_from", transient_series)
+
+    result = index_valuation._fetch_one_index(object(), "沪深300", ["沪深300"], False)
+
+    assert result is not None
+    assert result["pe"] == 12.0
+    assert result["pb"] == 1.2
+    assert result["date"] == "2026-08-31"
+    assert attempts["pe"] == 2
+
+
+def test_index_fetch_still_fails_closed_after_bounded_retries(monkeypatch):
+    calls = []
+
+    def unavailable_series(ak, fn_name, sym, prefer, dump_cols):
+        calls.append((fn_name, sym))
+        return None, None, None, None
+
+    monkeypatch.setattr(index_valuation, "_series_from", unavailable_series)
+
+    assert index_valuation._fetch_one_index(object(), "中证500", ["中证500"], False) is None
+    assert len(calls) == index_valuation.FETCH_ATTEMPTS * 2
+
+
 def test_index_series_sorts_parseable_dates_before_selecting_current_value():
     dates = [f"2026-07-{day:02d}" for day in range(1, 31)] + ["2026-08-01"]
     values = list(range(1, 31)) + [777]

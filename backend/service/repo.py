@@ -213,6 +213,16 @@ def _save_detail(conn, d):
         "INSERT OR REPLACE INTO nav_history(code,date,nav,ac_return) VALUES (?,?,?,?)",
         [(d["code"], h["date"], h["nav"], h.get("ac_return")) for h in hist],
     )
+    # Keep a true rolling window across refreshes. Slicing only the incoming
+    # batch leaves older rows behind forever and can exhaust the same SQLite
+    # volume that stores the private V8 ledger.
+    conn.execute(
+        """DELETE FROM nav_history
+           WHERE code=? AND date NOT IN (
+             SELECT date FROM nav_history WHERE code=? ORDER BY date DESC LIMIT ?
+           )""",
+        (d["code"], d["code"], HIST_KEEP),
+    )
     d["updated_at"] = saved_at
 
 
@@ -375,14 +385,11 @@ def release_request(request_id: str, endpoint: str) -> bool:
         conn.close()
 
 
-def operations_status() -> dict:
+def public_operations_status() -> dict:
+    """Return cache/universe health without querying owner decision tables."""
     conn = get_conn()
     try:
         oldest = conn.execute("SELECT MIN(updated_at) FROM fund_detail").fetchone()[0]
-        latest_decision = conn.execute("SELECT MAX(created_at) FROM decision_history").fetchone()[0]
-        latest_settlement = conn.execute(
-            "SELECT MAX(n.date) FROM nav_history n JOIN decision_history d ON n.code=d.code AND n.date>d.decision_date"
-        ).fetchone()[0]
     finally:
         conn.close()
     meta = None
@@ -403,8 +410,28 @@ def operations_status() -> dict:
             "hit_rate": round(_detail_cache_hits / _detail_requests * 100, 1) if _detail_requests else None,
             "oldest_age_hours": oldest_age,
         },
+        "latest_decision_write": None,
+        "latest_result_settlement": None,
+        "redacted": True,
+    }
+
+
+def operations_status() -> dict:
+    """Lossless owner operations status for the authenticated private API."""
+    public = public_operations_status()
+    conn = get_conn()
+    try:
+        latest_decision = conn.execute("SELECT MAX(created_at) FROM decision_history").fetchone()[0]
+        latest_settlement = conn.execute(
+            "SELECT MAX(n.date) FROM nav_history n JOIN decision_history d ON n.code=d.code AND n.date>d.decision_date"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    return {
+        **public,
         "latest_decision_write": latest_decision,
         "latest_result_settlement": latest_settlement,
+        "redacted": False,
     }
 
 

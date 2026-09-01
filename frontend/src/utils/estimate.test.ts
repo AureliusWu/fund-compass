@@ -1,20 +1,96 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
 
 import {
   applyOverseasModelEstimate,
   fetchEstimate,
   fetchEstimates,
   holdingsToOverseasModel,
+  estimateDataFreshness,
   latestNavMove,
   loadCachedEstimates,
   normalizeEstimate,
+  parseEstimateWireRow,
   preferredDailyMove,
   saveCachedEstimates,
 } from './estimate'
 
+const wireFixture = JSON.parse(readFileSync(
+  new URL('../../../contracts/estimate-wire-v8.json', import.meta.url),
+  'utf8',
+)) as {
+  cases: Array<{
+    id: string
+    wire: Record<string, unknown>
+    expected: Record<string, unknown> & { accepted: boolean }
+  }>
+}
+
 afterEach(() => vi.unstubAllGlobals())
 
 describe('estimate proxy', () => {
+  it('normalizes the shared cross-runtime wire fixtures without mixing valuation axes', () => {
+    for (const fixture of wireFixture.cases) {
+      const parsed = parseEstimateWireRow(fixture.wire, {
+        status: String(fixture.wire.status || ''),
+        source: String(fixture.wire.source || ''),
+        fallback: null,
+        fetchedAt: null,
+      })
+      if (!fixture.expected.accepted) {
+        expect(parsed, fixture.id).toBeNull()
+        continue
+      }
+      expect(parsed, fixture.id).not.toBeNull()
+      const estimate = normalizeEstimate(parsed!)
+      expect(estimate.contractKind, fixture.id).toBe(fixture.expected.kind)
+      expect(estimate.legacyEstimateAliasUsed, fixture.id).toBe(fixture.expected.legacy_alias_used)
+
+      if (fixture.id === 'official_nav_canonical') {
+        expect(estimate).toMatchObject({
+          kind: 'official_nav', valueNav: 1.02, valueChange: 2,
+          navDate: '2026-08-28', estNav: null, estChange: null,
+        })
+      } else if (fixture.id === 'official_nav_change_unknown') {
+        expect(estimate).toMatchObject({
+          kind: 'official_nav', valueNav: 1.02, valueChange: null,
+          navDate: '2026-08-28', estNav: null, estChange: null,
+        })
+      } else if (fixture.id === 'intraday_estimate_canonical') {
+        expect(estimate).toMatchObject({
+          kind: 'intraday', valueNav: 1.01, valueChange: null,
+          estNav: 1.01, estChange: 1, targetNavDate: null,
+        })
+      } else if (fixture.id === 'qdii_next_nav_estimate_canonical') {
+        expect(estimate).toMatchObject({
+          kind: 'overseas_model', contractKind: 'qdii_next_nav_estimate', isRealtime: false,
+          targetNavDate: '2026-08-31', modelVersion: 'qdii-fixture-v1',
+          sampleCount: 28, modelCoverage: 78.5, errorP80: 1.3,
+        })
+      } else if (fixture.id === 'stale_intraday_estimate') {
+        expect(estimateDataFreshness(estimate, Date.parse('2026-08-28T10:00:00+08:00'))).toBe('expired')
+      } else if (fixture.id === 'unavailable_nulls') {
+        expect(estimate).toMatchObject({
+          kind: 'unavailable', valueNav: null, valueChange: null, estNav: null, estChange: null,
+        })
+      }
+    }
+  })
+
+  it('fails closed when a canonical QDII estimate omits required uncertainty evidence', () => {
+    const fixture = wireFixture.cases.find((item) => item.id === 'qdii_next_nav_estimate_canonical')!
+    const malformed = structuredClone(fixture.wire)
+    const uncertainty = malformed.uncertainty as Record<string, unknown>
+    delete uncertainty.direction_accuracy
+
+    expect(parseEstimateWireRow(malformed, {
+      status: String(malformed.status || ''),
+      source: String(malformed.source || ''),
+      fallback: null,
+      fetchedAt: null,
+    })).toBeNull()
+  })
+
   it('renders a safe local estimate snapshot before the network refresh', () => {
     const values = new Map<string, string>()
     const storage = {
@@ -74,7 +150,9 @@ describe('estimate proxy', () => {
     expect(estimate).toMatchObject({
       kind: 'official_nav',
       label: '最近净值',
-      estChange: 2,
+      valueChange: 2,
+      estNav: null,
+      estChange: null,
       estTime: '2026-07-24',
       isRealtime: false,
     })
@@ -301,6 +379,21 @@ describe('normalizeEstimate', () => {
     expect(e.sourceNote).toContain('未提供精确分钟')
   })
 
+  it('does not publish a QDII next-NAV model without an explicitly bound target NAV date', () => {
+    const estimate = normalizeEstimate({
+      fundcode: '012920', name: '易方达全球成长精选混合(QDII)人民币A',
+      dwjz: '5', gszzl: '0.01', gztime: '2026-07-02 04:00',
+    })
+    const modeled = applyOverseasModelEstimate(estimate, {
+      usQQQ: { changePct: -2 }, usSOXX: { changePct: -3 }, sh000300: { changePct: 1 },
+    })
+
+    expect(modeled).toBe(estimate)
+    expect(modeled.kind).toBe('overseas')
+    expect(modeled.contractKind).toBeUndefined()
+    expect(modeled.targetNavDate).toBeNull()
+  })
+
   it('replaces target QDII stale valuation with holdings-through overseas model', () => {
     const e = normalizeEstimate({
       fundcode: '012920',
@@ -308,6 +401,7 @@ describe('normalizeEstimate', () => {
       dwjz: '5',
       gszzl: '0.01',
       gztime: '2026-07-02 04:00',
+      targetNavDate: '2026-07-03',
     })
     const modeled = applyOverseasModelEstimate(e, {
       usTSM: { changePct: -2 },
@@ -324,10 +418,12 @@ describe('normalizeEstimate', () => {
 
     expect(modeled.kind).toBe('overseas_model')
     expect(modeled.label).toBe('海外模型估算')
-    expect(modeled.isRealtime).toBe(true)
+    expect(modeled.isRealtime).toBe(false)
     expect(modeled.modelWeight).toBeCloseTo(51.83)
     expect(modeled.estChange).toBeLessThan(-1)
     expect(modeled.estNav).toBeCloseTo(5 * (1 + modeled.estChange! / 100))
+    expect(modeled.valueDate).toBe('2026-07-03')
+    expect(modeled.estTime).toBe(modeled.generatedAt)
   })
 
   it('uses the calibrated style-factor model for 012920 when factor quotes are available', () => {
@@ -337,6 +433,7 @@ describe('normalizeEstimate', () => {
       dwjz: '5',
       gszzl: '0.01',
       gztime: '2026-07-02 04:00',
+      targetNavDate: '2026-07-03',
     })
     const modeled = applyOverseasModelEstimate(e, {
       usQQQ: { changePct: -2 },
@@ -358,6 +455,7 @@ describe('normalizeEstimate', () => {
       dwjz: '2.4',
       gszzl: '0.01',
       gztime: '2026-07-02 04:00',
+      targetNavDate: '2026-07-03',
     })
     const modeled = applyOverseasModelEstimate(e, {
       usTSM: { changePct: 1 },
@@ -372,7 +470,7 @@ describe('normalizeEstimate', () => {
     })
 
     expect(modeled.kind).toBe('overseas_model')
-    expect(modeled.isRealtime).toBe(true)
+    expect(modeled.isRealtime).toBe(false)
     expect(modeled.modelWeight).toBeCloseTo(64.33)
     expect(modeled.estNav).toBeCloseTo(2.4 * (1 + modeled.estChange! / 100))
   })
@@ -384,6 +482,7 @@ describe('normalizeEstimate', () => {
       dwjz: '2.8',
       gszzl: '0.01',
       gztime: '2026-07-02 04:00',
+      targetNavDate: '2026-07-03',
     })
     const modeled = applyOverseasModelEstimate(e, { usTSM: { changePct: -2 } })
 
@@ -418,6 +517,7 @@ describe('normalizeEstimate', () => {
       dwjz: '2',
       gszzl: '0.01',
       gztime: '2026-07-02 04:00',
+      targetNavDate: '2026-07-03',
     })
     const model = holdingsToOverseasModel([
       { code: 'TSM', name: '台积电', ratio: 20 },
@@ -444,6 +544,7 @@ describe('normalizeEstimate', () => {
       dwjz: '2',
       gszzl: '0.01',
       gztime: '2026-07-02 04:00',
+      targetNavDate: '2026-07-03',
     })
     const model = holdingsToOverseasModel([
       { code: 'TSM', name: '台积电', ratio: 10 },

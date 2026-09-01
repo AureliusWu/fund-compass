@@ -26,20 +26,24 @@ jobs:
           cache-dependency-path: backend/requirements.txt
       - name: Install backend runtime dependencies
         run: python -m pip install -r backend/requirements.txt
-      - name: Require backend URL
+      - name: Require backend private-read configuration
         env:
-          FUND_API_BASE: ${{ secrets.FUND_API_BASE || 'https://fund-compass-api.onrender.com' }}
+          FUND_API_BASE: ${{ secrets.FUND_API_BASE }}
+          PRIVATE_READ_TOKEN: ${{ secrets.PRIVATE_READ_TOKEN }}
         shell: bash
-        run: test -n "$FUND_API_BASE" || { echo "FUND_API_BASE secret is required"; exit 1; }
+        run: |
+          test -n "$FUND_API_BASE" || { echo "FUND_API_BASE is required"; exit 1; }
+          test -n "$PRIVATE_READ_TOKEN" || { echo "PRIVATE_READ_TOKEN secret is required"; exit 1; }
       - name: Calibrate strategy candidate
         env:
           CALIBRATION_MIN_VALID: '12'
           CALIBRATION_MAX_FUNDS: '30'
-          FUND_API_BASE: ${{ secrets.FUND_API_BASE || 'https://fund-compass-api.onrender.com' }}
+          FUND_API_BASE: ${{ secrets.FUND_API_BASE }}
+          PRIVATE_READ_TOKEN: ${{ secrets.PRIVATE_READ_TOKEN }}
           PYTHONUNBUFFERED: '1'
         run: python tools/calibrate_strategy.py
       - name: Upload calibration evidence
-        if: always()
+        if: success()
         uses: actions/upload-artifact@v7
         with:
           name: strategy-calibration-${{ github.run_number }}

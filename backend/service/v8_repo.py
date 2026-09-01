@@ -231,7 +231,7 @@ def save_holding(version: HoldingVersion) -> HoldingVersion:
     _assert_id(version.holding_version, stable_id("hold", identity), "holding")
     semantic_sha = payload_sha256(identity)
     payload = _model_payload(version)
-    with db.transaction() as conn:
+    with db.transaction(immediate=True) as conn:
         existing = _existing_model(conn, "holding_versions", "holding_version", version.holding_version, HoldingVersion)
         if existing is not None:
             if payload_sha256(_holding_identity(existing)) != semantic_sha:
@@ -375,7 +375,7 @@ def save_decision(snapshot: DecisionSnapshot) -> DecisionSnapshot:
     payload = _model_payload(snapshot)
     semantic = _without(payload, "created_at")
     semantic_sha = payload_sha256(semantic)
-    with db.transaction() as conn:
+    with db.transaction(immediate=True) as conn:
         evidence = _existing_model(
             conn, "evidence_snapshots", "evidence_id", snapshot.evidence_id, EvidenceSnapshot,
         )

@@ -24,6 +24,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "frontend", "public", "data", "index-valuation.json")
 BEIJING = datetime.timezone(datetime.timedelta(hours=8), "Asia/Shanghai")
 CORE_INDICES = {"沪深300", "上证50", "上证180", "中证100", "中证500", "中证1000"}
+FETCH_ATTEMPTS = 3
 
 # 乐咕乐股 symbol（中文全称，简称可能 KeyError）。key 是司南内部标准指数名，
 # value 是按稳定性排序的候选 symbol；CI 逐个尝试，成功才写入。
@@ -163,34 +164,50 @@ def _fetch_one_index(ak, name, candidates, dumped):
     last_warn = None
     partial = None
     for sym in candidates:
-        pe, pe_pct, d1, pe_col = _series_from(ak, "stock_index_pe_lg", sym, ("滚动市盈率", "市盈率"), not dumped)
-        pb, pb_pct, d2, pb_col = _series_from(ak, "stock_index_pb_lg", sym, ("市净率",), False)
-        if pe is None and pb is None:
-            last_warn = sym
-            continue
-        if pe is not None and pb is not None and d1 != d2:
-            print(f"[warn] {name}: PE/PB 源日期不一致 symbol={sym} pe_date={d1} pb_date={d2}")
-            last_warn = sym
-            continue
-        source_date = d1 or d2
-        if source_date is None:
-            last_warn = sym
-            continue
-        print(f"[col] {name}: symbol={sym} pe列={pe_col} pb列={pb_col}")
-        item = {
-            "name": name,
-            "symbol": sym,
-            "pe": pe,
-            "pe_pct": pe_pct,
-            "pe_date": d1,
-            "pb": pb,
-            "pb_pct": pb_pct,
-            "pb_date": d2,
-            "date": source_date,
-        }
-        if pe is not None and pb is not None:
-            return item
-        partial = item
+        for attempt in range(1, FETCH_ATTEMPTS + 1):
+            pe, pe_pct, d1, pe_col = _series_from(
+                ak,
+                "stock_index_pe_lg",
+                sym,
+                ("滚动市盈率", "市盈率"),
+                not dumped and attempt == 1,
+            )
+            pb, pb_pct, d2, pb_col = _series_from(
+                ak, "stock_index_pb_lg", sym, ("市净率",), False,
+            )
+            if pe is None and pb is None:
+                last_warn = sym
+                if attempt < FETCH_ATTEMPTS:
+                    print(f"[warn] {name}: symbol={sym} 空响应，重试 {attempt}/{FETCH_ATTEMPTS}")
+                continue
+            if pe is not None and pb is not None and d1 != d2:
+                print(
+                    f"[warn] {name}: PE/PB 源日期不一致 symbol={sym} "
+                    f"pe_date={d1} pb_date={d2} attempt={attempt}/{FETCH_ATTEMPTS}"
+                )
+                last_warn = sym
+                continue
+            source_date = d1 or d2
+            if source_date is None:
+                last_warn = sym
+                continue
+            print(f"[col] {name}: symbol={sym} pe列={pe_col} pb列={pb_col}")
+            item = {
+                "name": name,
+                "symbol": sym,
+                "pe": pe,
+                "pe_pct": pe_pct,
+                "pe_date": d1,
+                "pb": pb,
+                "pb_pct": pb_pct,
+                "pb_date": d2,
+                "date": source_date,
+            }
+            if pe is not None and pb is not None:
+                return item
+            partial = item
+            if attempt < FETCH_ATTEMPTS:
+                print(f"[warn] {name}: symbol={sym} PE/PB 不完整，重试 {attempt}/{FETCH_ATTEMPTS}")
     if partial is not None:
         return partial
     print(f"[warn] {name} 候选 symbol 均失败: {candidates} last={last_warn}")

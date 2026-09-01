@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as apiClient from './client'
 import {
+  ApiError,
   getV8Decision,
   getV8DecisionDiff,
   getV8Evidence,
@@ -9,6 +10,7 @@ import {
   getV8PortfolioPolicyHistory,
   getV8StrategyPerformance,
   getV8StrategyRegistry,
+  getWatchlist,
   request,
 } from './client'
 
@@ -44,17 +46,24 @@ describe('API request resilience', () => {
 
 describe('v8 API contracts', () => {
   it('exposes snapshot reads without state-changing query parameters', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) })
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ available: false, redacted: true }),
+    })
     vi.stubGlobal('fetch', fetchMock)
 
-    await getV8Evidence('510300')
-    await getV8Decision('510300')
-    await getV8DecisionDiff('510300')
-    await getV8FundOutcomes('510300')
-    await getV8PortfolioPolicy()
-    await getV8PortfolioPolicyHistory()
-    await getV8StrategyRegistry()
-    await getV8StrategyPerformance('decision-v2:test')
+    const reads = await Promise.allSettled([
+      getV8Evidence('510300'),
+      getV8Decision('510300'),
+      getV8DecisionDiff('510300'),
+      getV8FundOutcomes('510300'),
+      getV8PortfolioPolicy(),
+      getV8PortfolioPolicyHistory(),
+      getV8StrategyRegistry(),
+      getV8StrategyPerformance('decision-v2:test'),
+    ])
+    expect(reads.every(result => result.status === 'rejected'
+      && result.reason instanceof ApiError && result.reason.kind === 'redacted')).toBe(true)
 
     expect(fetchMock.mock.calls.map(call => String(call[0]))).toEqual([
       '/api/v2/fund/510300/evidence',
@@ -77,5 +86,42 @@ describe('v8 API contracts', () => {
     expect(apiClient).not.toHaveProperty('postV8WatchlistDecisions')
     expect(apiClient).not.toHaveProperty('postV8PortfolioDecisions')
     expect(apiClient).not.toHaveProperty('postV8PortfolioRebalance')
+  })
+
+  it('rejects a redacted owner response instead of treating hidden values as empty or zero', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        code: '510300',
+        available: false,
+        redacted: true,
+      }),
+    }))
+
+    await expect(getV8Decision('510300')).rejects.toMatchObject({
+      message: '私人数据未公开',
+      kind: 'redacted',
+    })
+    await expect(getWatchlist()).rejects.toMatchObject({
+      message: '私人数据未公开',
+      kind: 'redacted',
+    })
+  })
+
+  it('fails closed when a mixed rollout returns the former full anonymous DTO', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        code: '510300',
+        action: 'buy',
+        holding: { shares: 123.45 },
+      }),
+    }))
+
+    await expect(getV8Decision('510300')).rejects.toMatchObject({
+      message: '匿名读取返回了不安全的旧契约',
+      kind: 'http',
+      status: 502,
+    })
   })
 })

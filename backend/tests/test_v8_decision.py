@@ -46,7 +46,7 @@ def make_evidence(
         "risk_flags": risk_flags or [],
         "decision_context": {
             "status": status,
-            "kind": "estimate",
+            "kind": "qdii_next_nav_estimate" if target_nav_date else "intraday_estimate",
             "source": "fixture_quote",
             "source_time": "2026-08-25T14:29:00+08:00",
             "source_time_precision": "datetime",

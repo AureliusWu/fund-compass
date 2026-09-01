@@ -14,4 +14,4 @@ enabled = true
 crons = ["30 6 * * MON-FRI", "40 6 * * MON-FRI"]
 
 [vars]
-FUND_API_BASE = "https://fund-compass-api.onrender.com"
+FUND_API_BASE = "https://fund-compass-api-v8-candidate.onrender.com"

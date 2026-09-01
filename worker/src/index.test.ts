@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import worker, { formatMessage, normalizeBuildSha, normalizeEstimate, parseFundHoldings, parsePushState, parseWatchEntries, run, runScheduled, type Env, type Estimate } from './index'
+import worker, { estimateContext, formatMessage, normalizeBuildSha, normalizeEstimate, parseFundHoldings, parsePushState, parseWatchEntries, run, runScheduled, type Env, type Estimate } from './index'
+import { estimateFixture } from './estimate-fixtures.test-support'
+import { normalizeEstimateWire } from './valuation'
 
 const env: Env = {
   GIST_ID: 'gist', FUND_API_BASE: '', GIST_TOKEN: 'gist-token', WECHAT_SENDKEY: 'send-key',
@@ -8,6 +10,73 @@ const env: Env = {
 const monday1430 = new Date('2026-07-13T06:30:00Z')
 const monday1440 = new Date('2026-07-13T06:40:00Z')
 const buildSha = '0123456789abcdef0123456789abcdef01234567'
+
+function stubEdgeCache() {
+  const entries = new Map<string, Response>()
+  const pending: Promise<unknown>[] = []
+  const match = vi.fn(async (input: Request | string) => {
+    const key = input instanceof Request ? input.url : String(input)
+    return entries.get(key)?.clone()
+  })
+  const put = vi.fn(async (input: Request | string, response: Response) => {
+    const key = input instanceof Request ? input.url : String(input)
+    entries.set(key, response.clone())
+  })
+  vi.stubGlobal('caches', { default: { match, put } })
+  const ctx = {
+    waitUntil(promise: Promise<unknown>) { pending.push(promise) },
+    passThroughOnException() {},
+  } as ExecutionContext
+  return {
+    entries,
+    match,
+    put,
+    ctx,
+    async drain() {
+      await Promise.all(pending.splice(0))
+    },
+  }
+}
+
+describe('scheduled next-NAV estimate contract', () => {
+  it.each(['qdii_next_nav_estimate_canonical', 'official_nav_change_unknown'])(
+    'preserves canonical shared %s evidence for backend decisions', (id) => {
+      const { wire, estimate } = estimateFixture(id)
+      const context = estimateContext(estimate)
+      for (const key of [
+        'kind', 'source_time', 'value_nav', 'value_change', 'nav_date', 'base_nav', 'base_nav_date',
+        'estimate_nav', 'estimate_change', 'estimate_time',
+      ]) expect(context[key as keyof typeof context], key).toStrictEqual(wire[key])
+      expect(normalizeEstimateWire(context)).toMatchObject({ kind: wire.kind, legacy_alias_used: false })
+      if (id === 'qdii_next_nav_estimate_canonical') {
+        expect(context).toMatchObject({
+          market: 'overseas', target_nav_date: wire.target_nav_date,
+          estimate_model_version: wire.estimate_model_version, sample_count: wire.sample_count,
+          coverage: wire.coverage, uncertainty: wire.uncertainty,
+        })
+      }
+    },
+  )
+
+  it('fails closed to unavailable when next-NAV model metadata is unknown', () => {
+    const { estimate } = estimateFixture('qdii_next_nav_estimate_canonical')
+    expect(estimateContext({ ...estimate, targetNavDate: null })).toMatchObject({
+      kind: 'unavailable', estimate_nav: null, estimate_change: null, target_nav_date: null,
+      estimate_model_version: null, sample_count: null, coverage: null, uncertainty: null,
+    })
+  })
+})
+
+function tencentQuoteRow(code: string, options: {
+  price?: number; previousClose?: number; change?: number | null; timestamp?: string
+} = {}): string {
+  const fields = Array.from({ length: 33 }, () => '')
+  fields[3] = String(options.price ?? 100)
+  fields[4] = String(options.previousClose ?? 99)
+  fields[30] = options.timestamp ?? '20260828153000'
+  fields[32] = options.change === null ? '' : String(options.change ?? 1.01)
+  return `v_${code.replace(/-/g, '_')}="${fields.join('~')}";`
+}
 
 function mockDecisionResponse(body: Record<string, unknown>) {
   const items = body.items as Array<{ code: string }>
@@ -69,7 +138,7 @@ function mockNotificationResponse(
 }
 
 function fakeNetwork(sendStatuses = [200], options: {
-  patchFails?: boolean; missingSecond?: boolean; gistReadFails?: boolean
+  patchFails?: boolean; patchFailures?: number; missingSecond?: boolean; gistReadFails?: boolean
     estimateFails?: boolean; officialFails?: boolean; holdingsFails?: boolean
   backend?: 'success' | 'timeout' | 'unauthorized'
   estimateDates?: Record<string, string>
@@ -81,6 +150,7 @@ function fakeNetwork(sendStatuses = [200], options: {
 } = {}) {
   let state: Record<string, unknown> = { ...(options.initialState || {}) }
   let sends = 0
+  let patches = 0
   let outcomeSettlements = 0
   let decisionBody: Record<string, unknown> | null = null
   const decisionBodies: Record<string, unknown>[] = []
@@ -96,7 +166,10 @@ function fakeNetwork(sendStatuses = [200], options: {
       } })
     }
     if (url.includes('/gists/gist') && init?.method === 'PATCH') {
-      if (options.patchFails) return new Response('failed', { status: 500 })
+      patches += 1
+      if (options.patchFails || patches <= (options.patchFailures ?? 0)) {
+        return new Response('failed', { status: 500 })
+      }
       const body = JSON.parse(String(init.body))
       state = JSON.parse(body.files['sinan-estimate-state.json'].content)
       return Response.json({ ok: true })
@@ -492,10 +565,17 @@ describe('Cloudflare push worker', () => {
     await expect(run({ ...env, FUND_API_BASE: 'https://api.test' }, false, monday1430))
       .resolves.toMatchObject({ status: 'sent', fresh: true, stale: 1 })
     const decision = net.getDecisionBody() as { items: Array<Record<string, unknown>>; portfolio_value: number }
+    const fresh = decision.items.find((item) => item.code === '000001')!
     const expired = decision.items.find((item) => item.code === '000002')!
+    expect(fresh.estimate_context).toMatchObject({
+      kind: 'intraday_estimate', source_time: '2026-07-13T14:29:00+08:00',
+      estimate_time: '2026-07-13T14:29:00+08:00', value_change: null, nav_date: null,
+    })
     expect(expired.estimate_context).toMatchObject({
       kind: 'official_nav', status: 'latest_official', source_time_precision: 'date',
-      estimate_nav: null, value_nav: 1, estimate_change: null,
+      base_nav: null, base_nav_date: null,
+      estimate_nav: null, value_nav: 1, value_change: null, estimate_change: null,
+      estimate_time: null,
     })
     expect((expired.holding as Record<string, unknown>).current_weight).toBe(49.75)
     expect(decision.portfolio_value).toBe(201)
@@ -583,6 +663,28 @@ describe('Cloudflare push worker', () => {
     const net = fakeNetwork([200], { patchFails: true })
     await expect(run(env, false, monday1430)).rejects.toThrow('Gist 状态写入失败')
     expect(net.getSends()).toBe(0)
+  })
+
+  it('closes a claimed pre-send Gist failure so 14:40 can compensate once', async () => {
+    const net = fakeNetwork([200], { backend: 'success', patchFailures: 1 })
+    const withBackend = { ...env, FUND_API_BASE: 'https://api.test' }
+
+    await expect(run(withBackend, false, monday1430)).rejects.toThrow('Gist 状态写入失败')
+    expect(net.getSends()).toBe(0)
+    expect(net.getNotificationEvents().map((event) => event.status)).toEqual([
+      'scheduled', 'attempted', 'failed',
+    ])
+    expect(net.getNotificationEvents()[2]).toMatchObject({
+      scheduled_window: '2026-07-13T14:30+08:00',
+      attempt_no: 1,
+      error_class: 'pre_delivery_state_persistence_failed',
+    })
+
+    await expect(run(withBackend, false, monday1440)).resolves.toMatchObject({ status: 'sent' })
+    expect(net.getSends()).toBe(1)
+    expect(net.getNotificationEvents().map((event) => event.status)).toEqual([
+      'scheduled', 'attempted', 'failed', 'scheduled', 'attempted', 'compensated',
+    ])
   })
 
   it('keeps the official fallback visible when one primary estimate row is missing', async () => {
@@ -988,7 +1090,7 @@ describe('Cloudflare push worker', () => {
     const response = await worker.fetch(new Request('https://worker.test/health'), env)
     const body = await response.json() as { runtime: Record<string, unknown>; version: string; build_sha: string }
     expect(response.status).toBe(200)
-    expect(body.version).toBe('7.0.1')
+    expect(body.version).toBe('8.0.0')
     expect(body.build_sha).toBe(buildSha)
     expect(body.runtime).toMatchObject({
       state_available: true,
@@ -1087,9 +1189,42 @@ describe('Cloudflare push worker', () => {
     expect(body.accounting).toEqual({ primary: 2, model: 0, official: 0, unavailable: 0 })
     expect(Object.values(body.accounting).reduce((sum, value) => sum + value, 0)).toBe(2)
     expect(body.items[0]).toMatchObject({
-      code: '000001', est_change: 1, source_time_precision: 'datetime', status: 'fresh',
+      code: '000001', kind: 'intraday_estimate', value_change: null, nav_date: null, estimate_change: 1,
+      estimate_time: '2026-07-13T14:29:00+08:00',
+      est_change: 1, source_time_precision: 'datetime', status: 'fresh',
       source: 'eastmoney_estimate_table',
     })
+  })
+
+  it('coalesces untrusted estimate origins without regressing trusted CORS', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(monday1430)
+    fakeNetwork()
+    const edge = stubEdgeCache()
+    const endpoint = 'https://worker.test/estimates?codes=000001,000002'
+
+    const first = await worker.fetch(new Request(endpoint, {
+      headers: { Origin: 'https://random-one.invalid' },
+    }), env, edge.ctx)
+    await edge.drain()
+    const second = await worker.fetch(new Request(endpoint, {
+      headers: { Origin: 'https://random-two.invalid' },
+    }), env, edge.ctx)
+
+    expect(first.status).toBe(200)
+    expect(second.status).toBe(200)
+    expect(edge.entries.size).toBe(1)
+    expect([...edge.entries.keys()].map((key) => new URL(key).searchParams.get('origin')))
+      .toEqual(['anonymous'])
+    expect([...edge.entries.keys()].join('|')).not.toContain('random-')
+
+    const trusted = await worker.fetch(new Request(endpoint, {
+      headers: { Origin: 'https://aureliuswu.github.io' },
+    }), env, edge.ctx)
+    await edge.drain()
+    expect(trusted.headers.get('Access-Control-Allow-Origin')).toBe('https://aureliuswu.github.io')
+    expect(new Set([...edge.entries.keys()].map((key) => new URL(key).searchParams.get('origin'))))
+      .toEqual(new Set(['anonymous', 'https://aureliuswu.github.io']))
   })
 
   it('keeps a fresh estimate-table row ahead of all fallback sources', async () => {
@@ -1098,7 +1233,7 @@ describe('Cloudflare push worker', () => {
     const net = fakeModelNetwork({ freshPrimary: true })
     const response = await worker.fetch(new Request('https://worker.test/estimates?codes=005844'), env)
     const body = await response.json() as { items: Array<Record<string, unknown>>; accounting: Record<string, number> }
-    expect(body.items[0]).toMatchObject({ kind: 'estimate', status: 'fresh', source: 'eastmoney_estimate_table' })
+    expect(body.items[0]).toMatchObject({ kind: 'intraday_estimate', status: 'fresh', source: 'eastmoney_estimate_table' })
     expect(net.fetchMock.mock.calls.some(([input]) => String(input).includes('/f10/lsjz'))).toBe(false)
     expect(net.fetchMock.mock.calls.some(([input]) => String(input).includes('/FundArchivesDatas.aspx'))).toBe(false)
   })
@@ -1124,7 +1259,11 @@ describe('Cloudflare push worker', () => {
     const decision = net.getDecisionBody() as { items: Array<Record<string, unknown>> }
     expect(decision.items[0].estimate_context).toMatchObject({
       status: 'modeled', kind: 'holdings_model', source: 'eastmoney_holdings_model',
-      source_time_precision: 'datetime', model_coverage: 60, model_quote_count: 6,
+      source_time: '2026-07-13T14:29:00+08:00', estimate_time: '2026-07-13T14:29:00+08:00',
+      source_time_precision: 'datetime', value_change: null, nav_date: null,
+      model_coverage: 60, model_quote_count: 6,
+      model_oldest_quote_time: '2026-07-13T14:29:00+08:00',
+      model_newest_quote_time: '2026-07-13T14:29:00+08:00',
     })
   })
 
@@ -1157,10 +1296,14 @@ describe('Cloudflare push worker', () => {
     expect(response.status).toBe(200)
     expect(body.status).toBe('degraded')
     expect(body.source).toBe('eastmoney_mixed')
-    expect(body.items[0]).toMatchObject({ code: '000001', status: 'fresh', est_change: 1 })
+    expect(body.items[0]).toMatchObject({
+      code: '000001', status: 'fresh', value_change: null, nav_date: null,
+      estimate_change: 1, estimate_time: '2026-07-13T14:29:00+08:00', est_change: 1,
+    })
     expect(body.items[1]).toMatchObject({
       code: '000002', status: 'latest_official', source: 'eastmoney_official_nav',
-      fallback_reason: 'estimate_stale', est_time: '2026-07-11', est_change: 2,
+      fallback_reason: 'estimate_stale', value_change: 2, nav_date: '2026-07-11',
+      estimate_change: null, est_time: '2026-07-11', est_change: null,
     })
   })
 
@@ -1174,7 +1317,8 @@ describe('Cloudflare push worker', () => {
     expect(response.status).toBe(200)
     expect(body.items[0]).toMatchObject({
       code: '000001', status: 'latest_official', source: 'eastmoney_official_nav',
-      fallback_reason: 'estimate_incomplete', last_nav: 1, est_nav: 1.02, est_change: 2,
+      fallback_reason: 'estimate_incomplete', last_nav: 1, value_nav: 1.02, value_change: 2,
+      estimate_nav: null, estimate_change: null, est_nav: null, est_change: null,
     })
   })
 
@@ -1267,9 +1411,13 @@ describe('Cloudflare push worker', () => {
     expect(body.items[0]).toMatchObject({
       code: '000001',
       last_nav: 1,
-      est_nav: 1.02,
-      est_change: 2,
-      nav_date: '2026-07-11',
+      value_nav: 1.02,
+      value_change: 2,
+      estimate_nav: null,
+      estimate_change: null,
+      est_nav: null,
+      est_change: null,
+      nav_date: '2026-07-12',
       est_time: '2026-07-12',
       est_label: '最近净值',
       est_kind: 'official_nav',
@@ -1296,6 +1444,34 @@ describe('Cloudflare push worker', () => {
     expect(body.items[0]).toEqual({ code: '688361', name: '中科飞测', ratio: 9.55 })
   })
 
+  it('coalesces untrusted holdings origins without regressing trusted CORS', async () => {
+    fakeNetwork()
+    const edge = stubEdgeCache()
+    const endpoint = 'https://worker.test/holdings?code=005844'
+
+    await worker.fetch(new Request(endpoint, {
+      headers: { Origin: 'https://random-one.invalid' },
+    }), env, edge.ctx)
+    await edge.drain()
+    const second = await worker.fetch(new Request(endpoint, {
+      headers: { Origin: 'https://random-two.invalid' },
+    }), env, edge.ctx)
+
+    expect(second.status).toBe(200)
+    expect(edge.entries.size).toBe(1)
+    expect([...edge.entries.keys()].map((key) => new URL(key).searchParams.get('origin')))
+      .toEqual(['anonymous'])
+    expect([...edge.entries.keys()].join('|')).not.toContain('random-')
+
+    const trusted = await worker.fetch(new Request(endpoint, {
+      headers: { Origin: 'http://localhost:5173' },
+    }), env, edge.ctx)
+    await edge.drain()
+    expect(trusted.headers.get('Access-Control-Allow-Origin')).toBe('http://localhost:5173')
+    expect(new Set([...edge.entries.keys()].map((key) => new URL(key).searchParams.get('origin'))))
+      .toEqual(new Set(['anonymous', 'http://localhost:5173']))
+  })
+
   it('rejects an invalid holdings fund code', async () => {
     const response = await worker.fetch(new Request('https://worker.test/holdings?code=bad'), env)
     expect(response.status).toBe(400)
@@ -1306,5 +1482,150 @@ describe('Cloudflare push worker', () => {
     const response = await worker.fetch(new Request('https://worker.test/holdings?code=005844'), env)
     expect(response.status).toBe(502)
     expect(await response.text()).toContain('holdings_upstream_failed')
+  })
+
+  it('serves normalized Tencent and Eastmoney quotes through fixed upstreams', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-28T07:31:00Z'))
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input))
+      if (url.hostname === 'qt.gtimg.cn') {
+        expect(url.pathname).toBe('/')
+        expect(url.searchParams.get('q')).toBe('usIXIC,sh000001')
+        expect(new Headers(init?.headers).get('Referer')).toBe('https://gu.qq.com/')
+        return new Response([
+          tencentQuoteRow('usIXIC', {
+            price: 21100, previousClose: 21000, change: 0.48, timestamp: '2026-08-28 15:30:00',
+          }),
+          tencentQuoteRow('sh000001', { price: 3800, previousClose: 3780, change: 0.53 }),
+        ].join('\n'))
+      }
+      if (url.hostname === 'push2.eastmoney.com') {
+        expect(url.pathname).toBe('/api/qt/ulist.np/get')
+        expect(url.searchParams.get('secids')).toBe('118.AU9999,113.AU9999,114.AU9999')
+        expect(new Headers(init?.headers).get('Referer')).toBe('https://quote.eastmoney.com/')
+        return Response.json({ data: { diff: [{
+          f12: 'AU9999', f2: 811.2, f3: -0.2, f124: Date.parse('2026-08-28T07:30:00Z') / 1000,
+        }] } })
+      }
+      throw new Error(`unexpected fixed upstream ${url.hostname}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const response = await worker.fetch(new Request(
+      'https://worker.test/quotes?codes=usIXIC,sh000001,AU9999',
+      { headers: { Origin: 'https://aureliuswu.github.io' } },
+    ), env)
+    const body = await response.json() as {
+      status: string; source: string; requested: number; returned: number
+      unavailable_codes: string[]; errors: unknown[]; items: Array<Record<string, unknown>>
+    }
+    expect(response.status).toBe(200)
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBe('https://aureliuswu.github.io')
+    expect(body).toMatchObject({
+      status: 'ok', source: 'mixed', requested: 3, returned: 3,
+      unavailable_codes: [], errors: [],
+    })
+    expect(body.items).toEqual([
+      expect.objectContaining({ code: 'usIXIC', price: 21100, change_pct: 0.48, source: 'tencent', status: 'fresh' }),
+      expect.objectContaining({ code: 'sh000001', price: 3800, change_pct: 0.53, source: 'tencent', status: 'fresh' }),
+      expect.objectContaining({ code: 'AU9999', price: 811.2, change_pct: -0.2, source: 'eastmoney', status: 'fresh' }),
+    ])
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([
+    {
+      label: 'malformed payload',
+      reply: async () => new Response('not a Tencent assignment'),
+      reason: 'schema_invalid', upstreamStatus: null, calls: 1,
+    },
+    {
+      label: 'timeout',
+      reply: async () => { throw new DOMException('private timeout detail', 'TimeoutError') },
+      reason: 'network_timeout', upstreamStatus: null, calls: 2,
+    },
+    {
+      label: '404',
+      reply: async () => new Response('private not found body', { status: 404 }),
+      reason: 'http_4xx', upstreamStatus: 404, calls: 1,
+    },
+    {
+      label: '429',
+      reply: async () => new Response('private rate limit body', { status: 429 }),
+      reason: 'http_429', upstreamStatus: 429, calls: 2,
+    },
+    {
+      label: '5xx',
+      reply: async () => new Response('private server body', { status: 503 }),
+      reason: 'http_5xx', upstreamStatus: 503, calls: 2,
+    },
+    {
+      label: 'oversize',
+      reply: async () => new Response('x', { headers: { 'Content-Length': '300000' } }),
+      reason: 'response_too_large', upstreamStatus: null, calls: 1,
+    },
+  ])('normalizes $label quote failures without leaking upstream details', async ({
+    reply, reason, upstreamStatus, calls,
+  }) => {
+    const fetchMock = vi.fn(reply)
+    vi.stubGlobal('fetch', fetchMock)
+    const response = await worker.fetch(new Request('https://worker.test/quotes?codes=usIXIC'), env)
+    const body = await response.json() as {
+      status: string; items: unknown[]; unavailable_codes: string[]
+      errors: Array<Record<string, unknown>>
+    }
+    expect(response.status).toBe(200)
+    expect(body.status).toBe('unavailable')
+    expect(body.items).toEqual([])
+    expect(body.unavailable_codes).toEqual(['usIXIC'])
+    expect(body.errors).toEqual([{
+      source: 'tencent', reason, upstream_status: upstreamStatus, codes: ['usIXIC'],
+    }])
+    expect(JSON.stringify(body)).not.toContain('private')
+    expect(JSON.stringify(body)).not.toContain('qt.gtimg.cn')
+    expect(fetchMock).toHaveBeenCalledTimes(calls)
+  })
+
+  it('marks severely stale quotes and removes their change percentage', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-28T07:31:00Z'))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(tencentQuoteRow('usIXIC', {
+      price: 20000, previousClose: 19000, change: 5.26, timestamp: '20260801093000',
+    }))))
+    const response = await worker.fetch(new Request('https://worker.test/quotes?codes=usIXIC'), env)
+    const body = await response.json() as { status: string; items: Array<Record<string, unknown>> }
+    expect(body.status).toBe('degraded')
+    expect(body.items[0]).toMatchObject({
+      code: 'usIXIC', price: 20000, change_pct: null,
+      source_time: '2026-08-01 09:30:00', status: 'stale',
+    })
+  })
+
+  it('reports a well-formed but unavailable quote without inventing zero values', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('v_usIXIC="";')))
+    const response = await worker.fetch(new Request('https://worker.test/quotes?codes=usIXIC'), env)
+    const body = await response.json() as {
+      status: string; items: unknown[]; unavailable_codes: string[]; errors: Array<Record<string, unknown>>
+    }
+    expect(body).toMatchObject({ status: 'unavailable', items: [], unavailable_codes: ['usIXIC'] })
+    expect(body.errors).toEqual([{
+      source: 'tencent', reason: 'upstream_empty', upstream_status: null, codes: ['usIXIC'],
+    }])
+    expect(JSON.stringify(body)).not.toMatch(/"(?:price|change_pct)":0/)
+  })
+
+  it('rejects illegal, duplicate or oversized quote code lists before any fetch', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const requests = [
+      'https://worker.test/quotes?codes=https%3A%2F%2Fevil.test',
+      'https://worker.test/quotes?codes=usIXIC,usIXIC',
+      `https://worker.test/quotes?codes=${Array.from({ length: 51 }, (_, index) => `usA${index}`).join(',')}`,
+    ]
+    for (const request of requests) {
+      expect((await worker.fetch(new Request(request), env)).status).toBe(400)
+    }
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })

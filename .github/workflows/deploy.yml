@@ -38,10 +38,24 @@ jobs:
       - run: npm ci
       - run: npm run type-check
       - run: npm run test
+      - name: Verify production API endpoint
+        shell: bash
+        env:
+          VITE_API_BASE: ${{ vars.VITE_API_BASE }}
+        run: |
+          test -n "${VITE_API_BASE:-}"
+          case "$VITE_API_BASE" in
+            /api|./api|../api|http://*|https://localhost*|https://127.0.0.1*|https://0.0.0.0*)
+              echo "VITE_API_BASE must be an absolute public HTTPS endpoint ending in /api" >&2
+              exit 1
+              ;;
+          esac
+          [[ "$VITE_API_BASE" =~ ^https://[^/?#[:space:]]+/api$ ]] || {
+            echo "VITE_API_BASE must be an absolute public HTTPS endpoint ending in /api" >&2
+            exit 1
+          }
       - run: npm run build
         env:
-          # 在仓库 Settings → Actions → Variables 里设 VITE_API_BASE 为后端公网地址；
-          # 未设时为空，前端回退 /api（GitHub Pages 上无后端会显示未连接，属正常）。
           VITE_API_BASE: ${{ vars.VITE_API_BASE }}
       - name: Stamp exact deployed commit
         shell: bash

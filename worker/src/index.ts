@@ -1,7 +1,10 @@
 import { ExternalDataError, externalGet, readBoundedText, readJson } from './external'
 import {
   beijingDate,
+  canonicalWireTime,
+  fetchPublicQuotes,
   fetchFundHoldings,
+  isSupportedPublicQuoteCode,
   isPublishableIntraday,
   normalizeEstimate,
   parseFundHoldings,
@@ -104,14 +107,23 @@ export function parseWatchEntries(value: unknown): WatchEntry[] {
 }
 
 interface DecisionEstimateContext {
-  status: 'fresh' | 'modeled' | 'delayed' | 'latest_official' | 'unavailable'
+  status: Estimate['status'] | 'unavailable'
   source: string
   source_time: string | null
   source_time_precision: 'date' | 'datetime'
   estimate_change: number | null
   estimate_nav: number | null
+  estimate_time: string | null
   value_nav: number | null
-  kind: 'estimate' | 'holdings_model' | 'official_nav' | 'unavailable'
+  value_change: number | null
+  nav_date: string | null
+  target_nav_date: string | null
+  kind: 'intraday_estimate' | 'qdii_next_nav_estimate' | 'holdings_model' | 'official_nav' | 'unavailable'
+  market: 'overseas' | 'unknown'
+  estimate_model_version: string | null
+  sample_count: number | null
+  coverage: number | null
+  uncertainty: Estimate['uncertainty'] | null
   is_fallback: boolean
   fallback_reason: string | null
   base_nav: number | null
@@ -339,6 +351,11 @@ const PUBLIC_ORIGINS = new Set([
   'http://127.0.0.1:5173',
 ])
 
+function publicCacheOrigin(request: Request): string {
+  const origin = request.headers.get('Origin') || ''
+  return PUBLIC_ORIGINS.has(origin) ? origin : 'anonymous'
+}
+
 function publicHeaders(request: Request): HeadersInit {
   const origin = request.headers.get('Origin') || ''
   return {
@@ -359,7 +376,7 @@ async function publicEstimates(request: Request, url: URL, ctx?: ExecutionContex
     })
   }
   const today = beijingNow().date
-  const origin = request.headers.get('Origin') || 'none'
+  const origin = publicCacheOrigin(request)
   const cacheKey = new Request(`https://estimate-cache.internal/v4?date=${today}&codes=${encodeURIComponent([...codes].sort().join(','))}&origin=${encodeURIComponent(origin)}`)
   const edgeCache = typeof caches === 'undefined' ? null : caches.default
   const cached = edgeCache ? await edgeCache.match(cacheKey) : null
@@ -412,6 +429,53 @@ async function publicEstimates(request: Request, url: URL, ctx?: ExecutionContex
     return response
   } catch {
     return Response.json({ error: 'valuation_resolution_failed' }, {
+      status: 502, headers: publicHeaders(request),
+    })
+  }
+}
+
+async function publicQuotes(request: Request, url: URL): Promise<Response> {
+  const rawCodes = (url.searchParams.get('codes') || '').split(',').map((value) => value.trim()).filter(Boolean)
+  const codes = [...new Set(rawCodes)]
+  if (!codes.length || codes.length > 50 || codes.length !== rawCodes.length
+    || codes.some((code) => !isSupportedPublicQuoteCode(code))) {
+    return Response.json({ error: 'codes must contain 1-50 unique supported market codes' }, {
+      status: 400, headers: publicHeaders(request),
+    })
+  }
+  try {
+    const batch = await fetchPublicQuotes(codes)
+    const items = codes.flatMap((code) => {
+      const item = batch.items.get(code)
+      return item ? [{
+        code: item.code,
+        price: item.price,
+        change_pct: item.changePct,
+        source_time: item.sourceTime,
+        source: item.source,
+        status: item.status,
+      }] : []
+    })
+    const sources = new Set(items.map((item) => item.source))
+    const degraded = batch.unavailableCodes.length > 0
+      || items.some((item) => item.status === 'stale' || item.change_pct == null)
+    return Response.json({
+      status: items.length === 0 ? 'unavailable' : degraded ? 'degraded' : 'ok',
+      source: sources.size > 1 ? 'mixed' : [...sources][0] || 'unavailable',
+      fetched_at: new Date().toISOString(),
+      requested: codes.length,
+      returned: items.length,
+      items,
+      unavailable_codes: batch.unavailableCodes,
+      errors: batch.failures.map((failure) => ({
+        source: failure.source,
+        reason: failure.reason,
+        upstream_status: failure.upstreamStatus,
+        codes: failure.codes,
+      })),
+    }, { headers: publicHeaders(request) })
+  } catch {
+    return Response.json({ error: 'quote_resolution_failed' }, {
       status: 502, headers: publicHeaders(request),
     })
   }
@@ -487,7 +551,7 @@ async function publicFundHoldings(request: Request, url: URL, ctx?: ExecutionCon
       status: 400, headers: publicHeaders(request),
     })
   }
-  const origin = request.headers.get('Origin') || 'none'
+  const origin = publicCacheOrigin(request)
   const cacheKey = new Request(`https://holdings-cache.internal/v1?code=${code}&origin=${encodeURIComponent(origin)}`)
   const edgeCache = typeof caches === 'undefined' ? null : caches.default
   const cached = edgeCache ? await edgeCache.match(cacheKey) : null
@@ -514,11 +578,14 @@ async function publicFundHoldings(request: Request, url: URL, ctx?: ExecutionCon
   }
 }
 
-function estimateContext(estimate?: Estimate): DecisionEstimateContext {
+export function estimateContext(estimate?: Estimate): DecisionEstimateContext {
   if (!estimate) {
     return {
       status: 'unavailable', source: 'unavailable', source_time: null, source_time_precision: 'date',
-      estimate_change: null, estimate_nav: null, value_nav: null, kind: 'unavailable', is_fallback: true,
+      estimate_change: null, estimate_nav: null, estimate_time: null,
+      value_nav: null, value_change: null, nav_date: null, target_nav_date: null,
+      kind: 'unavailable', is_fallback: true,
+      market: 'unknown', estimate_model_version: null, sample_count: null, coverage: null, uncertainty: null,
       fallback_reason: 'estimate_missing_for_decision',
       base_nav: null, base_nav_date: null, value_date: null,
       model_coverage: null, model_quote_count: null, model_report_date: null,
@@ -529,42 +596,74 @@ function estimateContext(estimate?: Estimate): DecisionEstimateContext {
     }
   }
   const isOfficial = estimate.kind === 'official_nav'
+  const isQdii = estimate.kind === 'qdii_next_nav_estimate'
+  const sourceTime = canonicalWireTime(estimate.sourceTime, estimate.diagnostics.source_time_precision)
+  if (!sourceTime) return estimateContext()
+  // Scheduled evidence uses the same strict serializer as the public wire.
+  // This is contract support, not permission to use an uncalibrated QDII model.
+  try { publicValuationItem(estimate) }
+  catch (error) {
+    if (error instanceof ExternalDataError) return estimateContext()
+    throw error
+  }
   return {
     status: estimate.status,
     source: estimate.source,
-    source_time: estimate.sourceTime || null,
+    source_time: sourceTime,
     source_time_precision: estimate.diagnostics.source_time_precision,
     // A published NAV is an observed value, never an intraday estimate.  Keep
     // the estimate fields null so downstream code cannot relabel an official
     // value/change as a live prediction.
     estimate_change: isOfficial ? null : estimate.change,
     estimate_nav: isOfficial ? null : estimate.valueNav,
+    estimate_time: isOfficial ? null : sourceTime,
     value_nav: estimate.valueNav,
-    kind: estimate.kind,
+    value_change: isOfficial ? estimate.change : null,
+    nav_date: isOfficial ? (estimate.valueDate || null) : null,
+    target_nav_date: isQdii ? (estimate.targetNavDate ?? null) : null,
+    kind: estimate.kind === 'estimate' ? 'intraday_estimate' : estimate.kind,
+    market: isQdii ? 'overseas' : 'unknown',
+    estimate_model_version: isQdii ? (estimate.estimateModelVersion ?? null) : null,
+    sample_count: isQdii ? (estimate.sampleCount ?? null) : null,
+    coverage: isQdii ? estimate.coverage : null,
+    uncertainty: isQdii ? (estimate.uncertainty ?? null) : null,
     is_fallback: estimate.isFallback,
     fallback_reason: estimate.isFallback ? estimate.diagnostics.primary_reason : null,
     base_nav: estimate.baseNav,
     base_nav_date: estimate.baseNavDate || null,
     value_date: estimate.valueDate || null,
-    model_coverage: estimate.kind === 'holdings_model' ? estimate.coverage : null,
+    model_coverage: estimate.kind === 'holdings_model' || isQdii ? estimate.coverage : null,
     model_quote_count: estimate.kind === 'holdings_model' ? estimate.quoteCount : null,
     model_report_date: estimate.kind === 'holdings_model' ? (estimate.reportDate || null) : null,
-    model_oldest_quote_time: estimate.kind === 'holdings_model' ? (estimate.oldestQuoteTime || null) : null,
-    model_newest_quote_time: estimate.kind === 'holdings_model' ? (estimate.newestQuoteTime || null) : null,
+    model_oldest_quote_time: estimate.kind === 'holdings_model'
+      ? canonicalWireTime(estimate.oldestQuoteTime, 'datetime')
+      : null,
+    model_newest_quote_time: estimate.kind === 'holdings_model'
+      ? canonicalWireTime(estimate.newestQuoteTime, 'datetime')
+      : null,
     model_rejected_count: estimate.kind === 'holdings_model' ? estimate.rejectedCount : null,
     diagnostics: { ...estimate.diagnostics },
   }
 }
 
 function safeDecisionEstimate(estimate: Estimate | undefined): Estimate | undefined {
+  if (estimate?.kind === 'qdii_next_nav_estimate') {
+    try { publicValuationItem(estimate) }
+    catch (error) {
+      if (error instanceof ExternalDataError) return undefined
+      throw error
+    }
+  }
   if (!estimate || estimate.kind !== 'estimate' || estimate.status !== 'delayed') return estimate
   if (estimate.baseNav == null || !estimate.baseNavDate) return undefined
   const reason = estimate.diagnostics.primary_reason || 'estimate_delayed'
   return {
     ...estimate,
-    lastNav: estimate.baseNav,
+    lastNav: null,
     estNav: estimate.baseNav,
-    change: 0,
+    // The delayed row only proves one official NAV value. Without a preceding
+    // official NAV pair, its move is unknown and must not be fabricated as 0.
+    change: null,
     time: estimate.baseNavDate,
     navDate: estimate.baseNavDate,
     label: '最近正式净值',
@@ -572,6 +671,8 @@ function safeDecisionEstimate(estimate: Estimate | undefined): Estimate | undefi
     source: 'eastmoney_official_nav',
     status: 'latest_official',
     isFallback: true,
+    baseNav: null,
+    baseNavDate: '',
     valueNav: estimate.baseNav,
     valueDate: estimate.baseNavDate,
     sourceTime: estimate.baseNavDate,
@@ -1239,7 +1340,34 @@ export async function run(
       throw error
     }
   }
-  if (!force) await writeState(env, current)
+  if (!force) {
+    try {
+      // The backend claim already exists, but transport has not started. If
+      // the Gist checkpoint fails, close that claim explicitly as a safe
+      // pre-delivery failure so the 14:40 window may compensate exactly once.
+      await writeState(env, current)
+    } catch (error) {
+      current.last_error = persistedFailureReason(error)
+      current.decision_status = 'degraded'
+      if (result) {
+        try {
+          await recordNotificationEvent(
+            env,
+            ids,
+            now,
+            slot,
+            'failed',
+            current.attempt_count,
+            true,
+            'pre_delivery_state_persistence_failed',
+          )
+        } catch (auditError) {
+          console.error('failed to close pre-delivery notification claim', auditError)
+        }
+      }
+      throw error
+    }
+  }
   try {
     await sendWithOneRetry(env, title, formatMessage(activeEntries, estimates, result))
   } catch (error) {
@@ -1357,7 +1485,7 @@ export default {
   },
   async fetch(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
     const url = new URL(request.url)
-    if (request.method === 'OPTIONS' && (url.pathname === '/estimates' || url.pathname === '/holdings' || url.pathname === '/health')) {
+    if (request.method === 'OPTIONS' && (url.pathname === '/estimates' || url.pathname === '/quotes' || url.pathname === '/holdings' || url.pathname === '/health')) {
       return new Response(null, {
         status: 204,
         headers: url.pathname === '/health' ? healthHeaders(request) : publicHeaders(request),
@@ -1365,6 +1493,9 @@ export default {
     }
     if (request.method === 'GET' && url.pathname === '/estimates') {
       return publicEstimates(request, url, ctx)
+    }
+    if (request.method === 'GET' && url.pathname === '/quotes') {
+      return publicQuotes(request, url)
     }
     if (request.method === 'GET' && url.pathname === '/holdings') {
       return publicFundHoldings(request, url, ctx)
@@ -1377,7 +1508,7 @@ export default {
       }
       const runtime = await cachedHealthRuntime(env)
       const payload = {
-        status: 'ok', service: 'sinan-estimate-push', version: '7.0.1', build_sha: currentBuildSha(), runtime, configured: {
+        status: 'ok', service: 'sinan-estimate-push', version: '8.0.0', build_sha: currentBuildSha(), runtime, configured: {
         gist_id: Boolean(env.GIST_ID), fund_api: Boolean(env.FUND_API_BASE),
         gist_token: Boolean(env.GIST_TOKEN), serverchan: Boolean(env.WECHAT_SENDKEY), admin: Boolean(env.ADMIN_TOKEN),
         worker: Boolean(env.WORKER_TOKEN),

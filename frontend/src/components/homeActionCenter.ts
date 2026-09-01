@@ -3,7 +3,7 @@ import { V8_STRONG_ACTION_CONFIDENCE_GATE } from '@/utils/v8Decision'
 
 export const HOME_ACTION_CONFIDENCE_GATE = V8_STRONG_ACTION_CONFIDENCE_GATE
 
-export type HomeDecisionErrorKind = 'missing' | 'failed'
+export type HomeDecisionErrorKind = 'missing' | 'failed' | 'redacted'
 
 export interface HomeDecisionError {
   code: string
@@ -18,6 +18,7 @@ export interface HomeActionSummary {
   dataIssues: number
   missing: number
   failed: number
+  redacted: number
 }
 
 const ACTIONABLE = new Set<V8Action>(['buy', 'dca', 'add', 'reduce', 'sell'])
@@ -69,6 +70,7 @@ export function summarizeHomeActions(
     dataIssues: errors.length,
     missing: 0,
     failed: 0,
+    redacted: 0,
   }
   for (const decision of decisions) {
     summary[homeActionBucket(decision)] += 1

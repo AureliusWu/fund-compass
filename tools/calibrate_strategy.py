@@ -24,6 +24,7 @@ PUBLIC_REPORT = ROOT / "frontend" / "public" / "data" / "strategy-calibration.js
 MIN_VALID = int(os.environ.get("CALIBRATION_MIN_VALID", "12"))
 MAX_FUNDS = int(os.environ.get("CALIBRATION_MAX_FUNDS", "30"))
 FUND_API_BASE = os.environ.get("FUND_API_BASE", "").rstrip("/")
+PRIVATE_READ_TOKEN = os.environ.get("PRIVATE_READ_TOKEN", "").strip()
 
 
 def sample_codes() -> list[tuple[str, str]]:
@@ -100,19 +101,56 @@ def aggregate(rows: list[dict]) -> dict:
     }
 
 
-def fetch_outcomes() -> dict | None:
+def fetch_outcomes() -> dict:
     if not FUND_API_BASE:
-        return None
+        raise RuntimeError("FUND_API_BASE is required for outcome governance")
+    if not PRIVATE_READ_TOKEN:
+        raise RuntimeError("PRIVATE_READ_TOKEN is required for outcome governance")
     try:
         req = urllib.request.Request(
-            f"{FUND_API_BASE}/api/strategy/outcomes",
-            headers={"User-Agent": "sinan-calibration"},
+            f"{FUND_API_BASE}/api/private/strategy/outcomes",
+            headers={
+                "Authorization": f"Bearer {PRIVATE_READ_TOKEN}",
+                "User-Agent": "sinan-calibration",
+            },
         )
         with urllib.request.urlopen(req, timeout=30) as response:
-            return json.loads(response.read().decode("utf-8"))
+            payload = json.loads(response.read().decode("utf-8"))
     except Exception as ex:
-        print(f"outcome audit unavailable: {ex}")
-        return None
+        raise RuntimeError(f"outcome audit unavailable: {type(ex).__name__}") from ex
+    if (
+        not isinstance(payload, dict)
+        or payload.get("redacted") is True
+        or payload.get("available") is False
+        or type(payload.get("total")) is not int
+        or payload["total"] < 0
+        or not isinstance(payload.get("summary"), list)
+    ):
+        raise RuntimeError("outcome audit returned an invalid or redacted contract")
+    return payload
+
+
+def require_public_calibration_inputs(outcomes: dict, current: dict) -> None:
+    """Do not copy owner outcomes, including derived governance, into Git/Pages.
+
+    This job only has public output destinations. Until private governance has
+    durable authenticated storage, refuse publication when private evidence
+    exists; leave both existing artifacts and the active strategy untouched.
+    A verified empty dataset is different from an unavailable/redacted one.
+    """
+    governance = current.get("governance") or {}
+    previous_evidence = governance.get("outcome_evidence") or {}
+    if (
+        type(outcomes.get("total")) is not int
+        or outcomes["total"] != 0
+        or outcomes.get("summary") != []
+        or outcomes.get("items", []) != []
+        or any(outcomes.get(key, 0) != 0 for key in ("mature", "pending"))
+        or governance.get("poor_cycles", 0) != 0
+        or any(value != 0 for value in previous_evidence.values())
+        or governance.get("rollback_recommended", False) is not False
+    ):
+        raise RuntimeError("private governance storage is required before calibration publication")
 
 
 def active_is_degraded(outcomes: dict | None, version: str) -> tuple[bool, dict]:
@@ -166,6 +204,9 @@ def review_policy(
 
 
 def main() -> None:
+    current = load_registry()
+    outcomes = fetch_outcomes()
+    require_public_calibration_inputs(outcomes, current)
     rows = []
     for index, (code, fund_type) in enumerate(sample_codes(), 1):
         try:
@@ -178,8 +219,6 @@ def main() -> None:
 
     summary = aggregate(rows)
     now = dt.datetime.now(dt.timezone(dt.timedelta(hours=8))).isoformat(timespec="seconds")
-    current = load_registry()
-    outcomes = fetch_outcomes()
     active_version = current["active"].get("version") or "unknown"
     degraded, outcome_evidence = active_is_degraded(outcomes, active_version)
     previous_cycles = int((current.get("governance") or {}).get("poor_cycles") or 0)

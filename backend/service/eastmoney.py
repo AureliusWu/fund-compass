@@ -121,6 +121,232 @@ def _strict_number(value, *, positive: bool = False) -> float | None:
     return number
 
 
+def _wire_number(
+    row: dict,
+    canonical: str,
+    *aliases: str,
+    positive: bool = False,
+) -> float | None:
+    """Read a canonical numeric field and reject conflicting aliases."""
+    parsed: list[tuple[str, float]] = []
+    for key in (canonical, *aliases):
+        if key not in row or row[key] is None:
+            continue
+        number = _strict_number(row[key], positive=positive)
+        if number is None:
+            raise ValueError(f"估值代理字段 {key} 无效")
+        parsed.append((key, number))
+    if not parsed:
+        return None
+    selected = parsed[0][1]
+    if any(not math.isclose(selected, value, rel_tol=1e-9, abs_tol=1e-9) for _, value in parsed[1:]):
+        raise ValueError(f"估值代理字段 {canonical} 与兼容别名冲突")
+    return selected
+
+
+def _wire_text(row: dict, canonical: str, *aliases: str) -> str | None:
+    """Read a canonical text field and reject conflicting non-empty aliases."""
+    values: list[tuple[str, str]] = []
+    for key in (canonical, *aliases):
+        if key not in row or row[key] is None:
+            continue
+        if not isinstance(row[key], str):
+            raise ValueError(f"估值代理字段 {key} 无效")
+        text = row[key].strip()
+        if text:
+            values.append((key, text))
+    if not values:
+        return None
+    selected = values[0][1]
+    if any(value != selected for _, value in values[1:]):
+        raise ValueError(f"估值代理字段 {canonical} 与兼容别名冲突")
+    return selected
+
+
+def _parse_worker_estimate_row(row: dict, payload: dict | None = None) -> dict:
+    """Normalize one Worker valuation row into the canonical backend DTO."""
+    envelope = payload or {}
+    kind_aliases = {
+        "estimate": "intraday_estimate",
+        "intraday": "intraday_estimate",
+        "overseas_model": "qdii_next_nav_estimate",
+    }
+    raw_kind = row.get("kind")
+    legacy_kind = row.get("est_kind")
+    kind = kind_aliases.get(raw_kind, raw_kind)
+    legacy_kind = kind_aliases.get(legacy_kind, legacy_kind)
+    if kind is None:
+        kind = legacy_kind
+    elif (
+        legacy_kind is not None
+        and legacy_kind != kind
+        # Old unavailable rows had no matching est_kind enum and emitted
+        # ``estimate``.  Canonical kind remains authoritative in this one
+        # documented compatibility case.
+        and not (kind == "unavailable" and legacy_kind == "intraday_estimate")
+    ):
+        raise ValueError("估值代理 kind 与 deprecated est_kind 冲突")
+    allowed_kinds = {
+        "intraday_estimate", "qdii_next_nav_estimate", "holdings_model",
+        "official_nav", "unavailable",
+    }
+    if kind not in allowed_kinds:
+        raise ValueError("估值代理类型无效")
+
+    status = str(row.get("status") or "")
+    allowed_status = {
+        "fresh", "modeled", "delayed", "degraded", "stale",
+        "latest_official", "unavailable",
+    }
+    if status not in allowed_status:
+        raise ValueError("估值代理状态无效")
+    precision_value = row.get("source_time_precision")
+    if precision_value is None:
+        time_hint = row.get("estimate_time") or row.get("source_time") or row.get("est_time")
+        precision_value = (
+            "date"
+            if kind in {"official_nav", "unavailable"}
+            or (isinstance(time_hint, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", time_hint.strip()))
+            else "datetime"
+        )
+    precision = str(precision_value)
+    if precision not in {"date", "datetime"}:
+        raise ValueError("估值代理时间精度无效")
+
+    raw_diagnostics = row.get("diagnostics") if isinstance(row.get("diagnostics"), dict) else {}
+    raw_rejected = raw_diagnostics.get("rejected") if isinstance(raw_diagnostics.get("rejected"), dict) else {}
+    diagnostics = {
+        "primary_reason": str(raw_diagnostics.get("primary_reason") or "")[:80] or None,
+        "model_reason": str(raw_diagnostics.get("model_reason") or "")[:80] or None,
+        "official_reason": str(raw_diagnostics.get("official_reason") or "")[:80] or None,
+        "source_time_precision": precision,
+        "rejected": {
+            str(key)[:80]: int(value)
+            for key, value in list(raw_rejected.items())[:20]
+            if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 100
+        },
+    }
+    is_fallback = row.get("is_fallback")
+    if not isinstance(is_fallback, bool):
+        raise ValueError("估值代理缺少严格 fallback 标记")
+
+    base_nav = _wire_number(row, "base_nav", "last_nav", positive=True)
+    base_nav_date = _wire_text(row, "base_nav_date")
+    common = {
+        "status": status,
+        "source": str(row.get("source") or envelope.get("source") or "unavailable")[:80],
+        "kind": kind,
+        "source_time_precision": precision,
+        "fetched_at": str(row.get("fetched_at") or envelope.get("fetched_at") or "") or None,
+        "calculated_at": str(row.get("calculated_at") or "") or None,
+        "is_fallback": is_fallback,
+        "fallback_reason": str(row.get("fallback_reason") or "")[:240] or None,
+        "market": str(row.get("market") or ("overseas" if kind == "qdii_next_nav_estimate" else "unknown")),
+        "base_nav": base_nav,
+        "base_nav_date": base_nav_date,
+        "model_coverage": _wire_number(row, "model_coverage", "coverage") if kind == "holdings_model" else None,
+        "model_quote_count": row.get("model_quote_count", row.get("quote_count")) if kind == "holdings_model" else None,
+        "model_report_date": (_wire_text(row, "model_report_date", "report_date") if kind == "holdings_model" else None),
+        "model_oldest_quote_time": (_wire_text(row, "model_oldest_quote_time", "oldest_quote_time") if kind == "holdings_model" else None),
+        "model_newest_quote_time": (_wire_text(row, "model_newest_quote_time", "newest_quote_time") if kind == "holdings_model" else None),
+        "model_rejected_count": row.get("model_rejected_count", row.get("rejected_count")) if kind == "holdings_model" else None,
+        "note": str(row.get("note") or row.get("est_note") or "")[:500] or None,
+        "diagnostics": diagnostics,
+    }
+
+    if kind == "official_nav":
+        if row.get("estimate_nav") is not None or row.get("estimate_change") is not None:
+            raise ValueError("正式净值不得携带 estimate_* 数值")
+        value_nav = _wire_number(row, "value_nav", "est_nav", positive=True)
+        value_change = _wire_number(row, "value_change", "est_change")
+        nav_date = _wire_text(row, "nav_date", "value_date")
+        source_time = _wire_text(row, "source_time") or nav_date
+        common.update({
+            "source_time": source_time,
+            "estimate_change": None,
+            "estimate_nav": None,
+            "estimate_time": None,
+            "value_nav": value_nav,
+            "value_change": value_change,
+            "value_date": nav_date,
+            "nav_date": nav_date,
+        })
+    elif kind == "unavailable":
+        forbidden = (
+            "estimate_nav", "estimate_change", "value_nav", "value_change",
+            "est_nav", "est_change", "coverage", "sample_count", "error_p80",
+        )
+        if any(field in row and row[field] is not None for field in forbidden):
+            raise ValueError("不可用估值不得携带数值")
+        common.update({
+            "source_time": _wire_text(row, "source_time"),
+            "estimate_change": None,
+            "estimate_nav": None,
+            "estimate_time": None,
+            "value_nav": None,
+            "value_change": None,
+            "value_date": None,
+            "nav_date": None,
+        })
+    else:
+        estimate_nav = _wire_number(row, "estimate_nav", "value_nav", "est_nav", positive=True)
+        estimate_change = _wire_number(row, "estimate_change", "est_change")
+        if row.get("value_change") is not None:
+            raise ValueError("估算不得携带 official value_change")
+        estimate_time = _wire_text(row, "estimate_time", "source_time", "est_time")
+        value_date = _wire_text(row, "value_date")
+        common.update({
+            "source_time": estimate_time,
+            "estimate_change": estimate_change,
+            "estimate_nav": estimate_nav,
+            "estimate_time": estimate_time,
+            "value_nav": estimate_nav,
+            "value_change": None,
+            "value_date": value_date,
+            "nav_date": None,
+        })
+        if kind == "qdii_next_nav_estimate":
+            uncertainty = row.get("uncertainty")
+            if uncertainty is None:
+                uncertainty = {}
+            if not isinstance(uncertainty, dict):
+                raise ValueError("QDII uncertainty 字段无效")
+
+            def uncertainty_number(canonical: str, *aliases: str) -> float | None:
+                values: list[float] = []
+                for container, key in (
+                    *((row, key) for key in (canonical, *aliases)),
+                    (uncertainty, canonical),
+                ):
+                    if key not in container or container[key] is None:
+                        continue
+                    number = _strict_number(container[key])
+                    if number is None:
+                        raise ValueError(f"QDII {canonical} 字段无效")
+                    values.append(number)
+                if not values:
+                    return None
+                if any(not math.isclose(values[0], value, rel_tol=1e-9, abs_tol=1e-9) for value in values[1:]):
+                    raise ValueError(f"QDII {canonical} 与 uncertainty 冲突")
+                return values[0]
+
+            target_nav_date = _wire_text(row, "target_nav_date")
+            common.update({
+                "value_date": target_nav_date,
+                "target_nav_date": target_nav_date,
+                "estimate_model_version": _wire_text(row, "estimate_model_version", "model_version"),
+                "model_version": _wire_text(row, "estimate_model_version", "model_version"),
+                "sample_count": row.get("sample_count", row.get("accuracy_samples")),
+                "coverage": _wire_number(row, "coverage", "model_coverage"),
+                "model_coverage": _wire_number(row, "coverage", "model_coverage"),
+                "mae": uncertainty_number("mae"),
+                "error_p80": uncertainty_number("error_p80", "estimate_error_p80"),
+                "direction_accuracy": uncertainty_number("direction_accuracy"),
+                "market_time": _wire_text(row, "market_time") or estimate_time,
+            })
+    return EstimateContext.model_validate(common).model_dump()
+
+
 def fetch_resolved_estimate(code: str) -> dict:
     """Read the Worker v7 resolver so UI and scheduled decisions share evidence."""
     if not re.fullmatch(r"\d{6}", code):
@@ -138,70 +364,7 @@ def fetch_resolved_estimate(code: str) -> dict:
     rows = [row for row in payload["items"] if isinstance(row, dict) and str(row.get("code")) == code]
     if len(rows) != 1:
         raise ValueError("估值代理未返回唯一基金")
-    row = rows[0]
-    kind = str(row.get("est_kind") or row.get("kind") or "")
-    status = str(row.get("status") or "")
-    if kind not in {"estimate", "holdings_model", "official_nav"}:
-        raise ValueError("估值代理类型无效")
-    allowed_status = {"fresh", "modeled", "delayed", "degraded", "latest_official"}
-    if status not in allowed_status:
-        raise ValueError("估值代理状态无效")
-    estimate_nav = _strict_number(row.get("value_nav", row.get("est_nav")), positive=True)
-    base_nav = _strict_number(row.get("base_nav", row.get("last_nav")), positive=True)
-    estimate_change = _strict_number(row.get("estimate_change", row.get("est_change")))
-    if estimate_nav is None or base_nav is None or estimate_change is None or not -100 <= estimate_change <= 1000:
-        raise ValueError("估值代理数值无效")
-    precision = str(row.get("source_time_precision") or "date")
-    if precision not in {"date", "datetime"}:
-        raise ValueError("估值代理时间精度无效")
-    source_time = str(
-        row.get("source_time") or row.get("model_newest_quote_time")
-        or row.get("est_time") or row.get("value_date") or ""
-    ).strip()
-    if not source_time:
-        raise ValueError("估值代理缺少行情时间")
-    raw_diagnostics = row.get("diagnostics") if isinstance(row.get("diagnostics"), dict) else {}
-    raw_rejected = raw_diagnostics.get("rejected") if isinstance(raw_diagnostics.get("rejected"), dict) else {}
-    diagnostics = {
-        "primary_reason": str(raw_diagnostics.get("primary_reason") or "")[:80] or None,
-        "model_reason": str(raw_diagnostics.get("model_reason") or "")[:80] or None,
-        "official_reason": str(raw_diagnostics.get("official_reason") or "")[:80] or None,
-        "source_time_precision": precision,
-        "rejected": {
-            str(key)[:80]: int(value)
-            for key, value in list(raw_rejected.items())[:20]
-            if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 100
-        },
-    }
-    is_fallback = row.get("is_fallback")
-    if not isinstance(is_fallback, bool):
-        raise ValueError("估值代理缺少严格 fallback 标记")
-    context = {
-        "status": status,
-        "source": str(row.get("source") or payload.get("source") or "unavailable")[:80],
-        "kind": kind,
-        "source_time": source_time,
-        "source_time_precision": precision,
-        "fetched_at": str(row.get("fetched_at") or payload.get("fetched_at") or "") or None,
-        "calculated_at": str(row.get("calculated_at") or "") or None,
-        "is_fallback": is_fallback,
-        "fallback_reason": str(row.get("fallback_reason") or "")[:240] or None,
-        "estimate_change": estimate_change,
-        "estimate_nav": estimate_nav,
-        "base_nav": base_nav,
-        "base_nav_date": str(row.get("base_nav_date") or row.get("nav_date") or "") or None,
-        "value_nav": estimate_nav,
-        "value_date": str(row.get("value_date") or "") or None,
-        "model_coverage": _strict_number(row.get("model_coverage", row.get("coverage"))) if kind == "holdings_model" else None,
-        "model_quote_count": row.get("model_quote_count", row.get("quote_count")) if kind == "holdings_model" else None,
-        "model_report_date": (str(row.get("model_report_date") or row.get("report_date") or "") or None) if kind == "holdings_model" else None,
-        "model_oldest_quote_time": (str(row.get("model_oldest_quote_time") or row.get("oldest_quote_time") or "") or None) if kind == "holdings_model" else None,
-        "model_newest_quote_time": (str(row.get("model_newest_quote_time") or row.get("newest_quote_time") or "") or None) if kind == "holdings_model" else None,
-        "model_rejected_count": row.get("model_rejected_count", row.get("rejected_count")) if kind == "holdings_model" else None,
-        "note": str(row.get("est_note") or row.get("note") or "")[:500] or None,
-        "diagnostics": diagnostics,
-    }
-    return EstimateContext.model_validate(context).model_dump()
+    return _parse_worker_estimate_row(rows[0], payload)
 
 
 def _raw_var(text: str, name: str):

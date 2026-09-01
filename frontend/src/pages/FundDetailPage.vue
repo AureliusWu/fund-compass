@@ -45,6 +45,7 @@ function openManager() {
 }
 
 const holdMax = computed(() => Math.max(1, ...holdings.value.map((s) => s.ratio)))
+const holdingsReportDate = computed(() => holdings.value[0]?.reportDate || null)
 
 const COMP_NAMES: Record<string, string> = { return: '收益', risk: '风险', management: '管理', cost: '成本' }
 
@@ -336,7 +337,7 @@ async function toggleWatch() {
             <span class="hd-rt">{{ s.ratio.toFixed(2) }}%</span>
             <span class="hd-ch" :style="{ color: colorOf(s.change) }">{{ s.change != null ? pct(s.change) : '--' }}</span>
           </div>
-          <div class="hd-note">条形为占净值比例，右侧为个股当日涨跌。重仓股季度披露，数据来源天天基金。</div>
+          <div class="hd-note">条形为占净值比例，右侧为个股当日涨跌。重仓股季度披露<span v-if="holdingsReportDate">（披露日 {{ holdingsReportDate }}）</span>，数据来源天天基金。</div>
         </div>
         <div class="card" v-else-if="holdingsDone"><van-empty description="暂无重仓股（QDII/债基/货基常无）" image-size="60" /></div>
         <van-loading v-else size="18" style="display:block;text-align:center;padding:14px" />

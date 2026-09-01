@@ -27,9 +27,12 @@ jobs:
           python-version: '3.12'
       - name: 人工信号检查与推送
         env:
-          API_BASE: ${{ vars.VITE_API_BASE || 'https://fund-compass-api.onrender.com/api' }}
+          API_BASE: ${{ vars.VITE_API_BASE }}
           GIST_ID: ${{ secrets.GIST_ID }}
           GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
           SC_SENDKEY: ${{ secrets.SC_SENDKEY }}
           FORCE: ${{ inputs.force }}
-        run: python tools/notify.py
+        shell: bash
+        run: |
+          test -n "$API_BASE" || { echo "VITE_API_BASE variable is required" >&2; exit 1; }
+          python tools/notify.py

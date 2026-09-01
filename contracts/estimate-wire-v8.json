@@ -1,0 +1,314 @@
+{
+  "schema_version": "estimate-wire-v8.0",
+  "description": "Cross-runtime valuation fixtures. Canonical fields are authoritative; deprecated est_* aliases are accepted only when canonical fields are absent and consistent.",
+  "canonical_kinds": [
+    "intraday_estimate",
+    "qdii_next_nav_estimate",
+    "holdings_model",
+    "official_nav",
+    "unavailable"
+  ],
+  "cases": [
+    {
+      "id": "official_nav_canonical",
+      "wire": {
+        "code": "000001",
+        "name": "正式净值样例",
+        "kind": "official_nav",
+        "status": "latest_official",
+        "source": "fixture_official_nav",
+        "is_fallback": true,
+        "fallback_reason": "intraday_unavailable",
+        "source_time": "2026-08-28",
+        "source_time_precision": "date",
+        "base_nav": 1,
+        "base_nav_date": "2026-08-27",
+        "value_nav": 1.02,
+        "value_change": 2,
+        "nav_date": "2026-08-28",
+        "estimate_nav": null,
+        "estimate_change": null,
+        "estimate_time": null,
+        "est_kind": "official_nav",
+        "est_nav": null,
+        "est_change": null,
+        "est_time": "2026-08-28",
+        "diagnostics": {
+          "primary_reason": "intraday_unavailable",
+          "model_reason": null,
+          "official_reason": null,
+          "source_time_precision": "date",
+          "rejected": {}
+        }
+      },
+      "expected": {
+        "accepted": true,
+        "kind": "official_nav",
+        "nav_date": "2026-08-28",
+        "value_nav": 1.02,
+        "value_change": 2,
+        "estimate_nav": null,
+        "estimate_change": null,
+        "legacy_alias_used": false
+      }
+    },
+    {
+      "id": "official_nav_change_unknown",
+      "wire": {
+        "code": "000007",
+        "name": "正式净值涨跌未知样例",
+        "kind": "official_nav",
+        "status": "latest_official",
+        "source": "fixture_official_nav",
+        "is_fallback": true,
+        "fallback_reason": "previous_nav_unavailable",
+        "source_time": "2026-08-28",
+        "source_time_precision": "date",
+        "base_nav": null,
+        "base_nav_date": null,
+        "value_nav": 1.02,
+        "value_change": null,
+        "nav_date": "2026-08-28",
+        "estimate_nav": null,
+        "estimate_change": null,
+        "estimate_time": null,
+        "est_kind": "official_nav",
+        "est_nav": null,
+        "est_change": null,
+        "est_time": "2026-08-28",
+        "diagnostics": {
+          "primary_reason": "previous_nav_unavailable",
+          "model_reason": null,
+          "official_reason": null,
+          "source_time_precision": "date",
+          "rejected": {}
+        }
+      },
+      "expected": {
+        "accepted": true,
+        "kind": "official_nav",
+        "nav_date": "2026-08-28",
+        "value_nav": 1.02,
+        "value_change": null,
+        "estimate_nav": null,
+        "estimate_change": null,
+        "legacy_alias_used": false
+      }
+    },
+    {
+      "id": "intraday_estimate_canonical",
+      "wire": {
+        "code": "000002",
+        "name": "盘中估值样例",
+        "kind": "intraday_estimate",
+        "status": "fresh",
+        "source": "fixture_intraday",
+        "is_fallback": false,
+        "source_time": "2026-08-28T14:30:00+08:00",
+        "source_time_precision": "datetime",
+        "base_nav": 1,
+        "base_nav_date": "2026-08-27",
+        "value_nav": 1.01,
+        "value_change": null,
+        "value_date": "2026-08-28",
+        "estimate_nav": 1.01,
+        "estimate_change": 1,
+        "estimate_time": "2026-08-28T14:30:00+08:00",
+        "nav_date": null,
+        "est_kind": "estimate",
+        "est_nav": 1.01,
+        "est_change": 1,
+        "est_time": "2026-08-28T14:30:00+08:00",
+        "diagnostics": {
+          "primary_reason": null,
+          "model_reason": null,
+          "official_reason": null,
+          "source_time_precision": "datetime",
+          "rejected": {}
+        }
+      },
+      "expected": {
+        "accepted": true,
+        "kind": "intraday_estimate",
+        "value_nav": 1.01,
+        "estimate_nav": 1.01,
+        "estimate_change": 1,
+        "target_nav_date": null,
+        "legacy_alias_used": false
+      }
+    },
+    {
+      "id": "qdii_next_nav_estimate_canonical",
+      "wire": {
+        "code": "018147",
+        "name": "建信新兴市场混合(QDII)C",
+        "kind": "qdii_next_nav_estimate",
+        "status": "modeled",
+        "source": "fixture_qdii_model",
+        "is_fallback": false,
+        "source_time": "2026-08-28T16:04:47+08:00",
+        "source_time_precision": "datetime",
+        "base_nav": 2.4,
+        "base_nav_date": "2026-08-27",
+        "value_nav": 2.424,
+        "value_change": null,
+        "value_date": "2026-08-31",
+        "estimate_nav": 2.424,
+        "estimate_change": 1,
+        "estimate_time": "2026-08-28T16:04:47+08:00",
+        "nav_date": null,
+        "target_nav_date": "2026-08-31",
+        "estimate_model_version": "qdii-fixture-v1",
+        "sample_count": 28,
+        "coverage": 78.5,
+        "uncertainty": {
+          "mae": 0.74,
+          "error_p80": 1.3,
+          "direction_accuracy": 64.3
+        },
+        "est_kind": "overseas_model",
+        "est_nav": 2.424,
+        "est_change": 1,
+        "est_time": "2026-08-28T16:04:47+08:00",
+        "diagnostics": {
+          "primary_reason": null,
+          "model_reason": null,
+          "official_reason": null,
+          "source_time_precision": "datetime",
+          "rejected": {}
+        }
+      },
+      "expected": {
+        "accepted": true,
+        "kind": "qdii_next_nav_estimate",
+        "estimate_nav": 2.424,
+        "estimate_change": 1,
+        "target_nav_date": "2026-08-31",
+        "estimate_model_version": "qdii-fixture-v1",
+        "sample_count": 28,
+        "coverage": 78.5,
+        "error_p80": 1.3,
+        "legacy_alias_used": false
+      }
+    },
+    {
+      "id": "stale_intraday_estimate",
+      "wire": {
+        "code": "000003",
+        "name": "过期估值样例",
+        "kind": "intraday_estimate",
+        "status": "stale",
+        "source": "fixture_stale",
+        "is_fallback": false,
+        "source_time": "2026-08-25T14:30:00+08:00",
+        "source_time_precision": "datetime",
+        "base_nav": 1,
+        "base_nav_date": "2026-08-24",
+        "value_nav": 1.01,
+        "value_change": null,
+        "value_date": "2026-08-25",
+        "estimate_nav": 1.01,
+        "estimate_change": 1,
+        "estimate_time": "2026-08-25T14:30:00+08:00",
+        "nav_date": null,
+        "est_kind": "estimate",
+        "est_nav": 1.01,
+        "est_change": 1,
+        "est_time": "2026-08-25T14:30:00+08:00",
+        "diagnostics": {
+          "primary_reason": null,
+          "model_reason": null,
+          "official_reason": null,
+          "source_time_precision": "datetime",
+          "rejected": {}
+        }
+      },
+      "expected": {
+        "accepted": true,
+        "kind": "intraday_estimate",
+        "freshness_at_2026_08_28": "expired",
+        "legacy_alias_used": false
+      }
+    },
+    {
+      "id": "unavailable_nulls",
+      "wire": {
+        "code": "000004",
+        "name": "不可用样例",
+        "kind": "unavailable",
+        "status": "unavailable",
+        "source": "unavailable",
+        "is_fallback": true,
+        "fallback_reason": "all_sources_unavailable",
+        "source_time": null,
+        "source_time_precision": "date",
+        "base_nav": null,
+        "base_nav_date": null,
+        "value_nav": null,
+        "value_change": null,
+        "nav_date": null,
+        "estimate_nav": null,
+        "estimate_change": null,
+        "estimate_time": null,
+        "target_nav_date": null,
+        "est_kind": "estimate",
+        "est_nav": null,
+        "est_change": null,
+        "est_time": null,
+        "diagnostics": {
+          "primary_reason": "all_sources_unavailable",
+          "model_reason": "model_unavailable",
+          "official_reason": "official_unavailable",
+          "source_time_precision": "date",
+          "rejected": {}
+        }
+      },
+      "expected": {
+        "accepted": true,
+        "kind": "unavailable",
+        "value_nav": null,
+        "value_change": null,
+        "estimate_nav": null,
+        "estimate_change": null,
+        "target_nav_date": null,
+        "legacy_alias_used": false
+      }
+    },
+    {
+      "id": "malformed_official_conflict",
+      "wire": {
+        "code": "000005",
+        "name": "冲突字段样例",
+        "kind": "official_nav",
+        "status": "latest_official",
+        "source": "fixture_conflict",
+        "is_fallback": true,
+        "fallback_reason": "intraday_unavailable",
+        "source_time": "2026-08-28",
+        "source_time_precision": "date",
+        "base_nav": 1,
+        "base_nav_date": "2026-08-27",
+        "value_nav": 1.02,
+        "value_change": 2,
+        "nav_date": "2026-08-28",
+        "estimate_nav": 9.99,
+        "estimate_change": 999,
+        "est_kind": "estimate",
+        "est_nav": 8.88,
+        "est_change": 888,
+        "est_time": "2026-08-29",
+        "diagnostics": {
+          "primary_reason": "intraday_unavailable",
+          "model_reason": null,
+          "official_reason": null,
+          "source_time_precision": "date",
+          "rejected": {}
+        }
+      },
+      "expected": {
+        "accepted": false,
+        "reason": "canonical_legacy_conflict"
+      }
+    }
+  ]
+}

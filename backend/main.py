@@ -24,8 +24,23 @@ from models.api import (
     PortfolioLabRequest, V8DecisionBatchRequest,
     V8NotificationEventRequest, V8OutcomeSettleRequest, V8PolicyRequest, WatchlistRequest,
 )
+from models.v8 import (
+    PortfolioPolicy,
+    PrivateFundOutcomesResponse,
+    PrivatePortfolioOutcomesResponse,
+    PrivateV8DecisionResponse,
+    PrivateWatchlistResponse,
+    PublicDecisionDiff,
+    PublicEvidenceResponse,
+    PublicFundOutcomesResponse,
+    PublicPortfolioOutcomesResponse,
+    PublicPortfolioPolicyHistoryResponse,
+    PublicPortfolioPolicyReference,
+    PublicV8DecisionResponse,
+    PublicWatchlistResponse,
+)
 from service import eastmoney, repo, v8_decisions, v8_repo
-from service.security import require_admin, require_worker_or_admin
+from service.security import require_admin, require_private_read, require_worker_or_admin
 from strategy import backtest, decide_fund, score_fund, timing_signal
 from strategy.calibration import calibrate
 from strategy.index_valuation import status as index_valuation_status
@@ -67,7 +82,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="司南基金 API", version="7.0.1", lifespan=lifespan)
+app = FastAPI(title="司南基金 API", version="8.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -81,16 +96,20 @@ app.add_middleware(
 )
 
 
-def fund_detail_dep(code: str, force: bool = Query(False)) -> dict:
+def fund_detail_dep(code: str) -> dict:
     """统一的详情取数依赖：命中缓存或抓取，失败转 404。
 
     四个基金端点此前各自重复一遍 try/except，收口到这里后端点只声明
     `detail: dict = Depends(fund_detail_dep)` 即可，详情逻辑只有一处。
     """
     try:
-        return repo.get_detail(code, force=force)
-    except Exception as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        # Anonymous GETs may refresh only through the repository's bounded TTL
+        # policy. A caller-controlled force flag would turn a read route into
+        # an unauthenticated upstream/database write primitive.
+        return repo.get_detail(code, force=False)
+    except Exception as error:
+        log.warning("基金详情不可用 code=%s: %s", code, error)
+        raise HTTPException(status_code=404, detail="基金数据暂不可用") from error
 
 
 def _meta(d: dict) -> dict:
@@ -126,18 +145,39 @@ def _estimate_context(detail: dict, now_utc: datetime | None = None) -> dict:
         estimate = eastmoney.fetch_resolved_estimate(detail["code"])
     except Exception as error:
         log.warning("盘中估值不可用 code=%s: %s", detail.get("code"), error)
+        # The detailed exception stays in server logs; public DTOs receive a
+        # stable class rather than upstream URLs or response fragments.
+        fallback_reason = "estimate_upstream_unavailable"
+        latest_nav = detail.get("latest_nav")
+        latest_nav_date = detail.get("latest_nav_date")
+        official_available = latest_nav is not None and bool(latest_nav_date)
         return {
-            "source_time": detail.get("latest_nav_date"),
+            "source_time": latest_nav_date if official_available else None,
+            "source_time_precision": "date",
             "fetched_at": fetched_at,
             "calculated_at": None,
             "age_seconds": None,
-            "status": "latest_official" if detail.get("latest_nav_date") else "unavailable",
-            "source": detail.get("source") or "official_nav_cache",
+            "status": "latest_official" if official_available else "unavailable",
+            "source": (detail.get("source") or "official_nav_cache") if official_available else "unavailable",
+            "kind": "official_nav" if official_available else "unavailable",
             "is_fallback": True,
-            "fallback_reason": str(error),
+            "fallback_reason": fallback_reason,
             "market": _market_kind(detail),
             "estimate_change": None,
             "estimate_nav": None,
+            "estimate_time": None,
+            "base_nav": None,
+            "base_nav_date": None,
+            "value_nav": latest_nav if official_available else None,
+            "value_change": None,
+            "value_date": latest_nav_date if official_available else None,
+            "nav_date": latest_nav_date if official_available else None,
+            "target_nav_date": None,
+            "diagnostics": {
+                "primary_reason": fallback_reason[:80],
+                "source_time_precision": "date",
+                "rejected": {},
+            },
         }
 
     source_time = estimate.get("source_time")
@@ -161,7 +201,9 @@ def _estimate_context(detail: dict, now_utc: datetime | None = None) -> dict:
 
     precision = estimate.get("source_time_precision")
     hard_expired = False
-    if precision == "datetime" and estimate.get("kind") in {"estimate", "holdings_model"}:
+    if precision == "datetime" and estimate.get("kind") in {
+        "intraday_estimate", "qdii_next_nav_estimate", "holdings_model",
+    }:
         times = [source_time]
         if estimate.get("kind") == "holdings_model":
             times.extend((
@@ -197,13 +239,65 @@ def _estimate_context(detail: dict, now_utc: datetime | None = None) -> dict:
         "is_fallback": bool(estimate.get("is_fallback")),
         "market": _market_kind(detail),
     }
-    if hard_expired:
-        context.update({"estimate_change": None, "estimate_nav": None, "value_nav": None})
+    if hard_expired or status == "stale":
+        reason = "source_time_stale" if hard_expired else "source_reported_stale"
+        diagnostics = dict(context.get("diagnostics") or {})
+        diagnostics.update({
+            "primary_reason": reason,
+            "source_time_precision": precision or "date",
+        })
+        context.update({
+            "status": "unavailable",
+            "source": f"rejected:{str(context.get('source') or 'estimate')}"[:80],
+            "kind": "unavailable",
+            "is_fallback": True,
+            "fallback_reason": reason,
+            "estimate_change": None,
+            "estimate_nav": None,
+            "estimate_time": None,
+            "base_nav": None,
+            "base_nav_date": None,
+            "value_nav": None,
+            "value_change": None,
+            "value_date": None,
+            "nav_date": None,
+            "target_nav_date": None,
+            "coverage": None,
+            "model_coverage": None,
+            "model_quote_count": None,
+            "model_rejected_count": None,
+            "sample_count": None,
+            "mae": None,
+            "error_p80": None,
+            "diagnostics": diagnostics,
+        })
     return context
 
 
 def _decision_detail(detail: dict) -> dict:
     return {**detail, "decision_context": _estimate_context(detail)}
+
+
+def _public_source_health() -> dict:
+    """Expose source availability without returning upstream exception text."""
+    source = eastmoney.source_health()
+    last_error = source.get("last_primary_error")
+    return {
+        key: source.get(key)
+        for key in (
+            "primary_ok",
+            "primary_fail",
+            "fallback_used",
+            "primary_fail_rate",
+            "degraded",
+        )
+    } | {
+        "last_primary_error": (
+            {"category": "primary_source_unavailable", "recorded": True}
+            if last_error
+            else None
+        ),
+    }
 
 
 @app.get("/api/health", response_model=HealthResponse)
@@ -218,9 +312,20 @@ def health() -> dict:
         "universe": universe,
         "universe_ready": universe > 0,
         "universe_import": {"mode": "manual", "running": False},
-        "source": eastmoney.source_health(),
+        "source": _public_source_health(),
         "index_valuation": index_valuation_status(),
         "database": persistence_status(),
+        "strategy_registry": {"available": False, "redacted": True},
+        "operations": repo.public_operations_status(),
+    }
+
+
+@app.get("/api/private/operations")
+def private_operations(
+    _reader: str = Depends(require_private_read),
+) -> dict:
+    """Lossless owner activity and strategy governance status."""
+    return {
         "strategy_registry": registry_summary(),
         "operations": repo.operations_status(),
     }
@@ -270,7 +375,14 @@ def fund_calibrate(detail: dict = Depends(fund_detail_dep)) -> dict:
 
 @app.get("/api/strategy/registry")
 def strategy_registry() -> dict:
-    """当前线上参数、候选版本及其跨基金验证依据。"""
+    """Anonymous callers cannot infer owner outcome governance state."""
+    return {"available": False, "redacted": True}
+
+
+@app.get("/api/private/strategy/registry")
+def private_strategy_registry(
+    _reader: str = Depends(require_private_read),
+) -> dict:
     return registry_summary()
 
 
@@ -366,38 +478,87 @@ def portfolio_decisions(request: PortfolioDecisionRequest, _role: str = Depends(
             raise HTTPException(status_code=400, detail="portfolio_value 需为数字") from ex
         if portfolio_value < 0:
             raise HTTPException(status_code=400, detail="portfolio_value 不能为负数")
-    result = decide_portfolio(cleaned, portfolio_value)
-    if request_id and not repo.claim_request(request_id, "portfolio_decisions"):
-        return {**result, "duplicate": True, "request_id": request_id}
+    idempotency_endpoint = "legacy_portfolio_decisions"
+    if request_id:
+        claim = v8_repo.claim_idempotency(
+            request_id,
+            idempotency_endpoint,
+            {"items": cleaned, "portfolio_value": portfolio_value},
+        )
+        if claim["state"] == "conflict":
+            raise HTTPException(status_code=409, detail="request_id 已用于不同请求")
+        if claim["state"] == "in_progress":
+            raise HTTPException(status_code=425, detail="相同 request_id 正在处理")
+        if claim["state"] == "complete":
+            return {**claim["response"], "duplicate": True}
     try:
+        result = decide_portfolio(cleaned, portfolio_value)
         version = (registry_summary().get("active") or {}).get("version") or "unknown"
         repo.record_decisions(result["decisions"], version)
         repo.record_portfolio_decision(cleaned, result["decisions"], version)
+        response = {**result, "duplicate": False, "request_id": request_id or None}
+        if request_id:
+            v8_repo.complete_idempotency(request_id, idempotency_endpoint, response)
     except Exception:
         if request_id:
             try:
-                repo.release_request(request_id, "portfolio_decisions")
+                v8_repo.release_idempotency(request_id, idempotency_endpoint)
             except Exception:
                 log.exception("request_id 释放失败 request_id=%s", request_id)
         raise
-    return {**result, "duplicate": False, "request_id": request_id or None}
+    return response
 
 
 @app.get("/api/strategy/outcomes")
 def strategy_outcomes() -> dict:
-    """历史决策在 5/20/60 个净值观测后的真实表现。"""
+    """Stable anonymous shape; owner outcomes require private authentication."""
+    return {
+        "total": None, "mature": None, "pending": None,
+        "summary": [], "items": [], "breakdowns": {},
+        "available": False, "redacted": True,
+    }
+
+
+@app.get("/api/private/strategy/outcomes")
+def private_strategy_outcomes(
+    _reader: str = Depends(require_private_read),
+) -> dict:
+    """Lossless legacy decision outcomes for the deployment owner."""
     return repo.decision_outcomes()
 
 
 @app.get("/api/strategy/portfolio-outcomes")
 def strategy_portfolio_outcomes() -> dict:
-    """组合建议快照在 20/60 个净值观测后的真实表现。"""
+    """公开组合结果仅返回稳定脱敏形状，不查询私人快照。"""
+    return {
+        "total": None,
+        "mature": None,
+        "pending": None,
+        "unavailable": None,
+        "items": [],
+        "redacted": True,
+    }
+
+
+@app.get("/api/private/strategy/portfolio-outcomes")
+def private_strategy_portfolio_outcomes(
+    _reader: str = Depends(require_private_read),
+) -> dict:
+    """Lossless legacy portfolio outcome view for the deployment owner."""
     return repo.portfolio_decision_outcomes()
 
 
 @app.get("/api/strategy/version-comparison")
 def strategy_version_comparison() -> dict:
-    """冻结模型的新旧实盘结果比较；只读且样本不足时拒绝下结论。"""
+    """Anonymous callers cannot infer owner-scoped strategy samples."""
+    return {"available": False, "redacted": True}
+
+
+@app.get("/api/private/strategy/version-comparison")
+def private_strategy_version_comparison(
+    _reader: str = Depends(require_private_read),
+) -> dict:
+    """Lossless owner-scoped frozen-model comparison."""
     return repo.version_comparison()
 
 
@@ -409,42 +570,77 @@ def _v8_valid_code(code: str) -> str:
     return code
 
 
-@app.get("/api/v2/fund/{code}/evidence")
+def _private_decision_bundle(bundle: dict) -> PrivateV8DecisionResponse:
+    decision = bundle["decision"]
+    evidence = bundle["evidence"]
+    return PrivateV8DecisionResponse(
+        code=evidence.fund_code,
+        name=evidence.fund_name,
+        type=evidence.fund_type,
+        action=decision.action,
+        action_label=v8_decisions.ACTION_ZH[decision.action],
+        strength=decision.strength,
+        confidence=decision.confidence,
+        summary=decision.summary,
+        decision=decision,
+        evidence=evidence,
+        holding=bundle["holding"],
+        policy=bundle["policy"],
+        diff=bundle["diff"],
+    )
+
+
+def _decision_bundle_or_404(code: str) -> dict:
+    bundle = v8_repo.latest_decision_bundle(_v8_valid_code(code))
+    if bundle is None:
+        raise HTTPException(status_code=404, detail="尚无已生成的 V8 Decision 快照")
+    return bundle
+
+
+@app.get("/api/v2/fund/{code}/evidence", response_model=PublicEvidenceResponse)
 def v8_fund_evidence(code: str) -> dict:
-    """Return the latest persisted evidence without fetching or writing."""
+    """Stable anonymous marker; never query owner-scoped evidence."""
+    return PublicEvidenceResponse(fund_code=_v8_valid_code(code)).model_dump(mode="json")
+
+
+@app.get("/api/v2/private/fund/{code}/evidence")
+def v8_private_fund_evidence(
+    code: str,
+    _reader: str = Depends(require_private_read),
+) -> dict:
+    """Return the latest lossless owner evidence without fetching or writing."""
     snapshot = v8_repo.latest_evidence(_v8_valid_code(code))
     if snapshot is None:
         raise HTTPException(status_code=404, detail="尚无已生成的 V8 Evidence 快照")
     return snapshot.model_dump(mode="json")
 
 
-@app.get("/api/v2/fund/{code}/decision")
+@app.get("/api/v2/fund/{code}/decision", response_model=PublicV8DecisionResponse)
 def v8_fund_decision(
     code: str,
 ) -> dict:
-    bundle = v8_repo.latest_decision_bundle(_v8_valid_code(code))
-    if bundle is None:
-        raise HTTPException(status_code=404, detail="尚无已生成的 V8 Decision 快照")
-    decision = bundle["decision"]
-    evidence = bundle["evidence"]
-    return {
-        "code": evidence.fund_code,
-        "name": evidence.fund_name,
-        "type": evidence.fund_type,
-        "action": decision.action,
-        "action_label": v8_decisions.ACTION_ZH[decision.action],
-        "strength": decision.strength,
-        "confidence": decision.confidence,
-        "summary": decision.summary,
-        **{key: bundle[key].model_dump(mode="json") for key in (
-            "decision", "evidence", "holding", "policy", "diff",
-        )},
-    }
+    return PublicV8DecisionResponse(code=_v8_valid_code(code)).model_dump(mode="json")
 
 
-@app.get("/api/v2/fund/{code}/decision/diff")
+@app.get("/api/v2/private/fund/{code}/decision", response_model=PrivateV8DecisionResponse)
+def v8_private_fund_decision(
+    code: str,
+    _reader: str = Depends(require_private_read),
+) -> dict:
+    return _private_decision_bundle(_decision_bundle_or_404(code)).model_dump(mode="json")
+
+
+@app.get("/api/v2/fund/{code}/decision/diff", response_model=PublicDecisionDiff)
 def v8_fund_decision_diff(
     code: str,
+) -> dict:
+    return PublicDecisionDiff(fund_code=_v8_valid_code(code)).model_dump(mode="json")
+
+
+@app.get("/api/v2/private/fund/{code}/decision/diff")
+def v8_private_fund_decision_diff(
+    code: str,
+    _reader: str = Depends(require_private_read),
 ) -> dict:
     diff = v8_repo.latest_decision_diff(_v8_valid_code(code))
     if diff is None:
@@ -452,8 +648,18 @@ def v8_fund_decision_diff(
     return diff.model_dump(mode="json")
 
 
-@app.get("/api/v2/fund/{code}/outcomes")
+@app.get("/api/v2/fund/{code}/outcomes", response_model=PublicFundOutcomesResponse)
 def v8_fund_outcomes(code: str) -> dict:
+    return PublicFundOutcomesResponse(
+        fund_code=_v8_valid_code(code),
+    ).model_dump(mode="json")
+
+
+@app.get("/api/v2/private/fund/{code}/outcomes", response_model=PrivateFundOutcomesResponse)
+def v8_private_fund_outcomes(
+    code: str,
+    _reader: str = Depends(require_private_read),
+) -> dict:
     return v8_repo.outcomes_for_fund(_v8_valid_code(code))
 
 
@@ -537,8 +743,17 @@ def v8_portfolio_rebalance(
     }
 
 
-@app.get("/api/v2/portfolio/outcomes")
+@app.get("/api/v2/portfolio/outcomes", response_model=PublicPortfolioOutcomesResponse)
 def v8_portfolio_outcomes(limit: int = 100) -> dict:
+    del limit
+    return PublicPortfolioOutcomesResponse().model_dump(mode="json")
+
+
+@app.get("/api/v2/private/portfolio/outcomes", response_model=PrivatePortfolioOutcomesResponse)
+def v8_private_portfolio_outcomes(
+    limit: int = Query(100, ge=1, le=500),
+    _reader: str = Depends(require_private_read),
+) -> dict:
     return v8_repo.portfolio_outcomes(limit)
 
 
@@ -565,8 +780,15 @@ def v8_settle_portfolio_outcomes(
     return v8_repo.settle_all_portfolio_outcomes(bounded_limit)
 
 
-@app.get("/api/v2/portfolio/policy")
+@app.get("/api/v2/portfolio/policy", response_model=PublicPortfolioPolicyReference)
 def v8_portfolio_policy() -> dict:
+    return PublicPortfolioPolicyReference().model_dump(mode="json")
+
+
+@app.get("/api/v2/private/portfolio/policy", response_model=PortfolioPolicy)
+def v8_private_portfolio_policy(
+    _reader: str = Depends(require_private_read),
+) -> dict:
     try:
         return v8_repo.read_policy().model_dump(mode="json")
     except LookupError as error:
@@ -590,14 +812,28 @@ def v8_post_portfolio_policy(
     return v8_repo.save_policy(policy).model_dump(mode="json")
 
 
-@app.get("/api/v2/portfolio/policy/history")
+@app.get("/api/v2/portfolio/policy/history", response_model=PublicPortfolioPolicyHistoryResponse)
 def v8_portfolio_policy_history() -> dict:
+    return PublicPortfolioPolicyHistoryResponse().model_dump(mode="json")
+
+
+@app.get("/api/v2/private/portfolio/policy/history")
+def v8_private_portfolio_policy_history(
+    _reader: str = Depends(require_private_read),
+) -> dict:
     rows = v8_repo.read_policy_history()
     return {"total": len(rows), "items": [row.model_dump(mode="json") for row in rows]}
 
 
 @app.get("/api/v2/strategy/registry")
 def v8_strategy_registry() -> dict:
+    return {"available": False, "redacted": True}
+
+
+@app.get("/api/v2/private/strategy/registry")
+def v8_private_strategy_registry(
+    _reader: str = Depends(require_private_read),
+) -> dict:
     registry = registry_summary()
     active = (registry.get("active") or {}).get("version")
     return {
@@ -613,18 +849,22 @@ def v8_strategy_registry() -> dict:
 def v8_strategy_performance(version: str) -> dict:
     if not re.fullmatch(r"[A-Za-z0-9._:-]{1,120}", version):
         raise HTTPException(status_code=422, detail="策略版本格式无效")
+    return {"available": False, "redacted": True}
+
+
+@app.get("/api/v2/private/strategy/{version}/performance")
+def v8_private_strategy_performance(
+    version: str,
+    _reader: str = Depends(require_private_read),
+) -> dict:
+    if not re.fullmatch(r"[A-Za-z0-9._:-]{1,120}", version):
+        raise HTTPException(status_code=422, detail="策略版本格式无效")
     return v8_repo.strategy_performance(version)
 
 
 @app.get("/api/v2/strategy/candidates")
 def v8_strategy_candidates() -> dict:
-    registry = registry_summary()
-    return {
-        "candidate": registry.get("candidate"),
-        "history": registry.get("history") or [],
-        "governance": registry.get("governance"),
-        "auto_promotion": False,
-    }
+    return {"available": False, "redacted": True}
 
 
 @app.post("/api/v2/outcomes/settle")
@@ -757,9 +997,17 @@ def portfolio_lab(request: PortfolioLabRequest, _role: str = Depends(require_adm
         raise HTTPException(status_code=422, detail=str(ex)) from ex
 
 
-@app.get("/api/watchlist")
+@app.get("/api/watchlist", response_model=PublicWatchlistResponse)
 def get_watchlist() -> dict:
-    return {"items": repo.list_watchlist()}
+    """Compatibility route that never reveals the server-side watchlist."""
+    return PublicWatchlistResponse().model_dump(mode="json")
+
+
+@app.get("/api/private/watchlist", response_model=PrivateWatchlistResponse)
+def get_private_watchlist(
+    _reader: str = Depends(require_private_read),
+) -> dict:
+    return PrivateWatchlistResponse(items=repo.list_watchlist()).model_dump(mode="json")
 
 
 @app.post("/api/watchlist")

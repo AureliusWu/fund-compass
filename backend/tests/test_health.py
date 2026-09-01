@@ -199,7 +199,7 @@ def test_health_exposes_index_freshness_and_database_mode(monkeypatch):
     monkeypatch.setattr(main, "index_valuation_status", lambda: index_status)
     monkeypatch.setattr(main, "persistence_status", lambda: database_status)
     monkeypatch.setattr(main.repo, "universe_count", lambda: 10)
-    monkeypatch.setattr(main.repo, "operations_status", lambda: {})
+    monkeypatch.setattr(main.repo, "public_operations_status", lambda: {})
     monkeypatch.setattr(main.eastmoney, "source_health", lambda: {})
     monkeypatch.setattr(main, "registry_summary", lambda: {})
 
@@ -207,6 +207,35 @@ def test_health_exposes_index_freshness_and_database_mode(monkeypatch):
 
     assert result["index_valuation"] == index_status
     assert result["database"] == database_status
+
+
+def test_health_redacts_primary_source_exception_detail(monkeypatch):
+    secret = "https://upstream.example/private?token=must-not-leak"
+    monkeypatch.setattr(main.repo, "universe_count", lambda: 1)
+    monkeypatch.setattr(main.repo, "public_operations_status", lambda: {})
+    monkeypatch.setattr(main, "index_valuation_status", lambda: {})
+    monkeypatch.setattr(main, "persistence_status", lambda: {})
+    monkeypatch.setattr(main.eastmoney, "source_health", lambda: {
+        "primary_ok": 2,
+        "primary_fail": 1,
+        "fallback_used": 1,
+        "primary_fail_rate": 33.3,
+        "last_primary_error": {
+            "code": "510300",
+            "reason": f"RuntimeError: {secret}",
+            "at": "2026-09-01T12:00:00+08:00",
+        },
+        "degraded": False,
+    })
+
+    source = main.health()["source"]
+
+    assert source["last_primary_error"] == {
+        "category": "primary_source_unavailable",
+        "recorded": True,
+    }
+    assert "reason" not in str(source).lower()
+    assert secret not in str(source)
 
 
 def test_deployment_status_exposes_only_valid_render_commit(monkeypatch):

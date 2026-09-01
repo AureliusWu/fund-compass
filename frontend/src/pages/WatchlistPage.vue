@@ -80,6 +80,9 @@ const decisionRows = computed(() => filterAndSortWatchDecisions(
 ))
 
 function failedLoadState(error: unknown, kind: 'decision' | 'diff'): WatchDecisionLoadState {
+  if (error instanceof ApiError && error.kind === 'redacted') {
+    return { kind: 'redacted', message: '私人数据未公开；不表示快照不存在' }
+  }
   if (error instanceof ApiError && error.status === 404) {
     return {
       kind: 'missing',

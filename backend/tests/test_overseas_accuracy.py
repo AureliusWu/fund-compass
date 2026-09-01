@@ -3,6 +3,8 @@ import datetime as dt
 import json
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -18,6 +20,11 @@ def load(name):
 accuracy = load("overseas_accuracy")
 calibration = load("calibrate_overseas")
 audit_module = load("audit_overseas_accuracy")
+
+
+@pytest.fixture(autouse=True)
+def configured_api_base(monkeypatch):
+    monkeypatch.setattr(accuracy, "FUND_API_BASE", "https://api.test")
 
 
 def registry_fixture():
@@ -75,9 +82,21 @@ def test_add_predictions_skips_weekends():
     assert ledger["records"] == []
 
 
-def test_empty_api_secret_falls_back_to_public_backend():
-    assert accuracy.normalize_api_base("") == "https://fund-compass-api.onrender.com"
+def test_empty_api_secret_has_no_legacy_fallback():
+    assert accuracy.normalize_api_base("") == ""
+    assert accuracy.normalize_api_base(None) == ""
     assert accuracy.normalize_api_base("https://example.test/") == "https://example.test"
+
+
+def test_pipeline_requires_explicit_api_base_before_io(monkeypatch):
+    monkeypatch.setattr(accuracy, "FUND_API_BASE", "")
+    monkeypatch.setattr(accuracy, "REGISTRY", ROOT / "must-not-be-read.json")
+    monkeypatch.setattr(accuracy, "request_bytes", lambda *args, **kwargs: (_ for _ in ()).throw(
+        AssertionError("network must not be called before API configuration is validated")
+    ))
+
+    with pytest.raises(RuntimeError, match="FUND_API_BASE is required"):
+        accuracy.run_pipeline()
 
 
 def test_fetch_quotes_preserves_source_market_date(monkeypatch):

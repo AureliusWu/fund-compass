@@ -8,8 +8,14 @@ import {
   type ExternalRequestBudget,
 } from './external'
 
-export type ValuationKind = 'estimate' | 'holdings_model' | 'official_nav'
-export type ValuationStatus = 'fresh' | 'delayed' | 'modeled' | 'latest_official'
+export type ValuationKind = 'estimate' | 'qdii_next_nav_estimate' | 'holdings_model' | 'official_nav'
+export type ValuationStatus = 'fresh' | 'delayed' | 'modeled' | 'degraded' | 'stale' | 'latest_official'
+
+export interface EstimateUncertainty {
+  mae: number
+  error_p80: number
+  direction_accuracy: number
+}
 
 export interface ValuationDiagnostics {
   primary_reason: string | null
@@ -48,6 +54,12 @@ export interface Estimate {
   newestQuoteTime: string
   rejectedCount: number
   diagnostics: ValuationDiagnostics
+  // Supplied only by an independently audited next-NAV model. The resolver
+  // below does not produce these fields or infer a QDII target from today.
+  targetNavDate?: string | null
+  estimateModelVersion?: string | null
+  sampleCount?: number | null
+  uncertainty?: EstimateUncertainty | null
 }
 
 export interface FundHolding {
@@ -67,6 +79,45 @@ export interface HoldingQuote {
   change: number
   timestampMs: number
   sourceTime: string
+}
+
+export type PublicQuoteSource = 'tencent' | 'eastmoney'
+export type PublicQuoteStatus = 'fresh' | 'stale'
+
+export interface PublicQuote {
+  code: string
+  price: number
+  changePct: number | null
+  sourceTime: string | null
+  source: PublicQuoteSource
+  status: PublicQuoteStatus
+}
+
+export interface PublicQuoteFailure {
+  source: PublicQuoteSource
+  reason: string
+  upstreamStatus: number | null
+  codes: string[]
+}
+
+export interface PublicQuoteBatch {
+  items: Map<string, PublicQuote>
+  unavailableCodes: string[]
+  failures: PublicQuoteFailure[]
+}
+
+export type CanonicalValuationKind =
+  | 'intraday_estimate'
+  | 'qdii_next_nav_estimate'
+  | 'holdings_model'
+  | 'official_nav'
+  | 'unavailable'
+
+export class EstimateWireError extends Error {
+  constructor(readonly reason: 'canonical_legacy_conflict' | 'schema_invalid') {
+    super(reason)
+    this.name = 'EstimateWireError'
+  }
 }
 
 export interface UnavailableValuation {
@@ -90,6 +141,7 @@ const OFFICIAL_NAV_URL = 'https://api.fund.eastmoney.com/f10/lsjz'
 const HOLDINGS_URL = 'https://fundf10.eastmoney.com/FundArchivesDatas.aspx'
 const PROFILE_URL = 'https://fund.eastmoney.com/pingzhongdata'
 const QUOTES_URL = 'https://push2.eastmoney.com/api/qt/ulist.np/get'
+const TENCENT_QUOTES_URL = 'https://qt.gtimg.cn/'
 const MAX_NAV = 1_000_000
 const MAX_ABS_CHANGE = 100
 const MAX_PRICE = 10_000_000
@@ -108,6 +160,10 @@ const FALLBACK_CONCURRENCY = 5
 const MAX_FALLBACK_RESOLUTIONS = 25
 const MAX_MODEL_ATTEMPTS = 3
 const DEFAULT_REQUEST_BUDGET = 45
+const PUBLIC_QUOTE_TIMEOUT_MS = 8_000
+const MAX_PUBLIC_QUOTE_BODY_BYTES = 256_000
+const MAX_PUBLIC_QUOTE_AGE_MS = 7 * 24 * 60 * 60 * 1000
+const PUBLIC_TENCENT_CODE_RE = /^(?:(?:sh|sz)\d{6}|hk\d{5}|us[A-Z0-9-]{1,8})$/
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -189,6 +245,177 @@ function beijingTimestamp(timestampMs: number): string {
   }).formatToParts(new Date(timestampMs))
   const part = (type: string) => parts.find((item) => item.type === type)?.value || ''
   return `${part('year')}-${part('month')}-${part('day')} ${part('hour')}:${part('minute')}:${part('second')}`
+}
+
+export function canonicalWireTime(
+  value: string,
+  precision: 'date' | 'datetime',
+): string | null {
+  const text = String(value || '').trim()
+  if (precision === 'date') return cleanDate(text) || null
+  const local = /^(\d{4}-\d{2}-\d{2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(text)
+  if (local && cleanDate(local[1])) {
+    const hour = Number(local[2])
+    const minute = Number(local[3])
+    const second = Number(local[4] || 0)
+    if (hour <= 23 && minute <= 59 && second <= 59) {
+      return `${local[1]}T${local[2].padStart(2, '0')}:${local[3]}:${String(second).padStart(2, '0')}+08:00`
+    }
+  }
+  if (!/(?:Z|[+-]\d{2}:\d{2})$/.test(text) || sourceTimestampMs(text) == null) return null
+  return text
+}
+
+function owns(record: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(record, key)
+}
+
+function wireNumbersEqual(left: number, right: number): boolean {
+  return Math.abs(left - right) <= 1e-9 * Math.max(1, Math.abs(left), Math.abs(right))
+}
+
+function canonicalWireKind(value: unknown): CanonicalValuationKind | null {
+  const kind = String(value ?? '').trim()
+  if (kind === 'estimate' || kind === 'intraday') return 'intraday_estimate'
+  if (kind === 'overseas_model') return 'qdii_next_nav_estimate'
+  if (kind === 'intraday_estimate'
+    || kind === 'qdii_next_nav_estimate'
+    || kind === 'holdings_model'
+    || kind === 'official_nav'
+    || kind === 'unavailable') return kind
+  return null
+}
+
+function wireNumber(record: Record<string, unknown>, canonical: string, legacy?: string): {
+  value: number | null
+  legacyUsed: boolean
+} {
+  const canonicalPresent = owns(record, canonical)
+  const canonicalValue = canonicalPresent ? numberOrNull(record[canonical]) : null
+  const legacyPresent = Boolean(legacy) && owns(record, legacy!)
+  const legacyValue = legacyPresent ? numberOrNull(record[legacy!]) : null
+  if (canonicalPresent && legacyPresent && canonicalValue != null && legacyValue != null
+    && !wireNumbersEqual(canonicalValue, legacyValue)) {
+    throw new EstimateWireError('canonical_legacy_conflict')
+  }
+  return {
+    value: canonicalPresent ? canonicalValue : legacyValue,
+    legacyUsed: !canonicalPresent && legacyPresent,
+  }
+}
+
+/**
+ * Strict compatibility boundary for cross-runtime estimate fixtures. Canonical
+ * fields always win. Deprecated est_* aliases may fill a missing canonical
+ * field, but can never override or contradict a canonical value.
+ */
+export function normalizeEstimateWire(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) throw new EstimateWireError('schema_invalid')
+  const kindFromCanonical = canonicalWireKind(value.kind)
+  const kindFromLegacy = canonicalWireKind(value.est_kind)
+  const kind = kindFromCanonical || kindFromLegacy
+  if (!kind) throw new EstimateWireError('schema_invalid')
+  let legacyUsed = !kindFromCanonical && Boolean(kindFromLegacy)
+  if (kind !== 'unavailable' && kindFromCanonical && kindFromLegacy && kindFromCanonical !== kindFromLegacy) {
+    throw new EstimateWireError('canonical_legacy_conflict')
+  }
+
+  const normalized: Record<string, unknown> = { ...value, kind }
+  if (kind === 'unavailable') {
+    for (const field of ['value_nav', 'value_change', 'estimate_nav', 'estimate_change', 'est_nav', 'est_change']) {
+      if (owns(value, field) && value[field] != null) throw new EstimateWireError('canonical_legacy_conflict')
+      normalized[field] = null
+    }
+    if (value.estimate_time != null || value.nav_date != null) {
+      throw new EstimateWireError('canonical_legacy_conflict')
+    }
+    normalized.estimate_time = null
+    normalized.nav_date = null
+    normalized.target_nav_date = null
+    normalized.legacy_alias_used = legacyUsed
+    return normalized
+  }
+
+  const valueNav = wireNumber(value, 'value_nav')
+  const valueChange = wireNumber(value, 'value_change')
+  const estimateNav = wireNumber(value, 'estimate_nav', 'est_nav')
+  const estimateChange = wireNumber(value, 'estimate_change', 'est_change')
+  legacyUsed = legacyUsed || estimateNav.legacyUsed || estimateChange.legacyUsed
+
+  if (kind === 'official_nav') {
+    const invalidExplicitChange = owns(value, 'value_change')
+      && value.value_change != null
+      && valueChange.value == null
+    if (positiveBounded(valueNav.value) == null
+      || invalidExplicitChange
+      || (valueChange.value != null && boundedChange(valueChange.value) == null)) {
+      throw new EstimateWireError('schema_invalid')
+    }
+    if (estimateNav.value != null || estimateChange.value != null || value.estimate_time != null
+      || value.est_nav != null || value.est_change != null) {
+      throw new EstimateWireError('canonical_legacy_conflict')
+    }
+    if (!cleanDate(value.nav_date)) throw new EstimateWireError('schema_invalid')
+    normalized.value_nav = valueNav.value
+    normalized.value_change = valueChange.value
+    normalized.estimate_nav = null
+    normalized.estimate_change = null
+    normalized.estimate_time = null
+    normalized.est_nav = null
+    normalized.est_change = null
+    normalized.target_nav_date = null
+    normalized.legacy_alias_used = legacyUsed
+    return normalized
+  }
+
+  if (positiveBounded(valueNav.value) == null
+    || positiveBounded(estimateNav.value) == null
+    || boundedChange(estimateChange.value) == null
+    || !wireNumbersEqual(valueNav.value!, estimateNav.value!)) {
+    throw new EstimateWireError('schema_invalid')
+  }
+  if (valueChange.value != null || value.nav_date != null) {
+    throw new EstimateWireError('canonical_legacy_conflict')
+  }
+  const estimateTime = String(value.estimate_time ?? '').trim()
+  if (!estimateTime) throw new EstimateWireError('schema_invalid')
+  normalized.value_nav = valueNav.value
+  normalized.value_change = null
+  normalized.nav_date = null
+  normalized.estimate_nav = estimateNav.value
+  normalized.estimate_change = estimateChange.value
+  normalized.estimate_time = estimateTime
+
+  if (kind === 'qdii_next_nav_estimate') {
+    const target = cleanDate(value.target_nav_date)
+    const baseDate = cleanDate(value.base_nav_date)
+    const version = String(value.estimate_model_version ?? '').trim()
+    const samples = numberOrNull(value.sample_count)
+    const coverage = numberOrNull(value.coverage)
+    const uncertainty = isRecord(value.uncertainty) ? value.uncertainty : null
+    const mae = uncertainty ? numberOrNull(uncertainty.mae) : null
+    const errorP80 = uncertainty ? numberOrNull(uncertainty.error_p80) : null
+    const direction = uncertainty ? numberOrNull(uncertainty.direction_accuracy) : null
+    if (!target || !baseDate || target <= baseDate || value.value_date !== target
+      || typeof value.estimate_model_version !== 'string' || !version || version.length > 120
+      || samples == null || !Number.isInteger(samples) || samples < 0 || samples > 1_000_000
+      || coverage == null || coverage < 0 || coverage > 100
+      || mae == null || mae < 0 || mae > 1000 || errorP80 == null || errorP80 < 0 || errorP80 > 1000
+      || direction == null || direction < 0 || direction > 100
+      || value.source_time_precision !== 'datetime'
+      || !['modeled', 'degraded', 'stale'].includes(String(value.status))
+      || canonicalWireTime(estimateTime, 'datetime') == null
+      || value.source_time !== estimateTime) {
+      throw new EstimateWireError('schema_invalid')
+    }
+    normalized.estimate_model_version = version
+    normalized.sample_count = samples
+    normalized.coverage = coverage
+    normalized.uncertainty = { mae, error_p80: errorP80, direction_accuracy: direction }
+  }
+  normalized.target_nav_date = kind === 'qdii_next_nav_estimate' ? value.target_nav_date : null
+  normalized.legacy_alias_used = legacyUsed
+  return normalized
 }
 
 function emptyDiagnostics(primaryReason: string | null = null): ValuationDiagnostics {
@@ -512,6 +739,179 @@ export function parseHoldingQuotePayload(payload: unknown): Map<string, HoldingQ
     quotes.set(code, { code, price, change, timestampMs, sourceTime: beijingTimestamp(timestampMs) })
   }
   return quotes
+}
+
+export function isSupportedPublicQuoteCode(code: string): boolean {
+  return code === 'AU9999' || PUBLIC_TENCENT_CODE_RE.test(code)
+}
+
+function compactTencentTimestamp(value: unknown): { sourceTime: string | null; timestampMs: number | null } {
+  const text = String(value ?? '').trim()
+  const directTimestampMs = sourceTimestampMs(text)
+  if (directTimestampMs != null) return { sourceTime: text, timestampMs: directTimestampMs }
+  const match = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/.exec(text)
+  if (!match) return { sourceTime: null, timestampMs: null }
+  const sourceTime = `${match[1]}-${match[2]}-${match[3]} ${match[4]}:${match[5]}:${match[6]}`
+  const timestampMs = sourceTimestampMs(sourceTime)
+  return timestampMs == null
+    ? { sourceTime: null, timestampMs: null }
+    : { sourceTime, timestampMs }
+}
+
+function publicQuote(
+  code: string,
+  priceValue: unknown,
+  changeValue: unknown,
+  source: PublicQuoteSource,
+  sourceTime: string | null,
+  timestampMs: number | null,
+  now: Date,
+): PublicQuote | null {
+  const price = positiveBounded(priceValue, MAX_PRICE)
+  if (price == null) return null
+  const change = boundedChange(changeValue)
+  const nowMs = now.getTime()
+  const fresh = timestampMs != null
+    && Number.isFinite(nowMs)
+    && timestampMs <= nowMs + MAX_FUTURE_SKEW_MS
+    && nowMs - timestampMs <= MAX_PUBLIC_QUOTE_AGE_MS
+  return {
+    code,
+    price,
+    // A severely stale or unverifiable quote can still be displayed as a last
+    // price, but must not drive a current percentage/model calculation.
+    changePct: fresh ? change : null,
+    sourceTime,
+    source,
+    status: fresh ? 'fresh' : 'stale',
+  }
+}
+
+export function parseTencentQuotePayload(payload: string, codes: string[], now = new Date()): Map<string, PublicQuote> {
+  if (typeof payload !== 'string') throw new ExternalDataError('schema_invalid')
+  if (!payload.trim()) throw new ExternalDataError('upstream_empty')
+  const assignments = new Map<string, string>()
+  const pattern = /(?:^|[\r\n\s])v_([A-Za-z0-9_]+)="([^"\r\n]*)";?/g
+  for (const match of payload.matchAll(pattern)) assignments.set(match[1], match[2])
+  if (!assignments.size) throw new ExternalDataError('schema_invalid')
+
+  const quotes = new Map<string, PublicQuote>()
+  for (const code of codes) {
+    const raw = assignments.get(code.replace(/-/g, '_'))
+    if (raw == null) continue
+    const fields = raw.split('~')
+    if (fields.length < 5) continue
+    const price = positiveBounded(fields[3], MAX_PRICE)
+    if (price == null) continue
+    let change = boundedChange(fields[32])
+    const previousClose = positiveBounded(fields[4], MAX_PRICE)
+    if (change == null && previousClose != null) change = boundedChange((price / previousClose - 1) * 100)
+    const stamp = compactTencentTimestamp(fields[30])
+    const normalized = publicQuote(code, price, change, 'tencent', stamp.sourceTime, stamp.timestampMs, now)
+    if (normalized) quotes.set(code, normalized)
+  }
+  return quotes
+}
+
+export function parseEastmoneyGoldQuotePayload(payload: unknown, now = new Date()): PublicQuote | null {
+  if (!isRecord(payload) || !isRecord(payload.data)) {
+    if (isRecord(payload) && payload.data === null) throw new ExternalDataError('upstream_empty')
+    throw new ExternalDataError('schema_invalid')
+  }
+  const diff = payload.data.diff
+  const rows = Array.isArray(diff) ? diff : isRecord(diff) ? Object.values(diff) : null
+  if (!rows) throw new ExternalDataError('schema_invalid')
+  for (const value of rows) {
+    if (!isRecord(value) || String(value.f12 ?? '').trim().toUpperCase() !== 'AU9999') continue
+    const seconds = numberOrNull(value.f124 ?? value.f86)
+    const timestampMs = seconds != null && seconds > 0 ? seconds * 1000 : null
+    const sourceTime = timestampMs == null ? null : beijingTimestamp(timestampMs)
+    const normalized = publicQuote(
+      'AU9999',
+      value.f2 ?? value.f43 ?? value.f57,
+      value.f3 ?? value.f170,
+      'eastmoney',
+      sourceTime,
+      timestampMs,
+      now,
+    )
+    if (normalized) return normalized
+  }
+  return null
+}
+
+function quoteFailure(source: PublicQuoteSource, codes: string[], error: unknown): PublicQuoteFailure {
+  const status = error instanceof ExternalDataError && error.status != null && error.status >= 400
+    ? error.status
+    : null
+  return { source, reason: stableFailureReason(error), upstreamStatus: status, codes }
+}
+
+/**
+ * Restricted public quote fan-out. Callers supply only validated market codes;
+ * no URL, hostname, path, headers or query fragment is accepted from the wire.
+ */
+export async function fetchPublicQuotes(codes: string[], now = new Date()): Promise<PublicQuoteBatch> {
+  const uniqueCodes = [...new Set(codes)]
+  if (!uniqueCodes.length || uniqueCodes.some((code) => !isSupportedPublicQuoteCode(code))) {
+    throw new ExternalDataError('schema_invalid')
+  }
+  const tencentCodes = uniqueCodes.filter((code) => code !== 'AU9999')
+  const wantsGold = uniqueCodes.includes('AU9999')
+  const items = new Map<string, PublicQuote>()
+  const failures: PublicQuoteFailure[] = []
+  let tencentFailed = false
+  let eastmoneyFailed = false
+
+  await Promise.all([
+    (async () => {
+      if (!tencentCodes.length) return
+      try {
+        const query = new URLSearchParams({ q: tencentCodes.join(',') })
+        const response = await externalGet(`${TENCENT_QUOTES_URL}?${query}`, {
+          headers: { Referer: 'https://gu.qq.com/' },
+        }, { timeoutMs: PUBLIC_QUOTE_TIMEOUT_MS })
+        const parsed = parseTencentQuotePayload(
+          await readBoundedText(response, MAX_PUBLIC_QUOTE_BODY_BYTES),
+          tencentCodes,
+          now,
+        )
+        for (const [code, item] of parsed) items.set(code, item)
+      } catch (error) {
+        tencentFailed = true
+        failures.push(quoteFailure('tencent', tencentCodes, error))
+      }
+    })(),
+    (async () => {
+      if (!wantsGold) return
+      try {
+        const query = new URLSearchParams({
+          fltt: '2', fields: 'f2,f3,f12,f124', secids: '118.AU9999,113.AU9999,114.AU9999',
+        })
+        const response = await externalGet(`${QUOTES_URL}?${query}`, {
+          headers: { Referer: 'https://quote.eastmoney.com/' },
+        }, { timeoutMs: PUBLIC_QUOTE_TIMEOUT_MS })
+        const quote = parseEastmoneyGoldQuotePayload(await readJson(response, MAX_PUBLIC_QUOTE_BODY_BYTES), now)
+        if (quote) items.set(quote.code, quote)
+      } catch (error) {
+        eastmoneyFailed = true
+        failures.push(quoteFailure('eastmoney', ['AU9999'], error))
+      }
+    })(),
+  ])
+
+  const missingTencent = tencentCodes.filter((code) => !items.has(code))
+  if (missingTencent.length && !tencentFailed) {
+    failures.push({ source: 'tencent', reason: 'upstream_empty', upstreamStatus: null, codes: missingTencent })
+  }
+  if (wantsGold && !items.has('AU9999') && !eastmoneyFailed) {
+    failures.push({ source: 'eastmoney', reason: 'upstream_empty', upstreamStatus: null, codes: ['AU9999'] })
+  }
+  return {
+    items,
+    unavailableCodes: uniqueCodes.filter((code) => !items.has(code)),
+    failures,
+  }
 }
 
 async function fetchHoldingQuotes(holdings: FundHolding[], budget: ExternalRequestBudget): Promise<Map<string, HoldingQuote>> {
@@ -879,54 +1279,95 @@ export async function resolveValuations(
 }
 
 export function publicValuationItem(item: Estimate): Record<string, unknown> {
-  if (!hasCompleteValues(item)) throw new ExternalDataError('schema_invalid')
-  return {
+  const isOfficial = item.kind === 'official_nav'
+  if (isOfficial) {
+    // A published NAV may be known without a preceding NAV/change. Preserve
+    // that observation without inventing a zero move or an estimate.
+    const baseDate = item.baseNavDate || null
+    if (positiveBounded(item.valueNav) == null || !cleanDate(item.valueDate)
+      || (item.baseNav == null) !== (baseDate == null)
+      || (baseDate != null && (!cleanDate(baseDate) || baseDate >= item.valueDate || positiveBounded(item.baseNav) == null))
+      || (item.change != null && !hasCompleteValues(item))) {
+      throw new ExternalDataError('schema_invalid')
+    }
+  } else if (!hasCompleteValues(item)) throw new ExternalDataError('schema_invalid')
+  const canonicalKind: CanonicalValuationKind = item.kind === 'estimate'
+    ? 'intraday_estimate'
+    : item.kind
+  const isQdii = item.kind === 'qdii_next_nav_estimate'
+  const sourcePrecision = item.diagnostics.source_time_precision
+  const wireSourceTime = canonicalWireTime(item.sourceTime, sourcePrecision)
+  if (!wireSourceTime) throw new ExternalDataError('schema_invalid')
+  const modelOldestQuoteTime = item.oldestQuoteTime
+    ? canonicalWireTime(item.oldestQuoteTime, 'datetime')
+    : null
+  const modelNewestQuoteTime = item.newestQuoteTime
+    ? canonicalWireTime(item.newestQuoteTime, 'datetime')
+    : null
+  const result = {
     code: item.code,
     name: item.name,
-    kind: item.kind,
+    kind: canonicalKind,
     source: item.source,
     status: item.status,
     is_fallback: item.isFallback,
     base_nav: item.baseNav,
-    base_nav_date: item.baseNavDate,
+    base_nav_date: item.baseNavDate || null,
     value_nav: item.valueNav,
+    value_change: isOfficial ? item.change : null,
     value_date: item.valueDate,
-    source_time: item.sourceTime,
-    estimate_change: item.change,
+    nav_date: isOfficial ? item.valueDate : null,
+    source_time: wireSourceTime,
+    estimate_nav: isOfficial ? null : item.valueNav,
+    estimate_change: isOfficial ? null : item.change,
+    estimate_time: isOfficial ? null : wireSourceTime,
+    target_nav_date: isQdii ? (item.targetNavDate ?? null) : null,
+    estimate_model_version: isQdii ? (item.estimateModelVersion ?? null) : null,
+    sample_count: isQdii ? (item.sampleCount ?? null) : null,
+    uncertainty: isQdii ? (item.uncertainty ?? null) : null,
     coverage: item.coverage,
     quote_count: item.quoteCount,
     report_date: item.reportDate || null,
-    oldest_quote_time: item.oldestQuoteTime || null,
-    newest_quote_time: item.newestQuoteTime || null,
+    oldest_quote_time: modelOldestQuoteTime,
+    newest_quote_time: modelNewestQuoteTime,
     rejected_count: item.rejectedCount,
     model_coverage: item.coverage,
     model_quote_count: item.quoteCount,
     model_report_date: item.reportDate || null,
-    model_oldest_quote_time: item.oldestQuoteTime || null,
-    model_newest_quote_time: item.newestQuoteTime || null,
+    model_oldest_quote_time: modelOldestQuoteTime,
+    model_newest_quote_time: modelNewestQuoteTime,
     model_rejected_count: item.rejectedCount,
     note: item.note,
     diagnostics: item.diagnostics,
-    // FundVal and other v6 consumers.
+    // Deprecated v6 aliases. New consumers must use value_*/estimate_* and
+    // canonical `kind`. Official NAV is not an estimate, so its est_* aliases
+    // intentionally remain null instead of repeating the official value.
     last_nav: item.lastNav,
-    est_nav: item.estNav,
-    est_change: item.change,
-    nav_date: item.navDate,
+    est_nav: isOfficial ? null : item.estNav,
+    est_change: isOfficial ? null : item.change,
     // FundVal v13 treats every unknown non-official kind as a direct estimate
     // and derives its badge from this legacy field.  Keep the canonical
     // source_time/model_* timestamps precise, but make the v6 alias date-only
     // for holdings models so old clients cannot relabel a non-official model
     // as realtime.
     est_time: item.kind === 'holdings_model' ? item.valueDate : item.time,
-    source_time_precision: item.diagnostics.source_time_precision,
+    source_time_precision: sourcePrecision,
     est_label: item.label,
-    est_kind: item.kind,
+    est_kind: isQdii ? 'overseas_model' : item.kind,
     est_realtime: item.kind === 'estimate'
       && item.status === 'fresh'
       && item.diagnostics.source_time_precision === 'datetime',
     est_note: item.note,
     fallback_reason: item.isFallback ? item.diagnostics.primary_reason : null,
   }
+  // Validate the real serialized boundary as well as test fixtures. Incomplete
+  // QDII evidence must never leave this function as a usable prediction.
+  try { normalizeEstimateWire(result) }
+  catch (error) {
+    if (error instanceof EstimateWireError) throw new ExternalDataError('schema_invalid')
+    throw error
+  }
+  return result
 }
 
 export function publicUnavailableItem(item: UnavailableValuation): Record<string, unknown> {
@@ -938,11 +1379,16 @@ export function publicUnavailableItem(item: UnavailableValuation): Record<string
     status: 'unavailable',
     is_fallback: true,
     base_nav: null,
-    base_nav_date: item.baseNavDate,
+    base_nav_date: item.baseNavDate || null,
     value_nav: null,
-    value_date: item.valueDate,
-    source_time: item.sourceTime,
+    value_change: null,
+    value_date: item.valueDate || null,
+    nav_date: null,
+    source_time: item.sourceTime || null,
+    estimate_nav: null,
     estimate_change: null,
+    estimate_time: null,
+    target_nav_date: null,
     coverage: null,
     quote_count: null,
     report_date: null,
@@ -957,11 +1403,11 @@ export function publicUnavailableItem(item: UnavailableValuation): Record<string
     model_rejected_count: 0,
     note: '盘中估值、重仓模型和最近正式净值均不可用',
     diagnostics: item.diagnostics,
+    // Deprecated v6 aliases; kept null so missing data cannot become zero.
     last_nav: null,
     est_nav: null,
     est_change: null,
-    nav_date: item.baseNavDate,
-    est_time: item.sourceTime,
+    est_time: item.sourceTime || null,
     source_time_precision: item.diagnostics.source_time_precision,
     est_label: '数据不可用',
     est_kind: 'estimate',

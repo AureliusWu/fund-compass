@@ -25,7 +25,7 @@ const props = defineProps<{
   code: string
 }>()
 
-type LoadState = 'loading' | 'ready' | 'missing' | 'error'
+type LoadState = 'loading' | 'ready' | 'missing' | 'error' | 'redacted'
 
 const state = ref<LoadState>('loading')
 const result = ref<V8DecisionResult | null>(null)
@@ -72,7 +72,8 @@ async function load() {
     state.value = 'ready'
   } catch (error) {
     if (generation !== loadGeneration) return
-    state.value = error instanceof ApiError && error.status === 404 ? 'missing' : 'error'
+    state.value = error instanceof ApiError && error.kind === 'redacted' ? 'redacted'
+      : error instanceof ApiError && error.status === 404 ? 'missing' : 'error'
   }
 }
 
@@ -93,6 +94,12 @@ watch(() => props.code, load, { immediate: true })
       <span class="loading-rule" />
       <strong>正在读取 V8 决策链</strong>
       <p>旧版基金详情会继续正常加载。</p>
+    </div>
+
+    <div v-else-if="state === 'redacted'" class="ledger-state missing-state" aria-live="polite">
+      <span class="state-seal">未公开</span>
+      <strong>私人决策快照不对匿名请求公开</strong>
+      <p>这不表示没有记录，也不表示持仓或收益为 0。下方公开基金分析仍可查看。</p>
     </div>
 
     <div v-else-if="state === 'missing'" class="ledger-state missing-state" aria-live="polite">

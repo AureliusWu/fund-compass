@@ -7,7 +7,12 @@ def test_operations_status_is_secret_free_and_tolerates_empty_db(tmp_path, monke
     monkeypatch.setattr(repo, "get_conn", db.get_conn)
     monkeypatch.setattr(repo, "UNIVERSE_META", tmp_path / "missing.json")
     db.init_db()
-    status = repo.operations_status()
-    assert status["cache"]["hit_rate"] is None
-    assert status["latest_decision_write"] is None
-    assert "token" not in str(status).lower()
+    public = repo.public_operations_status()
+    private = repo.operations_status()
+    assert public["cache"]["hit_rate"] is None
+    assert public["latest_decision_write"] is None
+    assert public["latest_result_settlement"] is None
+    assert public["redacted"] is True
+    assert private["latest_decision_write"] is None
+    assert private["redacted"] is False
+    assert "token" not in str(public).lower()
