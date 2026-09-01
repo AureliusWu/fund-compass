@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-08-31T08:43:55.367395+00:00",
+  "generated_at": "2026-09-01T07:16:27.356406+00:00",
   "source": "eastmoney fundcode_search.js",
-  "fund_count": 27711,
-  "sha256": "6cf16e2043230182d2e87916838f49481762ccb040de97261786dbf8539c06d2"
+  "fund_count": 27718,
+  "sha256": "2947fe9b83082d68a7eb74fbc4c2d79c9de603c89e4c06ca14f47d758d77f445"
 }
