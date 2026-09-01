@@ -5,7 +5,7 @@
 
 ## 结论
 
-v8.0.0 本地发布候选已完成代码加固和全量回归。版本、前端、API、Worker、PWA 与锁文件已统一到 8.0.0；后端 556 项、前端 236 项、Worker 144 项测试通过，类型检查、生产构建、依赖审计、Worker dry-run、本地 Chrome 合成 smoke 和三轮交替性能对比通过。
+v8.0.0 本地发布候选已完成代码加固和全量回归。版本、前端、API、Worker、PWA 与锁文件已统一到 8.0.0；后端 557 项、前端 236 项、Worker 144 项测试通过，类型检查、生产构建、依赖审计、Worker dry-run、本地 Chrome 合成 smoke 和三轮交替性能对比通过。
 
 生产仍必须按同一精确提交完成候选 Render Free、Pages、Worker、三端地址一致性与部署后 smoke。并行候选服务 `fund-compass-api-v8-candidate` 已按 $0/月创建且没有磁盘；Free SQLite 必须报告 `ephemeral / durable=false`，重启可能丢失数据。代码级失败关闭可以部署为未发布候选，但 V8 persistence gate 必须拒绝正式发布；状态保持 `BLOCKED`，不能把本地备份测试写成生产持久化已通过。
 

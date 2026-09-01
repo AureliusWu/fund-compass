@@ -309,10 +309,22 @@ def private_records(monkeypatch):
 
 
 @pytest.fixture
-def client(private_records):
+def client(private_records, tmp_path, monkeypatch):
+    # Keep this ASGI suite independent from the developer's ignored local DB
+    # and from whichever database another test used previously.  Entering the
+    # client context runs the real application lifespan, including init_db().
+    from database import db
+
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "private-read.db"))
+    monkeypatch.setattr(
+        main.repo,
+        "import_universe_artifact",
+        lambda: {"loaded": False, "reason": "isolated-test", "fund_count": 0},
+    )
     # Requests travel through FastAPI routing, dependency injection, response
     # validation and JSON serialization; handlers are not called directly.
-    return TestClient(main.app)
+    with TestClient(main.app) as test_client:
+        yield test_client
 
 
 def _all_keys(value):
@@ -323,6 +335,14 @@ def _all_keys(value):
     elif isinstance(value, list):
         for item in value:
             yield from _all_keys(item)
+
+
+def test_clean_client_initializes_health_database_before_first_request(client):
+    response = client.get("/api/health")
+
+    assert response.status_code == 200
+    assert response.json()["universe"] == 0
+    assert response.json()["universe_ready"] is False
 
 
 PRIVATE_KEYS = {

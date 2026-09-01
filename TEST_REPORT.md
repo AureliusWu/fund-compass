@@ -14,7 +14,7 @@
 
 | 范围 | 结果 | 证据 |
 |---|---|---|
-| Backend 全量 | PASS | 556 tests collected；全量 100% 通过 |
+| Backend 全量 | PASS | 557 tests collected；全量 100% 通过；含 Linux 空库首请求 health 隔离回归 |
 | Python 依赖 | PASS | `pip check`：No broken requirements found |
 | Frontend 全量 | PASS | 34 files / 236 tests |
 | Frontend 类型 | PASS | `vue-tsc --noEmit` |
