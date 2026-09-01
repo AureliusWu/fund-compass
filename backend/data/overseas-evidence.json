@@ -1,7 +1,29 @@
 {
   "alignment_version": "observation-target-v2",
-  "models": {},
+  "models": {
+    "012920": {
+      "accuracy_status": "collecting",
+      "alignment_version": "observation-target-v2",
+      "base_nav": 3.7287,
+      "base_nav_date": "2026-08-28",
+      "code": "012920",
+      "coverage": 33.98,
+      "direction_accuracy": 80.0,
+      "error_p80": 3.032,
+      "mae": 1.823,
+      "market_time": "2026-08-31T16:04:55+08:00",
+      "model_version": "v1-2026q1-style",
+      "name": "易方达全球成长精选混合(QDII)人民币A",
+      "observed_at": "2026-09-01T19:58:26+08:00",
+      "predicted_change": 0.5312,
+      "predicted_nav": 3.7485,
+      "prediction_date": "2026-09-01",
+      "sample_count": 10,
+      "status": "pending",
+      "target_nav_date": "2026-08-31"
+    }
+  },
   "schema": 1,
   "source_schema": 2,
-  "source_updated_at": "2026-08-29T02:58:29+08:00"
+  "source_updated_at": "2026-09-01T19:58:26+08:00"
 }
