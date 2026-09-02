@@ -1,29 +1,50 @@
 {
   "alignment_version": "observation-target-v2",
   "models": {
-    "012920": {
+    "018147": {
       "accuracy_status": "collecting",
       "alignment_version": "observation-target-v2",
-      "base_nav": 3.7287,
-      "base_nav_date": "2026-08-28",
-      "code": "012920",
-      "coverage": 33.98,
-      "direction_accuracy": 80.0,
-      "error_p80": 3.032,
-      "mae": 1.823,
-      "market_time": "2026-08-31T16:04:55+08:00",
-      "model_version": "v1-2026q1-style",
-      "name": "易方达全球成长精选混合(QDII)人民币A",
-      "observed_at": "2026-09-01T19:58:26+08:00",
-      "predicted_change": 0.5312,
-      "predicted_nav": 3.7485,
-      "prediction_date": "2026-09-01",
+      "base_nav": 2.32,
+      "base_nav_date": "2026-08-31",
+      "code": "018147",
+      "coverage": 64.33,
+      "direction_accuracy": 90.0,
+      "error_p80": 1.313,
+      "mae": 0.878,
+      "market_time": "2026-09-01T16:04:55+08:00",
+      "model_version": "v1-2026q1-holdings",
+      "name": "建信新兴市场混合(QDII)C",
+      "observed_at": "2026-09-02T19:40:17+08:00",
+      "predicted_change": -1.7297,
+      "predicted_nav": 2.2799,
+      "prediction_date": "2026-09-02",
       "sample_count": 10,
       "status": "pending",
-      "target_nav_date": "2026-08-31"
+      "target_nav_date": "2026-09-01"
+    },
+    "539002": {
+      "accuracy_status": "collecting",
+      "alignment_version": "observation-target-v2",
+      "base_nav": 2.358,
+      "base_nav_date": "2026-08-31",
+      "code": "539002",
+      "coverage": 64.33,
+      "direction_accuracy": 90.0,
+      "error_p80": 1.315,
+      "mae": 0.87,
+      "market_time": "2026-09-01T16:04:55+08:00",
+      "model_version": "v1-2026q1-holdings",
+      "name": "建信新兴市场混合(QDII)A",
+      "observed_at": "2026-09-02T19:40:17+08:00",
+      "predicted_change": -1.7297,
+      "predicted_nav": 2.3172,
+      "prediction_date": "2026-09-02",
+      "sample_count": 10,
+      "status": "pending",
+      "target_nav_date": "2026-09-01"
     }
   },
   "schema": 1,
   "source_schema": 2,
-  "source_updated_at": "2026-09-01T19:58:26+08:00"
+  "source_updated_at": "2026-09-02T19:40:17+08:00"
 }
