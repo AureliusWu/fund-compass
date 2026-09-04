@@ -11,10 +11,15 @@ on:
         type: string
         required: false
         default: ''
+      formal_release:
+        description: Run the fail-closed formal-release storage audit
+        type: boolean
+        required: false
+        default: false
 
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name == 'workflow_dispatch' && inputs.formal_release && 'formal' || 'candidate' }}
+  cancel-in-progress: ${{ !(github.event_name == 'workflow_dispatch' && inputs.formal_release) }}
 
 permissions:
   contents: read
@@ -37,6 +42,7 @@ jobs:
         env:
           REQUESTED_SHA: ${{ github.event.inputs.target_sha || '' }}
           EVENT_NAME: ${{ github.event_name }}
+          EVENT_REF: ${{ github.ref }}
           EVENT_SHA: ${{ github.sha }}
         run: |
           target_sha=${REQUESTED_SHA:-$EVENT_SHA}
@@ -46,6 +52,10 @@ jobs:
           fi
           git cat-file -e "$target_sha^{commit}"
           if [[ "$EVENT_NAME" != "pull_request" ]]; then
+            [[ "$EVENT_REF" == "refs/heads/main" ]] || {
+              echo "release workflows must run from refs/heads/main" >&2
+              exit 1
+            }
             git fetch --no-tags origin main
             remote_sha=$(git rev-parse origin/main)
             [[ "$target_sha" == "$remote_sha" ]] || {
@@ -132,7 +142,7 @@ jobs:
       - run: npx wrangler deploy --dry-run
 
   deploy:
-    if: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+    if: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && !(github.event_name == 'workflow_dispatch' && inputs.formal_release) }}
     needs: [resolve, backend, frontend, worker]
     uses: ./.github/workflows/deploy.yml
     with:
@@ -142,12 +152,24 @@ jobs:
       pages: write
       id-token: write
 
-  smoke:
-    if: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+  candidate_smoke:
+    if: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && !(github.event_name == 'workflow_dispatch' && inputs.formal_release) }}
     needs: [resolve, deploy]
     uses: ./.github/workflows/post-deploy-smoke.yml
     with:
       target_sha: ${{ needs.resolve.outputs.target_sha }}
+      enforce_persistence: false
+    secrets: inherit
+    permissions:
+      contents: read
+
+  formal_smoke:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.formal_release }}
+    needs: [resolve, backend, frontend, worker]
+    uses: ./.github/workflows/post-deploy-smoke.yml
+    with:
+      target_sha: ${{ needs.resolve.outputs.target_sha }}
+      enforce_persistence: true
     secrets: inherit
     permissions:
       contents: read

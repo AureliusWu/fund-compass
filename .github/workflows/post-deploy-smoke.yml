@@ -7,18 +7,30 @@ on:
         description: Exact validated and deployed main commit to verify
         type: string
         required: true
+      enforce_persistence:
+        description: Run the fail-closed formal-release storage audit
+        type: boolean
+        required: false
+        default: true
+    outputs:
+      formal_release_status:
+        description: Machine-readable release status; remains blocked until restart proof is automated
+        value: ${{ jobs.smoke.outputs.formal_release_status }}
 
 permissions:
   contents: read
 
 concurrency:
-  group: post-deploy-smoke
-  cancel-in-progress: true
+  group: post-deploy-smoke-${{ inputs.enforce_persistence && 'formal' || 'candidate' }}
+  cancel-in-progress: ${{ inputs.enforce_persistence == false }}
 
 jobs:
   smoke:
+    name: ${{ inputs.enforce_persistence && 'FORMAL_RELEASE_AUDIT (fail closed)' || 'CANDIDATE_ONLY (not a release)' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    outputs:
+      formal_release_status: ${{ steps.release_status.outputs.formal_release_status }}
     env:
       FUND_API_BASE: ${{ secrets.FUND_API_BASE }}
       VITE_API_BASE: ${{ vars.VITE_API_BASE }}
@@ -28,6 +40,10 @@ jobs:
         with:
           ref: ${{ inputs.target_sha }}
           fetch-depth: 0
+      - name: 初始化机器可读发布状态
+        id: release_status
+        shell: bash
+        run: echo "formal_release_status=blocked" >> "$GITHUB_OUTPUT"
       - name: 校验精确源码
         shell: bash
         run: test "$(git rev-parse HEAD)" = "${{ inputs.target_sha }}"
@@ -563,11 +579,80 @@ jobs:
               and (.fallback_reason | type) == "string"
             )
           ' <<<"$estimates" >/dev/null
-      - name: 正式发布持久化硬门禁（零成本候选预期阻断）
+      - name: 最终重新绑定 main、Pages 与后端部署身份
+        env:
+          EXPECTED_VERSION: ${{ steps.release.outputs.version }}
+          EXPECTED_SHA: ${{ inputs.target_sha }}
+        shell: bash
+        run: |
+          git fetch --no-tags origin main
+          [[ "$(git rev-parse origin/main)" == "$EXPECTED_SHA" ]] || {
+            echo "target SHA is no longer the current origin/main" >&2
+            exit 1
+          }
+          page_release=$(curl --fail --silent --show-error \
+            --header "Cache-Control: no-cache" \
+            --header "Pragma: no-cache" \
+            "https://aureliuswu.github.io/fund-compass/release.json?release=${EXPECTED_SHA}&audit=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}")
+          [[ "$(jq -r '.commit // empty' <<<"$page_release")" == "$EXPECTED_SHA" ]] || {
+            echo "final Pages deployment is not bound to the target SHA" >&2
+            exit 1
+          }
+          api="${FUND_API_BASE%/}"
+          final_health="$RUNNER_TEMP/fund-compass-final-health.json"
+          curl --fail --silent --show-error --header "Cache-Control: no-cache" \
+            "$api/api/health?audit=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" > "$final_health"
+          deployment_commit=$(jq -r '.deployment.commit // empty' "$final_health")
+          backend_source_matches=false
+          if [[ "$deployment_commit" =~ ^[0-9a-f]{40}$ ]] \
+            && git merge-base --is-ancestor "$deployment_commit" "$EXPECTED_SHA" \
+            && git diff --quiet "$deployment_commit" "$EXPECTED_SHA" -- backend render.yaml; then
+            backend_source_matches=true
+          fi
+          jq -e --arg version "$EXPECTED_VERSION" '
+            .status == "ok"
+            and .version == $version
+            and .deployment.platform == "render"
+            and (.deployment.commit | type) == "string"
+          ' "$final_health" >/dev/null
+          [[ "$backend_source_matches" == "true" ]] || {
+            echo "final storage response is not bound to the validated backend source" >&2
+            exit 1
+          }
+      - name: 验证零成本候选存储边界（不授予正式发布资格）
+        if: ${{ inputs.enforce_persistence == false }}
+        shell: bash
+        run: |
+          jq -e '
+            .database.engine == "sqlite"
+            and .database.persistence == "ephemeral"
+            and .database.durable == false
+            and (.database.warning | type) == "string"
+            and (.database.warning | length) > 0
+          ' "$RUNNER_TEMP/fund-compass-final-health.json" >/dev/null
+          {
+            echo "## CANDIDATE_ONLY"
+            echo
+            echo "生产契约与候选部署验收通过，但当前存储为 ephemeral / durable=false。"
+            echo "状态：BLOCKED_FOR_FORMAL_RELEASE；不得创建 v8.0.0 Tag 或 GitHub Release。"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=Candidate only::CANDIDATE_ONLY / BLOCKED_FOR_FORMAL_RELEASE"
+      - name: 正式发布持久化硬门禁（需跨重启证据）
+        if: ${{ inputs.enforce_persistence }}
         env:
           EXPECTED_VERSION: ${{ steps.release.outputs.version }}
         shell: bash
         run: |
-          api="${FUND_API_BASE%/}"
-          health=$(curl --fail --silent --show-error "$api/api/health")
-          python tools/persistence_gate.py --expected-version "$EXPECTED_VERSION" <<<"$health"
+          if ! python tools/persistence_gate.py --expected-version "$EXPECTED_VERSION" \
+            < "$RUNNER_TEMP/fund-compass-final-health.json"; then
+            echo "BLOCKED_FOR_FORMAL_RELEASE: durable storage contract is not satisfied" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          {
+            echo "## BLOCKED_FOR_FORMAL_RELEASE"
+            echo
+            echo "耐久存储自报契约通过，但尚无自动化的生产写入、重启或再部署、读回证据。"
+            echo "在该证据门禁实现前，不得创建 v8.0.0 Tag 或 GitHub Release。"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "formal release requires cross-restart production write/read evidence" >&2
+          exit 1

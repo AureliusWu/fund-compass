@@ -26,9 +26,10 @@ def test_ci_is_the_only_release_orchestrator() -> None:
 
     assert "workflow_dispatch:" in ci
     assert "target_sha:" in ci
+    assert "formal_release:" in ci
     assert "uses: ./.github/workflows/deploy.yml" in ci
     assert "needs: [resolve, backend, frontend, worker]" in ci
-    assert "uses: ./.github/workflows/post-deploy-smoke.yml" in ci
+    assert ci.count("uses: ./.github/workflows/post-deploy-smoke.yml") == 2
     assert "needs: [resolve, deploy]" in ci
     assert ci.count("github.event_name != 'pull_request'") == 2
     assert "github.ref == 'refs/heads/main'" in ci
@@ -44,12 +45,28 @@ def test_ci_is_the_only_release_orchestrator() -> None:
     assert "dist/release.json" in deploy
     assert "release.json?release=" in smoke
     assert 'deployed_commit" == "${{ inputs.target_sha }}"' in smoke
+    assert "enforce_persistence:" in smoke
+    assert "default: true" in smoke
+    assert "formal_release_status:" in smoke
+    assert "formal_release_status=blocked" in smoke
+    assert "formal_release_eligible" not in smoke
+    assert not re.search(r"if:\s*\$\{\{[^\n]*formal_release_status\s*\}\}", ci + smoke)
+    assert "CANDIDATE_ONLY (not a release)" in smoke
+    assert "FORMAL_RELEASE_AUDIT (fail closed)" in smoke
+    assert "enforce_persistence: false" in ci
+    assert "enforce_persistence: true" in ci
+    assert "formal_smoke:" in ci
+    assert "candidate_smoke:" in ci
+    assert "formal_smoke:" in ci[ci.index("candidate_smoke:") :]
 
 
 def test_ci_validates_and_checks_out_one_exact_sha() -> None:
     ci = workflow("ci.yml")
 
     assert "target_sha must be a full 40-character commit SHA" in ci
+    assert 'EVENT_REF: ${{ github.ref }}' in ci
+    assert '[[ "$EVENT_REF" == "refs/heads/main" ]]' in ci
+    assert "release workflows must run from refs/heads/main" in ci
     assert '[[ "$target_sha" == "$remote_sha" ]]' in ci
     assert "refusing to release a non-HEAD main commit" in ci
     assert ci.count("ref: ${{ needs.resolve.outputs.target_sha }}") == 3
@@ -206,7 +223,8 @@ def test_post_deploy_smoke_verifies_exact_api_and_complete_static_data() -> None
     assert ".index_valuation.age_days <= .index_valuation.max_age_days" in source
     assert ".index_valuation.usable == false" in source
     assert ".index_valuation.stale == true" in source
-    assert 'python tools/persistence_gate.py --expected-version "$EXPECTED_VERSION" <<<"$health"' in source
+    assert 'python tools/persistence_gate.py --expected-version "$EXPECTED_VERSION"' in source
+    assert '< "$RUNNER_TEMP/fund-compass-final-health.json"' in source
     assert '.build_sha == $sha' in source
     assert 'git diff --quiet "$worker_deployment_sha" "$EXPECTED_SHA" -- worker' in source
     assert '[[ "$worker_source_matches" == "true" ]]' in source
@@ -235,17 +253,46 @@ def test_post_deploy_smoke_runs_v8_persistence_gate_against_configured_api() -> 
     required_target = 'test -n "${FUND_API_BASE:-}"'
     normalized_target = 'api="${FUND_API_BASE%/}"'
     health_request = 'health=$(curl --fail --silent --show-error "$api/api/health" || true)'
-    persistence_gate = (
-        'python tools/persistence_gate.py --expected-version '
-        '"$EXPECTED_VERSION" <<<"$health"'
-    )
+    final_health = 'final_health="$RUNNER_TEMP/fund-compass-final-health.json"'
+    persistence_gate = 'python tools/persistence_gate.py --expected-version "$EXPECTED_VERSION"'
 
     assert required_target in source
     assert normalized_target in source
     assert "api=${FUND_API_BASE:-" not in source
     assert source.index(required_target) < source.index(normalized_target)
     assert source.index(normalized_target) < source.index(health_request)
-    assert source.index(health_request) < source.index(persistence_gate)
+    assert source.index(health_request) < source.index(final_health)
+    assert source.index(final_health) < source.index(persistence_gate)
+    assert 'git merge-base --is-ancestor "$deployment_commit" "$EXPECTED_SHA"' in source
+    assert 'git diff --quiet "$deployment_commit" "$EXPECTED_SHA" -- backend render.yaml' in source
+    assert '[[ "$(git rev-parse origin/main)" == "$EXPECTED_SHA" ]]' in source
+    assert "&audit=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" in source
+    assert '--header "Cache-Control: no-cache"' in source
+    assert "final Pages deployment is not bound to the target SHA" in source
+    assert "final storage response is not bound to the validated backend source" in source
+    assert "if: ${{ inputs.enforce_persistence }}" in source
+    assert "continue-on-error" not in source[source.index(persistence_gate) - 300:]
+    assert "formal release requires cross-restart production write/read evidence" in source
+    assert 'echo "formal_release_status=blocked" >> "$GITHUB_OUTPUT"' in source
+    assert source.index(persistence_gate) < source.index(
+        "formal release requires cross-restart production write/read evidence"
+    )
+
+
+def test_candidate_smoke_requires_honest_ephemeral_storage_without_granting_release() -> None:
+    source = workflow("post-deploy-smoke.yml")
+
+    candidate_condition = "if: ${{ inputs.enforce_persistence == false }}"
+    candidate_status = "CANDIDATE_ONLY / BLOCKED_FOR_FORMAL_RELEASE"
+    formal_gate = 'python tools/persistence_gate.py --expected-version "$EXPECTED_VERSION"'
+
+    assert candidate_condition in source
+    assert '.database.engine == "sqlite"' in source
+    assert '.database.persistence == "ephemeral"' in source
+    assert ".database.durable == false" in source
+    assert candidate_status in source
+    assert "不得创建 v8.0.0 Tag 或 GitHub Release" in source
+    assert source.index(candidate_condition) < source.index(formal_gate)
 
 
 def test_post_deploy_smoke_finishes_compatibility_and_worker_checks_before_persistence_block() -> None:
@@ -253,16 +300,29 @@ def test_post_deploy_smoke_finishes_compatibility_and_worker_checks_before_persi
 
     compatibility_path = "/api/v2/fund/005844/decision"
     worker_contract = 'estimates=$(curl --fail --silent --show-error "$WORKER_BASE/estimates?codes=005844,018147")'
-    persistence_gate = (
-        'python tools/persistence_gate.py --expected-version '
-        '"$EXPECTED_VERSION" <<<"$health"'
-    )
+    persistence_gate = 'python tools/persistence_gate.py --expected-version "$EXPECTED_VERSION"'
 
     assert compatibility_path in source
     assert 'test "$owner_read_status" = "403"' in source
     assert "私人数据未公开" in source
     assert source.index(compatibility_path) < source.index(worker_contract)
     assert source.index(worker_contract) < source.index(persistence_gate)
+
+
+def test_formal_release_runs_are_not_cancelled_by_candidate_runs() -> None:
+    ci = workflow("ci.yml")
+    smoke = workflow("post-deploy-smoke.yml")
+
+    assert "'formal' || 'candidate'" in ci
+    assert "cancel-in-progress: ${{ !(github.event_name == 'workflow_dispatch'" in ci
+    assert "'formal' || 'candidate'" in smoke
+    assert "cancel-in-progress: ${{ inputs.enforce_persistence == false }}" in smoke
+    deploy_block = ci[ci.index("  deploy:") : ci.index("  candidate_smoke:")]
+    formal_block = ci[ci.index("  formal_smoke:") :]
+    assert "!inputs.formal_release" not in deploy_block
+    assert "!(github.event_name == 'workflow_dispatch' && inputs.formal_release)" in deploy_block
+    assert "uses: ./.github/workflows/deploy.yml" not in formal_block
+    assert "enforce_persistence: true" in formal_block
 
 
 def test_post_deploy_smoke_requires_frontend_worker_and_api_to_share_one_origin() -> None:

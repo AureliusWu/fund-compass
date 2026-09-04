@@ -42,8 +42,9 @@ uvicorn main:app --host 0.0.0.0 --port $PORT
 1. 冻结候选 Free 服务真实 URL、Render deployment ID、Pages deployment、Worker version ID 与目标提交 SHA，不创建或升级到任何付费资源。
 2. 在候选 Free 服务配置三个彼此不同的 `ADMIN_TOKEN` / `WORKER_TOKEN` / `PRIVATE_READ_TOKEN`，并部署同一目标 SHA。
 3. 将 GitHub Actions Secret `FUND_API_BASE`、Pages 变量 `VITE_API_BASE` 和 Worker 后端地址统一指向已核验的 `https://fund-compass-api-v8-candidate.onrender.com`。
-4. 用 `/api/health` 核对版本、源码身份以及 `ephemeral / durable=false`；生产 persistence gate 必须失败并保持发布阻断，不能把它降级为警告或伪装为持久化成功。
-5. Pages、API、Worker、隐私脱敏、canonical wire 与精确 SHA 可以作为候选部署证据，但在真实 `durable=true` 前不得创建 v8.0.0 标签或宣称正式发布。
+4. 普通 `main` CI 以候选模式部署 Pages 并运行生产 smoke：用 `/api/health` 核对版本、源码身份并严格要求当前零成本服务诚实报告 `ephemeral / durable=false`。其余契约通过后，流水线任务名和摘要写入 `CANDIDATE_ONLY / BLOCKED_FOR_FORMAL_RELEASE`，并输出机器可读的枚举 `formal_release_status=blocked`，但不再用预期中的正式门禁失败把候选验收标成代码失败。未来消费该输出时只能精确比较 `== 'eligible'`，不能把非空字符串作为布尔值判断。
+5. 只有从 `main` 手工运行 `CI` 且显式选择 `formal_release=true` 时，才执行不可降级的 V8 persistence gate。正式模式只审计当前目标 SHA 已在生产部署的版本，不再次发布 Pages，因此候选运行不能取消正式审计；最终步骤用本次运行唯一参数绕过缓存，重新核对 `origin/main`、Pages `release.json` 和后端源码，检测到任何并发部署漂移都失败关闭。该模式在当前 Free SQLite 上必须失败；即使未来自报 `persistent_disk / durable=true`，在自动化生产写入、重启或再部署、读回证据就绪前仍失败关闭。不得使用 `continue-on-error`、`|| true` 或候选状态替代正式资格。
+6. Pages、API、Worker、隐私脱敏、canonical wire 与精确 SHA 可以作为候选部署证据，但在真实 `durable=true` 前不得创建 v8.0.0 标签或宣称正式发布。
 
 后端只在未来真正配置持久存储且以下条件全部满足时，才会在 `/api/health` 报告 `persistent_disk` 与 `durable: true`：
 
@@ -80,7 +81,7 @@ schema 对象和文件型 `file:` URI 也必须先备份。比当前代码更新
 
 ## 发布与回滚
 
-发布必须绑定同一个精确提交完成以下闭环：本地全量门禁 → push `main` → CI → Pages → Render → 必要时部署 Worker → `post-deploy-smoke`。Pages 的 `release.json` 必须等于目标 SHA；API 健康接口的 Render commit 必须是目标提交本身，或是目标提交的祖先且 `backend/` 与 `render.yaml` 内容逐字节等价（纯静态数据提交不会强迫 Render 重部署）。smoke 必须使用 GitHub Secret `FUND_API_BASE` 指向经过核验的真实 Free API，验证 V8 契约并确认其诚实报告 `ephemeral / durable=false`；V8 persistence gate 必须因此拒绝正式发布，不能把失败降级为警告或通过。Worker 有源码变化时还必须核对实际部署 version，只有版本号相同不能证明部署。其他代码与生产契约门禁通过也只能形成未发布候选，在真实 `durable=true` 前不得创建版本标签。自动数据提交也要经过显式调度的 CI/Pages 链路，不能只看到仓库数据更新就认为生产静态数据已经更新。
+发布必须绑定同一个精确提交完成以下闭环：本地全量门禁 → push `main` → CI → Pages → Render → 必要时部署 Worker → `post-deploy-smoke`。Pages 的 `release.json` 必须等于目标 SHA；API 健康接口的 Render commit 必须是目标提交本身，或是目标提交的祖先且 `backend/` 与 `render.yaml` 内容逐字节等价（纯静态数据提交不会强迫 Render 重部署）。普通 `main` CI 负责部署并运行候选 smoke，必须使用 GitHub Secret `FUND_API_BASE` 指向经过核验的真实 Free API，验证 V8 契约并确认其诚实报告 `ephemeral / durable=false`，最终状态只能是 `CANDIDATE_ONLY / BLOCKED_FOR_FORMAL_RELEASE`。从 `main` 手工选择 `formal_release=true` 才运行正式审计；正式模式不重复部署，只验收当前生产是否已经是同一目标 SHA，因此候选部署不能取消正式审计。最终步骤必须重新绑定 `origin/main`、Pages、版本和后端源码，任何并发漂移都失败关闭；且在生产写入、跨重启读回证据自动化前始终拒绝正式发布，不能把失败降级为警告或通过。Worker 有源码变化时还必须核对实际部署 version，只有版本号相同不能证明部署。其他代码与生产契约门禁通过也只能形成未发布候选，在真实 `durable=true` 前不得创建版本标签。自动数据提交也要经过显式调度的 CI/Pages 链路，不能只看到仓库数据更新就认为生产静态数据已经更新。
 
 选基、经理和持仓静态数据使用 schema v2 清单与内容哈希；生产 smoke 会下载全部分片，核对 SHA-256、行数、唯一性、披露日期与明细文件。指数估值只接受真实源日期和可用核心 PE 分位，任务运行日期不能替代行情日期。定期任务状态页只统计自然 `schedule` 运行；手工验收结果必须单独记录，不能遮盖最近一次自然失败。
 
