@@ -6,11 +6,11 @@
     "计划任务延迟至同日窗口，预测仅使用已证明归属目标日的行情"
   ],
   "stats": {
-    "records": 55,
+    "records": 58,
     "statuses": {
       "observed_only": 2,
       "legacy_misaligned": 17,
-      "settled": 33,
+      "settled": 36,
       "pending": 3
     },
     "prediction_due": true,
@@ -20,5 +20,5 @@
     "prediction_effective_age_hours": 0.0,
     "settlement_effective_age_hours": 0.0
   },
-  "updated_at": "2026-09-03T19:40:46+08:00"
+  "updated_at": "2026-09-04T19:42:17+08:00"
 }
