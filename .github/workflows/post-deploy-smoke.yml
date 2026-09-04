@@ -356,7 +356,6 @@ jobs:
                 and .index_valuation.stale == true)
             )
           ' <<<"$health" >/dev/null
-          python tools/persistence_gate.py --expected-version "$EXPECTED_VERSION" <<<"$health"
           fund=$(curl --fail --silent --show-error "$api/api/fund/005844")
           jq -e '
             .code == "005844"
@@ -365,7 +364,17 @@ jobs:
             and (.latest_nav_date | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$"))
             and (.stale | type) == "boolean"
           ' <<<"$fund" >/dev/null
-          curl --fail --silent --show-error "$api/api/strategy/registry" | jq -e 'type == "object"' >/dev/null
+          owner_read_body=$(mktemp)
+          for owner_path in \
+            /api/v2/fund/005844/decision \
+            /api/v2/fund/005844/decision/diff \
+            /api/v2/fund/005844/outcomes \
+            /api/strategy/registry \
+            /api/watchlist; do
+            owner_read_status=$(curl --silent --show-error --output "$owner_read_body" --write-out '%{http_code}' "$api$owner_path")
+            test "$owner_read_status" = "403"
+            jq -e '.detail == "私人数据未公开"' "$owner_read_body" >/dev/null
+          done
           test "$(curl --silent --output /dev/null --write-out '%{http_code}' "$api/api/fund/not-a-code")" = "404"
       - name: 检查 Worker 构建身份、估值契约与自然调度边界
         env:
@@ -554,3 +563,11 @@ jobs:
               and (.fallback_reason | type) == "string"
             )
           ' <<<"$estimates" >/dev/null
+      - name: 正式发布持久化硬门禁（零成本候选预期阻断）
+        env:
+          EXPECTED_VERSION: ${{ steps.release.outputs.version }}
+        shell: bash
+        run: |
+          api="${FUND_API_BASE%/}"
+          health=$(curl --fail --silent --show-error "$api/api/health")
+          python tools/persistence_gate.py --expected-version "$EXPECTED_VERSION" <<<"$health"

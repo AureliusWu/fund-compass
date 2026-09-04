@@ -47,17 +47,24 @@ interface RedactedOwnerRead {
 }
 
 /**
- * Current owner-scoped GETs keep their legacy public URL only as a stable
- * redacted marker. A mixed rollout against an older backend may still return
- * the former full shape; reject it as an unsafe contract instead of rendering
- * private values in an anonymous browser.
+ * Owner-scoped GETs keep their legacy public URL but fail closed with HTTP 403
+ * so a cached pre-v8 client cannot mistake a smaller redacted payload for the
+ * former full DTO. During a mixed rollout an older backend may still return a
+ * 200 redacted marker; accept only that marker and reject every full shape.
  */
 async function readOwnerScoped<T>(path: string): Promise<T> {
-  const payload = await req<T | RedactedOwnerRead>(path)
-  if (payload && typeof payload === 'object' && (payload as RedactedOwnerRead).redacted === true) {
-    throw new ApiError('私人数据未公开', 'redacted')
+  try {
+    const payload = await req<T | RedactedOwnerRead>(path)
+    if (payload && typeof payload === 'object' && (payload as RedactedOwnerRead).redacted === true) {
+      throw new ApiError('私人数据未公开', 'redacted')
+    }
+    throw new ApiError('匿名读取返回了不安全的旧契约', 'http', 502)
+  } catch (error) {
+    if (error instanceof ApiError && error.kind === 'http' && error.status === 403) {
+      throw new ApiError('私人数据未公开', 'redacted', 403)
+    }
+    throw error
   }
-  throw new ApiError('匿名读取返回了不安全的旧契约', 'http', 502)
 }
 
 export interface Health {
@@ -625,8 +632,8 @@ export interface V8StrategyPerformance {
 
 /**
  * Owner-scoped V8 reads are deliberately unavailable to anonymous browser
- * clients. The legacy public URLs return a stable redacted marker, which
- * readOwnerScoped maps to the existing missing-data UI. Snapshot creation,
+ * clients. The legacy public URLs fail closed with 403 (or a redacted marker
+ * during mixed rollout), which readOwnerScoped maps to the unavailable UI. Snapshot creation,
  * settlement, notification and rebalance routes require Worker/Admin
  * credentials and must never be called from public frontend code.
  */

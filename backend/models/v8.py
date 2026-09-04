@@ -510,6 +510,12 @@ class NotificationEvent(FrozenModel):
 # HTTP boundary instead of mutating historical snapshots.
 
 
+class PublicOwnerReadDenied(FrozenModel):
+    """Stable error body for anonymous access to owner-scoped data."""
+
+    detail: Literal["私人数据未公开"] = "私人数据未公开"
+
+
 class PublicHoldingReference(FrozenModel):
     """Opaque marker: anonymous callers cannot learn whether a fund is held."""
 

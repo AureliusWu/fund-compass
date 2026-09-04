@@ -2,16 +2,17 @@
 
 ## 8.0.0 - 2026-09-01 (Candidate / Unreleased)
 
-- V8 Release Hardening 01：公开 V8 decision、outcome、policy 与兼容 watchlist 读取改用脱敏 DTO；完整持仓、精确权重、组合价值及服务端自选仅能通过独立 `PRIVATE_READ_TOKEN` 私有接口读取，Admin/Worker 凭证不能替代私人读取身份。
+- 修复 V8 API 与旧 PWA 滚动升级崩溃：匿名 owner 数据兼容端点统一以 HTTP 403 失败关闭，新前端映射为“私人数据未公开”，旧缓存前端进入既有请求失败态，不再把较小的脱敏 DTO 当作完整决策解引用；Service Worker 新版本立即激活并接管旧客户端，注册器强制绕过 HTTP 缓存检查更新、只刷新一次，富集静态数据缓存按 `fc-data-v8` 隔离旧 schema，并新增构建产物门禁。
+- V8 Release Hardening 01：公开 V8 decision、outcome、policy 与兼容 watchlist 读取一律失败关闭；完整持仓、精确权重、组合价值及服务端自选仅能通过独立 `PRIVATE_READ_TOKEN` 私有接口读取，Admin/Worker 凭证不能替代私人读取身份。
 - 关闭策略 registry、运行活动和校准公开产物的私人数据旁路；混合版本的旧匿名完整 DTO 在浏览器中拒绝展示。含私人实盘样本的公开校准发布在私人治理存储就绪前明确阻断，不覆写历史、不上传旧产物、不自动变更 active 策略。
 - 新增本地真实进程重启/备份恢复门禁和生产存储校验；迁移备份先写明确的 `.partial` 文件，通过 quick/integrity/FK 校验后才原子命名为 `.bak`，V8 补列与文件型 `file:` URI 迁移也必须先备份，未来 schema 版本失败关闭。完整 Evidence → Source Health → Holding/Policy → Decision → Outcome → Portfolio → Notification/Idempotency 账本已在临时数据库跨进程及旁路恢复后读回。用户撤销付费持久盘授权后，付费 Blueprint 已移除；并行候选服务 `fund-compass-api-v8-candidate` 明确使用 Render Free（$0/月、无磁盘），并诚实报告 `ephemeral / durable=false`，数据库重启可能丢失，不能声称生产持久化通过。
 - 浏览器移除腾讯/东方财富 JSONP script 注入，指数与持仓行情统一经固定 Worker JSON 代理；代理限制代码、请求规模、上游目标、超时和响应大小，并启用 `script-src 'self'` CSP。
 - 统一 `official_nav`、`intraday_estimate` 与 `qdii_next_nav_estimate` 跨端契约，正式净值不再写入估值字段，QDII 绑定目标净值日和模型误差证据；旧别名仅在无冲突时兼容，缺失、过期和不可用值继续保持 `null`。
-- 完成 v8.0.0 决策界面与失败关闭状态：首页“今日行动中心”、自选页和基金详情已具备 V8 动作、Decision Diff、证据与 Outcome 展示结构；匿名生产浏览器只会收到脱敏 DTO，因此在可信 owner 会话/BFF 就绪前明确显示私人决策不可用，不把长期 `PRIVATE_READ_TOKEN` 下发浏览器，也不把脱敏结果伪装成完整操作建议。
+- 完成 v8.0.0 决策界面与失败关闭状态：首页“今日行动中心”、自选页和基金详情已具备 V8 动作、Decision Diff、证据与 Outcome 展示结构；匿名生产浏览器只会收到拒绝响应，因此在可信 owner 会话/BFF 就绪前明确显示私人决策不可用，不把长期 `PRIVATE_READ_TOKEN` 下发浏览器，也不把拒绝结果伪装成完整操作建议。
 - UI 只读不可变 V8 快照；404、空值、过期、源不可用、低置信、部分失败与未成熟 Outcome 均失败关闭。正式净值、盘中估值和 QDII 下一净值估算按日期轴分开展示，缺失值不补 0。
 - 指数行情只回退 5 分钟内的短时缓存，上游 stale 时隐藏价格并显示源时间；十大重仓的内存/本地缓存统一执行 12 小时 TTL，强制校验并展示季度披露日，未来、超龄或无日期持仓失败关闭。
 - 旧组合决策入口升级为请求哈希、租约与原响应重放的真实幂等；定时海外精度、信号推送、Pages 构建均要求显式生产 API 地址，不再静默回退旧 Free 服务。含私人治理样本的周校准仍有意阻断，待认证的私人治理存储完成后再恢复，不能称为全部定时任务已恢复。
-- 刷新前端锁文件中的传递依赖补丁（`brace-expansion`、`fast-uri`、`nanoid`、`postcss`），不改变直接依赖或运行时接口；生产依赖审计为 0 项漏洞。
+- 刷新前端锁文件中的传递依赖补丁（`brace-expansion`、`fast-uri`、`nanoid`、`postcss`、`browserslist`），不改变直接依赖或运行时接口；生产依赖审计为 0 项漏洞。
 - 前端、API、Worker、PWA 描述与锁文件统一升级为 8.0.0；代码级失败关闭、精确提交部署和部署后烟测仍是发布门禁。零成本 Render Free 的生产持久化门禁明确未满足，因此正式发布状态保持 `BLOCKED`，不能声称 `durable=true`，也不得创建 v8.0.0 标签。
 
 ## 7.0.1 - 2026-08-24

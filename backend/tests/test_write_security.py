@@ -170,9 +170,11 @@ def test_failed_persistence_releases_claim_and_retry_completes_missing_write(mon
         conn.close()
 
 
-def test_public_watchlist_compatibility_route_is_always_redacted(monkeypatch):
+def test_public_watchlist_compatibility_route_fails_closed(monkeypatch):
     monkeypatch.setattr(repo, "list_watchlist", lambda: ["510300"])
-    assert main.get_watchlist() == {"items": [], "redacted": True}
+    with pytest.raises(HTTPException) as error:
+        main.get_watchlist()
+    assert error.value.status_code == 403
 
 
 def test_anonymous_fund_force_query_cannot_bypass_repository_ttl(monkeypatch):

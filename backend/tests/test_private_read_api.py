@@ -390,18 +390,20 @@ PUBLIC_PORTFOLIO_KEYS = {
 ])
 def test_anonymous_public_reads_never_return_private_financial_fields(client, path):
     response = client.get(path)
-    assert response.status_code == 200, response.text
+    assert response.status_code == 403, response.text
     payload = response.json()
+    assert payload == {"detail": "私人数据未公开"}
     assert PRIVATE_KEYS.isdisjoint(set(_all_keys(payload)))
     serialized = response.text
     assert "不可公开账户" not in serialized
     assert "当前仓位 37.25" not in serialized
 
 
-def test_public_decision_is_fixed_redacted_marker_without_owner_state(client):
-    payload = client.get("/api/v2/fund/510300/decision").json()
+def test_public_decision_fails_closed_for_cached_legacy_clients(client):
+    response = client.get("/api/v2/fund/510300/decision")
 
-    assert payload == {"code": "510300", "available": False, "redacted": True}
+    assert response.status_code == 403
+    assert response.json() == {"detail": "私人数据未公开"}
 
 
 def test_anonymous_owner_routes_never_query_private_repositories(client, monkeypatch):
@@ -419,41 +421,27 @@ def test_anonymous_owner_routes_never_query_private_repositories(client, monkeyp
     monkeypatch.setattr(main.repo, "operations_status", forbidden)
     monkeypatch.setattr(main, "registry_summary", forbidden)
 
-    expected = {
-        "/api/v2/fund/510300/evidence": {"fund_code": "510300", "available": False, "redacted": True},
-        "/api/v2/fund/510300/decision": {"code": "510300", "available": False, "redacted": True},
-        "/api/v2/fund/510300/decision/diff": {"fund_code": "510300", "available": False, "redacted": True},
-        "/api/v2/fund/510300/outcomes": {
-            "fund_code": "510300", "total": None, "items": [],
-            "available": False, "redacted": True,
-        },
-        "/api/v2/portfolio/policy": {"available": False, "redacted": True},
-        "/api/v2/portfolio/policy/history": {
-            "total": None, "items": [], "available": False, "redacted": True,
-        },
-        "/api/v2/portfolio/outcomes": {
-            "total": None, "mature": None, "pending": None, "unavailable": None,
-            "items": [], "redacted": True,
-        },
-        "/api/strategy/portfolio-outcomes": {
-            "total": None, "mature": None, "pending": None, "unavailable": None,
-            "items": [], "redacted": True,
-        },
-        "/api/strategy/version-comparison": {"available": False, "redacted": True},
-        "/api/v2/strategy/decision-v2:test/performance": {"available": False, "redacted": True},
-        "/api/v2/strategy/registry": {"available": False, "redacted": True},
-        "/api/v2/strategy/candidates": {"available": False, "redacted": True},
-        "/api/strategy/registry": {"available": False, "redacted": True},
-    }
-    for path, payload in expected.items():
+    paths = [
+        "/api/v2/fund/510300/evidence",
+        "/api/v2/fund/510300/decision",
+        "/api/v2/fund/510300/decision/diff",
+        "/api/v2/fund/510300/outcomes",
+        "/api/v2/portfolio/policy",
+        "/api/v2/portfolio/policy/history",
+        "/api/v2/portfolio/outcomes",
+        "/api/strategy/portfolio-outcomes",
+        "/api/strategy/version-comparison",
+        "/api/v2/strategy/decision-v2:test/performance",
+        "/api/v2/strategy/registry",
+        "/api/v2/strategy/candidates",
+        "/api/strategy/registry",
+        "/api/strategy/outcomes",
+        "/api/watchlist",
+    ]
+    for path in paths:
         response = client.get(path)
-        assert response.status_code == 200, (path, response.text)
-        assert response.json() == payload
-
-    strategy = client.get("/api/strategy/outcomes")
-    assert strategy.status_code == 200
-    assert strategy.json()["redacted"] is True
-    assert strategy.json()["total"] is None
+        assert response.status_code == 403, (path, response.text)
+        assert response.json() == {"detail": "私人数据未公开"}
 
     health = client.get("/api/health")
     assert health.status_code == 200
@@ -466,17 +454,12 @@ def test_anonymous_owner_routes_never_query_private_repositories(client, monkeyp
     "/api/v2/portfolio/outcomes",
     "/api/strategy/portfolio-outcomes",
 ])
-def test_public_portfolio_outcomes_are_redacted_without_aggregate_side_channels(client, path):
-    payload = client.get(path).json()
+def test_public_portfolio_outcomes_fail_closed_without_aggregate_side_channels(client, path):
+    response = client.get(path)
+    payload = response.json()
 
-    assert payload == {
-        "total": None,
-        "mature": None,
-        "pending": None,
-        "unavailable": None,
-        "items": [],
-        "redacted": True,
-    }
+    assert response.status_code == 403
+    assert payload == {"detail": "私人数据未公开"}
     assert PUBLIC_PORTFOLIO_KEYS.isdisjoint(set(_all_keys(payload)))
 
 
@@ -604,13 +587,17 @@ def test_private_read_token_never_authorizes_write_roles(client):
     assert client.get("/api/v2/notifications/dec_" + "a" * 64, headers=headers).status_code == 401
 
 
-def test_openapi_marks_private_contracts_and_public_response_models():
+def test_openapi_marks_private_contracts_and_fail_closed_public_status():
     schema = main.app.openapi()
 
     assert schema["components"]["securitySchemes"]["PrivateReadBearer"]["scheme"] == "bearer"
     private_operation = schema["paths"]["/api/v2/private/fund/{code}/decision"]["get"]
     assert private_operation["security"] == [{"PrivateReadBearer": []}]
-    public_schema = schema["paths"]["/api/v2/fund/{code}/decision"]["get"]["responses"]["200"]
-    assert public_schema["content"]["application/json"]["schema"]["$ref"].endswith("PublicV8DecisionResponse")
+    public_responses = schema["paths"]["/api/v2/fund/{code}/decision"]["get"]["responses"]
+    assert "403" in public_responses
+    assert "200" not in public_responses
+    assert public_responses["403"]["description"].startswith("Anonymous owner-scoped read denied")
+    denied_schema = public_responses["403"]["content"]["application/json"]["schema"]
+    assert denied_schema["$ref"].endswith("PublicOwnerReadDenied")
     private_schema = private_operation["responses"]["200"]["content"]["application/json"]["schema"]
     assert private_schema["$ref"].endswith("PrivateV8DecisionResponse")

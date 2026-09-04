@@ -14,6 +14,7 @@ import os
 import re
 from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
+from typing import NoReturn
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,14 +31,7 @@ from models.v8 import (
     PrivatePortfolioOutcomesResponse,
     PrivateV8DecisionResponse,
     PrivateWatchlistResponse,
-    PublicDecisionDiff,
-    PublicEvidenceResponse,
-    PublicFundOutcomesResponse,
-    PublicPortfolioOutcomesResponse,
-    PublicPortfolioPolicyHistoryResponse,
-    PublicPortfolioPolicyReference,
-    PublicV8DecisionResponse,
-    PublicWatchlistResponse,
+    PublicOwnerReadDenied,
 )
 from service import eastmoney, repo, v8_decisions, v8_repo
 from service.security import require_admin, require_private_read, require_worker_or_admin
@@ -94,6 +88,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"]
 )
+
+OWNER_READ_DENIED_RESPONSES = {
+    403: {
+        "model": PublicOwnerReadDenied,
+        "description": "Anonymous owner-scoped read denied without revealing record existence.",
+    },
+}
 
 
 def fund_detail_dep(code: str) -> dict:
@@ -274,6 +275,18 @@ def _estimate_context(detail: dict, now_utc: datetime | None = None) -> dict:
     return context
 
 
+def _deny_public_owner_read() -> NoReturn:
+    """Fail closed for legacy anonymous owner-data URLs.
+
+    Older cached frontends treated every HTTP 200 response as the former full
+    owner DTO.  Returning a smaller redacted object with 200 therefore made
+    those clients dereference missing financial fields and crash.  A stable
+    403 keeps both old and current clients on their existing unavailable path
+    without revealing whether an owner snapshot exists.
+    """
+    raise HTTPException(status_code=403, detail="私人数据未公开")
+
+
 def _decision_detail(detail: dict) -> dict:
     return {**detail, "decision_context": _estimate_context(detail)}
 
@@ -373,10 +386,10 @@ def fund_calibrate(detail: dict = Depends(fund_detail_dep)) -> dict:
     return {"code": detail["code"], "name": detail.get("name"), **calibrate(detail)}
 
 
-@app.get("/api/strategy/registry")
+@app.get("/api/strategy/registry", status_code=403, responses=OWNER_READ_DENIED_RESPONSES)
 def strategy_registry() -> dict:
     """Anonymous callers cannot infer owner outcome governance state."""
-    return {"available": False, "redacted": True}
+    _deny_public_owner_read()
 
 
 @app.get("/api/private/strategy/registry")
@@ -509,14 +522,10 @@ def portfolio_decisions(request: PortfolioDecisionRequest, _role: str = Depends(
     return response
 
 
-@app.get("/api/strategy/outcomes")
+@app.get("/api/strategy/outcomes", status_code=403, responses=OWNER_READ_DENIED_RESPONSES)
 def strategy_outcomes() -> dict:
-    """Stable anonymous shape; owner outcomes require private authentication."""
-    return {
-        "total": None, "mature": None, "pending": None,
-        "summary": [], "items": [], "breakdowns": {},
-        "available": False, "redacted": True,
-    }
+    """Owner outcomes require the dedicated private-read route."""
+    _deny_public_owner_read()
 
 
 @app.get("/api/private/strategy/outcomes")
@@ -527,17 +536,10 @@ def private_strategy_outcomes(
     return repo.decision_outcomes()
 
 
-@app.get("/api/strategy/portfolio-outcomes")
+@app.get("/api/strategy/portfolio-outcomes", status_code=403, responses=OWNER_READ_DENIED_RESPONSES)
 def strategy_portfolio_outcomes() -> dict:
-    """公开组合结果仅返回稳定脱敏形状，不查询私人快照。"""
-    return {
-        "total": None,
-        "mature": None,
-        "pending": None,
-        "unavailable": None,
-        "items": [],
-        "redacted": True,
-    }
+    """公开组合结果不可读；不查询私人快照。"""
+    _deny_public_owner_read()
 
 
 @app.get("/api/private/strategy/portfolio-outcomes")
@@ -548,10 +550,10 @@ def private_strategy_portfolio_outcomes(
     return repo.portfolio_decision_outcomes()
 
 
-@app.get("/api/strategy/version-comparison")
+@app.get("/api/strategy/version-comparison", status_code=403, responses=OWNER_READ_DENIED_RESPONSES)
 def strategy_version_comparison() -> dict:
     """Anonymous callers cannot infer owner-scoped strategy samples."""
-    return {"available": False, "redacted": True}
+    _deny_public_owner_read()
 
 
 @app.get("/api/private/strategy/version-comparison")
@@ -597,10 +599,11 @@ def _decision_bundle_or_404(code: str) -> dict:
     return bundle
 
 
-@app.get("/api/v2/fund/{code}/evidence", response_model=PublicEvidenceResponse)
+@app.get("/api/v2/fund/{code}/evidence", status_code=403, responses=OWNER_READ_DENIED_RESPONSES)
 def v8_fund_evidence(code: str) -> dict:
-    """Stable anonymous marker; never query owner-scoped evidence."""
-    return PublicEvidenceResponse(fund_code=_v8_valid_code(code)).model_dump(mode="json")
+    """Never query or reveal owner-scoped evidence to anonymous callers."""
+    _v8_valid_code(code)
+    _deny_public_owner_read()
 
 
 @app.get("/api/v2/private/fund/{code}/evidence")
@@ -615,11 +618,12 @@ def v8_private_fund_evidence(
     return snapshot.model_dump(mode="json")
 
 
-@app.get("/api/v2/fund/{code}/decision", response_model=PublicV8DecisionResponse)
+@app.get("/api/v2/fund/{code}/decision", status_code=403, responses=OWNER_READ_DENIED_RESPONSES)
 def v8_fund_decision(
     code: str,
 ) -> dict:
-    return PublicV8DecisionResponse(code=_v8_valid_code(code)).model_dump(mode="json")
+    _v8_valid_code(code)
+    _deny_public_owner_read()
 
 
 @app.get("/api/v2/private/fund/{code}/decision", response_model=PrivateV8DecisionResponse)
@@ -630,11 +634,12 @@ def v8_private_fund_decision(
     return _private_decision_bundle(_decision_bundle_or_404(code)).model_dump(mode="json")
 
 
-@app.get("/api/v2/fund/{code}/decision/diff", response_model=PublicDecisionDiff)
+@app.get("/api/v2/fund/{code}/decision/diff", status_code=403, responses=OWNER_READ_DENIED_RESPONSES)
 def v8_fund_decision_diff(
     code: str,
 ) -> dict:
-    return PublicDecisionDiff(fund_code=_v8_valid_code(code)).model_dump(mode="json")
+    _v8_valid_code(code)
+    _deny_public_owner_read()
 
 
 @app.get("/api/v2/private/fund/{code}/decision/diff")
@@ -648,11 +653,10 @@ def v8_private_fund_decision_diff(
     return diff.model_dump(mode="json")
 
 
-@app.get("/api/v2/fund/{code}/outcomes", response_model=PublicFundOutcomesResponse)
+@app.get("/api/v2/fund/{code}/outcomes", status_code=403, responses=OWNER_READ_DENIED_RESPONSES)
 def v8_fund_outcomes(code: str) -> dict:
-    return PublicFundOutcomesResponse(
-        fund_code=_v8_valid_code(code),
-    ).model_dump(mode="json")
+    _v8_valid_code(code)
+    _deny_public_owner_read()
 
 
 @app.get("/api/v2/private/fund/{code}/outcomes", response_model=PrivateFundOutcomesResponse)
@@ -743,10 +747,10 @@ def v8_portfolio_rebalance(
     }
 
 
-@app.get("/api/v2/portfolio/outcomes", response_model=PublicPortfolioOutcomesResponse)
+@app.get("/api/v2/portfolio/outcomes", status_code=403, responses=OWNER_READ_DENIED_RESPONSES)
 def v8_portfolio_outcomes(limit: int = 100) -> dict:
     del limit
-    return PublicPortfolioOutcomesResponse().model_dump(mode="json")
+    _deny_public_owner_read()
 
 
 @app.get("/api/v2/private/portfolio/outcomes", response_model=PrivatePortfolioOutcomesResponse)
@@ -780,9 +784,9 @@ def v8_settle_portfolio_outcomes(
     return v8_repo.settle_all_portfolio_outcomes(bounded_limit)
 
 
-@app.get("/api/v2/portfolio/policy", response_model=PublicPortfolioPolicyReference)
+@app.get("/api/v2/portfolio/policy", status_code=403, responses=OWNER_READ_DENIED_RESPONSES)
 def v8_portfolio_policy() -> dict:
-    return PublicPortfolioPolicyReference().model_dump(mode="json")
+    _deny_public_owner_read()
 
 
 @app.get("/api/v2/private/portfolio/policy", response_model=PortfolioPolicy)
@@ -812,9 +816,9 @@ def v8_post_portfolio_policy(
     return v8_repo.save_policy(policy).model_dump(mode="json")
 
 
-@app.get("/api/v2/portfolio/policy/history", response_model=PublicPortfolioPolicyHistoryResponse)
+@app.get("/api/v2/portfolio/policy/history", status_code=403, responses=OWNER_READ_DENIED_RESPONSES)
 def v8_portfolio_policy_history() -> dict:
-    return PublicPortfolioPolicyHistoryResponse().model_dump(mode="json")
+    _deny_public_owner_read()
 
 
 @app.get("/api/v2/private/portfolio/policy/history")
@@ -825,9 +829,9 @@ def v8_private_portfolio_policy_history(
     return {"total": len(rows), "items": [row.model_dump(mode="json") for row in rows]}
 
 
-@app.get("/api/v2/strategy/registry")
+@app.get("/api/v2/strategy/registry", status_code=403, responses=OWNER_READ_DENIED_RESPONSES)
 def v8_strategy_registry() -> dict:
-    return {"available": False, "redacted": True}
+    _deny_public_owner_read()
 
 
 @app.get("/api/v2/private/strategy/registry")
@@ -845,11 +849,11 @@ def v8_private_strategy_registry(
     }
 
 
-@app.get("/api/v2/strategy/{version}/performance")
+@app.get("/api/v2/strategy/{version}/performance", status_code=403, responses=OWNER_READ_DENIED_RESPONSES)
 def v8_strategy_performance(version: str) -> dict:
     if not re.fullmatch(r"[A-Za-z0-9._:-]{1,120}", version):
         raise HTTPException(status_code=422, detail="策略版本格式无效")
-    return {"available": False, "redacted": True}
+    _deny_public_owner_read()
 
 
 @app.get("/api/v2/private/strategy/{version}/performance")
@@ -862,9 +866,9 @@ def v8_private_strategy_performance(
     return v8_repo.strategy_performance(version)
 
 
-@app.get("/api/v2/strategy/candidates")
+@app.get("/api/v2/strategy/candidates", status_code=403, responses=OWNER_READ_DENIED_RESPONSES)
 def v8_strategy_candidates() -> dict:
-    return {"available": False, "redacted": True}
+    _deny_public_owner_read()
 
 
 @app.post("/api/v2/outcomes/settle")
@@ -997,10 +1001,10 @@ def portfolio_lab(request: PortfolioLabRequest, _role: str = Depends(require_adm
         raise HTTPException(status_code=422, detail=str(ex)) from ex
 
 
-@app.get("/api/watchlist", response_model=PublicWatchlistResponse)
+@app.get("/api/watchlist", status_code=403, responses=OWNER_READ_DENIED_RESPONSES)
 def get_watchlist() -> dict:
     """Compatibility route that never reveals the server-side watchlist."""
-    return PublicWatchlistResponse().model_dump(mode="json")
+    _deny_public_owner_read()
 
 
 @app.get("/api/private/watchlist", response_model=PrivateWatchlistResponse)

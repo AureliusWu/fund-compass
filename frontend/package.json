@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && node tools/verify-pwa-build.mjs",
     "preview": "vite preview",
     "type-check": "vue-tsc --noEmit",
     "test": "vitest run"

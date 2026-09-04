@@ -108,6 +108,24 @@ describe('v8 API contracts', () => {
     })
   })
 
+  it('maps the fail-closed 403 compatibility boundary to a redacted state', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+    }))
+
+    await expect(getV8Decision('510300')).rejects.toMatchObject({
+      message: '私人数据未公开',
+      kind: 'redacted',
+      status: 403,
+    })
+    await expect(getWatchlist()).rejects.toMatchObject({
+      message: '私人数据未公开',
+      kind: 'redacted',
+      status: 403,
+    })
+  })
+
   it('fails closed when a mixed rollout returns the former full anonymous DTO', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,

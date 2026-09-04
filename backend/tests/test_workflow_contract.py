@@ -248,6 +248,23 @@ def test_post_deploy_smoke_runs_v8_persistence_gate_against_configured_api() -> 
     assert source.index(health_request) < source.index(persistence_gate)
 
 
+def test_post_deploy_smoke_finishes_compatibility_and_worker_checks_before_persistence_block() -> None:
+    source = workflow("post-deploy-smoke.yml")
+
+    compatibility_path = "/api/v2/fund/005844/decision"
+    worker_contract = 'estimates=$(curl --fail --silent --show-error "$WORKER_BASE/estimates?codes=005844,018147")'
+    persistence_gate = (
+        'python tools/persistence_gate.py --expected-version '
+        '"$EXPECTED_VERSION" <<<"$health"'
+    )
+
+    assert compatibility_path in source
+    assert 'test "$owner_read_status" = "403"' in source
+    assert "私人数据未公开" in source
+    assert source.index(compatibility_path) < source.index(worker_contract)
+    assert source.index(worker_contract) < source.index(persistence_gate)
+
+
 def test_post_deploy_smoke_requires_frontend_worker_and_api_to_share_one_origin() -> None:
     source = workflow("post-deploy-smoke.yml")
 

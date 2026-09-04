@@ -14,10 +14,16 @@ export default defineConfig({
     Components({ resolvers: [VantResolver({ importStyle: true })] }),
     VitePWA({
       registerType: 'autoUpdate',
-      // Explicit external same-origin registration keeps the generated PWA
-      // compatible with index.html's script-src 'self' CSP (no inline script).
-      injectRegister: 'script-defer',
+      // Registration is an audited same-origin script in public/registerSW.js.
+      // Keep plugin injection disabled so CSP never needs inline JavaScript and
+      // the registration can force a network update check during rollouts.
+      injectRegister: false,
       workbox: {
+        // A newly downloaded worker must not wait behind a long-lived installed
+        // PWA window. It claims old clients; registerSW.js performs one guarded
+        // reload so already-running code moves to the new asset contract.
+        skipWaiting: true,
+        clientsClaim: true,
         // 大的富集/排行数据不进安装期预缓存，改运行时按需缓存
         globIgnores: ['**/data/**', '**/assets/echarts-*.js', '**/pwa-*.png'],
         runtimeCaching: [
@@ -30,7 +36,7 @@ export default defineConfig({
             urlPattern: ({ url }) => url.pathname.includes('/data/'),
             handler: 'StaleWhileRevalidate',
             options: {
-              cacheName: 'fc-data',
+              cacheName: 'fc-data-v8',
               expiration: { maxEntries: 60, maxAgeSeconds: 60 * 60 * 24 * 7 },
               cacheableResponse: { statuses: [0, 200] },
             },

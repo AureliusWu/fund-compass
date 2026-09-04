@@ -98,7 +98,7 @@ v8.0.0 发布前冻结以下回滚证据：上一正式标签与提交、最新�
 - `WORKER_TOKEN`：Cloudflare Worker 调用组合决策接口。
 - `PRIVATE_READ_TOKEN`：仅供服务所有者读取脱敏前的私人 DTO；不得复用 Admin/Worker Token。
 
-凭证只进入确有调用需要的 Secret 存储：`ADMIN_TOKEN` 仅放 Render；`WORKER_TOKEN` 放 Render、Cloudflare Worker，并供 GitHub 的手动估值任务使用；`PRIVATE_READ_TOKEN` 放 Render 和需要读取私人校准证据的 GitHub Actions。三者不得使用前端 `VITE_` 变量、localStorage 或写入仓库。公开 GET 只返回脱敏 DTO；需要完整持仓、组合、策略结果、运行活动或服务端 watchlist 的 private GET 必须携带 `PRIVATE_READ_TOKEN`。公开 health 不再返回最近决策/结算时间或候选策略治理聚合；服务所有者可从 `/api/private/operations` 和 `/api/private/strategy/registry` 读取完整数据。
+凭证只进入确有调用需要的 Secret 存储：`ADMIN_TOKEN` 仅放 Render；`WORKER_TOKEN` 放 Render、Cloudflare Worker，并供 GitHub 的手动估值任务使用；`PRIVATE_READ_TOKEN` 放 Render 和需要读取私人校准证据的 GitHub Actions。三者不得使用前端 `VITE_` 变量、localStorage 或写入仓库。匿名 owner 数据 GET 统一返回 HTTP 403；需要完整持仓、组合、策略结果、运行活动或服务端 watchlist 的 private GET 必须携带 `PRIVATE_READ_TOKEN`。公开 health 不再返回最近决策/结算时间或候选策略治理聚合；服务所有者可从 `/api/private/operations` 和 `/api/private/strategy/registry` 读取完整数据。
 
 每周策略校准作业还必须在 GitHub Actions Secrets 配置同名 `PRIVATE_READ_TOKEN`。作业只读 `/api/private/strategy/outcomes`；Token 缺失、鉴权失败、响应脱敏或契约异常时会失败关闭，不会把未知实盘样本当成 0 并提交错误治理状态。
 

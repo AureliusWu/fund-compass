@@ -287,12 +287,12 @@ def test_v2_public_gets_only_read_existing_snapshots(sample_detail, monkeypatch)
     assert diff["current_decision_id"] == decision["decision"]["decision_id"]
     assert outcomes["items"][0]["pending_horizons"] == []
     assert outcomes["items"][0]["unavailable_horizons"] == [5, 20, 60]
-    assert main.v8_fund_evidence("510300") == {
-        "fund_code": "510300", "available": False, "redacted": True,
-    }
-    assert main.v8_fund_decision("510300") == {
-        "code": "510300", "available": False, "redacted": True,
-    }
+    with pytest.raises(HTTPException) as public_evidence:
+        main.v8_fund_evidence("510300")
+    assert public_evidence.value.status_code == 403
+    with pytest.raises(HTTPException) as public_decision:
+        main.v8_fund_decision("510300")
+    assert public_decision.value.status_code == 403
     conn = db.get_conn()
     try:
         after = {
