@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-08-31T15:36:02+08:00",
+  "updated_at": "2026-09-07T14:37:11+08:00",
   "active": {
     "version": "v1-default",
     "weights": {
@@ -11,8 +11,8 @@
     "source": "built-in baseline"
   },
   "candidate": {
-    "version": "candidate-20260831",
-    "created_at": "2026-08-31T15:36:02+08:00",
+    "version": "candidate-20260907",
+    "created_at": "2026-09-07T14:37:11+08:00",
     "weights": null,
     "status": "rejected",
     "eligible_for_admin_review": false,
@@ -218,7 +218,7 @@
       "type": "FOF",
       "available": true,
       "accepted": false,
-      "reason": "验证段未跑赢当前参数"
+      "reason": "验证段未跑赢一直持有"
     },
     {
       "code": "017204",
