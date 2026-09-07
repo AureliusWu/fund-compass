@@ -5,7 +5,7 @@
     "applied_at": "2026-08-13T13:46:49+08:00",
     "legacy_records_excluded": 17
   },
-  "updated_at": "2026-09-04T19:42:17+08:00",
+  "updated_at": "2026-09-07T20:59:10+08:00",
   "models": {
     "539002": {
       "name": "建信新兴市场混合(QDII)A",
@@ -79,12 +79,12 @@
         }
       },
       "candidate": {
-        "version": "candidate-20260904",
-        "created_at": "2026-09-04T19:42:17+08:00",
-        "data_fingerprint": "e8583f740187bab5206e7c9b1b19b05db7b0994e4004ef34ac708db34a9958b6",
-        "data_effective_at": "2026-09-04T19:41:41+08:00",
+        "version": "candidate-20260907",
+        "created_at": "2026-09-07T20:59:10+08:00",
+        "data_fingerprint": "9fadef19b4747b8d36280bd6b8eb48b532673189ca22496566419cc0a072049f",
+        "data_effective_at": "2026-09-07T20:58:24+08:00",
         "status": "collecting",
-        "samples": 12,
+        "samples": 13,
         "required": 20,
         "eligible_for_admin_review": false,
         "admin_review_recommendation": "no_active_change"
@@ -95,7 +95,7 @@
         "min_samples": 20,
         "poor_cycles": 0,
         "drift_evidence": {
-          "samples": 12,
+          "samples": 13,
           "reason": "insufficient"
         },
         "active_change_policy": "explicit_admin_only",
@@ -176,12 +176,12 @@
         }
       },
       "candidate": {
-        "version": "candidate-20260904",
-        "created_at": "2026-09-04T19:42:17+08:00",
-        "data_fingerprint": "869ba14e95da2f99c519676988e39c407ec15f3adec922f6b593bb1b1bcae0b4",
-        "data_effective_at": "2026-09-04T19:41:41+08:00",
+        "version": "candidate-20260907",
+        "created_at": "2026-09-07T20:59:10+08:00",
+        "data_fingerprint": "bdcdb16282110b034a1143a517486fec18933e15cb1c2f98dcebdff5d7dd1d08",
+        "data_effective_at": "2026-09-07T20:58:24+08:00",
         "status": "collecting",
-        "samples": 12,
+        "samples": 13,
         "required": 20,
         "eligible_for_admin_review": false,
         "admin_review_recommendation": "no_active_change"
@@ -192,7 +192,7 @@
         "min_samples": 20,
         "poor_cycles": 0,
         "drift_evidence": {
-          "samples": 12,
+          "samples": 13,
           "reason": "insufficient"
         },
         "active_change_policy": "explicit_admin_only",
@@ -273,12 +273,12 @@
         }
       },
       "candidate": {
-        "version": "candidate-20260904",
-        "created_at": "2026-09-04T19:42:17+08:00",
-        "data_fingerprint": "6a452653963960fa81001ccca63a0e1daed718b5fe75828b427e69ab8175d605",
-        "data_effective_at": "2026-09-04T19:41:41+08:00",
+        "version": "candidate-20260907",
+        "created_at": "2026-09-07T20:59:10+08:00",
+        "data_fingerprint": "1634adb8627124941d06a450477bb0fc18bf7303fe2a08c9c169e1e81abc88a9",
+        "data_effective_at": "2026-09-07T20:58:24+08:00",
         "status": "collecting",
-        "samples": 12,
+        "samples": 13,
         "required": 20,
         "eligible_for_admin_review": false,
         "admin_review_recommendation": "no_active_change"
@@ -289,7 +289,7 @@
         "min_samples": 20,
         "poor_cycles": 0,
         "drift_evidence": {
-          "samples": 12,
+          "samples": 13,
           "reason": "insufficient"
         },
         "active_change_policy": "explicit_admin_only",
