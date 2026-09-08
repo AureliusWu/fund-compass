@@ -5,7 +5,7 @@
     "applied_at": "2026-08-13T13:46:49+08:00",
     "legacy_records_excluded": 17
   },
-  "updated_at": "2026-09-07T20:59:10+08:00",
+  "updated_at": "2026-09-08T19:42:26+08:00",
   "models": {
     "539002": {
       "name": "建信新兴市场混合(QDII)A",
@@ -79,12 +79,12 @@
         }
       },
       "candidate": {
-        "version": "candidate-20260907",
-        "created_at": "2026-09-07T20:59:10+08:00",
-        "data_fingerprint": "9fadef19b4747b8d36280bd6b8eb48b532673189ca22496566419cc0a072049f",
-        "data_effective_at": "2026-09-07T20:58:24+08:00",
+        "version": "candidate-20260908",
+        "created_at": "2026-09-08T19:42:26+08:00",
+        "data_fingerprint": "638cbefa2ec00198221ba30388f3de1b5704eed5f1c0a8f073852874bd3b5030",
+        "data_effective_at": "2026-09-08T19:41:51+08:00",
         "status": "collecting",
-        "samples": 13,
+        "samples": 14,
         "required": 20,
         "eligible_for_admin_review": false,
         "admin_review_recommendation": "no_active_change"
@@ -95,7 +95,7 @@
         "min_samples": 20,
         "poor_cycles": 0,
         "drift_evidence": {
-          "samples": 13,
+          "samples": 14,
           "reason": "insufficient"
         },
         "active_change_policy": "explicit_admin_only",

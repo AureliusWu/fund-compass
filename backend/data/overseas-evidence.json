@@ -1,29 +1,7 @@
 {
   "alignment_version": "observation-target-v2",
-  "models": {
-    "539002": {
-      "accuracy_status": "collecting",
-      "alignment_version": "observation-target-v2",
-      "base_nav": 2.33,
-      "base_nav_date": "2026-09-03",
-      "code": "539002",
-      "coverage": 64.33,
-      "direction_accuracy": 84.6,
-      "error_p80": 1.213,
-      "mae": 0.794,
-      "market_time": "2026-09-04T16:04:38+08:00",
-      "model_version": "v1-2026q1-holdings",
-      "name": "建信新兴市场混合(QDII)A",
-      "observed_at": "2026-09-07T20:58:24+08:00",
-      "predicted_change": 3.6117,
-      "predicted_nav": 2.4142,
-      "prediction_date": "2026-09-07",
-      "sample_count": 13,
-      "status": "pending",
-      "target_nav_date": "2026-09-04"
-    }
-  },
+  "models": {},
   "schema": 1,
   "source_schema": 2,
-  "source_updated_at": "2026-09-07T20:58:24+08:00"
+  "source_updated_at": "2026-09-08T19:41:51+08:00"
 }
