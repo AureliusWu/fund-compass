@@ -7,11 +7,11 @@
     "当日仅产出 2/3 个有效模型预测"
   ],
   "stats": {
-    "records": 61,
+    "records": 63,
     "statuses": {
       "observed_only": 2,
       "legacy_misaligned": 17,
-      "settled": 40,
+      "settled": 42,
       "pending": 2
     },
     "prediction_due": true,
@@ -19,7 +19,7 @@
     "effective_predictions_for_observation": 2,
     "legacy_misaligned": 17,
     "prediction_effective_age_hours": 0.0,
-    "settlement_effective_age_hours": 48.1
+    "settlement_effective_age_hours": 0.0
   },
-  "updated_at": "2026-09-10T19:46:41+08:00"
+  "updated_at": "2026-09-11T19:45:33+08:00"
 }
