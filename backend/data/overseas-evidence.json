@@ -1,50 +1,7 @@
 {
   "alignment_version": "observation-target-v2",
-  "models": {
-    "018147": {
-      "accuracy_status": "collecting",
-      "alignment_version": "observation-target-v2",
-      "base_nav": 2.446,
-      "base_nav_date": "2026-09-09",
-      "code": "018147",
-      "coverage": 64.33,
-      "direction_accuracy": 71.4,
-      "error_p80": 1.199,
-      "mae": 0.792,
-      "market_time": "2026-09-10T16:05:32+08:00",
-      "model_version": "v1-2026q1-holdings",
-      "name": "建信新兴市场混合(QDII)C",
-      "observed_at": "2026-09-11T19:44:57+08:00",
-      "predicted_change": -2.9142,
-      "predicted_nav": 2.3747,
-      "prediction_date": "2026-09-11",
-      "sample_count": 14,
-      "status": "pending",
-      "target_nav_date": "2026-09-10"
-    },
-    "539002": {
-      "accuracy_status": "collecting",
-      "alignment_version": "observation-target-v2",
-      "base_nav": 2.486,
-      "base_nav_date": "2026-09-09",
-      "code": "539002",
-      "coverage": 64.33,
-      "direction_accuracy": 80.0,
-      "error_p80": 1.14,
-      "mae": 0.745,
-      "market_time": "2026-09-10T16:05:32+08:00",
-      "model_version": "v1-2026q1-holdings",
-      "name": "建信新兴市场混合(QDII)A",
-      "observed_at": "2026-09-11T19:44:57+08:00",
-      "predicted_change": -2.9142,
-      "predicted_nav": 2.4136,
-      "prediction_date": "2026-09-11",
-      "sample_count": 15,
-      "status": "pending",
-      "target_nav_date": "2026-09-10"
-    }
-  },
+  "models": {},
   "schema": 1,
   "source_schema": 2,
-  "source_updated_at": "2026-09-11T19:44:57+08:00"
+  "source_updated_at": "2026-09-14T21:16:47+08:00"
 }
