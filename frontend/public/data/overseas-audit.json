@@ -4,21 +4,22 @@
   "warnings": [
     "已保留并排除 17 条历史日期轴错位样本",
     "计划任务延迟至同日窗口，预测仅使用已证明归属目标日的行情",
-    "应产出预测但当日有效预测为 0（连续 1 次）"
+    "当日仅产出 2/3 个有效模型预测"
   ],
   "stats": {
-    "records": 63,
+    "records": 65,
     "statuses": {
       "observed_only": 2,
       "legacy_misaligned": 17,
-      "settled": 44
+      "settled": 44,
+      "pending": 2
     },
     "prediction_due": true,
     "prediction_expected": true,
-    "effective_predictions_for_observation": 0,
+    "effective_predictions_for_observation": 2,
     "legacy_misaligned": 17,
-    "prediction_effective_age_hours": 73.5,
-    "settlement_effective_age_hours": 0.0
+    "prediction_effective_age_hours": 0.0,
+    "settlement_effective_age_hours": 22.8
   },
-  "updated_at": "2026-09-14T21:17:54+08:00"
+  "updated_at": "2026-09-15T20:03:50+08:00"
 }
