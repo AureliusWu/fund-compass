@@ -5,7 +5,7 @@
     "applied_at": "2026-08-13T13:46:49+08:00",
     "legacy_records_excluded": 17
   },
-  "updated_at": "2026-09-18T19:44:59+08:00",
+  "updated_at": "2026-09-21T21:17:49+08:00",
   "models": {
     "539002": {
       "name": "建信新兴市场混合(QDII)A",
@@ -79,12 +79,12 @@
         }
       },
       "candidate": {
-        "version": "candidate-20260918",
-        "created_at": "2026-09-18T19:44:59+08:00",
-        "data_fingerprint": "f2b28c28fba540c4136f74db7508ba07ed8785e6640edda17438f73ef0e0e3cb",
-        "data_effective_at": "2026-09-18T19:44:21+08:00",
+        "version": "candidate-20260921",
+        "created_at": "2026-09-21T21:17:49+08:00",
+        "data_fingerprint": "45d497da6dd979d43fee324512f3b0e33244511c940cc62ccd9ec63b0663db57",
+        "data_effective_at": "2026-09-21T21:16:44+08:00",
         "status": "collecting",
-        "samples": 18,
+        "samples": 19,
         "required": 20,
         "eligible_for_admin_review": false,
         "admin_review_recommendation": "no_active_change"
@@ -95,7 +95,7 @@
         "min_samples": 20,
         "poor_cycles": 0,
         "drift_evidence": {
-          "samples": 18,
+          "samples": 19,
           "reason": "insufficient"
         },
         "active_change_policy": "explicit_admin_only",
@@ -273,12 +273,12 @@
         }
       },
       "candidate": {
-        "version": "candidate-20260918",
-        "created_at": "2026-09-18T19:44:59+08:00",
-        "data_fingerprint": "576d307d20ab6ca070d014d4222bda25e7f09ec21dc8d7b8b9de9b017f58724e",
-        "data_effective_at": "2026-09-18T19:44:21+08:00",
+        "version": "candidate-20260921",
+        "created_at": "2026-09-21T21:17:49+08:00",
+        "data_fingerprint": "4118667d2a6aa823b2c793c27fda0b4e46483dc334ed2009cb9acc5f1abeec99",
+        "data_effective_at": "2026-09-21T21:16:44+08:00",
         "status": "collecting",
-        "samples": 17,
+        "samples": 18,
         "required": 20,
         "eligible_for_admin_review": false,
         "admin_review_recommendation": "no_active_change"
@@ -289,7 +289,7 @@
         "min_samples": 20,
         "poor_cycles": 0,
         "drift_evidence": {
-          "samples": 17,
+          "samples": 18,
           "reason": "insufficient"
         },
         "active_change_policy": "explicit_admin_only",
