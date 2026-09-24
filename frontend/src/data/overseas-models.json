@@ -5,7 +5,7 @@
     "applied_at": "2026-08-13T13:46:49+08:00",
     "legacy_records_excluded": 17
   },
-  "updated_at": "2026-09-21T21:17:49+08:00",
+  "updated_at": "2026-09-24T20:09:28+08:00",
   "models": {
     "539002": {
       "name": "建信新兴市场混合(QDII)A",
@@ -79,29 +79,93 @@
         }
       },
       "candidate": {
-        "version": "candidate-20260921",
-        "created_at": "2026-09-21T21:17:49+08:00",
-        "data_fingerprint": "45d497da6dd979d43fee324512f3b0e33244511c940cc62ccd9ec63b0663db57",
-        "data_effective_at": "2026-09-21T21:16:44+08:00",
-        "status": "collecting",
-        "samples": 19,
-        "required": 20,
+        "version": "candidate-20260924",
+        "created_at": "2026-09-24T20:09:28+08:00",
+        "data_fingerprint": "90ce844aa8308407c7075a7c6c8238600121adbd10c801b25c954df476b0db81",
+        "data_effective_at": "2026-09-24T20:08:52+08:00",
+        "status": "rejected",
+        "samples": 20,
+        "split_date": "2026-09-09",
+        "train_samples": 14,
+        "validation_samples": 6,
+        "baseline": {
+          "samples": 6,
+          "mae": 0.6379,
+          "bias": -0.2385,
+          "direction_accuracy": 83.3,
+          "extreme_mae": 0.8096
+        },
+        "candidate": {
+          "samples": 6,
+          "mae": 0.5315,
+          "bias": 0.0345,
+          "direction_accuracy": 100.0,
+          "extreme_mae": 0.3442
+        },
+        "parameters": {
+          "scale": 1.0,
+          "bias": 0.2,
+          "legs": [
+            {
+              "code": "usTSM",
+              "weight": 12.312
+            },
+            {
+              "code": "usNVDA",
+              "weight": 8.112
+            },
+            {
+              "code": "usEWY",
+              "weight": 6.92
+            },
+            {
+              "code": "usAVGO",
+              "weight": 10.224
+            },
+            {
+              "code": "usEWY",
+              "weight": 5.408
+            },
+            {
+              "code": "usSNDK",
+              "weight": 5.892
+            },
+            {
+              "code": "usGLW",
+              "weight": 3.432
+            },
+            {
+              "code": "usWDC",
+              "weight": 4.476
+            },
+            {
+              "code": "usLITE",
+              "weight": 2.864
+            },
+            {
+              "code": "usMPWR",
+              "weight": 2.792
+            }
+          ]
+        },
         "eligible_for_admin_review": false,
         "admin_review_recommendation": "no_active_change"
       },
       "history": [],
       "governance": {
-        "status": "collecting",
+        "status": "healthy",
         "min_samples": 20,
         "poor_cycles": 0,
         "drift_evidence": {
-          "samples": 19,
-          "reason": "insufficient"
+          "samples": 20,
+          "previous_mae": 0.87,
+          "recent_mae": 0.561,
+          "recent_direction_accuracy": 80.0
         },
         "active_change_policy": "explicit_admin_only",
         "candidate_eligible_for_admin_review": false,
         "rollback_recommended": false,
-        "recommendation": "collect_more_evidence"
+        "recommendation": "keep_active_rejected_candidate"
       }
     },
     "012920": {
@@ -273,12 +337,12 @@
         }
       },
       "candidate": {
-        "version": "candidate-20260921",
-        "created_at": "2026-09-21T21:17:49+08:00",
-        "data_fingerprint": "4118667d2a6aa823b2c793c27fda0b4e46483dc334ed2009cb9acc5f1abeec99",
-        "data_effective_at": "2026-09-21T21:16:44+08:00",
+        "version": "candidate-20260924",
+        "created_at": "2026-09-24T20:09:28+08:00",
+        "data_fingerprint": "83c58646c6262d853beb67ffa5f41161de2d0c4ec562545515cbcb565366b399",
+        "data_effective_at": "2026-09-24T20:08:52+08:00",
         "status": "collecting",
-        "samples": 18,
+        "samples": 19,
         "required": 20,
         "eligible_for_admin_review": false,
         "admin_review_recommendation": "no_active_change"
@@ -289,7 +353,7 @@
         "min_samples": 20,
         "poor_cycles": 0,
         "drift_evidence": {
-          "samples": 18,
+          "samples": 19,
           "reason": "insufficient"
         },
         "active_change_policy": "explicit_admin_only",
