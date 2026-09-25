@@ -5,7 +5,7 @@
     "applied_at": "2026-08-13T13:46:49+08:00",
     "legacy_records_excluded": 17
   },
-  "updated_at": "2026-09-24T20:09:28+08:00",
+  "updated_at": "2026-09-25T20:08:51+08:00",
   "models": {
     "539002": {
       "name": "建信新兴市场混合(QDII)A",
@@ -79,26 +79,26 @@
         }
       },
       "candidate": {
-        "version": "candidate-20260924",
-        "created_at": "2026-09-24T20:09:28+08:00",
-        "data_fingerprint": "90ce844aa8308407c7075a7c6c8238600121adbd10c801b25c954df476b0db81",
-        "data_effective_at": "2026-09-24T20:08:52+08:00",
+        "version": "candidate-20260925",
+        "created_at": "2026-09-25T20:08:51+08:00",
+        "data_fingerprint": "ce09bf95388f858368b691194f382f09843c00e1bab792a21b9286da68510762",
+        "data_effective_at": "2026-09-25T20:08:14+08:00",
         "status": "rejected",
-        "samples": 20,
+        "samples": 21,
         "split_date": "2026-09-09",
         "train_samples": 14,
-        "validation_samples": 6,
+        "validation_samples": 7,
         "baseline": {
-          "samples": 6,
-          "mae": 0.6379,
-          "bias": -0.2385,
-          "direction_accuracy": 83.3,
+          "samples": 7,
+          "mae": 0.745,
+          "bias": -0.4027,
+          "direction_accuracy": 85.7,
           "extreme_mae": 0.8096
         },
         "candidate": {
-          "samples": 6,
-          "mae": 0.5315,
-          "bias": 0.0345,
+          "samples": 7,
+          "mae": 0.6124,
+          "bias": -0.1272,
           "direction_accuracy": 100.0,
           "extreme_mae": 0.3442
         },
@@ -157,9 +157,9 @@
         "min_samples": 20,
         "poor_cycles": 0,
         "drift_evidence": {
-          "samples": 20,
-          "previous_mae": 0.87,
-          "recent_mae": 0.561,
+          "samples": 21,
+          "previous_mae": 0.892,
+          "recent_mae": 0.637,
           "recent_direction_accuracy": 80.0
         },
         "active_change_policy": "explicit_admin_only",
