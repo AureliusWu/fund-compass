@@ -2,7 +2,8 @@
 
 Connections are short-lived and configured consistently so concurrent FastAPI
 worker threads fail predictably instead of immediately raising ``database is
-locked``. Startup remains local-only and never performs network I/O.
+locked``. SQLite remains the default. The explicit Turso candidate backend
+never falls back to a local file when configuration or network access fails.
 """
 from __future__ import annotations
 
@@ -473,6 +474,23 @@ def _persistent_disk_status() -> dict:
 
 def persistence_status() -> dict:
     """Return verified, non-sensitive SQLite durability metadata."""
+    try:
+        backend = database_backend()
+        if backend == "turso":
+            _turso_settings()
+            return {
+                "engine": "libsql",
+                "persistence": "turso_candidate",
+                "durable": False,
+                "warning": "Turso 候选存储尚未通过生产跨重启读回验收",
+            }
+    except sqlite3.DatabaseError:
+        return {
+            "engine": "unknown",
+            "persistence": "misconfigured",
+            "durable": False,
+            "warning": "数据库配置无效，禁止回退到本地存储",
+        }
     mode = os.environ.get("FUND_DB_PERSISTENCE", "").strip().lower()
     if mode == "persistent_disk":
         return _persistent_disk_status()
@@ -499,6 +517,23 @@ def _timeout_seconds() -> float:
         log.warning("invalid FUND_DB_TIMEOUT_SECONDS=%r; using %.1fs", raw, DEFAULT_TIMEOUT_SECONDS)
         return DEFAULT_TIMEOUT_SECONDS
     return min(MAX_TIMEOUT_SECONDS, max(0.1, value))
+
+
+def database_backend() -> str:
+    backend = os.environ.get("FUND_DB_BACKEND", "sqlite").strip().lower()
+    if backend not in {"sqlite", "turso"}:
+        raise sqlite3.DatabaseError("Unsupported FUND_DB_BACKEND")
+    return backend
+
+
+def _turso_settings() -> tuple[str, str, float]:
+    if os.environ.get("FUND_DB_PERSISTENCE", "").strip().lower() != "turso_candidate":
+        raise sqlite3.DatabaseError("Turso requires explicit turso_candidate persistence mode")
+    url = os.environ.get("TURSO_DATABASE_URL", "").strip()
+    token = os.environ.get("TURSO_AUTH_TOKEN", "").strip()
+    if not url or not token:
+        raise sqlite3.DatabaseError("Turso candidate credentials are not configured")
+    return url, token, _timeout_seconds()
 
 
 def _ensure_parent_directory(path: str) -> None:
@@ -911,6 +946,19 @@ def get_conn() -> sqlite3.Connection:
     immediately. Foreign keys are enabled per connection because SQLite does
     not persist that setting in the database file.
     """
+    if database_backend() == "turso":
+        from database.turso import connect
+
+        url, token, timeout = _turso_settings()
+        conn = connect(url, token, timeout)
+        try:
+            conn.execute("PRAGMA foreign_keys = ON")
+            if conn.execute("PRAGMA foreign_keys").fetchone()[0] != 1:
+                raise sqlite3.DatabaseError("Turso foreign key enforcement is unavailable")
+        except Exception:
+            conn.close()
+            raise
+        return conn
     _ensure_parent_directory(DB_PATH)
     timeout = _timeout_seconds()
     conn = sqlite3.connect(DB_PATH, timeout=timeout, uri=DB_PATH.startswith("file:"))
@@ -1021,6 +1069,17 @@ def init_db() -> None:
     cannot enable WAL, initialization continues with SQLite's current journal
     mode and logs the degradation.
     """
+    if database_backend() == "turso":
+        from database.turso_schema import verify_schema
+
+        # Startup is read-only with respect to the remote schema. Creating or
+        # adopting a candidate is a separate, explicit provisioning operation.
+        conn = get_conn()
+        try:
+            verify_schema(conn)
+        finally:
+            conn.close()
+        return
     _backup_before_v8_migration()
     settings = get_conn()
     try:

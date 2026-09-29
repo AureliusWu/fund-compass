@@ -2,6 +2,7 @@
 
 ## 8.0.0 - 2026-09-01 (Candidate / Unreleased)
 
+- 接入显式失败关闭的 Turso Free 候选存储：新增 Hrana 3 远端适配器、V8 schema 显式初始化/校验、候选探针和基金全集幂等批量导入回执。实库已验证 schema 8、27,718 只基金导入、独立进程写入/回读与重复启动零改写；在 Render 跨重启证据完成前仍报告 `durable=false`。
 - 拆分零成本候选验收与正式发布资格：普通 `main` CI 严格验证 Render Free 的 `ephemeral / durable=false`，在任务名、摘要及机器输出中标记 `CANDIDATE_ONLY / BLOCKED_FOR_FORMAL_RELEASE` 与 `formal_release_status=blocked`，不再因为预期中的耐久存储阻断把已通过的候选部署误标为代码失败；只有从 `main` 手工显式选择 `formal_release=true` 才执行不可降级的持久化硬门禁。正式模式不重复部署 Pages，只审计当前目标 SHA 的既有生产部署；最终存储响应会重新绑定已验证的版本与后端源码，候选运行不会取消正式运行。即使自报耐久契约通过，在自动化生产写入、跨重启读回证据就绪前也继续失败关闭，当前仍禁止创建 v8.0.0 Tag 或 GitHub Release。
 - 修复 V8 API 与旧 PWA 滚动升级崩溃：匿名 owner 数据兼容端点统一以 HTTP 403 失败关闭，新前端映射为“私人数据未公开”，旧缓存前端进入既有请求失败态，不再把较小的脱敏 DTO 当作完整决策解引用；Service Worker 新版本立即激活并接管旧客户端，注册器强制绕过 HTTP 缓存检查更新、只刷新一次，富集静态数据缓存按 `fc-data-v8` 隔离旧 schema，并新增构建产物门禁。
 - V8 Release Hardening 01：公开 V8 decision、outcome、policy 与兼容 watchlist 读取一律失败关闭；完整持仓、精确权重、组合价值及服务端自选仅能通过独立 `PRIVATE_READ_TOKEN` 私有接口读取，Admin/Worker 凭证不能替代私人读取身份。

@@ -40,6 +40,54 @@ SEED_FUNDS = [
 UNIVERSE_ARTIFACT = Path(__file__).resolve().parent.parent / "data" / "fund-universe.json.gz"
 UNIVERSE_META = Path(__file__).resolve().parent.parent / "data" / "fund-universe.meta.json"
 
+FUNDS_UPSERT = """
+INSERT INTO funds(code,name,type,pinyin) VALUES (?,?,?,?)
+ON CONFLICT(code) DO UPDATE SET
+    name=excluded.name, type=excluded.type, pinyin=excluded.pinyin
+WHERE funds.name IS NOT excluded.name
+   OR funds.type IS NOT excluded.type
+   OR funds.pinyin IS NOT excluded.pinyin
+"""
+FUNDS_WRITE_BATCH_SIZE = 200
+
+
+def _fund_write_statements(rows: list[tuple]) -> list[tuple[str, tuple]]:
+    """Bound SQL statement size without one remote request per fund.
+
+    200 rows use 800 bound parameters, below legacy SQLite's 999-variable limit.
+    All statements are still committed as one transaction by the caller.
+    """
+    statements = []
+    for offset in range(0, len(rows), FUNDS_WRITE_BATCH_SIZE):
+        chunk = rows[offset:offset + FUNDS_WRITE_BATCH_SIZE]
+        values = ",".join("(?,?,?,?)" for _ in chunk)
+        sql = FUNDS_UPSERT.replace("VALUES (?,?,?,?)", f"VALUES {values}")
+        statements.append((sql, tuple(value for row in chunk for value in row)))
+    return statements
+
+
+def _fund_delete_statements(codes: list[str]) -> list[tuple[str, tuple]]:
+    """Delete artifact-removed directory rows without touching history tables."""
+    statements = []
+    for offset in range(0, len(codes), FUNDS_WRITE_BATCH_SIZE):
+        chunk = codes[offset:offset + FUNDS_WRITE_BATCH_SIZE]
+        statements.append((
+            f"DELETE FROM funds WHERE code IN ({','.join('?' for _ in chunk)})",
+            tuple(chunk),
+        ))
+    return statements
+
+
+def _execute_import_statements(conn, statements: list[tuple[str, tuple]]) -> None:
+    # The remote adapter can send the complete import (including its receipt)
+    # in one request. Never commit individual chunks: failed imports are atomic.
+    execute_batch = getattr(conn, "execute_batch", None)
+    if callable(execute_batch) and statements:
+        execute_batch(statements, atomic=False)
+    else:
+        for sql, args in statements:
+            conn.execute(sql, args)
+
 
 def _now():
     return datetime.now(CST)
@@ -71,18 +119,24 @@ def import_universe() -> int:
     funds = fetch_universe()
     conn = get_conn()
     try:
-        conn.executemany(
-            "INSERT OR REPLACE INTO funds(code,name,type,pinyin) VALUES (?,?,?,?)",
-            [(f["code"], f["name"], f["type"], f["pinyin"]) for f in funds],
-        )
+        conn.execute("BEGIN IMMEDIATE")
+        rows = [(f["code"], f["name"], f["type"], f["pinyin"]) for f in funds]
+        _execute_import_statements(conn, _fund_write_statements(rows))
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
     return len(funds)
 
 
 def import_universe_artifact() -> dict:
-    """Import a verified local artifact. This function never performs network I/O."""
+    """Apply a verified artifact once per digest, committing its receipt atomically.
+
+    Source data always comes from the deployment artifact, never a provider fetch.
+    With a remote database, the database operations themselves use its connection.
+    """
     if not UNIVERSE_ARTIFACT.exists() or not UNIVERSE_META.exists():
         return {"loaded": False, "reason": "missing", "fund_count": 0}
     try:
@@ -94,19 +148,90 @@ def import_universe_artifact() -> dict:
         funds = json.loads(payload)
         if not isinstance(funds, list) or len(funds) != meta.get("fund_count"):
             raise ValueError("基金全集数量与元数据不一致")
+        codes = [fund.get("code") for fund in funds if isinstance(fund, dict)]
+        if len(codes) != len(funds) or any(not code_is_valid(code) for code in codes):
+            raise ValueError("基金全集包含无效基金代码")
+        if len(set(codes)) != len(codes):
+            raise ValueError("基金全集包含重复基金代码")
         conn = get_conn()
         try:
-            conn.executemany(
-                "INSERT OR REPLACE INTO funds(code,name,type,pinyin) VALUES (?,?,?,?)",
-                [(f["code"], f["name"], f.get("type"), f.get("pinyin", "")) for f in funds],
-            )
+            # Serialize startup importers and keep the receipt in the same
+            # transaction as the data. A failed import must not mark a new
+            # artifact as applied, nor leave partially updated funds behind.
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS universe_import_state (
+                    singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
+                    sha256 TEXT NOT NULL,
+                    fund_count INTEGER NOT NULL CHECK(fund_count >= 0),
+                    imported_at TEXT NOT NULL
+                )
+            """)
+            previous = conn.execute(
+                "SELECT sha256,fund_count,imported_at FROM universe_import_state WHERE singleton_id=1"
+            ).fetchone()
+            existing_codes = {row[0] for row in conn.execute("SELECT code FROM funds")}
+            expected_codes = set(codes)
+            if (previous and previous["sha256"] == digest
+                    and previous["fund_count"] == len(funds)
+                    and existing_codes == expected_codes):
+                conn.commit()
+                return {
+                    **meta, "loaded": True, "changed": False,
+                    "reason": "unchanged", "imported_at": previous["imported_at"],
+                }
+            rows = [(f["code"], f["name"], f.get("type"), f.get("pinyin", "")) for f in funds]
+            imported_at = _now().isoformat(timespec="seconds")
+            statements = _fund_write_statements(rows)
+            # ``funds`` is the current public directory. Removed directory rows
+            # must not accumulate across artifact revisions; independent NAV,
+            # decision and audit tables deliberately remain untouched.
+            statements.extend(_fund_delete_statements(sorted(existing_codes - expected_codes)))
+            statements.append((
+                """INSERT INTO universe_import_state(singleton_id,sha256,fund_count,imported_at)
+                VALUES (1,?,?,?)
+                ON CONFLICT(singleton_id) DO UPDATE SET
+                    sha256=excluded.sha256, fund_count=excluded.fund_count,
+                    imported_at=excluded.imported_at""",
+                (digest, len(funds), imported_at),
+            ))
+            _execute_import_statements(conn, statements)
             conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
         finally:
             conn.close()
-        return {"loaded": True, **meta}
+        return {**meta, "loaded": True, "changed": True, "imported_at": imported_at}
     except Exception as error:
         log.error("基金全集本地 artifact 加载失败: %s", error)
         return {"loaded": False, "reason": str(error), "fund_count": 0}
+
+
+def ensure_universe_artifact() -> dict:
+    """Check the deployment artifact on every startup, including nonempty DBs."""
+    return import_universe_artifact()
+
+
+def universe_import_status() -> dict | None:
+    """Return the last committed import receipt, never deployment-file claims.
+
+    Older databases have no receipt until their first verified artifact import.
+    This read does not create tables or cache state across database connections.
+    """
+    conn = get_conn()
+    try:
+        exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='universe_import_state'"
+        ).fetchone()
+        if not exists:
+            return None
+        row = conn.execute(
+            "SELECT sha256,fund_count,imported_at FROM universe_import_state WHERE singleton_id=1"
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
 
 
 def _query_seed(q=None, type=None, page=1, page_size=20) -> dict:
@@ -210,7 +335,11 @@ def _save_detail(conn, d):
     )
     hist = (d.get("nav_history") or [])[-HIST_KEEP:]
     conn.executemany(
-        "INSERT OR REPLACE INTO nav_history(code,date,nav,ac_return) VALUES (?,?,?,?)",
+        """INSERT INTO nav_history(code,date,nav,ac_return) VALUES (?,?,?,?)
+        ON CONFLICT(code,date) DO UPDATE SET
+            nav=excluded.nav, ac_return=excluded.ac_return
+        WHERE nav_history.nav IS NOT excluded.nav
+           OR nav_history.ac_return IS NOT excluded.ac_return""",
         [(d["code"], h["date"], h["nav"], h.get("ac_return")) for h in hist],
     )
     # Keep a true rolling window across refreshes. Slicing only the incoming

@@ -18,7 +18,7 @@
 | 层 | 选型 |
 |---|---|
 | 前端 | Vue 3 · Vite · TypeScript · Pinia · Vant 4 · ECharts · vite-plugin-pwa |
-| 后端 | FastAPI · Python 3.12 · SQLite |
+| 后端 | FastAPI · Python 3.12 · SQLite / Turso libSQL |
 | 算法 | 纯 Python，评分 / 风险 / 择时 / 回测不依赖 pandas/numpy |
 | 数据源 | 天天基金 / 东方财富公开接口 |
 | 本地存储 | SQLite · IndexedDB · localStorage |
@@ -102,7 +102,7 @@ npm run build
 
 - 前端：GitHub Pages。
 - 后端：Render / Railway。
-- Render 免费实例的 SQLite 属于临时存储；本次零成本候选明确不把它作为生产决策账本。正式发布需要经过验证的耐久存储，任何付费资源都必须重新取得授权；运行状态页会显示当前持久化模式。
+- 零成本候选使用 Turso Free 远端 libSQL，避免把 Render 临时磁盘当作决策账本。候选库已通过本地跨连接回读，但在真实 Render 重启/重部署自动验收前仍诚实报告 `turso_candidate / durable=false`，不授予正式发布资格。
 - 实时决策：前端调用 Render 后端，后端直接请求现行估值源；Service Worker 不缓存 `/api`。
 - 14:30 自选决策推送由 Cloudflare Workers Cron 执行；Worker 生产发布当前需在 `worker/` 手动执行 `npm run deploy`，GitHub Actions 的估值/信号任务仅保留手动应急入口。
 - Pages 只在同一精确 SHA 的代码门禁通过后部署；普通 `main` 生产 smoke 验收零成本候选并明确标记 `BLOCKED_FOR_FORMAL_RELEASE`，从 `main` 手工选择 `formal_release=true` 才执行不可降级的耐久存储审计。正式模式不重复部署，只验收当前目标 SHA 的既有生产版本；审计会重新绑定最终健康响应的版本与部署源码，且在生产写入、跨重启读回证据自动化前始终失败关闭。自动数据任务完整排队，提交后重试派发 CI，使静态数据也进入 Pages 部署链路；部署后烟测会核对 Pages/Render 的真实提交、Worker 版本、持久化与静态分片完整性。

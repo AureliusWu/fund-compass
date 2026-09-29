@@ -157,10 +157,17 @@ def test_v8_full_ledger_reader_rejects_missing_source_health_audit(tmp_path: Pat
 def test_render_blueprint_stays_free_and_paid_blueprint_is_absent() -> None:
     active = yaml.safe_load((ROOT / "render.yaml").read_text(encoding="utf-8"))
     active_service = active["services"][0]
+    environment = {item["key"]: item for item in active_service["envVars"]}
 
     assert active_service["plan"] == "free"
     assert "disk" not in active_service
-    assert {item["key"]: item.get("value") for item in active_service["envVars"]}[
-        "FUND_DB_PERSISTENCE"
-    ] == "ephemeral"
+    assert environment["FUND_DB_BACKEND"]["value"] == "turso"
+    assert environment["FUND_DB_PERSISTENCE"]["value"] == "turso_candidate"
+    assert environment["FUND_DB_TIMEOUT_SECONDS"]["value"] == 60
+    assert environment["TURSO_DATABASE_URL"] == {
+        "key": "TURSO_DATABASE_URL", "sync": False,
+    }
+    assert environment["TURSO_AUTH_TOKEN"] == {
+        "key": "TURSO_AUTH_TOKEN", "sync": False,
+    }
     assert not (ROOT / "render-persistent.yaml").exists()

@@ -288,6 +288,8 @@ def test_candidate_smoke_requires_honest_ephemeral_storage_without_granting_rele
 
     assert candidate_condition in source
     assert '.database.engine == "sqlite"' in source
+    assert '.database.engine == "libsql"' in source
+    assert '.database.persistence == "turso_candidate"' in source
     assert '.database.persistence == "ephemeral"' in source
     assert ".database.durable == false" in source
     assert candidate_status in source

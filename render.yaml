@@ -11,8 +11,16 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.7
+      - key: FUND_DB_BACKEND
+        value: turso
       - key: FUND_DB_PERSISTENCE
-        value: ephemeral
+        value: turso_candidate
+      - key: FUND_DB_TIMEOUT_SECONDS
+        value: 60
+      - key: TURSO_DATABASE_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false
       - key: ADMIN_TOKEN
         sync: false
       - key: WORKER_TOKEN

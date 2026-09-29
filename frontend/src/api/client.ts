@@ -75,7 +75,7 @@ export interface Health {
     max_age_days?: number; updated?: string | null; indices?: number; source?: string | null
   } | null
   database?: {
-    engine?: string; persistence?: 'persistent_disk' | 'ephemeral' | 'unspecified'
+    engine?: string; persistence?: 'persistent_disk' | 'ephemeral' | 'unspecified' | 'misconfigured' | 'turso_candidate'
     durable?: boolean; warning?: string | null
   }
   operations?: {

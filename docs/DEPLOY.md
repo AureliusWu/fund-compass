@@ -21,18 +21,17 @@ uvicorn main:app --host 0.0.0.0 --port $PORT
 2. Service 的 Root Directory 设为 `backend`，Build 命令设为 `pip install -r requirements.txt`，Start 命令使用本页顶部的 `uvicorn` 命令。本仓库没有 `Dockerfile` 或 `Procfile`，不得依赖不存在的自动识别文件。
 3. 拿到公网域名。
 
-> 重要：Render Free Web Service 的文件系统是临时的，实例休眠、重启或重新部署都会丢失 SQLite。免费档只适合临时体验，不能把自选、决策账本、组合快照或幂等记录视为耐久数据。
+> 重要：Render Free Web Service 的本地文件系统仍是临时的；当前候选版必须显式使用 Turso Free 远端 libSQL，不得回退到本地 SQLite 接受权威写入。
 
 ### 当前零成本发布边界
 
 用户已撤销 Render Starter 和持久盘的付费授权。本次创建的并行候选服务
 `fund-compass-api-v8-candidate` 明确使用 Render Free（$0/月），没有磁盘；仓库只保留
 `render.yaml` 的 Free 定义，不保留可能误触发付费资源的 Blueprint。候选公网 API 为
-`https://fund-compass-api-v8-candidate.onrender.com`，其 SQLite 文件系统是临时的，健康接口必须
-诚实报告 `persistence: ephemeral`、`durable: false`。
+`https://fund-compass-api-v8-candidate.onrender.com`。候选服务使用 Turso Free 远端 libSQL，健康接口在自动跨重启验收完成前必须
+诚实报告 `engine: libsql`、`persistence: turso_candidate`、`durable: false`。
 
-这意味着服务休眠、重启或重新部署后，自选、决策账本、Outcome、通知幂等记录和其他数据库
-内容都可能丢失。代码级 schema、备份和失败关闭测试通过，不能把它改写成生产持久化已通过；
+本地实库已完成 schema 8初始化、独立进程写入/回读、27,718只基金导入及重复启动零改写。这些证据仍不能改写成生产跨重启持久化已通过；
 现有 V8 persistence gate 会拒绝该配置。本次只能部署未发布候选用于验证，正式 v8.0.0
 发布状态必须保持 **`BLOCKED`**，不得创建版本标签。
 当前 v8.0.0 生产方案因此仍是候选部署，而不是正式发布。
@@ -40,9 +39,9 @@ uvicorn main:app --host 0.0.0.0 --port $PORT
 零成本发布顺序：
 
 1. 冻结候选 Free 服务真实 URL、Render deployment ID、Pages deployment、Worker version ID 与目标提交 SHA，不创建或升级到任何付费资源。
-2. 在候选 Free 服务配置三个彼此不同的 `ADMIN_TOKEN` / `WORKER_TOKEN` / `PRIVATE_READ_TOKEN`，并部署同一目标 SHA。
+2. 在候选 Free 服务配置 `FUND_DB_BACKEND=turso`、`FUND_DB_PERSISTENCE=turso_candidate`、`TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN` Secret，以及三个彼此不同的 `ADMIN_TOKEN` / `WORKER_TOKEN` / `PRIVATE_READ_TOKEN`，并部署同一目标 SHA。
 3. 将 GitHub Actions Secret `FUND_API_BASE`、Pages 变量 `VITE_API_BASE` 和 Worker 后端地址统一指向已核验的 `https://fund-compass-api-v8-candidate.onrender.com`。
-4. 普通 `main` CI 以候选模式部署 Pages 并运行生产 smoke：用 `/api/health` 核对版本、源码身份并严格要求当前零成本服务诚实报告 `ephemeral / durable=false`。其余契约通过后，流水线任务名和摘要写入 `CANDIDATE_ONLY / BLOCKED_FOR_FORMAL_RELEASE`，并输出机器可读的枚举 `formal_release_status=blocked`，但不再用预期中的正式门禁失败把候选验收标成代码失败。未来消费该输出时只能精确比较 `== 'eligible'`，不能把非空字符串作为布尔值判断。
+4. 普通 `main` CI 以候选模式部署 Pages 并运行生产 smoke：用 `/api/health` 核对版本、源码身份并严格要求零成本服务报告 `libsql / turso_candidate / durable=false`。其余契约通过后，流水线任务名和摘要写入 `CANDIDATE_ONLY / BLOCKED_FOR_FORMAL_RELEASE`，并输出机器可读的枚举 `formal_release_status=blocked`，但不再用预期中的正式门禁失败把候选验收标成代码失败。未来消费该输出时只能精确比较 `== 'eligible'`，不能把非空字符串作为布尔值判断。
 5. 只有从 `main` 手工运行 `CI` 且显式选择 `formal_release=true` 时，才执行不可降级的 V8 persistence gate。正式模式只审计当前目标 SHA 已在生产部署的版本，不再次发布 Pages，因此候选运行不能取消正式审计；最终步骤用本次运行唯一参数绕过缓存，重新核对 `origin/main`、Pages `release.json` 和后端源码，检测到任何并发部署漂移都失败关闭。该模式在当前 Free SQLite 上必须失败；即使未来自报 `persistent_disk / durable=true`，在自动化生产写入、重启或再部署、读回证据就绪前仍失败关闭。不得使用 `continue-on-error`、`|| true` 或候选状态替代正式资格。
 6. Pages、API、Worker、隐私脱敏、canonical wire 与精确 SHA 可以作为候选部署证据，但在真实 `durable=true` 前不得创建 v8.0.0 标签或宣称正式发布。
 
@@ -54,7 +53,7 @@ uvicorn main:app --host 0.0.0.0 --port $PORT
 
 任一检查失败时，健康接口会报告 `misconfigured` 与 `durable: false`，但不会暴露服务器路径。未来若启用持久存储，仍须执行数据库写入与读取，并确认记录经过重启或再次部署后存在；不能只依据环境变量或单次健康检查宣称持久化完成。
 
-当前 `render.yaml` 明确配置 `ephemeral`，不得把它当作耐久数据回滚或备份来源，也不得在文档、健康状态或发布结论中声称 `durable=true`。在获得新的明确授权和真实跨重启证据前，不执行付费持久化方案。
+当前 `render.yaml` 明确配置远端 `turso_candidate`，但在生产写入→Render重启/重部署→回读自动证据完成前，不得在健康状态或发布结论中声称 `durable=true`。不执行付费持久化方案。
 
 本地门禁会经正式仓储 API 写入 Evidence → Source Health → Holding/Policy → Decision
 → QDII/Portfolio Outcome → Notification/Idempotency 完整审计链。第二个 Python 进程

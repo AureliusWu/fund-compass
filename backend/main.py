@@ -6,12 +6,15 @@ r"""司南基金 后端入口（FastAPI）。
     pip install -r requirements.txt
     uvicorn main:app --reload --port 8000
 
-启动阶段只初始化本地 SQLite 表结构，不抓取第三方数据、不导入基金全集。
-基金全集需要时通过 POST /api/admin/refresh-universe 手动刷新，避免冷启动被网络请求拖慢。
+启动阶段初始化本地 SQLite 或验证已配置的 Turso 候选 schema；
+只导入随部署提供且通过哈希验证的基金全集，不抓取第三方数据源。
 """
 import logging
+import hashlib
 import os
 import re
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
 from typing import NoReturn
@@ -19,7 +22,7 @@ from typing import NoReturn
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
-from database.db import init_db, persistence_status
+from database.db import database_backend, init_db, persistence_status
 from models.api import (
     HealthResponse, PortfolioDecisionRequest, PortfolioDecisionResponse,
     PortfolioLabRequest, V8DecisionBatchRequest,
@@ -51,6 +54,9 @@ log = logging.getLogger(__name__)
 
 NAV_TAIL = 800  # 返回给前端的净值条数（≈3年，供走势图 / 定投回放 / 指标计算）
 STARTED_AT = datetime.now(timezone.utc).isoformat()
+_health_summary_cache = None
+_health_summary_lock = threading.Lock()
+HEALTH_SUMMARY_TTL_SECONDS = 30.0
 
 
 def _deployment_status() -> dict:
@@ -65,14 +71,15 @@ def _deployment_status() -> dict:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 冷启动只做本地建表，绝不在启动路径里访问第三方数据源。
+    global _health_summary_cache
+    _health_summary_cache = None
+    # Remote schema is provisioned explicitly; never repair it during startup.
     init_db()
     # Persist the deterministic default policy during startup so every public
     # GET remains a genuine read and protected decision writes can reference a
     # real immutable policy row.
     v8_repo.ensure_default_policy()
-    if repo.universe_count() == 0:
-        repo.import_universe_artifact()
+    repo.ensure_universe_artifact()
     yield
 
 
@@ -313,9 +320,30 @@ def _public_source_health() -> dict:
     }
 
 
+def _public_database_summary() -> tuple[int, dict]:
+    """Bound remote aggregate queries; local SQLite keeps its existing behavior."""
+    global _health_summary_cache
+    if database_backend() != "turso":
+        return repo.universe_count(), repo.public_operations_status()
+    # Credential rotation and database changes must invalidate cached results.
+    identity = hashlib.sha256((os.environ.get("TURSO_DATABASE_URL", "") + "\0"
+                               + os.environ.get("TURSO_AUTH_TOKEN", "")).encode()).digest()
+    with _health_summary_lock:
+        now = time.monotonic()
+        if (_health_summary_cache is not None
+                and _health_summary_cache[0] == identity
+                and now < _health_summary_cache[1]):
+            return _health_summary_cache[2], dict(_health_summary_cache[3])
+        count = repo.universe_count()
+        operations = repo.public_operations_status()
+        _health_summary_cache = (identity, time.monotonic() + HEALTH_SUMMARY_TTL_SECONDS,
+                                 count, dict(operations))
+        return count, operations
+
+
 @app.get("/api/health", response_model=HealthResponse)
 def health() -> dict:
-    universe = repo.universe_count()
+    universe, operations = _public_database_summary()
     return {
         "status": "ok",
         "service": "fund-compass",
@@ -329,7 +357,7 @@ def health() -> dict:
         "index_valuation": index_valuation_status(),
         "database": persistence_status(),
         "strategy_registry": {"available": False, "redacted": True},
-        "operations": repo.public_operations_status(),
+        "operations": operations,
     }
 
 

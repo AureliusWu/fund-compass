@@ -133,6 +133,9 @@ def test_qdii_target_never_uses_the_next_available_nav(outcome_db):
 
 
 def test_outcomes_api_reports_mature_and_pending_horizons(outcome_db, monkeypatch):
+    monkeypatch.setattr(
+        v8_repo, "_now", lambda: datetime(2026, 9, 1, 6, 30, tzinfo=timezone.utc),
+    )
     _, decision = persist()
     insert_navs(outcome_db, [("2026-08-25", 1.0)])
     insert_navs(outcome_db, [

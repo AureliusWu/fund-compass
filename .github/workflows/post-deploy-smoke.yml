@@ -355,7 +355,8 @@ jobs:
             sleep 15
           done
           jq -e '
-            .database.engine == "sqlite"
+            ((.database.engine == "sqlite" and .database.persistence == "ephemeral")
+              or (.database.engine == "libsql" and .database.persistence == "turso_candidate"))
             and .universe_ready == true
             and (.universe | type) == "number"
             and .universe >= 1000
@@ -624,8 +625,8 @@ jobs:
         shell: bash
         run: |
           jq -e '
-            .database.engine == "sqlite"
-            and .database.persistence == "ephemeral"
+            ((.database.engine == "sqlite" and .database.persistence == "ephemeral")
+              or (.database.engine == "libsql" and .database.persistence == "turso_candidate"))
             and .database.durable == false
             and (.database.warning | type) == "string"
             and (.database.warning | length) > 0
@@ -633,7 +634,7 @@ jobs:
           {
             echo "## CANDIDATE_ONLY"
             echo
-            echo "生产契约与候选部署验收通过，但当前存储为 ephemeral / durable=false。"
+            echo "生产契约与候选部署验收通过，但当前存储尚未通过自动跨重启验收，durable=false。"
             echo "状态：BLOCKED_FOR_FORMAL_RELEASE；不得创建 v8.0.0 Tag 或 GitHub Release。"
           } >> "$GITHUB_STEP_SUMMARY"
           echo "::notice title=Candidate only::CANDIDATE_ONLY / BLOCKED_FOR_FORMAL_RELEASE"
