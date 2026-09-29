@@ -355,8 +355,9 @@ jobs:
             sleep 15
           done
           jq -e '
-            ((.database.engine == "sqlite" and .database.persistence == "ephemeral")
-              or (.database.engine == "libsql" and .database.persistence == "turso_candidate"))
+            .database.engine == "libsql"
+            and .database.persistence == "turso_candidate"
+            and .database.durable == false
             and .universe_ready == true
             and (.universe | type) == "number"
             and .universe >= 1000
@@ -625,8 +626,8 @@ jobs:
         shell: bash
         run: |
           jq -e '
-            ((.database.engine == "sqlite" and .database.persistence == "ephemeral")
-              or (.database.engine == "libsql" and .database.persistence == "turso_candidate"))
+            .database.engine == "libsql"
+            and .database.persistence == "turso_candidate"
             and .database.durable == false
             and (.database.warning | type) == "string"
             and (.database.warning | length) > 0

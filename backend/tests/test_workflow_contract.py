@@ -279,7 +279,7 @@ def test_post_deploy_smoke_runs_v8_persistence_gate_against_configured_api() -> 
     )
 
 
-def test_candidate_smoke_requires_honest_ephemeral_storage_without_granting_release() -> None:
+def test_candidate_smoke_requires_turso_candidate_without_granting_release() -> None:
     source = workflow("post-deploy-smoke.yml")
 
     candidate_condition = "if: ${{ inputs.enforce_persistence == false }}"
@@ -287,11 +287,10 @@ def test_candidate_smoke_requires_honest_ephemeral_storage_without_granting_rele
     formal_gate = 'python tools/persistence_gate.py --expected-version "$EXPECTED_VERSION"'
 
     assert candidate_condition in source
-    assert '.database.engine == "sqlite"' in source
     assert '.database.engine == "libsql"' in source
     assert '.database.persistence == "turso_candidate"' in source
-    assert '.database.persistence == "ephemeral"' in source
     assert ".database.durable == false" in source
+    assert '((.database.engine == "sqlite"' not in source
     assert candidate_status in source
     assert "不得创建 v8.0.0 Tag 或 GitHub Release" in source
     assert source.index(candidate_condition) < source.index(formal_gate)
