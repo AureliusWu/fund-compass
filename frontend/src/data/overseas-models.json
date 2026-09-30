@@ -5,7 +5,7 @@
     "applied_at": "2026-08-13T13:46:49+08:00",
     "legacy_records_excluded": 17
   },
-  "updated_at": "2026-09-25T20:08:51+08:00",
+  "updated_at": "2026-09-30T20:57:59+08:00",
   "models": {
     "539002": {
       "name": "建信新兴市场混合(QDII)A",
@@ -79,26 +79,26 @@
         }
       },
       "candidate": {
-        "version": "candidate-20260925",
-        "created_at": "2026-09-25T20:08:51+08:00",
-        "data_fingerprint": "ce09bf95388f858368b691194f382f09843c00e1bab792a21b9286da68510762",
-        "data_effective_at": "2026-09-25T20:08:14+08:00",
+        "version": "candidate-20260930",
+        "created_at": "2026-09-30T20:57:59+08:00",
+        "data_fingerprint": "4c6d551158a54b425a8f3949f10fc58b0b9045aa5e3c0e29bdf320bbe134576d",
+        "data_effective_at": "2026-09-30T20:57:13+08:00",
         "status": "rejected",
-        "samples": 21,
-        "split_date": "2026-09-09",
-        "train_samples": 14,
+        "samples": 22,
+        "split_date": "2026-09-10",
+        "train_samples": 15,
         "validation_samples": 7,
         "baseline": {
           "samples": 7,
-          "mae": 0.745,
-          "bias": -0.4027,
-          "direction_accuracy": 85.7,
+          "mae": 0.6678,
+          "bias": -0.2819,
+          "direction_accuracy": 100.0,
           "extreme_mae": 0.8096
         },
         "candidate": {
           "samples": 7,
-          "mae": 0.6124,
-          "bias": -0.1272,
+          "mae": 0.5899,
+          "bias": 0.0014,
           "direction_accuracy": 100.0,
           "extreme_mae": 0.3442
         },
@@ -157,10 +157,10 @@
         "min_samples": 20,
         "poor_cycles": 0,
         "drift_evidence": {
-          "samples": 21,
-          "previous_mae": 0.892,
-          "recent_mae": 0.637,
-          "recent_direction_accuracy": 80.0
+          "samples": 22,
+          "previous_mae": 0.859,
+          "recent_mae": 0.556,
+          "recent_direction_accuracy": 90.0
         },
         "active_change_policy": "explicit_admin_only",
         "candidate_eligible_for_admin_review": false,
@@ -337,29 +337,93 @@
         }
       },
       "candidate": {
-        "version": "candidate-20260924",
-        "created_at": "2026-09-24T20:09:28+08:00",
-        "data_fingerprint": "83c58646c6262d853beb67ffa5f41161de2d0c4ec562545515cbcb565366b399",
-        "data_effective_at": "2026-09-24T20:08:52+08:00",
-        "status": "collecting",
-        "samples": 19,
-        "required": 20,
+        "version": "candidate-20260930",
+        "created_at": "2026-09-30T20:57:59+08:00",
+        "data_fingerprint": "40c21dbafb9d0a9b64075737f9c9152d067330b2290d8c6da62761aa728b1be2",
+        "data_effective_at": "2026-09-30T20:57:13+08:00",
+        "status": "rejected",
+        "samples": 20,
+        "split_date": "2026-09-10",
+        "train_samples": 14,
+        "validation_samples": 6,
+        "baseline": {
+          "samples": 6,
+          "mae": 0.5423,
+          "bias": -0.0948,
+          "direction_accuracy": 100.0,
+          "extreme_mae": 0.8116
+        },
+        "candidate": {
+          "samples": 6,
+          "mae": 0.4982,
+          "bias": 0.307,
+          "direction_accuracy": 100.0,
+          "extreme_mae": 0.7643
+        },
+        "parameters": {
+          "scale": 0.8,
+          "bias": 0.2,
+          "legs": [
+            {
+              "code": "usTSM",
+              "weight": 12.312
+            },
+            {
+              "code": "usNVDA",
+              "weight": 8.112
+            },
+            {
+              "code": "usEWY",
+              "weight": 6.92
+            },
+            {
+              "code": "usAVGO",
+              "weight": 10.224
+            },
+            {
+              "code": "usEWY",
+              "weight": 5.408
+            },
+            {
+              "code": "usSNDK",
+              "weight": 5.892
+            },
+            {
+              "code": "usGLW",
+              "weight": 3.432
+            },
+            {
+              "code": "usWDC",
+              "weight": 4.476
+            },
+            {
+              "code": "usLITE",
+              "weight": 2.864
+            },
+            {
+              "code": "usMPWR",
+              "weight": 2.792
+            }
+          ]
+        },
         "eligible_for_admin_review": false,
         "admin_review_recommendation": "no_active_change"
       },
       "history": [],
       "governance": {
-        "status": "collecting",
+        "status": "healthy",
         "min_samples": 20,
         "poor_cycles": 0,
         "drift_evidence": {
-          "samples": 19,
-          "reason": "insufficient"
+          "samples": 20,
+          "previous_mae": 0.878,
+          "recent_mae": 0.556,
+          "recent_direction_accuracy": 70.0
         },
         "active_change_policy": "explicit_admin_only",
         "candidate_eligible_for_admin_review": false,
         "rollback_recommended": false,
-        "recommendation": "collect_more_evidence"
+        "recommendation": "keep_active_rejected_candidate"
       }
     }
   },
