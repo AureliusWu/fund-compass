@@ -5,7 +5,7 @@
     "applied_at": "2026-08-13T13:46:49+08:00",
     "legacy_records_retained": 17
   },
-  "updated_at": "2026-09-30T20:57:13+08:00",
+  "updated_at": "2026-10-01T21:49:56+08:00",
   "summary": {
     "539002": {
       "samples": 22,
@@ -69,7 +69,7 @@
     },
     "018147": {
       "samples": 20,
-      "status": "collecting",
+      "status": "healthy",
       "confidence": "较高",
       "mae": 0.717,
       "bias": -0.137,
@@ -5803,37 +5803,37 @@
     }
   ],
   "pipeline": {
-    "last_run_at": "2026-09-30T20:57:13+08:00",
-    "quotes_count": 21,
+    "last_run_at": "2026-10-01T21:49:56+08:00",
+    "quotes_count": 0,
     "details_count": 3,
     "alignment_version": "observation-target-v2",
     "legacy_misaligned_records": 17,
     "legacy_last_prediction_at": "2026-07-17T16:38:44+08:00",
     "legacy_last_settlement_at": "2026-07-21T17:13:24+08:00",
-    "heartbeat_at": "2026-09-30T20:57:13+08:00",
+    "heartbeat_at": "2026-10-01T21:49:56+08:00",
     "run_mode": "scheduled",
-    "scheduled_for": "2026-09-30T14:35+08:00",
-    "delay_minutes": 382.23,
-    "observation_date": "2026-09-30",
+    "scheduled_for": "2026-10-01T14:35+08:00",
+    "delay_minutes": 434.94,
+    "observation_date": "2026-10-01",
     "calendar_supported": true,
     "calendar_source": "https://www.sse.com.cn/disclosure/dealinstruc/closed/",
-    "trading_day": true,
-    "prediction_due": true,
-    "prediction_expected": true,
-    "prediction_window_status": "delayed_same_day",
-    "prediction_target_date": "2026-09-29",
+    "trading_day": false,
+    "prediction_due": false,
+    "prediction_expected": false,
+    "prediction_window_status": "non_trading_day",
+    "prediction_target_date": "2026-09-30",
     "expected_models": 3,
     "effective_predictions_for_observation": 0,
     "consecutive_expected_zero_prediction_runs": 1,
     "last_expected_zero_prediction_observation_date": "2026-09-30",
     "predictions_written": 0,
-    "settlements_written": 2,
+    "settlements_written": 0,
     "legacy_records_migrated": 0,
     "quote_error": null,
     "last_prediction_at": "2026-09-29T21:16:28+08:00",
     "last_effective_prediction_at": "2026-09-29T21:16:28+08:00",
     "last_settlement_at": "2026-09-30T20:57:13+08:00",
     "last_effective_settlement_at": "2026-09-30T20:57:13+08:00",
-    "scheduled_observation_date": "2026-09-30"
+    "scheduled_observation_date": "2026-10-01"
   }
 }
