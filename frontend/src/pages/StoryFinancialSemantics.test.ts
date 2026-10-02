@@ -8,8 +8,12 @@ const mocks = vi.hoisted(() => ({
   activeHoldings: [] as Array<{
     code: string
     name?: string
-    shares?: number
-    cost?: number
+    shares?: number | null
+    cost?: number | null
+    account?: string
+    id?: string
+    position_kind?: 'holding' | 'watch'
+    deleted?: boolean
   }>,
   load: vi.fn(),
   detail: vi.fn(),
@@ -98,7 +102,11 @@ async function mount(component: Component): Promise<HostNode> {
     inheritAttrs: false,
     setup: (_props, { attrs, slots }) => () => h('button', attrs, slots.default?.()),
   })
-  for (const name of ['VanNavBar', 'VanLoading', 'VanEmpty', 'VanCell']) app.component(name, passthrough)
+  for (const name of ['VanLoading', 'VanEmpty', 'VanCell']) app.component(name, passthrough)
+  app.component('VanNavBar', defineComponent({
+    inheritAttrs: false,
+    setup: (_props, { attrs, slots }) => () => h('nav', attrs, [slots.default?.(), slots.right?.()]),
+  }))
   app.component('VanButton', button)
   app.mount(root)
   mounted.push(() => app.unmount())
@@ -343,6 +351,27 @@ describe('Story financial aggregation boundary', () => {
     expect(storyCoverageDateText(result.coverage.today)).toBe('2026-09-30 至 2026-10-01（跨日期）')
   })
 
+  it('rejects finite-input aggregate and rate overflow without publishing totals or rankings', () => {
+    const result = compileStoryData({ holdings: [
+      holding({ shares: Number.MAX_VALUE, nav: 1, cost: 1, today: Number.MAX_VALUE }),
+      holding({ code: '000002', name: '基金乙', shares: Number.MAX_VALUE, nav: 1, cost: 1, today: Number.MAX_VALUE }),
+    ] }, { now })
+    expect(result.pricedValue).toBeNull()
+    expect(result.knownCost).toBeNull()
+    expect(result.totalValue).toBeNull()
+    expect(result.totalCost).toBeNull()
+    expect(result.totalProfit).toBeNull()
+    expect(result.todayEst).toBeNull()
+    expect(result.coverage.valuation.publishable).toBe(false)
+    expect(result.coverage.cost.publishable).toBe(false)
+    expect(result.coverage.today.publishable).toBe(false)
+    expect(result.bestToday).toBeNull()
+    const extremeRate = compileStoryData({ holdings: [holding({ shares: 1, nav: Number.MAX_VALUE, cost: 1 })] }, { now })
+    expect(extremeRate.holdings[0].rate).toBeNull()
+    expect(extremeRate.totalRate).toBeNull()
+    expect(extremeRate.bestHolding).toBeNull()
+  })
+
   it('requires explicit 70% coverage, eligibility, freshness and dates for legacy evidence', () => {
     const trusted = compileStoryData({ holdings: [holding({
       signalEvidence: { value: '买入', coverage: 0.7, stale: false, asOfDate: '2026-10-01' },
@@ -369,6 +398,71 @@ describe('Story financial aggregation boundary', () => {
 })
 
 describe('mounted Story page financial semantics', () => {
+  it.each([null, undefined])('blocks complete amounts and rankings when a second explicit holding has unknown shares %s', async shares => {
+    mocks.activeHoldings.push(
+      { code: '000001', name: '基金甲', shares: 100, cost: 1, position_kind: 'holding' },
+      { code: '000002', name: '未知份额基金', shares, cost: 1, position_kind: 'holding' },
+    )
+    const root = await mount(StoryPage)
+    expect(text(root)).toContain('组合总额保持未知（--）')
+    expect(text(root)).toContain('缺失份额不会按 0 处理')
+    expect(all(root).some(node => node.props.class === 'sc-ov')).toBe(false)
+    expect(text(root)).not.toContain('最佳持仓')
+    expect(text(root)).not.toContain('单日最强')
+    const exportButton = all(root).find(node => node.type === 'button' && text(node) === '导出长图')!
+    expect(exportButton.props.disabled).toBe(true)
+    expect(mocks.detail).not.toHaveBeenCalled()
+    expect(mocks.fetchEstimates).not.toHaveBeenCalled()
+    expect(mocks.activeHoldings[1].shares).toBe(shares)
+  })
+
+  it.each(['duplicate-account', 'invalid-shares'] as const)('fails %s closed instead of publishing a partial denominator', async kind => {
+    mocks.activeHoldings.push(
+      { code: '000001', name: '基金甲', shares: 100, cost: 1, account: 'A', position_kind: 'holding' },
+      kind === 'duplicate-account'
+        ? { code: '000001', name: '重复账户', shares: 50, cost: 1, account: ' A ', position_kind: 'holding' }
+        : { code: '000002', name: '无效份额', shares: Infinity, cost: 1, position_kind: 'holding' },
+    )
+    const output = text(await mount(StoryPage))
+    expect(output).toContain('持仓输入不完整、无效或账户重复')
+    expect(output).toContain('已暂停排行和长图导出')
+    expect(mocks.fetchEstimates).not.toHaveBeenCalled()
+  })
+
+  it('does not turn pure watch records into zero-valued positions or request their NAVs', async () => {
+    mocks.activeHoldings.push({ code: '000001', name: '仅关注', shares: null, cost: null, position_kind: 'watch' })
+    const root = await mount(StoryPage)
+    expect(all(root).some(node => String(node.props.description || '').includes('仅关注基金不计入持仓金额和排行'))).toBe(true)
+    expect(all(root).some(node => node.props.class === 'sc-ov')).toBe(false)
+    expect(mocks.fetchEstimates).not.toHaveBeenCalled()
+    expect(mocks.detail).not.toHaveBeenCalled()
+    expect(mocks.activeHoldings).toHaveLength(1)
+  })
+
+  it('retains a zero-share holding record without inventing a positive position or zero portfolio', async () => {
+    mocks.activeHoldings.push({ code: '000001', name: '零份记录', shares: 0, cost: 0, position_kind: 'holding' })
+    const root = await mount(StoryPage)
+    expect(all(root).some(node => String(node.props.description || '').includes('1 条 0 份持仓记录'))).toBe(true)
+    expect(all(root).some(node => node.props.class === 'sc-ov')).toBe(false)
+    expect(mocks.fetchEstimates).not.toHaveBeenCalled()
+    expect(mocks.activeHoldings[0]).toMatchObject({ shares: 0, cost: 0, position_kind: 'holding' })
+  })
+
+  it('labels a retained zero-share record separately from a complete positive holding story', async () => {
+    mocks.activeHoldings.push(
+      { code: '000001', name: '基金甲', shares: 100, cost: 1, position_kind: 'holding' },
+      { code: '000002', name: '零份记录', shares: 0, cost: null, position_kind: 'holding' },
+    )
+    mocks.detail.mockResolvedValue({ code: '000001', name: '基金甲', type: '股票', latest_nav: 1,
+      latest_nav_date: '2026-09-30', nav_history: [], stale: false })
+    const root = await mount(StoryPage)
+    expect(text(root)).toContain('另有 1 条 0 份持仓记录')
+    expect(all(root).filter(node => node.props.class === 'sc-ov').map(text).some(value => value.includes('总市值') && value.includes('100'))).toBe(true)
+    expect(mocks.fetchEstimates).toHaveBeenCalledWith(['000001'])
+    expect(mocks.detail).toHaveBeenCalledTimes(1)
+    expect(mocks.activeHoldings).toHaveLength(2)
+  })
+
   it('renders incomplete fields as -- with coverage, source date and a clearly labelled subtotal', async () => {
     mocks.activeHoldings.push(
       { code: '000001', name: '基金甲', shares: 100, cost: 1 },

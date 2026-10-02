@@ -7,6 +7,7 @@ import {
   holdingCostBasis,
   holdingMarketValue,
   valuationCoverage,
+  completeFiniteSum,
 } from './portfolioCoverage'
 
 export interface StoryCoverage {
@@ -55,9 +56,9 @@ export interface StoryHolding {
 export interface StoryData {
   generated: string           // 报告生成时间，不是金融数据日期
   totalValue: number | null
-  pricedValue: number
+  pricedValue: number | null
   totalCost: number | null
-  knownCost: number
+  knownCost: number | null
   totalProfit: number | null
   totalRate: number | null
   todayEst: number | null
@@ -252,9 +253,10 @@ export function compileStoryData(raw: {
     const value = holdingMarketValue(holding.shares, holding.nav)
     const costBasis = holdingCostBasis(holding.shares, holding.cost)
     const profit = value != null && costBasis != null ? value - costBasis : null
-    const rate = profit != null && costBasis != null && costBasis > 0
+    const rawRate = profit != null && costBasis != null && costBasis > 0
       ? profit / costBasis * 100
       : null
+    const rate = finiteOrNull(rawRate)
     const navDate = sourceDate(holding.navDate, now)
     const todayDate = sourceDate(holding.todayDate, now)
     const signalDate = sourceDate(holding.signalEvidence?.asOfDate, now)
@@ -361,15 +363,19 @@ export function compileStoryData(raw: {
     rejectFutureDate: true,
   })
 
+  valuation.publishable = valuation.publishable && valuationBase.complete
+  cost.publishable = cost.publishable && costBase.complete
   const totalValue = valuation.publishable ? valuationBase.pricedValue : null
   const totalCost = cost.publishable ? costBase.knownCost : null
   const totalProfit = totalValue != null && totalCost != null ? totalValue - totalCost : null
-  const totalRate = totalProfit != null && totalCost != null && totalCost > 0
+  const rawRate = totalProfit != null && totalCost != null && totalCost > 0
     ? totalProfit / totalCost * 100
     : null
+  const totalRate = rawRate != null && Number.isFinite(rawRate) ? rawRate : null
   const todayEst = today.publishable
-    ? holdings.reduce((sum, holding) => sum + (holding.today as number), 0)
+    ? completeFiniteSum(holdings.map(holding => holding.today))
     : null
+  today.publishable = today.publishable && todayEst != null
 
   const sorted = returns.publishable
     ? [...holdings].sort((a, b) => (b.rate as number) - (a.rate as number))

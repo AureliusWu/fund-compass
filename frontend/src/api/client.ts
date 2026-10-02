@@ -302,6 +302,7 @@ export interface DecisionResp {
   }
 }
 export interface DecisionContextParams {
+  /** @deprecated Public legacy reads never use personal holding inputs. */
   held?: boolean
   target_weight?: number
   current_weight?: number
@@ -309,12 +310,8 @@ export interface DecisionContextParams {
   force?: boolean
 }
 export const getDecision = (code: string, p?: DecisionContextParams) => {
-  const u = new URLSearchParams()
-  if (p?.held != null) u.set('held', String(p.held))
-  if (p?.target_weight != null) u.set('target_weight', String(p.target_weight))
-  if (p?.current_weight != null) u.set('current_weight', String(p.current_weight))
-  const q = u.toString()
-  return req<DecisionResp>(`/fund/${code}/decision` + (q ? '?' + q : ''))
+  void p // Compatibility signature only; public fund information, not personal analysis.
+  return req<DecisionResp>(`/fund/${code}/decision`)
 }
 
 export interface PortfolioDecisionItem {
@@ -346,12 +343,8 @@ export interface PortfolioDecisionsResp {
     amount: number | null
   }[]
 }
-export const postPortfolioDecisions = (items: PortfolioDecisionItem[], portfolioValue?: number) =>
-  req<PortfolioDecisionsResp>('/portfolio/decisions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ items, portfolio_value: portfolioValue }),
-  })
+export const postPortfolioDecisions = (_items: PortfolioDecisionItem[], _portfolioValue?: number): Promise<PortfolioDecisionsResp> =>
+  Promise.reject(new ApiError('私人组合分析暂未启用：等待受限 Owner 分析接口，本地输入未发送', 'cancelled'))
 
 export type V8Action = 'buy' | 'dca' | 'watch' | 'add' | 'hold' | 'reduce' | 'sell'
 export type V8UserState = 'unheld' | 'held'
@@ -654,13 +647,11 @@ export interface PortfolioLabResp {
   stress: { name: string; return: number; pnl: number | null }[]
 }
 export const postPortfolioLab = (
-  items: { code: string; current_weight: number; target_weight: number }[],
-  portfolioValue?: number,
-) => req<PortfolioLabResp>('/portfolio/lab', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ items, portfolio_value: portfolioValue }),
-})
+  _items: { code: string; current_weight: number; target_weight: number }[],
+  _portfolioValue?: number,
+): Promise<PortfolioLabResp> => Promise.reject(new ApiError(
+  '私人组合分析暂未启用：等待受限 Owner 分析接口，本地输入未发送', 'cancelled',
+))
 
 export interface PortfolioOutcomesResp {
   total: number; mature: number; pending: number
@@ -682,12 +673,8 @@ export interface AnalyzeResp {
   decision: DecisionResp
 }
 export const getAnalyze = (code: string, p?: DecisionContextParams) => {
-  const u = new URLSearchParams()
-  if (p?.held != null) u.set('held', String(p.held))
-  if (p?.target_weight != null) u.set('target_weight', String(p.target_weight))
-  if (p?.current_weight != null) u.set('current_weight', String(p.current_weight))
-  const query = u.toString()
-  return req<AnalyzeResp>(`/fund/${code}/analyze${query ? '?' + query : ''}`)
+  void p // Compatibility signature only; never transmit local positions via a public URL.
+  return req<AnalyzeResp>(`/fund/${code}/analyze`)
 }
 
 export const getWatchlist = () => readOwnerScoped<{ items: WatchItem[] }>('/watchlist')

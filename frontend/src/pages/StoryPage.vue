@@ -13,12 +13,16 @@ import {
   type StoryData,
 } from '@/utils/story'
 import { FREE_TEXT_AI_UNAVAILABLE } from '@/utils/ai'
+import { aggregateFundHoldings } from '@/utils/holding-aggregation'
 
 const watch = useWatchlistStore()
 const funds = useFundsStore()
 
 const loading = ref(true)
 const story = ref<StoryData | null>(null)
+const inputError = ref('')
+const zeroHoldingCount = ref(0)
+const emptyDescription = ref('还没有正持仓数据。去自选页添加持仓。')
 const exporting = ref(false)
 const exportErr = ref('')
 const cardRef = ref<HTMLElement | null>(null)
@@ -38,7 +42,27 @@ onMounted(async () => {
   loading.value = true
   try {
     await watch.load(true)
-    const held = watch.activeHoldings.filter((e) => e.shares && e.shares > 0)
+    // Validate every account before selecting economic positions. Otherwise an
+    // explicit holding with unknown shares could disappear from the denominator.
+    const entries = watch.activeHoldings
+    const inputs = aggregateFundHoldings(entries)
+    if (!inputs.complete) {
+      story.value = null
+      inputError.value = '持仓输入不完整、无效或账户重复；组合总额保持未知（--），已暂停排行和长图导出。请在自选页修正原记录；缺失份额不会按 0 处理。'
+      return
+    }
+    const isHolding = (entry: typeof entries[number]) => entry.position_kind === 'holding'
+      || entry.position_kind == null && typeof entry.shares === 'number' && entry.shares > 0
+    zeroHoldingCount.value = entries.filter(entry => !entry.deleted && isHolding(entry) && entry.shares === 0).length
+    const held = entries.filter(entry => !entry.deleted && isHolding(entry)
+      && typeof entry.shares === 'number' && Number.isFinite(entry.shares) && entry.shares > 0)
+    if (!held.length) {
+      story.value = null
+      emptyDescription.value = zeroHoldingCount.value
+        ? `有 ${zeroHoldingCount.value} 条 0 份持仓记录，不计入正持仓金额和排行；可在自选页继续编辑。`
+        : '仅关注基金不计入持仓金额和排行；请在自选页录入正持仓。'
+      return
+    }
     const codes = [...new Set(held.map((e) => e.code))]
 
     // 并行拉取数据
@@ -184,13 +208,16 @@ function totalProfitLabel(data: StoryData): string {
   <div class="page">
     <van-nav-bar title="数据故事">
       <template #right>
-        <van-button size="mini" plain icon="down" :loading="exporting" @click="doExport">导出长图</van-button>
+        <van-button size="mini" plain icon="down" :loading="exporting" :disabled="loading || !story" @click="doExport">导出长图</van-button>
       </template>
     </van-nav-bar>
 
     <div class="page-body">
       <van-loading v-if="loading" style="text-align:center;padding:40px" />
-      <van-empty v-else-if="!story" description="还没有持仓数据。去自选页添加持仓。" />
+      <section v-else-if="inputError" class="sc-coverage-warning" role="alert">{{ inputError }}</section>
+      <van-empty v-else-if="!story" :description="emptyDescription" />
+
+      <div v-if="story && zeroHoldingCount" class="sc-coverage-warning" role="status">另有 {{ zeroHoldingCount }} 条 0 份持仓记录；不计入正持仓金额和排行，可在自选页继续编辑。</div>
 
       <template v-if="story">
         <div class="story-card" ref="cardRef">

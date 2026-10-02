@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createRenderer, h, nextTick } from 'vue'
+import { createRenderer, h, nextTick, ref } from 'vue'
 import FundDetailV8Panel from './FundDetailV8Panel.vue'
 import { clearOwnerSession, loginOwnerSession } from '@/stores/ownerSession'
 const SYNTHETIC_TOKEN = 'own_' + 'a'.repeat(43)
@@ -147,6 +147,34 @@ afterEach(() => {
 })
 
 describe('mounted detail private-session consumer', () => {
+  it('hides already-loaded current actions when local holdings change without rewriting the snapshot', async () => {
+    const fixture = mountedPrivateFixture()
+    const original = JSON.stringify(fixture)
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => Promise.resolve({
+      ok: true, status: 200,
+      json: async () => url.endsWith('/owner/session') ? {
+        access_token: SYNTHETIC_TOKEN, token_type: 'Bearer', owner_id: 'owner',
+        expires_at: new Date(Date.now() + 30 * 60_000).toISOString(),
+        scopes: ['read_private', 'write_holdings', 'run_personal_analysis'],
+      } : url.endsWith('/outcomes') ? { fund_code: '018147', total: 0, items: [] } : fixture,
+    })))
+    await loginOwnerSession('synthetic-password')
+    const pending = ref(false)
+    const root = hostNode()
+    const app = renderer.createApp({ render: () => h(FundDetailV8Panel, { code: '018147', localHoldingPending: pending.value }) })
+    app.component('RouterLink', { render: () => h('a', '查看历史复盘') })
+    app.mount(root)
+    await settleVueRequests()
+    expect(renderedText(root)).toContain(fixture.summary)
+    pending.value = true
+    await nextTick()
+    expect(renderedText(root)).toContain('当前行动已暂停')
+    expect(renderedText(root)).toContain('旧 Gist 上传也不等于新版确认')
+    expect(renderedText(root)).not.toContain(fixture.summary)
+    expect(renderedText(root)).not.toContain('当前动作')
+    expect(JSON.stringify(fixture)).toBe(original)
+    app.unmount()
+  })
   it('removes already-rendered private snapshots immediately after session clearing', async () => {
     const fixture = mountedPrivateFixture()
     vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => Promise.resolve({

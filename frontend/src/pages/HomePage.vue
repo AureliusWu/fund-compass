@@ -7,6 +7,7 @@ import { ownerSession, ownerSessionGeneration } from '@/stores/ownerSession'
 import { useFundsStore } from '@/stores/funds'
 import IndexBar from '@/components/IndexBar.vue'
 import HomeActionCenter from '@/components/HomeActionCenter.vue'
+import LocalHoldingGate from '@/components/LocalHoldingGate.vue'
 import type { HomeDecisionError } from '@/components/homeActionCenter'
 import { getSourceSummary, recordSource, type SourceStatus } from '@/utils/resilience'
 import { fetchTaskStatuses, type TaskStatus } from '@/utils/taskStatus'
@@ -244,12 +245,14 @@ onMounted(() => { void refreshHome(false) })
 
     <van-pull-refresh v-model="refreshing" @refresh="refreshHome(true)">
       <div class="page-body">
-        <HomeActionCenter
-          :decisions="v8Decisions"
-          :errors="v8Errors"
-          :requested="v8Requested"
-          :loading="v8Loading"
-        />
+        <LocalHoldingGate :pending="watch.hasLocalChanges()">
+          <HomeActionCenter
+            :decisions="v8Decisions"
+            :errors="v8Errors"
+            :requested="v8Requested"
+            :loading="v8Loading"
+          />
+        </LocalHoldingGate>
 
         <div class="secondary-home">
           <div class="sec">市场与持仓温度</div>

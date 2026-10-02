@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { showToast } from 'vant'
+import { showConfirmDialog, showToast } from 'vant'
 import { useFundsStore } from '@/stores/funds'
 import { useWatchlistStore } from '@/stores/watchlist'
 import { pct, num, colorOf, signalColor } from '@/utils/format'
@@ -16,6 +16,7 @@ import { templateInterpret } from '@/utils/interpret'
 import { FREE_TEXT_AI_UNAVAILABLE, getAiConfig, setAiConfig, hasAiKey, providerDef, PROVIDERS, type AiConfig } from '@/utils/ai'
 import { findSimilar, type ScreenFund } from '@/utils/screener'
 import type { FundDetail, ScoreResp, SignalResp, BacktestResp, DecisionResp } from '@/api/client'
+import { entryId } from '@/utils/gist'
 
 const route = useRoute()
 const router = useRouter()
@@ -35,6 +36,8 @@ const holdingsDone = ref(false)
 const loading = ref(true)
 const refreshing = ref(false)
 const error = ref('')
+let loadGeneration = 0
+let disposed = false
 
 function openManager() {
   if (!detail.value?.manager) return
@@ -80,32 +83,28 @@ async function loadSimilar() {
 }
 
 async function loadData(showInitialLoading = true) {
+  const generation = ++loadGeneration
+  const active = () => !disposed && generation === loadGeneration
   if (showInitialLoading) loading.value = true
   error.value = ''
   estDone.value = false
   holdingsDone.value = false
   // 页面显示估值与后端决策并行取数；后端会独立获取盘中行情并写入可追溯决策上下文。
-  fetchEstimate(code, !showInitialLoading).then((e) => { est.value = e }).finally(() => { estDone.value = true })
-  getHoldings(code).then((h) => { holdings.value = h }).finally(() => { holdingsDone.value = true })
+  fetchEstimate(code, !showInitialLoading).then((e) => { if (active()) est.value = e }).catch(() => {}).finally(() => { if (active()) estDone.value = true })
+  getHoldings(code).then((h) => { if (active()) holdings.value = h }).catch(() => {}).finally(() => { if (active()) holdingsDone.value = true })
   try {
-    await watch.load()
-    const userHoldings = watch.holdingsFor(code)
-    const targets = userHoldings.map((item) => item.target_weight).filter((value): value is number => value != null && Number.isFinite(value))
-    const a = await funds.analyze(code, {
-      held: userHoldings.length > 0,
-      target_weight: targets.length ? targets.reduce((sum, value) => sum + value, 0) : undefined,
-      force: !showInitialLoading,
-    })
+    // Public legacy analysis receives only the fund code and cache refresh intent.
+    const a = await funds.analyze(code, { force: !showInitialLoading })
+    if (!active()) return
     detail.value = a.detail
     score.value = a.score
     signal.value = a.signal
     bt.value = a.backtest
     decision.value = a.decision
   } catch {
-    error.value = '加载失败，后端是否已启动？'
+    if (active()) error.value = '加载失败，后端是否已启动？'
   } finally {
-    loading.value = false
-    refreshing.value = false
+    if (active()) { loading.value = false; refreshing.value = false }
   }
 }
 
@@ -117,6 +116,7 @@ onMounted(async () => {
   watch.load().catch(() => {})
   loadData()
 })
+onBeforeUnmount(() => { disposed = true; loadGeneration++ })
 
 const btOption = computed(() => {
   const s = bt.value?.strategy?.curve || []
@@ -182,8 +182,21 @@ async function toggleWatch() {
   try {
     await watch.toggle(code, detail.value?.name)
     showToast(watch.has(code) ? '已加入自选' : '已移出自选')
-  } catch {
-    showToast('操作失败')
+  } catch (cause) {
+    if (!(cause && typeof cause === 'object' && 'code' in cause && cause.code === 'requires-confirmation')) {
+      showToast('操作失败，本地记录未修改'); return
+    }
+    const records = watch.recordsFor(code)
+    const expected = records.map(row => ({ id: row.id || entryId(row.code, row.account), snapshot: watch.entrySnapshot(row.id || entryId(row.code, row.account)) || '' }))
+    try {
+      await showConfirmDialog({ title: '确认移出本地记录', message: `将移出该基金的 ${records.length} 条本地记录（含持仓/多账户）；不会发起交易。` })
+      if (disposed) return
+      await watch.remove(code, undefined, { confirmed: true, expected })
+      showToast('已移出本地记录')
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error) showToast('记录已变化或保存失败，请重新确认')
+      // Dialog cancellation preserves the exact local records.
+    }
   }
 }
 </script>
@@ -208,7 +221,7 @@ async function toggleWatch() {
       </van-empty>
       <template v-else-if="detail">
         <div v-if="detail.stale" class="data-warning">数据源暂不可用，当前展示 {{ detail.updated_at || detail.latest_nav_date }} 的历史缓存；评分与决策已降级。</div>
-        <FundDetailV8Panel :code="code" />
+        <FundDetailV8Panel :code="code" :local-holding-pending="watch.hasLocalChanges()" />
 
         <div class="legacy-divider" role="separator">
           <span>历史详情与旧版指标</span>
@@ -247,6 +260,7 @@ async function toggleWatch() {
           @click="router.push('/report/' + code)">生成体检报告</van-button>
 
         <div class="sec">旧版决策建议</div>
+        <div v-if="decision" class="data-warning">以下为公开基金信息形成的旧版参考，不使用本机持仓、成本或目标权重，也不代表新输入已确认或已保存为 V8 决策。</div>
         <DecisionCard v-if="decision" :decision="decision" />
 
         <div class="sec">旧版智能解读</div>

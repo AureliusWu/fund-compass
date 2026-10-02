@@ -49,6 +49,21 @@ python tools/turso_candidate.py inspect
 
 本地已实现不可变 scope 旁表与默认 V8 读取隔离，物理 schema 因合同变化独立升至 9，应用版本仍为 8.0.0。SQLite 8→9 迁移保留原 payload/ID 和备份；已有 schema 9 缺失 scope 元数据拒绝自动重分类。线上仍是 schema 8，尚未做受控增量迁移；新代码会拒绝该旧库，不能直接推 main 自动部署，也不能用重复 `initialize` 冒充迁移。远端验收写入、独立恢复与应用跨重启证据仍未完成。
 
+### 2026-10-02：元数据核对与离线升级演练
+
+真实候选库只读结构核对：54 个非 SQLite 内置核心 schema 对象没有缺失或 DDL 差异，版本仍为 8。额外两张表分别为既有 `turso_candidate_probe_v1` 和 `universe_import_state`，DDL 与仓库固定定义一致；无其他额外对象。仅查询 schema/版本元数据，不读私人账本记录，不输出 DDL 值、地址或 Token，没有 DDL/DML 或远端应用迁移。这不是全体业务数据、并发、恢复或耐久证明。
+
+新增入口只处理显式本地快照，不会自动导出或连接云库：
+
+```powershell
+python tools/turso_scope_upgrade.py plan --source <closed-snapshot.db> --source-kind remote-schema-table
+python tools/turso_scope_upgrade.py rehearse --source <closed-snapshot.db> --source-kind remote-schema-table --expected-plan-sha256 <plan摘要> --expected-backup-sha256 <逻辑备份摘要>
+```
+
+本地 header 版本 8 使用 `--source-kind local-header`，不自动猜测来源；输入必须是一致、关闭的 SQLite 快照，存在 WAL/SHM/journal、坏结构/JSON/引用链、漂移或超限时拒绝。工具只读输入，在私有内存执行仓库固定 DDL；验证 typed 行、ID/hash/投影/完整派生链，保留 payload、rowid 和序列，并将逻辑备份独立恢复、再次升级和仓储读回。计划绑定输入字节、逻辑行、代码、合同与备份摘要，不接受旧计划代替当前核验。
+
+输出 scope 固定 `local_turso_schema_migration_rehearsal`，`remote_applied=false`、`remote_restore_verified=false`、`formal_release_verified=false`。本次支持的离线合同仍严格拒绝额外用户对象，包括上述已核对的两张 operational 表；下一批必须按精确名称/固定 DDL 显式可选纳入并验证完整保留，不能以前缀或表数量豁免。当前工具没有 apply、远端导出、原子前像/receipt/reconcile、独立远端恢复或发布能力；不能直接对真实候选库执行升级。
+
 ## 合成标记写入与独立连接读回
 
 ```powershell

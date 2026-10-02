@@ -1,22 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createRenderer, defineComponent, h, nextTick, type Component } from 'vue'
 import type { BacktestResp, FundDetail, ScoreResp, SignalResp } from '@/api/client'
+import type { WatchEntry } from '@/utils/gist'
 import { FREE_TEXT_AI_UNAVAILABLE } from '@/utils/ai'
 import FundDetailPage from './FundDetailPage.vue'
 import StoryPage from './StoryPage.vue'
 
 const mocks = vi.hoisted(() => ({
   analyze: vi.fn(), detail: vi.fn(), signal: vi.fn(), score: vi.fn(),
-  load: vi.fn(), has: vi.fn(), holdingsFor: vi.fn(), toggle: vi.fn(),
+  load: vi.fn(), has: vi.fn(), holdingsFor: vi.fn(), toggle: vi.fn(), hasLocalChanges: vi.fn(),
   fetchEstimate: vi.fn(), fetchEstimates: vi.fn(), getHoldings: vi.fn(),
+  entries: [] as WatchEntry[],
 }))
 vi.mock('@/stores/funds', () => ({ useFundsStore: () => mocks }))
-vi.mock('@/stores/watchlist', () => ({ useWatchlistStore: () => ({ ...mocks, activeHoldings: [] }) }))
+vi.mock('@/stores/watchlist', () => ({ useWatchlistStore: () => ({ ...mocks, get activeHoldings() { return mocks.entries } }) }))
 vi.mock('vue-router', () => ({
   useRoute: () => ({ params: { code: '000001' } }),
   useRouter: () => ({ push: vi.fn(), back: vi.fn() }),
 }))
-vi.mock('vant', () => ({ showToast: vi.fn() }))
+vi.mock('vant', () => ({ showToast: vi.fn(), showConfirmDialog: vi.fn() }))
 vi.mock('@/utils/estimate', () => ({
   fetchEstimate: mocks.fetchEstimate, fetchEstimates: mocks.fetchEstimates,
   latestNavMove: () => null, preferredDailyMove: () => null, estimateDataFreshness: () => 'unknown',
@@ -98,6 +100,7 @@ let fetch: ReturnType<typeof vi.fn>
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mocks.entries = []
   storage = new Map([
     ['sinan_ai_text', JSON.stringify({ '000001': '旧 AI 缓存：合成的买卖建议，不应展示' })],
     ['sinan_ai_cfg', JSON.stringify({ provider: 'deepseek', apiKey: 'synthetic-not-a-real-key', baseUrl: '', model: '' })],
@@ -110,6 +113,7 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetch)
   mocks.load.mockResolvedValue(undefined)
   mocks.has.mockReturnValue(false)
+  mocks.hasLocalChanges.mockReturnValue(false)
   mocks.holdingsFor.mockReturnValue([])
   mocks.fetchEstimate.mockResolvedValue(null)
   mocks.fetchEstimates.mockResolvedValue(new Map())
@@ -173,6 +177,12 @@ describe('mounted free-text AI pause consumer', () => {
   )
 
   it('shows the summary pause in the real story card and cannot generate a fallback summary', async () => {
+    // A story card now requires a real positive local position; empty/watch-only
+    // inputs must not fabricate a complete zero-value portfolio for this fixture.
+    mocks.entries = [{ code: '000001', account: '合成账户', id: '000001::合成账户', position_kind: 'holding', shares: 10, cost: 1, updated_at: '2026-10-01T00:00:00Z' }]
+    mocks.detail.mockResolvedValue(syntheticDetail)
+    mocks.signal.mockResolvedValue(syntheticSignal)
+    mocks.score.mockResolvedValue(syntheticScore)
     const root = await mount(StoryPage)
     expect(text(root)).toContain('AI 摘要暂不可用')
     expect(text(root)).toContain(FREE_TEXT_AI_UNAVAILABLE)

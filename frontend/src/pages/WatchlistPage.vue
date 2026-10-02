@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch as observe } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch as observe } from 'vue'
 import { useRouter } from 'vue-router'
-import { showToast } from 'vant'
+import { showConfirmDialog, showToast } from 'vant'
 import {
   ApiError,
   getFunds,
@@ -18,6 +18,9 @@ import { getToken } from '@/utils/gist'
 import Icon from '@/components/Icon.vue'
 import WatchlistDecisionBoard from '@/components/watchlist/WatchlistDecisionBoard.vue'
 import OwnerSessionPanel from '@/components/OwnerSessionPanel.vue'
+import HoldingEditor from '@/components/HoldingEditor.vue'
+import { entryId } from '@/utils/gist'
+import { positionKind, WatchMutationError } from '@/utils/holding-editor'
 import { ownerSession, ownerSessionGeneration } from '@/stores/ownerSession'
 import {
   filterAndSortWatchDecisions,
@@ -40,7 +43,7 @@ const decisions = reactive<Record<string, V8DecisionResult>>({})
 const decisionDiffs = reactive<Record<string, V8DecisionDiff>>({})
 const decisionLoadStates = reactive<Record<string, WatchDecisionLoadState>>({})
 const decisionDiffLoadStates = reactive<Record<string, WatchDecisionLoadState>>({})
-const loading = ref(watch.items.length === 0 && watch.hasToken)
+const loading = ref(watch.items.length === 0 && watch.hasToken && watch.legacySyncEnabled)
 const refreshing = ref(false)
 const decisionsLoading = ref(false)
 const estimatesLoading = ref(false)
@@ -51,24 +54,33 @@ let decisionBatches = 0
 
 const showSync = ref(false)
 const token = ref(getToken())
+const editingCode = ref('')
 const importShow = ref(false)
 const importQuery = ref('')
 const importResults = ref<FundListItem[]>([])
 const importLoading = ref(false)
 let importTimer: ReturnType<typeof setTimeout> | null = null
+onBeforeUnmount(() => { if (importTimer) clearTimeout(importTimer) })
+
+function holdingCaption(code: string) {
+  const records = watch.recordsFor(code).filter(entry => positionKind(entry) === 'holding')
+  return records.length ? `持仓记录 ${records.length} 个账户（含 0 份记录）` : '仅关注 · 未录入持仓'
+}
 
 const decisionSources = computed<WatchDecisionSource[]>(() => {
   return watch.items.map((item) => {
     const estimate = estimates[item.code]
     const typeOrName = rows[item.code]?.type || rows[item.code]?.name || item.name
+    // Any account edit may change the shared fund-only denominator.
+    const localPending = watch.hasLocalChanges()
     return {
       code: item.code,
       name: rows[item.code]?.name || item.name || item.code,
       type: rows[item.code]?.type || null,
-      result: decisions[item.code] || null,
-      diff: decisionDiffs[item.code] || null,
-      load: decisionLoadStates[item.code] || { kind: decisionsLoading.value ? 'loading' : 'idle' },
-      diffLoad: decisionDiffLoadStates[item.code] || { kind: decisionsLoading.value ? 'loading' : 'idle' },
+      result: localPending ? null : decisions[item.code] || null,
+      diff: localPending ? null : decisionDiffs[item.code] || null,
+      load: localPending ? { kind: 'error', message: '本地持仓尚未确认；旧快照不能作为当前行动' } : decisionLoadStates[item.code] || { kind: decisionsLoading.value ? 'loading' : 'idle' },
+      diffLoad: localPending ? { kind: 'error', message: '本地修改未形成确认版本，不比较为当前持仓变化' } : decisionDiffLoadStates[item.code] || { kind: decisionsLoading.value ? 'loading' : 'idle' },
       change: displayChange(item.code),
       changeCaption: watchEstimateCaption(typeOrName, estimate),
     }
@@ -239,7 +251,16 @@ function estimateMeta(code: string) {
 }
 
 async function remove(code: string) {
-  await watch.remove(code)
+  const records = watch.recordsFor(code)
+  const expected = records.map(entry => {
+    const id = entry.id || entryId(entry.code, entry.account)
+    return { id, snapshot: watch.entrySnapshot(id)! }
+  })
+  try {
+    await showConfirmDialog({ title: '移除基金及全部账户？', message: `将移除 ${code} 的 ${records.length} 条账户记录，包括持仓份额、成本与目标。不影响其他基金。`, confirmButtonText: '确认全部移除' })
+  } catch { return }
+  try { watch.remove(code, undefined, { confirmed: true, expected }) }
+  catch (cause) { showToast(cause instanceof WatchMutationError ? cause.message : '本机保存失败，原记录未修改'); return }
   delete rows[code]
   delete estimates[code]
   delete decisions[code]
@@ -265,7 +286,8 @@ function onImportInput() {
 }
 
 async function doImport(code: string, name: string) {
-  watch.add(code, name)
+  try { watch.add(code, name) }
+  catch (cause) { showToast(cause instanceof WatchMutationError ? cause.message : '本机保存失败，原记录未修改'); return }
   loadOne(code, name)
   estimates[code] = (await fetchEstimates([code])).get(code) || null
   await loadDecisions(watch.items.filter((item) => item.code === code))
@@ -273,15 +295,27 @@ async function doImport(code: string, name: string) {
   showToast('已添加')
 }
 
-async function saveToken() { watch.setToken(token.value); showToast(token.value ? '已保存 Token' : '已清空') }
+async function saveToken() {
+  try { watch.setToken(token.value); showToast(token.value ? '已保存 Token；云同步仍需明确启用' : '已清空 Token 并关闭同步') }
+  catch { showToast('Token 保存失败，云同步保持关闭') }
+}
+async function changeLegacySync(enabled: boolean) {
+  if (enabled) {
+    try {
+      await showConfirmDialog({ title: '启用旧版 Gist 同步？', message: '此操作授权把全部自选、账户持仓、份额、成本和目标权重上传至 GitHub Gist，并自动备份后续编辑。它不是新版私人存储，也不会生成已确认持仓版本。', confirmButtonText: '明确启用' })
+    } catch { return }
+  }
+  try { watch.setLegacySyncEnabled(enabled) }
+  catch { showToast('同步设置保存失败，保持关闭') }
+}
 async function upload() {
   const success = await watch.manualUpload()
-  showToast(success ? '已上传' : '上传失败，请先下载合并后重试')
+  showToast(success ? '旧版 Gist 已备份；不是新版确认版本' : '未上传：请检查授权、Token，或先下载合并')
 }
 async function download() {
   const success = await watch.manualDownload()
   if (success) await refresh()
-  showToast(success ? '已同步' : '同步失败')
+  showToast(success ? '旧版 Gist 已下载；不是新版确认版本' : '未下载：请检查授权和 Token')
 }
 
 hydrateLocal()
@@ -300,6 +334,8 @@ onMounted(refresh)
     <van-pull-refresh v-model="refreshing" @refresh="refresh">
       <div class="page-body">
         <OwnerSessionPanel />
+        <p class="local-workcopy" role="status">{{ watch.localStatus }}。现有私人决策基于上次确认的云端状态；本地修改不表示旧快照已更新。</p>
+        <p v-if="watch.localStorageError" class="local-storage-error" role="alert">本机记录无法安全读取，编辑已暂停。原存储未覆盖，请先检查浏览器存储或恢复备份。</p>
         <div class="sec">{{ WATCH_SECTIONS[0] }}</div>
         <WatchlistDecisionBoard
           v-model:filter="decisionFilter"
@@ -319,7 +355,7 @@ onMounted(refresh)
         <section v-else class="estimate-list">
           <van-swipe-cell v-for="item in watch.items" :key="item.code">
             <article class="estimate-row" @click="router.push('/fund/' + item.code)">
-              <div class="fund-name"><b>{{ rows[item.code]?.name || item.name || item.code }}</b><span>{{ item.code }} · {{ rows[item.code]?.type || '基金' }}</span></div>
+              <div class="fund-name"><b>{{ rows[item.code]?.name || item.name || item.code }}</b><span>{{ item.code }} · {{ rows[item.code]?.type || '基金' }}</span><small>{{ holdingCaption(item.code) }}</small><button type="button" class="holding-entry" :aria-label="'管理 ' + item.code + ' 的持仓'" @click.stop="editingCode = item.code">管理持仓</button></div>
               <div class="estimate-value">
                 <strong :style="{ color: colorOf(displayChange(item.code)) }">{{ estimateText(item.code) }}</strong>
                 <span>{{ estimateMeta(item.code) }}</span>
@@ -342,14 +378,17 @@ onMounted(refresh)
       :style="{ padding: '18px', paddingBottom: 'calc(78px + env(safe-area-inset-bottom))', maxHeight: '80vh', overflowY: 'auto' }"
     >
       <div class="popup-title">同步自选</div>
+      <p class="sync-disclosure">旧版 Gist 会上传全部自选和账户持仓，默认关闭。保存 Token 不等于授权上传；新版私人存储同步尚未开放。</p>
       <van-field v-model="token" type="password" label="Token" placeholder="GitHub Gist Token" />
-      <div class="sync-status">{{ watch.syncing ? '同步中' : watch.lastSync ? '上次同步 ' + new Date(watch.lastSync).toLocaleString() : '尚未同步' }}</div>
+      <van-cell title="明确启用旧版 Gist 同步"><template #right-icon><van-switch :model-value="watch.legacySyncEnabled" aria-label="明确启用旧版 Gist 同步" @update:model-value="changeLegacySync" /></template></van-cell>
+      <div class="sync-status">{{ watch.syncing ? '旧版同步中' : watch.lastSync ? '上次旧版备份 ' + new Date(watch.lastSync).toLocaleString() : '尚无旧版同步记录' }}</div>
       <div class="sync-actions">
         <van-button size="small" @click="saveToken">保存</van-button>
-        <van-button size="small" type="primary" @click="upload">上传</van-button>
-        <van-button size="small" type="primary" plain @click="download">下载</van-button>
+        <van-button size="small" type="primary" :disabled="!watch.legacySyncEnabled || !watch.hasToken || watch.syncing" @click="upload">上传全部</van-button>
+        <van-button size="small" type="primary" plain :disabled="!watch.legacySyncEnabled || !watch.hasToken || watch.syncing" @click="download">下载合并</van-button>
       </div>
     </van-popup>
+    <HoldingEditor v-if="editingCode" :code="editingCode" :name="rows[editingCode]?.name || watch.items.find(item => item.code === editingCode)?.name || undefined" @close="editingCode = ''" />
 
     <van-popup v-model:show="importShow" position="bottom" round :safe-area-inset-bottom="true" :style="{ padding: '18px', paddingBottom: '66px', maxHeight: '70vh' }">
       <div class="popup-title">添加基金</div>
@@ -368,6 +407,7 @@ onMounted(refresh)
 <style scoped>
 .watch-page { --watch-estimate-column: clamp(140px, 34vw, 240px); }
 .nav-tool { width: 34px; height: 34px; display: inline-grid; place-items: center; padding: 0; border: 0; color: var(--teal); background: transparent; cursor: pointer; }
+.local-workcopy, .sync-disclosure { padding: 12px; border-left: 2px solid var(--gold); background: var(--gold-soft); color: var(--text-secondary); font-size: 12px; line-height: 1.6; }.local-storage-error { color: var(--danger); font-size: 13px; line-height: 1.6; }.fund-name small { display: block; margin-top: 8px; color: var(--text-secondary); font-size: 11px; }.holding-entry { margin-top: 8px; padding: 8px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--teal-soft); color: var(--teal-deep); font: inherit; font-size: 12px; cursor: pointer; }.holding-entry:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
 .estimate-sec { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }.estimate-sec small { color: var(--text-hint); font-size: 9px; font-weight: 400; letter-spacing: 0; text-align: right; }
 .estimate-list { overflow: hidden; background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); }
 .estimate-row { min-height: 76px; display: grid; grid-template-columns: minmax(0, 1fr) var(--watch-estimate-column); align-items: center; gap: 14px; padding: 13px 14px; border-bottom: 1px solid var(--border); cursor: pointer; }.van-swipe-cell:last-child .estimate-row { border-bottom: 0; }

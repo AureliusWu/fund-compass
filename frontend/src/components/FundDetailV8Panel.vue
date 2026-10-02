@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { ownerSession, ownerSessionGeneration } from '@/stores/ownerSession'
+import LocalHoldingGate from './LocalHoldingGate.vue'
 import {
   ApiError,
   getV8Decision,
@@ -24,6 +25,7 @@ import {
 
 const props = defineProps<{
   code: string
+  localHoldingPending?: boolean
 }>()
 
 type LoadState = 'loading' | 'ready' | 'missing' | 'error' | 'redacted'
@@ -100,6 +102,7 @@ watch(ownerSessionGeneration, () => {
       <span class="readonly-mark">只读快照</span>
     </header>
 
+    <LocalHoldingGate :pending="localHoldingPending">
     <div v-if="state === 'loading'" class="ledger-state" aria-live="polite">
       <span class="loading-rule" />
       <strong>正在读取 V8 决策链</strong>
@@ -335,6 +338,7 @@ watch(ownerSessionGeneration, () => {
         </div>
       </article>
     </div>
+    </LocalHoldingGate>
   </section>
 </template>
 

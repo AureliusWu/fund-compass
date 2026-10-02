@@ -49,6 +49,8 @@ uvicorn main:app --reload --port 8000
 - Iteration 18 的 Owner 会话生命周期是受限例外：登录须验证独立密码，会话只授权声明的私人 scope，不能进入既有 Admin/Worker 运维写接口；后续持仓写入须显式 Owner scope。Owner Token 仅浏览器内存，退出/到期清理私人响应并拒绝迟到请求。当前会话/登录限频仅单 API 进程，部署必须 `--workers 1`；多进程前先实现共享状态。
 - Iteration 18 本地验收的 `local-persistence:` / `synthetic:` provenance 为保留用途。仓储写入只在同事务核对独占本地库、当前源码与精确 fixture 后例外允许；普通库/远端及通知/结算/组合派生写拒绝验收链。不可变 scope 旁表与 root 写入同事务注册，默认 V8 读取在排序/limit 前经过 production 视图，跨 scope 引用拒绝；不得以基金代码、展示文案、环境布尔开关或仅有 marker 表代替隔离。此为本地实现，不开放远端验收写入，也不覆盖任意原始 SQL/legacy 读写。
 - 物理 schema 9 独立于应用版本 8.0.0。SQLite 8→9 增量迁移须保留备份并验证旧链；已有 schema 9 缺少 scope 元数据不得自动补为 production。Turso 正常启动只读校验，旧远端 schema 8 在受控迁移前拒绝启动；禁止直接推 main 触发不兼容部署，禁止用 initialize 冒充增量迁移。
+- Iteration 19 的本地持仓编辑不代表云端确认：`local_pending` 不能作为 holding_version/revision，旧 Gist 上传不得解除当前行动的待确认门禁。PAT 与明确同步同意分开；默认不上传私人输入，撤销及迟到响应必须失效。仅关注、真实零份与未知份额保持不同语义；账户更名/删除保留 tombstone，已观察到的旧本地副本不可覆盖更新后的存储。
+- `tools/turso_scope_upgrade.py` 仅对显式、关闭的本地 SQLite 快照做有界 plan/rehearse；不连接 Turso、不读取凭据、不执行输入 DDL、不应用远端迁移。内存逻辑恢复不是远端恢复或正式发布资格，额外 operational 表须逐表固定合同审查，不以前缀豁免。
 - 缺失值不得用 `0` 代替；评分覆盖率低于 70% 时不得输出总分或星级。
 - 后端缓存回退最多允许 7 天并必须返回 `stale`/数据年龄；指数估值超过 7 天不得参与信号。
 - 组合历史只能使用全部成分都有净值的共同日期，禁止用前向填充制造零收益。

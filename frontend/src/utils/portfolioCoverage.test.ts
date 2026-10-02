@@ -56,4 +56,23 @@ describe('portfolio valuation coverage', () => {
     expect(completeFiniteSum([])).toBeNull()
     expect(completeFiniteSum([12.5, 0, -2])).toBe(10.5)
   })
+
+  it('keeps product overflow unknown, never Infinity or zero', () => {
+    expect(holdingMarketValue(Number.MAX_VALUE, 2)).toBeNull()
+    expect(holdingCostBasis(Number.MAX_VALUE, 2)).toBeNull()
+    expect(holdingCostBasis(Number.MAX_VALUE, 0)).toBe(0)
+  })
+
+  it('rejects finite-input total overflow without manufacturing zero weights', () => {
+    const positions = [
+      { code: 'a', name: 'A', value: Number.MAX_VALUE },
+      { code: 'b', name: 'B', value: Number.MAX_VALUE },
+    ]
+    expect(valuationCoverage(positions)).toMatchObject({ complete: false, pricedCount: 2, pricedValue: null })
+    expect(costBasisCoverage(positions.map(row => ({ ...row, basis: row.value })))).toMatchObject({ complete: false, knownCount: 2, knownCost: null })
+    expect(completePortfolioWeights(positions)).toBeNull()
+    expect(completeFiniteSum([Number.MAX_VALUE, Number.MAX_VALUE])).toBeNull()
+    expect(completeFiniteSum([-Number.MAX_VALUE, -Number.MAX_VALUE])).toBeNull()
+    expect(completePortfolioWeights([{ code: 'a', name: 'A', value: Number.MAX_VALUE }])).toEqual([100])
+  })
 })

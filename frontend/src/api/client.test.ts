@@ -98,6 +98,27 @@ describe('API request resilience', () => {
 })
 
 describe('v8 API contracts', () => {
+  it('public legacy fund reads never serialize local positions, costs or weights', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ code: '000001' }) })
+    vi.stubGlobal('fetch', fetchMock)
+    const privateInputs = { held: true, current_weight: 12.34, target_weight: 56.78, force: true }
+    await apiClient.getAnalyze('000001', privateInputs)
+    await apiClient.getDecision('000001', privateInputs)
+    expect(fetchMock.mock.calls.map(call => call[0])).toEqual(['/api/fund/000001/analyze', '/api/fund/000001/decision'])
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(init.body).toBeUndefined()
+      expect(init.headers).toBeUndefined()
+    }
+  })
+
+  it('blocks legacy Admin-only personal POSTs before any network request', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const items = [{ code: '000001', current_weight: 100, target_weight: 100 }]
+    await expect(apiClient.postPortfolioLab(items, 12345)).rejects.toMatchObject({ kind: 'cancelled', message: expect.stringContaining('本地输入未发送') })
+    await expect(apiClient.postPortfolioDecisions(items, 12345)).rejects.toMatchObject({ kind: 'cancelled' })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
   it('maps authenticated reads to audited private URLs but keeps public calls anonymous', async () => {
     const fetchMock = vi.fn().mockImplementation((url: string) => Promise.resolve({
       ok: true,

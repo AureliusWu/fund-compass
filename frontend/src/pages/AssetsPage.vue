@@ -1,5 +1,5 @@
 ﻿<script setup lang="ts">
-import { reactive, ref, computed, onMounted } from 'vue'
+import { reactive, ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { showToast } from 'vant'
 import { useWatchlistStore } from '@/stores/watchlist'
@@ -13,9 +13,11 @@ import { computeAttribution, computePeriodAttribution } from '@/utils/attributio
 import { exportHoldingsCSV, exportPeriodAttributionCSV, exportSnapshotsCSV } from '@/utils/export'
 import { loadSnapshots, takeSnapshot, takeDailySnapshot, buildSnapChart } from '@/utils/snapshots'
 import { computeAssetClass, REFERENCE_ALLOCATION, CLASS_COLORS, type AssetClass } from '@/utils/assetclass'
-import { loadManualAssets, pullManualAssets, pushManualAssets, removeManualAsset, upsertManualAsset, MANUAL_ASSET_CLASSES, type ManualAsset } from '@/utils/manualAssets'
+import { getManualAssetStorageStatus, loadManualAssets, pullManualAssets, pushManualAssets, removeManualAsset, upsertManualAsset, MANUAL_ASSET_CLASSES, type ManualAsset } from '@/utils/manualAssets'
+import { getLegacySyncConsent, getLegacySyncGeneration, subscribeLegacySyncConsent } from '@/utils/cloud-consent'
 import { stressTest, computeStyleBox, rebalancePlan, computeCorrelation, type StyleBoxItem, type StressResult, type RebalanceAction, type CorrMatrix } from '@/utils/diagnostics'
 import { completeFiniteSum, costBasisCoverage, holdingCostBasis, holdingMarketValue, valuationCoverage } from '@/utils/portfolioCoverage'
+import { aggregateFundHoldings } from '@/utils/holding-aggregation'
 
 const router = useRouter()
 const watch = useWatchlistStore()
@@ -38,14 +40,39 @@ const manualClass = ref<AssetClass>('现金')
 const manualValue = ref('')
 const manualNote = ref('')
 const manualSyncing = ref(false)
+const manualStorageStatus = ref(getManualAssetStorageStatus())
+const manualStorageKnown = computed(() => manualStorageStatus.value !== 'invalid' && manualStorageStatus.value !== 'storage-error')
+const legacySyncEnabled = ref(getLegacySyncConsent())
+const manualStatus = ref('默认仅保存在本机，未同步到云端')
+let disposed = false
+const unsubscribeConsent = subscribeLegacySyncConsent(consent => {
+  legacySyncEnabled.value = consent
+  if (!consent) manualStatus.value = '云同步已关闭，本地手工资产保留'
+})
+onBeforeUnmount(() => { disposed = true; unsubscribeConsent() })
 
 const UNGROUPED = '未分组'
+const holdingInput = computed(() => aggregateFundHoldings(watch.activeHoldings))
+const positiveHoldings = computed(() => {
+  const identities = new Map<string, number>()
+  for (const row of watch.activeHoldings) {
+    if (row.deleted || (row.account != null && typeof row.account !== 'string')) continue
+    const identity = `${row.code}::${row.account?.trim() || ''}`
+    identities.set(identity, (identities.get(identity) || 0) + 1)
+  }
+  return watch.activeHoldings.filter(row => {
+    if (row.deleted || row.position_kind === 'watch' || typeof row.shares !== 'number' || !Number.isFinite(row.shares) || row.shares <= 0) return false
+    if (!aggregateFundHoldings([row]).complete) return false
+    const identity = `${row.code}::${row.account?.trim() || ''}`
+    return identities.get(identity) === 1
+  })
+})
 
 async function refresh() {
   loading.value = true
   await watch.load(true)
   // V3-12: 使用 activeHoldings（复合键，支持跨账户同一基金多笔持仓）
-  const held = watch.activeHoldings.filter((e) => e.shares && e.shares > 0)
+  const held = positiveHoldings.value
   const codes = [...new Set(held.map((e) => e.code))]
   fetchEstimates(codes).then((m) => m.forEach((v, k) => { est[k] = v }))
   await Promise.all(codes.map(async (code) => {
@@ -74,8 +101,10 @@ interface Holding {
 const holdings = computed<Holding[]>(() => {
   const out: Holding[] = []
   // V3-12：迭代 activeHoldings（复合键），同一基金不同账户各自独立一行
-  for (const e of watch.activeHoldings) {
-    if (!(e.shares && e.shares > 0)) continue
+  for (const e of positiveHoldings.value) {
+    // The positive-position view must not make omitted unknown/invalid inputs
+    // look like a complete portfolio; holdingInput gates the whole result.
+    if (e.shares == null) continue
     const m = meta[e.code]
     const nav = m?.nav != null && Number.isFinite(m.nav) && m.nav > 0 ? m.nav : null
     const value = holdingMarketValue(e.shares, nav)
@@ -100,12 +129,12 @@ const costs = computed(() => costBasisCoverage(holdings.value.map((holding) => (
   name: holding.name,
   basis: holding.costBasis,
 }))))
-const portfolioReady = computed(() => valuation.value.complete && costs.value.complete)
+const portfolioReady = computed(() => holdingInput.value.complete && valuation.value.complete && costs.value.complete && total.value.value != null && total.value.cost != null)
 const unpricedNames = computed(() => [...new Set(valuation.value.missing.map((holding) => holding.name))])
 const missingCostNames = computed(() => [...new Set(costs.value.missing.map((holding) => holding.name))])
 const todayCoverage = computed(() => {
   const missingHoldings = holdings.value.filter((holding) => holding.today == null).map((holding) => holding.name)
-  const missing = [...missingHoldings, ...manualAssets.value.map((asset) => asset.name)]
+  const missing = [...missingHoldings, ...manualAssets.value.map((asset) => asset.name), ...(!manualStorageKnown.value ? ['本地手工资产未知'] : []), ...(!holdingInput.value.complete ? ['持仓输入未知或账户重复'] : [])]
   return {
     complete: holdings.value.length > 0 && missing.length === 0,
     covered: holdings.value.filter((holding) => holding.today != null).length,
@@ -119,10 +148,11 @@ const total = computed(() => {
   for (const a of manualAssets.value) {
     manualValue += a.value
   }
-  const pricedValue = valuation.value.pricedValue + manualValue
-  const value = valuation.value.complete ? pricedValue : null
-  const knownCost = costs.value.knownCost + manualValue
-  const cost = costs.value.complete ? knownCost : null
+  const sum = (first: number | null, second: number): number | null => first != null && Number.isFinite(first + second) ? first + second : null
+  const pricedValue = holdingInput.value.complete ? sum(valuation.value.pricedValue, manualValue) : null
+  const value = valuation.value.complete && manualStorageKnown.value ? pricedValue : null
+  const knownCost = holdingInput.value.complete ? sum(costs.value.knownCost, manualValue) : null
+  const cost = costs.value.complete && manualStorageKnown.value ? knownCost : null
   const profit = value != null && cost != null ? value - cost : null
   return {
     value,
@@ -130,11 +160,11 @@ const total = computed(() => {
     cost,
     profit,
     knownCost,
-    rate: profit != null && cost != null && cost > 0 ? (profit / cost) * 100 : null,
-    today: completeFiniteSum([
+    rate: profit != null && cost != null && cost > 0 && Number.isFinite((profit / cost) * 100) ? (profit / cost) * 100 : null,
+    today: manualStorageKnown.value && holdingInput.value.complete ? completeFiniteSum([
       ...holdings.value.map((holding) => holding.today),
       ...manualAssets.value.map(() => null),
-    ]),
+    ]) : null,
   }
 })
 
@@ -187,7 +217,7 @@ function doSnap() {
 }
 
 // V3-13 大类资产
-const assetClass = computed(() => computeAssetClass(valuation.value.complete ? [
+const assetClass = computed(() => computeAssetClass(valuation.value.complete && total.value.value != null ? [
   ...holdings.value.map((holding) => ({ ...holding, value: holding.value as number })),
   ...manualAssets.value.map((a) => ({ value: a.value, type: a.cls })),
 ] : []))
@@ -276,12 +306,12 @@ function groupBy(field: 'account' | 'type'): Group[] {
       }
       map.set(k, g)
     }
-    if (h.value == null) g.valueComplete = false
+    if (h.value == null || !Number.isFinite(h.value) || !Number.isFinite(g.pricedValue + h.value)) g.valueComplete = false
     else g.pricedValue += h.value
-    if (h.costBasis == null) g.costComplete = false
+    if (h.costBasis == null || !Number.isFinite(h.costBasis) || !Number.isFinite(g.knownCost + h.costBasis)) g.costComplete = false
     else g.knownCost += h.costBasis
     g.count++
-    if (h.today == null) g.todayComplete = false
+    if (h.today == null || !Number.isFinite(h.today) || !Number.isFinite(g.knownToday + h.today)) g.todayComplete = false
     else g.knownToday += h.today
   }
   return [...map.values()].map((g) => ({
@@ -308,8 +338,8 @@ const pieOption = computed(() => {
   }
 })
 
-const rateOf = (g: Group) => (g.profit != null && g.cost != null && g.cost > 0 ? (g.profit / g.cost) * 100 : null)
-const share = (v: number | null) => (v != null && total.value.value != null && total.value.value > 0 ? (v / total.value.value) * 100 : null)
+const rateOf = (g: Group) => (g.profit != null && g.cost != null && g.cost > 0 && Number.isFinite((g.profit / g.cost) * 100) ? (g.profit / g.cost) * 100 : null)
+const share = (v: number | null) => (v != null && total.value.value != null && total.value.value > 0 && Number.isFinite((v / total.value.value) * 100) ? (v / total.value.value) * 100 : null)
 const shareText = (value: number | null) => {
   const percentage = share(value)
   return percentage == null ? '--' : `${percentage.toFixed(1)}%`
@@ -331,39 +361,72 @@ function openManual(asset?: ManualAsset) {
 }
 
 function saveManual() {
-  manualAssets.value = upsertManualAsset(manualAssets.value, {
+  const raw = manualValue.value.trim()
+  const value = raw === '' ? null : Number(raw)
+  if (value == null || !Number.isFinite(value) || value < 0) {
+    showToast('请填写有效的非负金额；空值不会按 0 保存')
+    return false
+  }
+  const previous = manualAssets.value
+  const next = upsertManualAsset(previous, {
     id: manualId.value || undefined,
     name: manualName.value,
     cls: manualClass.value,
-    value: Number(manualValue.value) || 0,
+    value,
     note: manualNote.value,
   })
+  manualStorageStatus.value = getManualAssetStorageStatus()
+  if (next === previous) { showToast('本地保存失败，原记录保留，未同步'); return false }
+  manualAssets.value = next
+  manualStatus.value = '已保存在本机，未同步到云端'
+  showToast('已保存在本机，未同步')
+  return true
 }
 
 function delManual(id: string) {
-  manualAssets.value = removeManualAsset(manualAssets.value, id)
+  const previous = manualAssets.value
+  const next = removeManualAsset(previous, id)
+  manualStorageStatus.value = getManualAssetStorageStatus()
+  if (next === previous) { showToast('本地保存失败，原记录保留，未同步'); return }
+  manualAssets.value = next
+  manualStatus.value = '已在本机移出，未同步到云端'
 }
 
 async function uploadManual() {
+  if (!getLegacySyncConsent()) { showToast('请先明确开启旧版云同步；本地数据未发送'); return }
   if (!watch.hasToken || manualSyncing.value) return
+  const generation = getLegacySyncGeneration()
+  const baseline = manualAssets.value
   manualSyncing.value = true
   try {
-    const success = await pushManualAssets(manualAssets.value)
+    const success = await pushManualAssets(baseline)
+    if (disposed || generation !== getLegacySyncGeneration() || !getLegacySyncConsent()) return
+    if (manualAssets.value !== baseline) { showToast('本地记录已变化，当前草稿未确认云备份'); return }
     showToast(success ? '手工资产已上传' : '上传失败，请先下载合并后重试')
+    if (success) manualStatus.value = '已上传旧版 Gist 云备份'
   }
+  catch { if (!disposed) showToast('手工资产上传失败，本地记录保留') }
   finally { manualSyncing.value = false }
 }
 
 async function downloadManual() {
+  if (!getLegacySyncConsent()) { showToast('请先明确开启旧版云同步；未下载或覆盖本地数据'); return }
   if (!watch.hasToken || manualSyncing.value) return
+  const generation = getLegacySyncGeneration()
+  const baseline = manualAssets.value
   manualSyncing.value = true
   try {
     const cloud = await pullManualAssets()
+    if (disposed || generation !== getLegacySyncGeneration() || !getLegacySyncConsent()) return
+    if (manualAssets.value !== baseline) { showToast('本地记录已变化，迟到下载未应用，当前草稿未同步'); return }
+    manualStorageStatus.value = getManualAssetStorageStatus()
     if (cloud) {
       manualAssets.value = cloud
-      showToast('手工资产已同步')
-    } else showToast('手工资产同步失败')
-  } finally { manualSyncing.value = false }
+      showToast('旧版手工资产已下载合并；不是新版确认版本')
+      manualStatus.value = '已合并旧版 Gist 云备份到本机；不是新版确认版本'
+    } else showToast('未合并：本地记录已变化、云数据冲突或为空；原记录保留')
+  } catch { if (!disposed) showToast('手工资产下载失败，本地记录保留') }
+  finally { manualSyncing.value = false }
 }
 
 onMounted(refresh)
@@ -378,16 +441,35 @@ onMounted(refresh)
       </template>
     </van-nav-bar>
     <div class="page-body">
+      <div v-if="manualStorageStatus === 'invalid' || manualStorageStatus === 'storage-error'" class="coverage-warning" role="alert">手工资产本地读取或保存失败；原始存储未被清空，也未同步。请先保留备份并修复本地记录。</div>
+      <section class="card manual-card">
+        <div class="manual-head">
+          <span>手工资产 · 本机输入</span>
+          <div class="manual-actions">
+            <van-button size="mini" plain icon="down" :disabled="!watch.hasToken || !legacySyncEnabled" :loading="manualSyncing" @click="downloadManual">下载合并</van-button>
+            <van-button size="mini" plain icon="upgrade" :disabled="!watch.hasToken || !legacySyncEnabled" :loading="manualSyncing" @click="uploadManual">上传</van-button>
+            <van-button size="mini" plain icon="plus" @click="openManual()">新增</van-button>
+          </div>
+        </div>
+        <div class="class-ref" role="status">{{ manualStatus }}。旧版云同步需在自选页单独明确开启，保存 Token 不代表同意上传。</div>
+        <div class="manual-row" v-for="a in manualAssets" :key="a.id">
+          <span class="manual-name">{{ a.name }}<em>{{ a.cls }}</em></span>
+          <span class="manual-value">{{ num(a.value, 2) }}</span>
+          <van-icon name="edit" color="#4C7E67" size="16" @click="openManual(a)" />
+          <van-icon name="cross" color="#A8B2A8" size="16" @click="delManual(a.id)" />
+        </div>
+        <div class="class-ref" v-if="!manualAssets.length">可把现金、股票、黄金等非基金资产手工纳入总览；金额 0 是有效输入。</div>
+      </section>
       <van-loading v-if="loading" style="text-align:center;padding:40px" />
-      <van-empty v-else-if="holdings.length === 0 && manualAssets.length === 0"
+      <van-empty v-else-if="holdingInput.complete && holdings.length === 0 && manualAssets.length === 0"
         description="还没有持仓。去自选页给基金填上份额/成本/账户" />
       <template v-else>
         <!-- 总资产 -->
         <div class="hero card">
           <div class="hero-inner">
-            <div class="k">{{ valuation.complete ? '总资产（估算市值）' : '总资产（净值未完整）' }}</div>
+            <div class="k">{{ !manualStorageKnown ? '总资产（本地手工资产未知）' : total.value == null ? '总资产（数据未完整或金额超限）' : '总资产（估算市值）' }}</div>
             <div class="big">{{ num(total.value, 2) }}</div>
-            <div class="priced-subtotal" v-if="!valuation.complete">
+            <div class="priced-subtotal" v-if="total.value == null">
               已定价小计 {{ num(total.pricedValue, 2) }}，不代表组合总资产
             </div>
             <div class="hero-row">
@@ -415,10 +497,13 @@ onMounted(refresh)
         </div>
 
         <div class="valuation-warning" role="alert" v-if="!portfolioReady">
+          <span v-if="!holdingInput.complete">存在份额未知、输入无效或账户重复的持仓，不能把筛选后的记录当成完整组合。请在自选页核对本机输入。</span>
           <b v-if="!valuation.complete">净值覆盖 {{ valuation.pricedCount }}/{{ valuation.totalCount }} 笔持仓</b>
           <span v-if="!valuation.complete">未定价：{{ unpricedNames.join('、') }}。缺失净值不会当成 0。</span>
           <b v-if="!costs.complete">成本覆盖 {{ costs.knownCount }}/{{ costs.totalCount }} 笔持仓</b>
           <span v-if="!costs.complete">成本缺失：{{ missingCostNames.join('、') }}。缺失成本不会当成 0。</span>
+          <span v-if="!manualStorageKnown">手工资产存储未知，不能把未读出的金额按 0 纳入完整组合。</span>
+          <span v-if="total.pricedValue == null || total.knownCost == null">金额合计超出可安全计算范围，已隐藏精确组合结果。</span>
           <span>已暂停累计盈亏、快照、组合诊断和组合实验。</span>
         </div>
 
@@ -454,7 +539,7 @@ onMounted(refresh)
               <span :class="{ on: dim === 'type' }" @click="dim = 'type'">按类型</span>
             </div>
           </div>
-          <Chart v-if="valuation.complete" :option="pieOption" height="200px" />
+          <Chart v-if="valuation.complete && total.value != null" :option="pieOption" height="200px" />
           <div v-else class="coverage-placeholder">净值覆盖完整后才计算账户和类型权重。</div>
         </div>
 
@@ -474,21 +559,6 @@ onMounted(refresh)
             </div>
             <div class="class-ref">参考：{{ classBars.map((b) => `${b.cls}~${b.ref}%`).join(' / ') }}</div>
             <div class="class-tip" v-if="assetClass.tip">{{ assetClass.tip }}</div>
-            <div class="manual-head">
-              <span>手工资产</span>
-              <div class="manual-actions">
-                <van-button size="mini" plain icon="down" :disabled="!watch.hasToken" :loading="manualSyncing" @click="downloadManual">下载</van-button>
-                <van-button size="mini" plain icon="upgrade" :disabled="!watch.hasToken" :loading="manualSyncing" @click="uploadManual">上传</van-button>
-                <van-button size="mini" plain icon="plus" @click="openManual()">新增</van-button>
-              </div>
-            </div>
-            <div class="manual-row" v-for="a in manualAssets" :key="a.id">
-              <span class="manual-name">{{ a.name }}<em>{{ a.cls }}</em></span>
-              <span class="manual-value">{{ num(a.value, 2) }}</span>
-              <van-icon name="edit" color="#4C7E67" size="16" @click="openManual(a)" />
-              <van-icon name="cross" color="#A8B2A8" size="16" @click="delManual(a.id)" />
-            </div>
-            <div class="class-ref" v-if="!manualAssets.length">可把现金、股票、黄金等非基金资产手工纳入总览。</div>
           </div>
         </template>
 
@@ -693,7 +763,7 @@ onMounted(refresh)
       </template>
     </div>
 
-    <van-dialog v-model:show="manualShow" title="手工资产" show-cancel-button @confirm="saveManual">
+    <van-dialog v-model:show="manualShow" title="手工资产" show-cancel-button :before-close="(action: string) => action === 'confirm' ? saveManual() : true">
       <div style="padding:8px 4px">
         <van-field v-model="manualName" label="名称" placeholder="如 现金、股票账户、黄金" />
         <van-field v-model="manualValue" type="number" label="市值" placeholder="0.00" />
@@ -741,6 +811,8 @@ onMounted(refresh)
 .valuation-warning { display: flex; flex-direction: column; gap: 4px; margin: 0 0 12px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border)); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--danger) 7%, var(--card-bg)); color: var(--text-secondary); font-size: 11px; line-height: 1.55; }
 .valuation-warning b { color: var(--danger); font-size: 12px; }
 .coverage-placeholder { padding: 28px 12px; color: var(--text-hint); font-size: 12px; line-height: 1.6; text-align: center; }
+.coverage-warning { margin-bottom: 12px; padding: 10px 12px; border: 1px solid var(--danger); color: var(--text-secondary); font-size: 12px; line-height: 1.6; }
+.manual-card .manual-head { margin-top: 0; }
 /* ── 归因 ── */
 .atr-row { display: flex; align-items: center; font-size: 12px; margin: 7px 0; }
 .atr-nm { width: 72px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
