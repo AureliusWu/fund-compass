@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { ownerSession, ownerSessionGeneration } from '@/stores/ownerSession'
 import {
   ApiError,
   getV8Decision,
@@ -78,6 +79,15 @@ async function load() {
 }
 
 watch(() => props.code, load, { immediate: true })
+watch(ownerSessionGeneration, () => {
+  loadGeneration++
+  result.value = null
+  outcomes.value = null
+  state.value = 'redacted'
+  outcomeLoading.value = false
+  outcomeError.value = false
+  if (ownerSession.value) void load()
+}, { flush: 'sync' })
 </script>
 
 <template>

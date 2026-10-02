@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch as observe } from 'vue'
 import { ApiError, getHealth, getV8Decision, type SignalResp, type V8DecisionResult } from '@/api/client'
 import { useAppStore } from '@/stores/app'
 import { useWatchlistStore } from '@/stores/watchlist'
+import { ownerSession, ownerSessionGeneration } from '@/stores/ownerSession'
 import { useFundsStore } from '@/stores/funds'
 import IndexBar from '@/components/IndexBar.vue'
 import HomeActionCenter from '@/components/HomeActionCenter.vue'
@@ -166,6 +167,15 @@ async function loadV8ActionCenter() {
 
   if (requestVersion === v8RequestVersion) v8Loading.value = false
 }
+
+observe(ownerSessionGeneration, () => {
+  v8RequestVersion++
+  v8Decisions.value = []
+  v8Errors.value = watch.items.map(item => ({ code: item.code, name: item.name, kind: 'redacted' }))
+  v8Requested.value = watch.items.length
+  v8Loading.value = false
+  if (ownerSession.value) void loadV8ActionCenter()
+}, { flush: 'sync' })
 
 async function refreshWatchHome(force: boolean) {
   try { await watch.load(force) } catch { /* keep the local watchlist */ }

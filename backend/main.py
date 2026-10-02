@@ -38,6 +38,7 @@ from models.v8 import (
 )
 from service import eastmoney, repo, v8_decisions, v8_repo
 from service.security import require_admin, require_private_read, require_worker_or_admin
+from service.owner_sessions import router as owner_session_router
 from strategy import backtest, decide_fund, score_fund, timing_signal
 from strategy.calibration import calibrate
 from strategy.index_valuation import status as index_valuation_status
@@ -95,6 +96,19 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"]
 )
+
+app.include_router(owner_session_router)
+
+
+@app.middleware("http")
+async def private_response_cache_policy(request, call_next):
+    """Never cache private DTOs, credentials, or authorization failures."""
+    response = await call_next(request)
+    if request.url.path.startswith(("/api/private/", "/api/v2/private/", "/api/v2/owner/")):
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
 
 OWNER_READ_DENIED_RESPONSES = {
     403: {

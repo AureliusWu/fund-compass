@@ -12,8 +12,8 @@ import Chart from '@/components/Chart.vue'
 import DcaCalc from '@/components/DcaCalc.vue'
 import { estimateDataFreshness, fetchEstimate, latestNavMove, preferredDailyMove, type Estimate } from '@/utils/estimate'
 import { getHoldings, type Holding } from '@/utils/holdings'
-import { templateInterpret, llmInterpret } from '@/utils/interpret'
-import { getAiConfig, setAiConfig, hasAiKey, providerDef, PROVIDERS, type AiConfig } from '@/utils/ai'
+import { templateInterpret } from '@/utils/interpret'
+import { FREE_TEXT_AI_UNAVAILABLE, getAiConfig, setAiConfig, hasAiKey, providerDef, PROVIDERS, type AiConfig } from '@/utils/ai'
 import { findSimilar, type ScreenFund } from '@/utils/screener'
 import type { FundDetail, ScoreResp, SignalResp, BacktestResp, DecisionResp } from '@/api/client'
 
@@ -49,49 +49,15 @@ const holdingsReportDate = computed(() => holdings.value[0]?.reportDate || null)
 
 const COMP_NAMES: Record<string, string> = { return: '收益', risk: '风险', management: '管理', cost: '成本' }
 
-// 智能解读：B 规则版即时计算（随数据到达响应式更新），A LLM 版按需触发
+// 规则解读随数据更新；自由文本 AI 暂停，不读取或改写旧解读缓存。
 const interp = computed(() =>
   detail.value ? templateInterpret(detail.value, score.value, signal.value, bt.value) : null,
 )
 const aiCfg = ref<AiConfig>(getAiConfig())
 const aiReady = ref(hasAiKey())
-const aiText = ref('')
-const aiLoading = ref(false)
-const aiErr = ref('')
 const cfgShow = ref(false)
 const curDef = computed(() => providerDef(aiCfg.value.provider))
 
-// 持久化 AI 解读（按基金代码缓存，离开页面不丢失）
-const AI_CACHE_KEY = 'sinan_ai_text'
-function loadAiCache(c: string) {
-  try {
-    const m = JSON.parse(localStorage.getItem(AI_CACHE_KEY) || '{}')
-    return m[c] || ''
-  } catch { return '' }
-}
-function saveAiCache(c: string, t: string) {
-  try {
-    const m = JSON.parse(localStorage.getItem(AI_CACHE_KEY) || '{}')
-    m[c] = t
-    localStorage.setItem(AI_CACHE_KEY, JSON.stringify(m))
-  } catch { /* quota */ }
-}
-// 挂载时恢复缓存
-aiText.value = loadAiCache(code)
-
-async function runAi() {
-  if (!detail.value) return
-  aiErr.value = ''; aiText.value = ''; aiLoading.value = true
-  try {
-    const text = await llmInterpret(detail.value, score.value, signal.value, bt.value)
-    aiText.value = text
-    saveAiCache(code, text)
-  } catch (e) {
-    aiErr.value = e instanceof Error ? e.message : 'AI 解读失败'
-  } finally {
-    aiLoading.value = false
-  }
-}
 function saveCfg() {
   aiCfg.value.apiKey = aiCfg.value.apiKey.trim()
   setAiConfig(aiCfg.value)
@@ -166,6 +132,11 @@ const btOption = computed(() => {
       { name: '一直持有', type: 'line' as const, showSymbol: false, data: b.map((p) => p.v), lineStyle: { color: '#D24A3A' }, itemStyle: { color: '#D24A3A' } },
     ],
   }
+})
+
+const backtestExcess = computed(() => {
+  const value = bt.value?.outperform
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
 })
 
 const navOption = computed(() => {
@@ -281,24 +252,17 @@ async function toggleWatch() {
         <div class="sec">旧版智能解读</div>
         <div class="card interp" v-if="interp">
           <div class="verdict" :class="interp.tone">{{ interp.verdict }}</div>
-          <div v-if="aiText" class="ai-box">
-            <div class="ai-tag">AI 解读 · {{ curDef.label }}</div>
-            <div class="ai-text">{{ aiText }}</div>
-          </div>
           <div class="isec" v-for="(x, i) in interp.sections" :key="i">
             <span class="ih">{{ x.h }}</span><span class="it">{{ x.t }}</span>
           </div>
-          <div v-if="aiErr" class="ai-err">{{ aiErr }}</div>
+          <div class="ai-hint" role="status">{{ FREE_TEXT_AI_UNAVAILABLE }}</div>
           <div class="ai-bar">
-            <van-button size="mini" plain type="primary" :loading="aiLoading"
-              @click="aiReady ? runAi() : (cfgShow = true)">
-              {{ aiReady ? (aiText ? '重新生成' : 'AI 生成解读') : '配置 AI' }}
-            </van-button>
-            <van-icon v-if="aiReady" name="setting-o" size="17" color="#A8B2A8" @click="cfgShow = true" />
+            <van-button size="mini" plain type="primary" disabled>AI 自由文本解读已暂停</van-button>
+            <van-button size="mini" plain @click="cfgShow = true">配置 AI</van-button>
             <span v-if="aiReady" class="ai-prov">{{ curDef.label }}</span>
           </div>
-          <div class="ai-hint">上为规则解读，免费离线。配置 AI（DeepSeek / 通义 / OpenAI / Claude… 自带 Key）可生成更自然的点评（按量计费）。</div>
-          <div v-if="!aiText" class="disc">以上为数据解读，仅供个人参考，不构成投资建议。</div>
+          <div class="ai-hint">上为规则解读，免费离线。已有 AI 配置与解读缓存保留，暂停期间不展示旧 AI 解读或调用模型。</div>
+          <div class="disc">以上为数据解读，仅供个人参考，不构成投资建议。</div>
         </div>
 
         <van-cell-group inset>
@@ -417,8 +381,10 @@ async function toggleWatch() {
               {{ signal.disclaimer || '择时信号仅为风险 / 时机参考，非买卖指令。' }}
               <template v-if="bt && bt.available && bt.strategy && bt.benchmark">
                 本基金回测：择时 {{ pct(bt.strategy.total_return) }} vs 一直持有 {{ pct(bt.benchmark.total_return) }}
-                 <em v-if="bt.outperform != null" :style="{ color: colorOf(bt.outperform) }">（{{ bt.outperform >= 0 ? '择时跑赢' : '择时跑输' }} {{ Math.abs(bt.outperform).toFixed(2) }}%）</em><em v-else>（超额数据不足）</em>。
-                优质基金长期持有 / 定投通常更优，勿据此轻易卖出。
+                <em v-if="backtestExcess == null">（超额数据不足，暂不比较）</em>
+                <em v-else-if="backtestExcess === 0">（本次历史回测收益持平）</em>
+                <em v-else :style="{ color: colorOf(backtestExcess) }">（本次历史区间{{ backtestExcess > 0 ? '择时跑赢' : '择时跑输' }} {{ Math.abs(backtestExcess).toFixed(2) }}%）</em>。
+                历史回测不代表未来表现，勿据此直接作买卖决策。
               </template>
             </div>
           </div>

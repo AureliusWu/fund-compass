@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch as observe } from 'vue'
 import { useRouter } from 'vue-router'
 import { showToast } from 'vant'
 import {
@@ -17,6 +17,8 @@ import { colorOf, pct } from '@/utils/format'
 import { getToken } from '@/utils/gist'
 import Icon from '@/components/Icon.vue'
 import WatchlistDecisionBoard from '@/components/watchlist/WatchlistDecisionBoard.vue'
+import OwnerSessionPanel from '@/components/OwnerSessionPanel.vue'
+import { ownerSession, ownerSessionGeneration } from '@/stores/ownerSession'
 import {
   filterAndSortWatchDecisions,
   watchEstimateCaption,
@@ -96,6 +98,7 @@ function failedLoadState(error: unknown, kind: 'decision' | 'diff'): WatchDecisi
 }
 
 async function loadDecisions(items = watch.items) {
+  const sessionGeneration = ownerSessionGeneration.value
   // items may be a one-fund incremental refresh; pruning must always follow the
   // complete current watchlist or a new item would erase valid snapshots for all others.
   const activeCodes = new Set(watch.items.map((item) => item.code))
@@ -139,10 +142,24 @@ async function loadDecisions(items = watch.items) {
     }))
   } catch { /* 后端不可用时保留估值 */ }
   finally {
+    if (sessionGeneration !== ownerSessionGeneration.value) return
     decisionBatches = Math.max(0, decisionBatches - 1)
     decisionsLoading.value = decisionBatches > 0
   }
 }
+
+observe(ownerSessionGeneration, () => {
+  Object.keys(decisions).forEach(key => { delete decisions[key] })
+  Object.keys(decisionDiffs).forEach(key => { delete decisionDiffs[key] })
+  for (const item of watch.items) {
+    decisionEpochs[item.code] = (decisionEpochs[item.code] || 0) + 1
+    decisionLoadStates[item.code] = { kind: 'redacted', message: '请登录私人会话查看快照' }
+    decisionDiffLoadStates[item.code] = { kind: 'redacted', message: '请登录私人会话查看变化' }
+  }
+  decisionBatches = 0
+  decisionsLoading.value = false
+  if (ownerSession.value) void loadDecisions()
+}, { flush: 'sync' })
 
 function loadOne(code: string, fallbackName: string | null) {
   const current = rows[code]
@@ -282,6 +299,7 @@ onMounted(refresh)
 
     <van-pull-refresh v-model="refreshing" @refresh="refresh">
       <div class="page-body">
+        <OwnerSessionPanel />
         <div class="sec">{{ WATCH_SECTIONS[0] }}</div>
         <WatchlistDecisionBoard
           v-model:filter="decisionFilter"

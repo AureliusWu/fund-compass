@@ -1,6 +1,6 @@
 # Turso 零成本候选数据库验证
 
-本文描述候选接入与验证，不代表生产数据库已迁移或 V8 正式发布已通过。目前没有实库凭据证据；本地 SQLite 注入测试只能验证工具行为。
+本文描述候选接入与验证，不代表生产数据库已迁移或 V8 正式发布已通过。2026-10-01 已用用户明确提供的本机配置完成一次真实候选库只读 `inspect`；本地 SQLite 注入测试与真实只读连接分开记录，均不替代应用耐久/恢复验收。
 
 ## 费用和范围
 
@@ -41,6 +41,14 @@ python tools/turso_candidate.py inspect
 
 只读执行 `SELECT 1`，读取 schema 版本、应用表数量以及公开基金目录 `funds` 的数量。没有 `funds` 表时返回 `null`，不会伪造为零；空库 schema 版本可为 0。不会读取私有决策、持仓、通知或审计记录，不会自动启动迁移。`fund_count` 是一次实际聚合查询，不适合作为高频保活任务。
 
+### 已验证的无浏览器替代路线（2026-10-01）
+
+数据库 SQL 访问不依赖 Dashboard、MCP OAuth 或组织级 CLI 登录。使用已有候选数据库 URL 与数据库 Token，经子进程环境传给上述工具即可；不要为此枚举浏览器密钥、读取登录 Cookie 或降低 OAuth 校验。配置只从用户明确提供的确切文件读取，本轮未在仓库保存凭据，也未把值放入命令行或输出。
+
+本次结果：`connectivity=true`、`schema_version=8`（`schema_table`）、`table_count=20`、`fund_count=27947`、`evidence_scope=database_probe_only`、`formal_release_verified=false`。没有执行 DDL/DML、读取私人账本、初始化/迁移 schema、写标记、轮换/撤销 Token 或更改套餐。现有凭据可读不证明其写权限、最小权限、有效期或已完成旧 Token 轮换；费用配置也仍未核验。
+
+本地已实现不可变 scope 旁表与默认 V8 读取隔离，物理 schema 因合同变化独立升至 9，应用版本仍为 8.0.0。SQLite 8→9 迁移保留原 payload/ID 和备份；已有 schema 9 缺失 scope 元数据拒绝自动重分类。线上仍是 schema 8，尚未做受控增量迁移；新代码会拒绝该旧库，不能直接推 main 自动部署，也不能用重复 `initialize` 冒充迁移。远端验收写入、独立恢复与应用跨重启证据仍未完成。
+
 ## 合成标记写入与独立连接读回
 
 ```powershell
@@ -55,6 +63,22 @@ python tools/turso_candidate.py read-probe --nonce <上一步返回的64位nonce
 全局超时参数放在子命令之前，例如 `python tools/turso_candidate.py --timeout 20 inspect`。成功结果始终包含 `evidence_scope=database_probe_only` 和 `formal_release_verified=false`。
 
 两次本地命令即便连接同一远端数据库，也只证明跨连接/进程读回；不能作为 Render 重启或重新部署证据。
+
+### 脱敏失败分类（2026-10-01）
+
+只有适配器实际观察到合法整数 HTTP 状态时，CLI 才返回下列固定码；不读取非 200 响应正文，不从提供方异常文本或任意 `status_code` 属性推断分类。分类不改变失败退出码 `1`，也不新增成功、写入确认或撤销确认字段。
+
+| HTTP 观察 | 固定错误码 | 能说明的边界 |
+| --- | --- | --- |
+| 401 | `candidate_authentication_rejected` | 本次鉴权被拒；不能区分过期、错误配置、撤销等原因 |
+| 403 | `candidate_access_denied` | 本次访问被拒；不证明旧 Token 已撤销 |
+| 429 | `candidate_rate_limited` | 本次收到限流状态；不会自动重试或启用付费超额 |
+| 500–599 | `candidate_service_unavailable` | 本次收到服务端错误；不证明请求未执行或写入可安全重放 |
+| 其他状态、传输/协议错误或不可信异常 | `candidate_operation_failed` | 原因未知；不解析错误文本，不输出地址、凭据或私账 |
+
+HTTP 错误保持 `sqlite3.OperationalError` 兼容性。失败连接被标记为不可继续使用，后续 SQL、回滚和关闭不重放请求。响应/会话关闭失败不得掩盖原始 HTTP 或协议错误；独立关闭失败同样脱敏。提交、批量写入或关闭失败时，CLI 不输出成功 JSON 或 `committed=true`；这不能倒推数据库一定未提交，应独立核对结果后再决定后续操作。
+
+这些码用于诊断，不是凭据轮换验收。撤销结论仍需要平台明确操作结果、准确作用范围，以及同资源的新旧凭据对照；只读成功不证明写权限或耐久。
 
 ## 导入副本、重部署和恢复验收
 

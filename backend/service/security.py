@@ -25,7 +25,7 @@ _private_read_bearer = HTTPBearer(
     auto_error=False,
     scheme_name="PrivateReadBearer",
     description=(
-        "Single-owner private read credential. Configure PRIVATE_READ_TOKEN; "
+        "Short-lived Owner session or server-side PRIVATE_READ_TOKEN; "
         "ADMIN_TOKEN and WORKER_TOKEN are not accepted."
     ),
 )
@@ -55,7 +55,7 @@ def _bearer(authorization: str | None) -> str:
 
 def _matches(value: str, env_name: str) -> bool:
     expected = os.environ.get(env_name, "")
-    return bool(expected) and hmac.compare_digest(value, expected)
+    return bool(expected) and hmac.compare_digest(value.encode("utf-8"), expected.encode("utf-8"))
 
 
 def _ensure_credential_separation() -> None:
@@ -66,7 +66,7 @@ def _ensure_credential_separation() -> None:
         if (value := os.environ.get(name, ""))
     ]
     for index, (_, left) in enumerate(configured):
-        if any(hmac.compare_digest(left, right) for _, right in configured[index + 1:]):
+        if any(hmac.compare_digest(left.encode("utf-8"), right.encode("utf-8")) for _, right in configured[index + 1:]):
             raise HTTPException(status_code=503, detail="Admin、Worker 与私人读取凭证必须彼此隔离")
 
 
@@ -132,19 +132,33 @@ def require_private_read(
 ) -> str:
     """Authorize the deployment owner's lossless private read API.
 
-    The current project is single-owner and has no user/account table.  This
-    token therefore isolates private DTOs without pretending that Admin or
-    Worker credentials are a user login.  A future multi-user service must
-    replace it with row ownership, not broaden this credential.
+    Browser callers use a short-lived Owner session. PRIVATE_READ_TOKEN remains
+    available for server-side operational consumers; Admin/Worker credentials
+    are never end-user identities. A multi-user service would require explicit
+    row ownership rather than broadening either credential.
     """
     if credentials is None or credentials.scheme.lower() != "bearer" or not credentials.credentials:
         raise _unauthorized("需要私人读取 Bearer 凭证")
     token = credentials.credentials.strip()
+    _ensure_credential_separation()
+    from service.owner_sessions import authenticated_owner_session
+
+    owner_session = authenticated_owner_session(token)
+    if owner_session is not None:
+        if "read_private" not in owner_session.scopes:
+            raise _forbidden("Owner 会话无权访问私人数据")
+        _rate_limit(
+            _identity("owner_reader", token),
+            max_requests=PRIVATE_READ_MAX_REQUESTS,
+            detail="私人读取请求过于频繁",
+        )
+        return "owner"
+    if token.startswith("own_"):
+        raise _unauthorized("Owner 会话无效或已过期，请重新登录")
     expected = os.environ.get("PRIVATE_READ_TOKEN", "")
     if not expected:
         raise HTTPException(status_code=503, detail="私人读取服务未配置")
-    _ensure_credential_separation()
-    if not hmac.compare_digest(token, expected):
+    if not hmac.compare_digest(token.encode("utf-8"), expected.encode("utf-8")):
         raise _forbidden("私人读取凭证无权访问")
     _rate_limit(
         _identity("private_reader", token),

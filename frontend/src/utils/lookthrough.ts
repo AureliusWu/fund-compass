@@ -2,6 +2,7 @@
 // 数据优先用 AKShare 富集 JSON（frontend/public/data/enrich/{code}.json，含完整持仓+行业），
 // 缺失时回退到 V3-2 的 jjcc 前十大（utils/holdings）。后者只覆盖前十大，会标注为近似。
 import { getHoldings } from './holdings'
+import { requestJson } from '@/api/request'
 
 export interface EnrichData {
   schema_version: 2
@@ -75,19 +76,20 @@ export function normalizeEnrich(code: string, raw: unknown, now = new Date()): E
   return row as unknown as EnrichData
 }
 
-export async function loadEnrich(code: string): Promise<EnrichData | null> {
-  if (enrichMem.has(code)) return enrichMem.get(code)!
+export async function loadEnrich(code: string, signal?: AbortSignal): Promise<EnrichData | null> {
+  if (signal?.aborted) return null
+  const cached = enrichMem.get(code)
+  if (cached) {
+    const current = normalizeEnrich(code, cached)
+    if (current) return current
+    enrichMem.delete(code)
+  }
   try {
-    const ctrl = new AbortController()
-    const t = setTimeout(() => ctrl.abort(), 6000)
-    const r = await fetch(`${import.meta.env.BASE_URL}data/enrich/${code}.json`, {
-      signal: ctrl.signal,
-      cache: 'no-cache',
-    })
-    clearTimeout(t)
-    if (!r.ok) return null
-    const d = normalizeEnrich(code, await r.json())
-    if (!d) return null
+    const raw = await requestJson<unknown>(`${import.meta.env.BASE_URL}data/enrich/${code}.json`, {
+      signal, cache: 'no-cache',
+    }, 6000)
+    const d = normalizeEnrich(code, raw)
+    if (!d || signal?.aborted) return null
     enrichMem.set(code, d)
     return d
   } catch {

@@ -28,6 +28,16 @@ describe('自选页 V8 快照契约', () => {
     expect(source).not.toMatch(/(?:confidence|strength|change)\s*(?:\|\||\?\?)\s*0/)
   })
 
+  it('会话变化时同步清除已显示的私人快照并作废旧批次', () => {
+    expect(source).toContain('observe(ownerSessionGeneration, () => {')
+    expect(source).toContain("}, { flush: 'sync' })")
+    expect(source).toContain('Object.keys(decisions).forEach(key => { delete decisions[key] })')
+    expect(source).toContain('Object.keys(decisionDiffs).forEach(key => { delete decisionDiffs[key] })')
+    expect(source).toContain('decisionEpochs[item.code] = (decisionEpochs[item.code] || 0) + 1')
+    expect(source).toContain('if (sessionGeneration !== ownerSessionGeneration.value) return')
+    expect(source).toContain('<OwnerSessionPanel />')
+  })
+
   it('明确区分 QDII 下一净值估算与正式净值涨跌', () => {
     expect(source).toContain('watchEstimateCaption(typeOrName, estimate)')
     expect(source).toContain('watchEstimateSemanticLabel(rows[code]?.type || rows[code]?.name, estimate)')

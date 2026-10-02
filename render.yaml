@@ -6,7 +6,8 @@ services:
     rootDir: backend
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: "uvicorn main:app --host 0.0.0.0 --port $PORT"
+    # Owner sessions/login limits are process-local; do not inherit WEB_CONCURRENCY.
+    startCommand: "uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1"
     healthCheckPath: /api/health
     envVars:
       - key: PYTHON_VERSION
@@ -26,4 +27,6 @@ services:
       - key: WORKER_TOKEN
         sync: false
       - key: PRIVATE_READ_TOKEN
+        sync: false
+      - key: OWNER_PASSWORD_HASH
         sync: false

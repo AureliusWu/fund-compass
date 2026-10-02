@@ -1,44 +1,6 @@
-// 后端基址：开发走 Vite 代理 /api → localhost:8000；
-// 生产用环境变量 VITE_API_BASE 指向已部署后端（Railway/Render）。
-const BASE = (import.meta.env.VITE_API_BASE as string) || '/api'
-const REQUEST_TIMEOUT_MS = 12_000
-
-export class ApiError extends Error {
-  constructor(
-    message: string,
-    readonly kind: 'timeout' | 'network' | 'http' | 'redacted',
-    readonly status?: number,
-  ) {
-    super(message)
-    this.name = 'ApiError'
-  }
-}
-
-export async function request<T>(
-  path: string,
-  init?: RequestInit,
-  timeoutMs = REQUEST_TIMEOUT_MS,
-): Promise<T> {
-  const controller = new AbortController()
-  const forwardAbort = () => controller.abort(init?.signal?.reason)
-  init?.signal?.addEventListener('abort', forwardAbort, { once: true })
-  const timer = globalThis.setTimeout(() => controller.abort('timeout'), timeoutMs)
-
-  try {
-    const res = await fetch(BASE + path, { cache: 'no-store', ...init, signal: controller.signal })
-    if (!res.ok) throw new ApiError(`HTTP ${res.status}`, 'http', res.status)
-    return res.json() as Promise<T>
-  } catch (error) {
-    if (error instanceof ApiError) throw error
-    if (controller.signal.aborted && !init?.signal?.aborted) {
-      throw new ApiError('请求超时，请稍后重试', 'timeout')
-    }
-    throw new ApiError('网络连接失败，请稍后重试', 'network')
-  } finally {
-    globalThis.clearTimeout(timer)
-    init?.signal?.removeEventListener('abort', forwardAbort)
-  }
-}
+import { ApiError, request } from './request'
+import { hasOwnerSession, requestOwnerRead } from '@/stores/ownerSession'
+export { ApiError, request } from './request'
 
 const req = request
 
@@ -47,12 +9,22 @@ interface RedactedOwnerRead {
 }
 
 /**
- * Owner-scoped GETs keep their legacy public URL but fail closed with HTTP 403
+ * Authenticated Owner GETs use audited private URLs. Anonymous GETs keep their
+ * legacy public URL but fail closed with HTTP 403
  * so a cached pre-v8 client cannot mistake a smaller redacted payload for the
  * former full DTO. During a mixed rollout an older backend may still return a
  * 200 redacted marker; accept only that marker and reject every full shape.
  */
 async function readOwnerScoped<T>(path: string): Promise<T> {
+  if (hasOwnerSession()) {
+    const privatePath = path.startsWith('/v2/')
+      ? path.replace('/v2/', '/v2/private/') : '/private' + path
+    const payload = await requestOwnerRead<T | RedactedOwnerRead>(privatePath)
+    if (payload && typeof payload === 'object' && (payload as RedactedOwnerRead).redacted === true) {
+      throw new ApiError('私人数据未公开', 'redacted')
+    }
+    return payload as T
+  }
   try {
     const payload = await req<T | RedactedOwnerRead>(path)
     if (payload && typeof payload === 'object' && (payload as RedactedOwnerRead).redacted === true) {
@@ -631,8 +603,8 @@ export interface V8StrategyPerformance {
 }
 
 /**
- * Owner-scoped V8 reads are deliberately unavailable to anonymous browser
- * clients. The legacy public URLs fail closed with 403 (or a redacted marker
+ * Owner-scoped V8 reads require a short-lived in-memory Owner session. The
+ * legacy public URLs fail closed with 403 (or a redacted marker
  * during mixed rollout), which readOwnerScoped maps to the unavailable UI. Snapshot creation,
  * settlement, notification and rebalance routes require Worker/Admin
  * credentials and must never be called from public frontend code.

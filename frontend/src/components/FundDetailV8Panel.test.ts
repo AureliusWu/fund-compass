@@ -1,5 +1,9 @@
 import { readFileSync } from 'node:fs'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createRenderer, h, nextTick } from 'vue'
+import FundDetailV8Panel from './FundDetailV8Panel.vue'
+import { clearOwnerSession, loginOwnerSession } from '@/stores/ownerSession'
+const SYNTHETIC_TOKEN = 'own_' + 'a'.repeat(43)
 import type {
   V8DecisionResult,
   V8EvidenceSnapshot,
@@ -84,6 +88,114 @@ function decisionResult(overrides: Record<string, unknown> = {}): V8DecisionResu
     ...overrides,
   } as unknown as V8DecisionResult
 }
+
+interface HostNode { type: string; text: string; children: HostNode[]; parent: HostNode | null }
+function hostNode(type = 'root', text = ''): HostNode { return { type, text, children: [], parent: null } }
+const renderer = createRenderer<HostNode, HostNode>({
+  createElement: type => hostNode(type),
+  createText: text => hostNode('text', text),
+  createComment: text => hostNode('comment', text),
+  setText: (node, text) => { node.text = text },
+  setElementText: (node, text) => { node.text = text; node.children = [] },
+  patchProp: () => {},
+  insert(node, parent, anchor = null) {
+    if (node.parent) {
+      const previous = node.parent.children.indexOf(node)
+      if (previous >= 0) node.parent.children.splice(previous, 1)
+    }
+    node.parent = parent
+    const before = anchor ? parent.children.indexOf(anchor) : -1
+    if (before < 0) parent.children.push(node)
+    else parent.children.splice(before, 0, node)
+  },
+  remove(node) {
+    if (node.parent) node.parent.children.splice(node.parent.children.indexOf(node), 1)
+    node.parent = null
+  },
+  parentNode: node => node.parent,
+  nextSibling: node => node.parent?.children[node.parent.children.indexOf(node) + 1] ?? null,
+})
+function renderedText(node: HostNode): string {
+  return (node.type === 'comment' ? '' : node.text) + node.children.map(renderedText).join(' ')
+}
+async function settleVueRequests() {
+  for (let index = 0; index < 20; index++) await Promise.resolve()
+  await nextTick()
+}
+function mountedPrivateFixture(): V8DecisionResult {
+  const value = decisionResult({ summary: '合成私人快照，退出后必须隐藏' })
+  value.decision = {
+    ...value.decision,
+    schema_version: 'v8-decision-1', decision_id: `dec_${'2'.repeat(64)}`,
+    evidence_id: value.evidence.evidence_id, fund_code: value.code,
+    holding_version: 'synthetic-holding', policy_version: 'synthetic-policy', strategy_version: 'synthetic-strategy',
+    user_state: 'held', summary: value.summary, reason_codes: [], reasons: [], risks: [],
+    invalidation_codes: [], invalidation_conditions: [], evidence_nodes: [], created_at: value.evidence.created_at,
+  }
+  value.diff = {
+    previous_decision_id: null, current_decision_id: value.decision.decision_id,
+    previous_action: null, current_action: 'reduce', changed: false,
+    drivers: [], driver_codes: [], unchanged: [],
+  }
+  return value
+}
+
+afterEach(() => {
+  clearOwnerSession()
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+})
+
+describe('mounted detail private-session consumer', () => {
+  it('removes already-rendered private snapshots immediately after session clearing', async () => {
+    const fixture = mountedPrivateFixture()
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => Promise.resolve({
+      ok: true, status: 200,
+      json: async () => url.endsWith('/owner/session') ? {
+        access_token: SYNTHETIC_TOKEN, token_type: 'Bearer', owner_id: 'owner',
+        expires_at: new Date(Date.now() + 30 * 60_000).toISOString(),
+        scopes: ['read_private', 'write_holdings', 'run_personal_analysis'],
+      } : url.endsWith('/outcomes') ? { fund_code: '018147', total: 0, items: [] } : fixture,
+    })))
+    await loginOwnerSession('synthetic-password')
+    const root = hostNode()
+    const app = renderer.createApp({ render: () => h(FundDetailV8Panel, { code: '018147' }) })
+    app.mount(root)
+    await settleVueRequests()
+    expect(renderedText(root)).toContain(fixture.summary)
+    clearOwnerSession()
+    await nextTick()
+    expect(renderedText(root)).not.toContain(fixture.summary)
+    expect(renderedText(root)).toContain('私人决策快照不对匿名请求公开')
+    app.unmount()
+  })
+
+  it('never renders late private replies after the session was cleared', async () => {
+    const lateReplies: Array<() => void> = []
+    const fixture = mountedPrivateFixture()
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => {
+      if (url.endsWith('/owner/session')) return Promise.resolve({ ok: true, status: 200, json: async () => ({
+        access_token: SYNTHETIC_TOKEN, token_type: 'Bearer', owner_id: 'owner',
+        expires_at: new Date(Date.now() + 30 * 60_000).toISOString(),
+        scopes: ['read_private', 'write_holdings', 'run_personal_analysis'],
+      }) })
+      return new Promise(resolve => { lateReplies.push(() => resolve({
+        ok: true, status: 200,
+        json: async () => url.endsWith('/outcomes') ? { fund_code: '018147', total: 0, items: [] } : fixture,
+      })) })
+    }))
+    await loginOwnerSession('synthetic-password')
+    const root = hostNode()
+    const app = renderer.createApp({ render: () => h(FundDetailV8Panel, { code: '018147' }) })
+    app.mount(root)
+    clearOwnerSession()
+    lateReplies.forEach(finish => finish())
+    await settleVueRequests()
+    expect(renderedText(root)).not.toContain(fixture.summary)
+    expect(renderedText(root)).toContain('私人决策快照不对匿名请求公开')
+    app.unmount()
+  })
+})
 
 describe('FundDetail V8 presenter', () => {
   it('keeps null distinct from a real zero', () => {
