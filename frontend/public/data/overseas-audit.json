@@ -15,8 +15,8 @@
     "prediction_expected": false,
     "effective_predictions_for_observation": 0,
     "legacy_misaligned": 17,
-    "prediction_effective_age_hours": 48.6,
-    "settlement_effective_age_hours": 24.9
+    "prediction_effective_age_hours": 71.9,
+    "settlement_effective_age_hours": 48.2
   },
-  "updated_at": "2026-10-01T21:50:39+08:00"
+  "updated_at": "2026-10-02T21:10:17+08:00"
 }
