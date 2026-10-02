@@ -1,4 +1,5 @@
 """Offline-only schema8 snapshots and failure injection; no cloud evidence."""
+import ast
 import importlib.util
 from io import StringIO
 import json
@@ -6,6 +7,8 @@ import os
 from pathlib import Path
 import socket
 import sqlite3
+import subprocess
+import sys
 
 import pytest
 
@@ -68,6 +71,323 @@ def cli_module():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+OPERATIONAL_COMBINATIONS = (
+    (), ("turso_candidate_probe_v1",), ("universe_import_state",),
+    ("turso_candidate_probe_v1", "universe_import_state"),
+)
+
+
+def repository_operational_statement(name):
+    # Read the trusted producer definitions as data, never import/run a producer
+    # or execute a SQLite input's sqlite_master SQL. This catches copy drift in
+    # the rehearsal's fixed DDL rather than using the same constant twice.
+    source, _ = upgrade._OPERATIONAL_DEFINITIONS[name]
+    project = Path(__file__).resolve().parents[2]
+    parsed = ast.parse((project / source).read_text(encoding="utf-8"))
+    producer = "write_probe" if name == "turso_candidate_probe_v1" else "import_universe_artifact"
+    function = next(node for node in parsed.body if isinstance(node, ast.FunctionDef) and node.name == producer)
+    matches = []
+    for node in ast.walk(function):
+        if not isinstance(node, ast.Call) or not node.args or not isinstance(node.func, ast.Attribute) or node.func.attr != "execute":
+            continue
+        literal = node.args[0]
+        if isinstance(literal, ast.Constant) and isinstance(literal.value, str):
+            sql = literal.value
+        elif isinstance(literal, ast.JoinedStr):
+            parts = []
+            for part in literal.values:
+                if isinstance(part, ast.Constant) and isinstance(part.value, str):
+                    parts.append(part.value)
+                elif (isinstance(part, ast.FormattedValue) and isinstance(part.value, ast.Name)
+                      and part.value.id == "PROBE_TABLE" and part.conversion == -1 and part.format_spec is None):
+                    parts.append("turso_candidate_probe_v1")
+                else:
+                    parts = []
+                    break
+            sql = "".join(parts)
+        else:
+            continue
+        if reformat_ddl(sql).startswith("CREATE TABLE IF NOT EXISTS " + name + " ("):
+            matches.append(sql)
+    assert len(matches) == 1
+    return matches[0]
+
+
+def reformat_ddl(sql):
+    return turso_schema._normalize_ddl(sql)
+
+
+def install_operational_tables(path, names):
+    with sqlite3.connect(path) as conn:
+        for name in names:
+            conn.execute(repository_operational_statement(name))
+        if "turso_candidate_probe_v1" in names:
+            # TEXT affinity can legally retain BLOB values. Capture the actual
+            # stored types instead of normalizing or judging receipt contents.
+            conn.executemany(
+                "INSERT INTO turso_candidate_probe_v1(rowid,nonce_sha256,marker_sha256,created_at) VALUES(?,?,?,?)",
+                [(-5, "1" * 64, sqlite3.Binary(b"\x00\xffprivate-probe-marker"), ""),
+                 (17, sqlite3.Binary(b"private-nonce-blob"), "0", sqlite3.Binary(b"\x01\x00")),
+                 (91, "2" * 64, "private-operational-value", "2026-09-01T00:00:00+00:00")],
+            )
+        if "universe_import_state" in names:
+            conn.execute("INSERT INTO universe_import_state VALUES(1,?,0,?)",
+                         (sqlite3.Binary(b"private-universe-digest"), ""))
+
+
+def operational_rows(conn, names):
+    result = {name: [tuple(row) for row in conn.execute(f'SELECT rowid,* FROM "{name}" ORDER BY rowid')]
+              for name in names}
+    result["sqlite_sequence"] = [tuple(row) for row in conn.execute("SELECT rowid,name,seq FROM sqlite_sequence ORDER BY rowid")]
+    return result
+
+
+@pytest.mark.parametrize("kind", ["local-header", "remote-schema-table"])
+@pytest.mark.parametrize("names", OPERATIONAL_COMBINATIONS)
+def test_explicit_operational_profile_preserves_all_rows_types_rowids_and_restore(snapshot, monkeypatch, kind, names):
+    path, _ = remote_snapshot(snapshot) if kind == "remote-schema-table" else snapshot
+    install_operational_tables(path, names)
+    before = path.read_bytes()
+    with sqlite3.connect(path) as conn:
+        expected = operational_rows(conn, names)
+        objects_before = upgrade._objects(conn)
+    original = upgrade._scope_upgrade
+    captured = []
+    def observed(conn, source_kind, budget):
+        captured.append(operational_rows(conn, names))
+        original(conn, source_kind, budget)
+        captured.append(operational_rows(conn, names))
+    monkeypatch.setattr(upgrade, "_scope_upgrade", observed)
+    plan = upgrade.rehearse_snapshot(path, source_kind=kind, restore=False,
+                                    operational_profile="known-operational-v1")
+    result = upgrade.rehearse_snapshot(path, source_kind=kind, operational_profile="known-operational-v1",
+                                      expected_plan_sha256=plan["plan_sha256"],
+                                      expected_backup_sha256=plan["logical_backup_sha256"])
+    assert captured and all(rows == expected for rows in captured)
+    assert result["operational_profile"] == "known-operational-v1"
+    assert result["operational_definitions_sha256"] == upgrade._operational_definitions_digest()
+    assert result["source_contract_sha256"] == upgrade._contract_digest(objects_before)
+    assert result["source_rows_sha256"] == plan["source_rows_sha256"]
+    assert result["target_rows_sha256"] == plan["target_rows_sha256"]
+    assert result["table_count"] == sum(kind == "table" for kind, _ in objects_before)
+    assert result["local_logical_restore_verified"] and result["legacy_rows_unchanged"]
+    assert result["source_file_unchanged"] and not result["remote_applied"]
+    assert not result["remote_restore_verified"] and not result["formal_release_verified"]
+    assert path.read_bytes() == before
+    emitted = json.dumps(result)
+    assert all(value not in emitted for value in (str(path), "private-probe", "private-universe", "private-operational"))
+
+
+@pytest.mark.parametrize("names", OPERATIONAL_COMBINATIONS[1:])
+def test_default_core_profile_does_not_silently_allow_operational_tables(snapshot, names):
+    path, _ = snapshot
+    install_operational_tables(path, names)
+    before = path.read_bytes()
+    with pytest.raises(upgrade.UpgradeError, match="source_schema_contract_mismatch"):
+        upgrade.rehearse_snapshot(path, source_kind="local-header")
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("name", sorted(upgrade._OPERATIONAL_DEFINITIONS))
+def test_operational_contract_matches_its_current_repository_producer(name):
+    actual = sqlite3.connect(":memory:")
+    reference = sqlite3.connect(":memory:")
+    try:
+        actual.execute(repository_operational_statement(name))
+        reference.execute(upgrade._OPERATIONAL_DEFINITIONS[name][1])
+        assert upgrade._contract_digest(upgrade._objects(actual)) == upgrade._contract_digest(upgrade._objects(reference))
+        assert list(actual.execute(f'PRAGMA table_info("{name}")')) == list(reference.execute(f'PRAGMA table_info("{name}")'))
+    finally:
+        actual.close()
+        reference.close()
+
+
+@pytest.mark.parametrize("name,old,new", [
+    ("turso_candidate_probe_v1", "PRIMARY KEY NOT NULL", "PRIMARY KEY"),
+    ("turso_candidate_probe_v1", "marker_sha256 TEXT NOT NULL", "marker_sha256 BLOB NOT NULL"),
+    ("turso_candidate_probe_v1", "created_at TEXT NOT NULL", "created_at TEXT"),
+    ("universe_import_state", "CHECK(singleton_id = 1)", "CHECK(singleton_id = 2)"),
+    ("universe_import_state", "CHECK(fund_count >= 0)", "CHECK(fund_count >= -1)"),
+    ("universe_import_state", "sha256 TEXT NOT NULL", "sha256 TEXT"),
+])
+def test_known_operational_name_does_not_allow_changed_ddl(snapshot, name, old, new):
+    path, _ = snapshot
+    sql = repository_operational_statement(name)
+    assert old in sql
+    with sqlite3.connect(path) as conn:
+        conn.execute(sql.replace(old, new))
+    before = path.read_bytes()
+    with pytest.raises(upgrade.UpgradeError, match="source_schema_contract_mismatch"):
+        upgrade.rehearse_snapshot(path, source_kind="local-header", operational_profile="known-operational-v1")
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("sql", [
+    "CREATE TABLE turso_candidate_probe_v2(secret TEXT)",
+    "CREATE TABLE turso_candidate_probe_v1_backup(secret TEXT)",
+    "CREATE TABLE universe_import_state_backup(secret TEXT)",
+    "CREATE TABLE private_operational_extra(secret TEXT)",
+    "CREATE INDEX private_extra_probe_index ON turso_candidate_probe_v1(marker_sha256)",
+    "CREATE TRIGGER private_probe_trigger AFTER INSERT ON turso_candidate_probe_v1 BEGIN SELECT 1; END",
+    "CREATE VIEW private_operational_view AS SELECT * FROM universe_import_state",
+    "ALTER TABLE universe_import_state ADD COLUMN private_extra TEXT",
+])
+def test_operational_profile_still_rejects_every_other_object(snapshot, sql):
+    path, _ = snapshot
+    install_operational_tables(path, OPERATIONAL_COMBINATIONS[-1])
+    with sqlite3.connect(path) as conn:
+        conn.execute(sql)
+    before = path.read_bytes()
+    with pytest.raises(upgrade.UpgradeError, match="source_schema_contract_mismatch"):
+        upgrade.rehearse_snapshot(path, source_kind="local-header", operational_profile="known-operational-v1")
+    assert path.read_bytes() == before
+
+
+def test_operational_profile_retains_optimizer_statistics(snapshot):
+    path, _ = snapshot
+    install_operational_tables(path, OPERATIONAL_COMBINATIONS[-1])
+    with sqlite3.connect(path) as conn:
+        conn.execute("ANALYZE")
+    before = path.read_bytes()
+    result = upgrade.rehearse_snapshot(path, source_kind="local-header", operational_profile="known-operational-v1")
+    assert result["local_logical_restore_verified"] and result["legacy_rows_unchanged"]
+    assert path.read_bytes() == before
+
+
+def test_profile_is_bound_even_when_no_operational_tables_are_present(snapshot):
+    path, _ = snapshot
+    core = upgrade.rehearse_snapshot(path, source_kind="local-header", restore=False)
+    operational = upgrade.rehearse_snapshot(path, source_kind="local-header", restore=False,
+                                           operational_profile="known-operational-v1")
+    assert core["operational_profile"] == "core-only"
+    assert core["source_contract_sha256"] == operational["source_contract_sha256"]
+    assert core["plan_sha256"] != operational["plan_sha256"]
+    with pytest.raises(upgrade.UpgradeError, match="plan_binding_mismatch"):
+        upgrade.rehearse_snapshot(path, source_kind="local-header", operational_profile="known-operational-v1",
+                                 expected_plan_sha256=core["plan_sha256"])
+
+
+def test_old_plan_without_profile_and_definition_binding_is_rejected(snapshot):
+    path, _ = snapshot
+    plan = upgrade.rehearse_snapshot(path, source_kind="local-header", restore=False)
+    old_keys = ("source_kind", "source_file_sha256", "source_contract_sha256", "source_rows_sha256",
+                "logical_backup_sha256", "target_contract_sha256", "target_rows_sha256", "code_sha256")
+    old_digest = upgrade._digest(upgrade._json_bytes({key: plan[key] for key in old_keys}))
+    with pytest.raises(upgrade.UpgradeError, match="plan_binding_mismatch"):
+        upgrade.rehearse_snapshot(path, source_kind="local-header", expected_plan_sha256=old_digest)
+
+
+@pytest.mark.parametrize("source", ["backend/service/repo.py", "tools/turso_candidate.py"])
+def test_producer_code_is_bound_without_importing_or_modifying_it(snapshot, monkeypatch, source):
+    path, _ = snapshot
+    plan = upgrade.rehearse_snapshot(path, source_kind="local-header", restore=False)
+    project = Path(__file__).resolve().parents[2]
+    selected = project / source
+    original = Path.read_bytes
+    reads = []
+    def altered_bytes(value):
+        reads.append(value)
+        data = original(value)
+        return data + b"\n# synthetic source drift\n" if value == selected else data
+    monkeypatch.setattr(Path, "read_bytes", altered_bytes)
+    assert upgrade._code_digest() != plan["code_sha256"]
+    assert upgrade._operational_definitions_digest() != plan["operational_definitions_sha256"]
+    with pytest.raises(upgrade.UpgradeError, match="plan_binding_mismatch"):
+        upgrade.rehearse_snapshot(path, source_kind="local-header", expected_plan_sha256=plan["plan_sha256"])
+    assert selected in reads
+
+
+def test_operational_data_drift_invalidates_plan(snapshot):
+    path, _ = snapshot
+    install_operational_tables(path, OPERATIONAL_COMBINATIONS[-1])
+    plan = upgrade.rehearse_snapshot(path, source_kind="local-header", restore=False,
+                                    operational_profile="known-operational-v1")
+    with sqlite3.connect(path) as conn:
+        conn.execute("UPDATE universe_import_state SET sha256=?", ("changed-private-universe",))
+    with pytest.raises(upgrade.UpgradeError, match="plan_binding_mismatch"):
+        upgrade.rehearse_snapshot(path, source_kind="local-header", operational_profile="known-operational-v1",
+                                 expected_plan_sha256=plan["plan_sha256"])
+
+
+@pytest.mark.parametrize("tamper", ["rowid", "type", "payload"])
+def test_operational_backup_restore_drift_never_certifies(snapshot, monkeypatch, tamper):
+    path, _ = snapshot
+    install_operational_tables(path, OPERATIONAL_COMBINATIONS[-1])
+    before = path.read_bytes()
+    original = upgrade._restore_image
+    def corrupt(image, expected, budget):
+        conn = original(image, expected, budget)
+        if tamper == "rowid":
+            conn.execute("UPDATE turso_candidate_probe_v1 SET rowid=999 WHERE rowid=91")
+        elif tamper == "type":
+            conn.execute("UPDATE turso_candidate_probe_v1 SET marker_sha256=? WHERE rowid=17", (sqlite3.Binary(b"0"),))
+        else:
+            conn.execute("UPDATE universe_import_state SET sha256='changed-private-payload'")
+        conn.commit()
+        return conn
+    monkeypatch.setattr(upgrade, "_restore_image", corrupt)
+    with pytest.raises(upgrade.UpgradeError, match="restored_source_mismatch"):
+        upgrade.rehearse_snapshot(path, source_kind="local-header", operational_profile="known-operational-v1")
+    assert path.read_bytes() == before
+
+
+def test_operational_restore_target_drift_never_certifies(snapshot, monkeypatch):
+    path, _ = snapshot
+    install_operational_tables(path, OPERATIONAL_COMBINATIONS[-1])
+    before = path.read_bytes()
+    original = upgrade._scope_upgrade
+    calls = 0
+    def drift(conn, source_kind, budget):
+        nonlocal calls
+        calls += 1
+        original(conn, source_kind, budget)
+        if calls == 2:
+            conn.execute("UPDATE turso_candidate_probe_v1 SET rowid=123 WHERE rowid=91")
+            conn.commit()
+    monkeypatch.setattr(upgrade, "_scope_upgrade", drift)
+    with pytest.raises(upgrade.UpgradeError, match="restored_target_mismatch"):
+        upgrade.rehearse_snapshot(path, source_kind="local-header", operational_profile="known-operational-v1")
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("value", [None, True, "known-operational-v2", "turso_candidate_probe"])
+def test_invalid_operational_profile_fails_closed(snapshot, value):
+    path, _ = snapshot
+    with pytest.raises(upgrade.UpgradeError, match="invalid_arguments"):
+        upgrade.rehearse_snapshot(path, source_kind="local-header", operational_profile=value)
+
+
+def test_real_cli_operational_plan_and_rehearsal_bind_without_credentials(snapshot, tmp_path):
+    path, _ = remote_snapshot(snapshot)
+    install_operational_tables(path, OPERATIONAL_COMBINATIONS[-1])
+    before = path.read_bytes()
+    script = Path(__file__).resolve().parents[2] / "tools/turso_scope_upgrade.py"
+    env = {"PYTHONUTF8": "1", "PYTHONDONTWRITEBYTECODE": "1", "FUND_DB_BACKEND": "sqlite",
+           "FUND_DB": str(tmp_path / "unused-configured.db"), "FUND_DB_PERSISTENCE": "ephemeral"}
+    if sys.platform == "win32":
+        env["SystemRoot"] = os.environ.get("SystemRoot", "C:\\Windows")
+    def run(command, *extra):
+        return subprocess.run([sys.executable, str(script), command, "--source", str(path),
+                               "--source-kind", "remote-schema-table", *extra], env=env,
+                              capture_output=True, text=True, encoding="utf-8", timeout=30)
+    refused = run("plan")
+    assert refused.returncode == 1 and json.loads(refused.stderr)["error"] == "source_schema_contract_mismatch"
+    planned = run("plan", "--operational-profile", "known-operational-v1")
+    assert planned.returncode == 0 and not planned.stderr
+    plan = json.loads(planned.stdout)
+    restored = run("rehearse", "--operational-profile", "known-operational-v1",
+                   "--expected-plan-sha256", plan["plan_sha256"],
+                   "--expected-backup-sha256", plan["logical_backup_sha256"])
+    assert restored.returncode == 0 and not restored.stderr
+    result = json.loads(restored.stdout)
+    assert result["plan_sha256"] == plan["plan_sha256"] and result["operational_profile"] == "known-operational-v1"
+    assert result["local_logical_restore_verified"] and not result["remote_applied"]
+    assert not result["formal_release_verified"] and not result["remote_restore_verified"]
+    assert path.read_bytes() == before and not (tmp_path / "unused-configured.db").exists()
+    assert all(value not in planned.stdout + restored.stdout + refused.stderr for value in
+               (str(path), "private-probe", "private-universe", "private-operational", "TURSO_AUTH_TOKEN"))
 
 
 @pytest.mark.parametrize("kind", ["local-header", "remote-schema-table"])
@@ -361,8 +681,11 @@ def test_live_wal_sidecar_is_rejected(snapshot):
         upgrade.rehearse_snapshot(path, source_kind="local-header")
 
 
-def test_offline_cli_never_opens_network_or_reads_credential_environment(snapshot, monkeypatch):
+@pytest.mark.parametrize("operational", [False, True])
+def test_offline_cli_never_opens_network_or_reads_credential_environment(snapshot, monkeypatch, operational):
     path, _ = snapshot
+    if operational:
+        install_operational_tables(path, OPERATIONAL_COMBINATIONS[-1])
     def network_forbidden(*args, **kwargs):
         pytest.fail("offline rehearsal must not use network")
     monkeypatch.setattr(socket, "create_connection", network_forbidden)
@@ -376,14 +699,19 @@ def test_offline_cli_never_opens_network_or_reads_credential_environment(snapsho
         return original_get(environ, key, default)
     monkeypatch.setattr(os._Environ, "get", safe_get)
     stdout, stderr = StringIO(), StringIO()
-    assert cli_module().main(["rehearse", "--source", str(path), "--source-kind", "local-header"],
+    argv = ["rehearse", "--source", str(path), "--source-kind", "local-header"]
+    if operational:
+        argv.extend(["--operational-profile", "known-operational-v1"])
+    assert cli_module().main(argv,
                              stdout=stdout, stderr=stderr) == 0
     result = json.loads(stdout.getvalue())
     assert result["local_logical_restore_verified"] is True and stderr.getvalue() == ""
 
 
 @pytest.mark.parametrize("argv", [["apply", "--source", "private-path"], ["plan"],
-                                  ["plan", "--source", "private-path", "--source-kind", "private-secret-kind"]])
+                                  ["plan", "--source", "private-path", "--source-kind", "private-secret-kind"],
+                                  ["plan", "--source", "private-path", "--source-kind", "local-header",
+                                   "--operational-profile", "private-secret-profile"]])
 def test_cli_has_no_apply_and_argument_errors_are_redacted(argv):
     stdout, stderr = StringIO(), StringIO()
     assert cli_module().main(argv, stdout=stdout, stderr=stderr) == 2

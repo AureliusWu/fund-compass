@@ -86,6 +86,20 @@ AI POST 使用共享 deadline，fetch、流式 body 与解析总计 30 秒，流
 
 这些是本地输入和隐私保护，不代表 I19-02 多设备同步、I19-03 迁移、I19-04 新版本生成或 I19-05 全引用链门禁已完成。
 
+### I19-02 本地候选同步底座
+
+严格同步入口只接受原始 JSON 文本/字节，最多 128 KiB、8 层、200 项操作，整数限制在 JavaScript 安全范围。账户采用相同的 trim 与 UTF-16 长度规则；稳定 key、字段 allowlist、kind、null/零与有限金额分别校验，不接受解析后模型或任意 dict 绕过。幂等摘要保留原始数值 token（`1` 与 `1.0` 不同请求），业务字段比较则允许有限 `1` 与 `1.0` 相等，避免浏览器 JSON 往返误冲突；布尔、null 与零不混同。
+
+独立 `owner-sync-schema-1` 五张扩展表只允许显式本地 SQLite 候选初始化，不加入应用自动启动，也不接入 Turso。验证固定核心 schema 9、扩展 DDL、内部索引和 sequence，拒绝额外对象/附加库/temp 对象；schema 对象最多 128 个、单项 DDL 最多 16 KiB，超限在 SQL 传输前拒绝。它不是生产初始化或远端迁移证据。
+
+当前状态、字段 revision、生命周期、追加 changes 与幂等 receipt 在同一事务中提交。不同字段可合并，A→B→A 仍依据字段 revision 拒绝旧基线；旧设备不能复活 tombstone。账户更名的旧 key 删除与新 key 创建可同批原子提交，目标碰撞拒绝整批。无变化不递增 revision；确定的 409 与成功响应均精确重放。提交异常视为结果未知，不自动重试或补偿删除，只读查询匹配 receipt；absent/unavailable 不证明回滚。
+
+changes 以固定 upper revision 和 `(revision,key)` 游标读取同一事务快照，分页最多 200 项；并发新写不会混进旧分页。当前记录与最新 change 快照/头部进行完整性核验，但不宣称防止任意直接 SQL 篡改。
+
+候选 HTTP router 仅由测试显式挂载，尚未加入 `main.py`，前端 Store 尚未接入。写入需 Owner/write_holdings 和独立 `X-Owner-Sync-Consent: owner-sync-v1`，读取需 Owner/read_private，机器凭据不能替代；请求体最长 5 秒，鉴权和限频在读 body 前，body 后、事务前、commit 前及私有响应前重新核验摘要会话。撤销阻止尚未提交的写入和迟到私人响应，不能撤销已接受的提交。所有候选响应固定脱敏且 no-store，不保存原始 Bearer。
+
+本节仅覆盖本地候选事务/HTTP 故障模型。真实云同步启用、Turso CAS/事务适配、远端独立恢复、多设备 UI、Holding/Policy/Decision 新版本链及正式证据仍未完成，不关闭整个 I19-02 或存储发布出口。
+
 ## 本轮验收
 
 - 会话合同与真实路由响应匹配，机器写权限未扩张。

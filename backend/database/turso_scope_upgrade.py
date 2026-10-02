@@ -23,6 +23,27 @@ from service import repository_scopes as scopes
 
 
 SOURCE_KINDS = frozenset({"remote-schema-table", "local-header"})
+OPERATIONAL_PROFILES = frozenset({"core-only", "known-operational-v1"})
+# These optional contracts are copied from the two repository-owned producers,
+# not from input sqlite_master SQL. Selecting the profile permits only the
+# exact tables that are present; it does not permit a prefix or arbitrary DDL.
+_OPERATIONAL_DEFINITIONS = {
+    "turso_candidate_probe_v1": ("tools/turso_candidate.py", """
+        CREATE TABLE IF NOT EXISTS turso_candidate_probe_v1 (
+            nonce_sha256 TEXT PRIMARY KEY NOT NULL,
+            marker_sha256 TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """),
+    "universe_import_state": ("backend/service/repo.py", """
+        CREATE TABLE IF NOT EXISTS universe_import_state (
+            singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
+            sha256 TEXT NOT NULL,
+            fund_count INTEGER NOT NULL CHECK(fund_count >= 0),
+            imported_at TEXT NOT NULL
+        )
+    """),
+}
 EVIDENCE_SCOPE = "local_turso_schema_migration_rehearsal"
 MAX_FILE_BYTES = 64 * 1024 * 1024
 MAX_CELL_BYTES = 256 * 1024
@@ -125,13 +146,18 @@ def _new_memory(budget: _Budget) -> sqlite3.Connection:
     return conn
 
 
-def _source_reference(source_kind: str, budget: _Budget, *, optimizer_statistics: bool = False):
+def _source_reference(source_kind: str, budget: _Budget, *, optimizer_statistics: bool = False,
+                      operational_objects: frozenset[str] = frozenset()):
+    if not operational_objects <= _OPERATIONAL_DEFINITIONS.keys():
+        raise UpgradeError("invalid_arguments")
     conn = _new_memory(budget)
     try:
         for statement in _fixed_contract_statements():
             conn.execute(statement)
         if source_kind == "remote-schema-table":
             conn.execute(turso_schema.VERSION_DDL)
+        for name in sorted(operational_objects):
+            conn.execute(_OPERATIONAL_DEFINITIONS[name][1])
         # SQLite's own fixed internal statistics table is optional. Never run
         # input SQL to create it, and never treat arbitrary sqlite_* as allowed.
         if optimizer_statistics:
@@ -367,11 +393,23 @@ def _code_digest():
     project = Path(__file__).resolve().parents[2]
     relative = ("backend/database/turso_scope_upgrade.py", "tools/turso_scope_upgrade.py",
                 "backend/database/db.py", "backend/database/turso_schema.py",
-                "backend/service/repository_scopes.py", "backend/service/v8_repo.py", "backend/models/v8.py")
+                "backend/service/repository_scopes.py", "backend/service/v8_repo.py", "backend/models/v8.py",
+                "backend/service/repo.py", "tools/turso_candidate.py")
     return _digest(_json_bytes([[name, _digest((project / name).read_bytes())] for name in relative]))
 
 
+def _operational_definitions_digest():
+    # Bind the fixed contracts to their producer files without importing or
+    # running either producer (which could read credentials or write a probe).
+    project = Path(__file__).resolve().parents[2]
+    return _digest(_json_bytes([
+        [name, source, turso_schema._normalize_ddl(ddl), _digest((project / source).read_bytes())]
+        for name, (source, ddl) in sorted(_OPERATIONAL_DEFINITIONS.items())
+    ]))
+
+
 def rehearse_snapshot(source, *, source_kind: str, restore: bool = True,
+                      operational_profile: str = "core-only",
                       expected_plan_sha256: str | None = None,
                       expected_backup_sha256: str | None = None) -> dict:
     """Read a closed local snapshot and optionally restore the private memory image.
@@ -380,7 +418,8 @@ def rehearse_snapshot(source, *, source_kind: str, restore: bool = True,
     changed source, code, contract or backup on a later invocation. No apply
     entry point exists; neither this function nor plan mode mutates its input.
     """
-    if type(source_kind) is not str or source_kind not in SOURCE_KINDS or type(restore) is not bool:
+    if (type(source_kind) is not str or source_kind not in SOURCE_KINDS or type(restore) is not bool
+            or type(operational_profile) is not str or operational_profile not in OPERATIONAL_PROFILES):
         raise UpgradeError("invalid_arguments")
     for expected in (expected_plan_sha256, expected_backup_sha256):
         if expected is not None and (type(expected) is not str or not _DIGEST.fullmatch(expected)):
@@ -390,6 +429,7 @@ def rehearse_snapshot(source, *, source_kind: str, restore: bool = True,
     try:
         path, file_digest = _source_path(source, budget)
         code_digest = _code_digest()
+        operational_definitions_digest = _operational_definitions_digest()
         source_conn = sqlite3.connect(path.as_uri() + "?mode=ro&immutable=1", uri=True)
         opened.append(source_conn)
         source_conn.row_factory = sqlite3.Row
@@ -397,8 +437,12 @@ def rehearse_snapshot(source, *, source_kind: str, restore: bool = True,
         source_conn.execute("PRAGMA trusted_schema=OFF")
         source_conn.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, MAX_CELL_BYTES)
         source_conn.set_progress_handler(budget.progress, 1000)
+        source_objects = _objects(source_conn)
+        optional_tables = frozenset(name for name in _OPERATIONAL_DEFINITIONS
+                                    if ("table", name) in source_objects) if operational_profile == "known-operational-v1" else frozenset()
         reference = _source_reference(source_kind, budget,
-                                      optimizer_statistics=("table", "sqlite_stat1") in _objects(source_conn))
+                                      optimizer_statistics=("table", "sqlite_stat1") in source_objects,
+                                      operational_objects=optional_tables)
         opened.append(reference)
         expected_objects = _objects(reference)
         header_version = source_conn.execute("PRAGMA user_version").fetchone()[0]
@@ -434,6 +478,8 @@ def rehearse_snapshot(source, *, source_kind: str, restore: bool = True,
             raise UpgradeError("legacy_rows_changed")
         binding = {
             "source_kind": source_kind, "source_file_sha256": file_digest,
+            "operational_profile": operational_profile,
+            "operational_definitions_sha256": operational_definitions_digest,
             "source_contract_sha256": _contract_digest(expected_objects),
             "source_rows_sha256": source_rows_digest, "logical_backup_sha256": backup_digest,
             "target_contract_sha256": _contract_digest(_objects(reference)),

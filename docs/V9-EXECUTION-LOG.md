@@ -379,3 +379,33 @@ Git diff-check 通过，仅 CRLF 提示；45 个有限改动路径的常见秘�
 I19-02 已完成只读设计复审：同步模型、独立 `owner-sync-schema-1` 扩展、当前状态/changes/幂等 receipt 同事务；字段 revision 防止 A→B→A 绕过，墓碑生命周期防止旧设备复活，原响应精确重放，提交结果未知仅查询 receipt。先实现隔离合成库中的仓储/失败测试，再接受限 Owner HTTP；不把新表加入自动启动迁移，也不扩张 Admin/Worker 权限。远端批次需真正 CAS 失败中止与提交协调，不能把本地事务称作远端验收。
 
 三端应用版本仍 8.0.0，schema 9 独立管理。整个 I19-01/02、I18 持久化出口、真实 Owner/设备/PWA、自然任务观察和正式 v9 发布未完成；工作项仍未勾选，正式发布 **BLOCKED**，总目标继续进行中。
+
+## 2026-10-02 · I19-02 候选事务与受限 HTTP
+
+前一批检查点为 `bacbec1a0540a40bb29d5f1a94fd9ca4fc2b934a`，已推独立 v9 分支；main 仍是 `5daddec42d599ce45cd88d72ad00e990c092aeaf`。本批继续不部署、不上传真实持仓、不更改平台/计费/凭据。
+
+### 实现与故障边界
+
+- 原始 JSON 同步模型固定字段、key、128 KiB/8 层/200 操作与 JS 安全整数，拒绝额外字段、重复键、类型转换和非有限值。幂等原文保留数值 token；有限业务数值 `1`/`1.0` 可相等，null/零/布尔仍分开。
+- 独立五表 `owner-sync-schema-1` 仅显式 SQLite 合成候选初始化，严格验证核心 schema 9 与所有对象。DDL 单项 16 KiB/对象 128 个有界读取，内部索引/sequence 缺损、未知对象、附加/temp schema 拒绝；没有加入自动启动或 Turso adapter。
+- 原子状态、字段/生命周期 revision、追加 changes 与幂等 receipt；不同字段可合并，同字段 ABA、kind 变化、删除/恢复生命周期及旧设备复活均有回归。账户更名可在同批删除旧 key/创建新 key，目标碰撞整批拒绝；无变化不增加 revision，确定 409 与成功精确重放。
+- 真实 SQLite 多连接/WAL 验证固定 upper 游标分页。提交前故障回滚；commit 已完成后抛错、连接 close 错误/丢失响应均为 unknown，不自动写重试或补偿删除；只读 receipt matched 可找回原结果，absent 不证明未提交。源记录与最新快照/头部完整性检查不等于防任意 SQL 篡改。
+- 测试显式挂载的 Owner HTTP router 支持同步/增量读取/receipt 核对，未加入 main 或前端。Owner 与 Admin/Worker/Private Read 角色继续分离；上传同意头独立于 Gist。body 前鉴权/限频、body 5 秒、事务/commit/私有响应前摘要会话复核、固定脱敏/no-store。退出前未提交写回滚，已提交后退出仅阻止私人响应，不伪造已撤销提交。
+- 离线 scope 升级的 `known-operational-v1` 显式 profile 精确保留候选已有两张辅助表（0/1/2 张组合）；未知对象和额外 trigger/index/view 仍拒绝。typed 行、rowid/sequence、独立内存恢复与计划绑定纳入验证，没有云 apply/export 能力。
+
+### 最终冻结验证
+
+| 门禁 | 结果 | 范围 |
+| --- | --- | --- |
+| Windows 后端全量 | **1576 passed / 137.28 秒**，exit 0 | Python 3.14.4；独占合成 DB/basetemp，子进程移除宿主凭据；62,763 条现有依赖弃用警告 |
+| Linux 后端全量 | **1576 passed / 134.46 秒**，exit 0 | Python 3.12.3 / Ubuntu 24.04；仅 PATH/LANG/合成 FUND_DB/禁用 pycache 四个环境键，1 条 Starlette/httpx 弃用警告；不是云 CI |
+| 独立只读仓储复审 | **64 passed / 5.08 秒**，exit 0 | kind ABA、删除/恢复/再删除额外验证拒绝旧请求且业务数据不变；无新 P0/P1 |
+| 离线升级专项 | **109 passed**，Windows 25.01 秒 / Linux 31.84 秒 | 本地显式 profile、备份/恢复与 CLI 合成故障，不是远端恢复 |
+
+Linux 全量一次通过；131 个后端/工具/合同/workflow 源文件前后 sorted flat `[path, rawSHA256]` 摘要为 `6eef4144dd9823fc2a4531f159e7cad805b0ca815e68af18d317a2651942a4e2`，无漂移。原 stdout 保留在工具输出；WSL `/tmp` 实体日志后续消失，不宣称有持久实体日志。首轮 HTTP 专项曾发现 JSON key 顺序导致原响应/重放字节不同，已修复为同一 canonical 响应再通过全量，不当作偶发或隐藏失败。
+
+本批未改前端/Worker，不冒充重跑其前批 657/PWA 和 144 项证据。有限改动路径秘密模式扫描零命中，diff-check 通过，仅 CRLF 提示；不称全仓安全审计。
+
+### 下一道门禁
+
+先推同一 feature 检查点，通过草稿 PR 运行既有三端标准 runner CI，PR 路径明确跳过 deploy/candidate_smoke/formal_smoke，不推 main。继续实现默认关闭的客户端 durable outbox/冲突/receipt 状态机，以及受控远端逻辑快照/原子前像/提交核对和独立恢复。应用版本仍 8.0.0；真实存储出口、云同步、多设备旅程和完整引用链未完成，不能发布 v9.0.0。

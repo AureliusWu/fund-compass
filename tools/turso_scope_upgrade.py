@@ -3,6 +3,8 @@
 The input must be a closed SQLite logical snapshot. A remote-schema-table
 snapshot is still a local file; this tool does not access Turso or credentials.
 Its local backup/recovery evidence cannot authorize a release or remote restore.
+Known operational tables require the explicit known-operational-v1 profile;
+the default core-only profile does not silently expand an existing plan.
 """
 from __future__ import annotations
 
@@ -26,6 +28,8 @@ def _parser():
     parser.add_argument("command", choices=("plan", "rehearse"))
     parser.add_argument("--source", required=True)
     parser.add_argument("--source-kind", required=True, choices=("remote-schema-table", "local-header"))
+    parser.add_argument("--operational-profile", default="core-only",
+                        choices=("core-only", "known-operational-v1"))
     parser.add_argument("--expected-plan-sha256")
     parser.add_argument("--expected-backup-sha256")
     return parser
@@ -54,6 +58,7 @@ def main(argv=None, *, stdout=None, stderr=None):
     try:
         result = rehearse_snapshot(args.source, source_kind=args.source_kind,
                                   restore=args.command == "rehearse",
+                                  operational_profile=args.operational_profile,
                                   expected_plan_sha256=args.expected_plan_sha256,
                                   expected_backup_sha256=args.expected_backup_sha256)
         print(json.dumps(result, sort_keys=True), file=stdout)

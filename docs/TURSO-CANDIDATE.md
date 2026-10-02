@@ -62,7 +62,9 @@ python tools/turso_scope_upgrade.py rehearse --source <closed-snapshot.db> --sou
 
 本地 header 版本 8 使用 `--source-kind local-header`，不自动猜测来源；输入必须是一致、关闭的 SQLite 快照，存在 WAL/SHM/journal、坏结构/JSON/引用链、漂移或超限时拒绝。工具只读输入，在私有内存执行仓库固定 DDL；验证 typed 行、ID/hash/投影/完整派生链，保留 payload、rowid 和序列，并将逻辑备份独立恢复、再次升级和仓储读回。计划绑定输入字节、逻辑行、代码、合同与备份摘要，不接受旧计划代替当前核验。
 
-输出 scope 固定 `local_turso_schema_migration_rehearsal`，`remote_applied=false`、`remote_restore_verified=false`、`formal_release_verified=false`。本次支持的离线合同仍严格拒绝额外用户对象，包括上述已核对的两张 operational 表；下一批必须按精确名称/固定 DDL 显式可选纳入并验证完整保留，不能以前缀或表数量豁免。当前工具没有 apply、远端导出、原子前像/receipt/reconcile、独立远端恢复或发布能力；不能直接对真实候选库执行升级。
+输出 scope 固定 `local_turso_schema_migration_rehearsal`，`remote_applied=false`、`remote_restore_verified=false`、`formal_release_verified=false`。默认 `core-only` 仍拒绝额外用户对象；显式 `--operational-profile known-operational-v1` 只接受上述两张固定辅助表的零张、一张或两张组合，并验证精确 DDL、完整 typed 行、rowid 和序列在备份/恢复中保留。profile 与辅助表生产者源码摘要纳入计划绑定；未知表、额外索引/触发器/视图和旧计划均拒绝，不使用前缀或表数量豁免。快照含这些表时，plan 与 rehearse 必须使用相同的显式 profile。
+
+当前工具没有 apply、远端导出、原子前像/receipt/reconcile、独立远端恢复或发布能力；不能直接对真实候选库执行升级。
 
 ## 合成标记写入与独立连接读回
 

@@ -112,6 +112,19 @@ class OwnerSession:
         }
 
 
+@dataclass(frozen=True, repr=False)
+class OwnerAuthorization:
+    """Internal revalidation handle; never contains a raw bearer or password.
+
+    Long-running Owner operations must revalidate after body reads and before
+    accepting a write. This is not a promise to cancel an already accepted
+    remote commit when a device subsequently logs out.
+    """
+
+    session: OwnerSession
+    token_fingerprint: bytes
+
+
 def _base64url(value: bytes) -> str:
     return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
 
@@ -230,17 +243,26 @@ def _limit_login(client: str) -> None:
         bucket.append(now)
 
 
-def authenticated_owner_session(token: str, *, required_scope: str | None = None) -> OwnerSession | None:
-    """Return a live owner identity only for a server-issued opaque bearer."""
+def authenticated_owner_authorization(
+    token: str, *, required_scope: str | None = None,
+) -> OwnerAuthorization | None:
+    """Capture a live, process-local handle without retaining its bearer."""
     with _state_lock:
         configuration = _configuration()
         _purge_sessions(configuration, time.monotonic())
         if not isinstance(token, str) or not _TOKEN_PATTERN.fullmatch(token) or _machine_credential(token):
             return None
-        session = _sessions.get(hashlib.sha256(token.encode("ascii")).digest())
+        fingerprint = hashlib.sha256(token.encode("ascii")).digest()
+        session = _sessions.get(fingerprint)
         if session is None or (required_scope is not None and required_scope not in session.scopes):
             return None
-        return session
+        return OwnerAuthorization(session=session, token_fingerprint=fingerprint)
+
+
+def authenticated_owner_session(token: str, *, required_scope: str | None = None) -> OwnerSession | None:
+    """Compatibility metadata lookup for existing private consumers."""
+    authorization = authenticated_owner_authorization(token, required_scope=required_scope)
+    return authorization.session if authorization is not None else None
 
 
 def _unauthorized() -> HTTPException:
@@ -249,6 +271,62 @@ def _unauthorized() -> HTTPException:
         detail="Owner 会话无效或已过期，请重新登录",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+
+def revalidate_owner_authorization(
+    authorization: OwnerAuthorization, *, required_scope: str | None = None,
+) -> OwnerSession:
+    """Fail closed on expiry, logout, restart, rotation or changed identity.
+
+    Identity comparison also rejects a replaced session/scopes object, rather
+    than trusting the stale metadata captured before an await or body read.
+    """
+    if required_scope is not None and required_scope not in OWNER_SCOPES:
+        raise ValueError("Unknown Owner scope")
+    with _state_lock:
+        _purge_sessions(_configuration(), time.monotonic())
+        if (type(authorization) is not OwnerAuthorization
+                or type(authorization.token_fingerprint) is not bytes
+                or len(authorization.token_fingerprint) != 32
+                or _sessions.get(authorization.token_fingerprint) is not authorization.session):
+            raise _unauthorized()
+        # A machine credential configured after capture must not retroactively
+        # turn the same bearer into two roles. Compare digests, not raw tokens.
+        if any(
+            configured and hmac.compare_digest(
+                authorization.token_fingerprint,
+                hashlib.sha256(configured.encode("utf-8")).digest(),
+            )
+            for name in ("ADMIN_TOKEN", "WORKER_TOKEN", "PRIVATE_READ_TOKEN")
+            if (configured := os.environ.get(name, ""))
+        ):
+            raise _unauthorized()
+        if required_scope is not None and required_scope not in authorization.session.scopes:
+            raise HTTPException(status_code=403, detail="Owner 会话无权执行此操作")
+        return authorization.session
+
+
+def require_owner_authorization(
+    credentials: HTTPAuthorizationCredentials | None = Security(_owner_bearer),
+) -> OwnerAuthorization:
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        raise _unauthorized()
+    authorization = authenticated_owner_authorization(credentials.credentials)
+    if authorization is None:
+        raise _unauthorized()
+    return authorization
+
+
+def require_owner_authorization_scope(scope: str):
+    """Owner-only long-operation dependency; never an Admin/Worker grant."""
+    if scope not in OWNER_SCOPES:
+        raise ValueError("Unknown Owner scope")
+
+    def scoped(authorization: OwnerAuthorization = Depends(require_owner_authorization)) -> OwnerAuthorization:
+        revalidate_owner_authorization(authorization, required_scope=scope)
+        return authorization
+
+    return scoped
 
 
 def require_owner_session(
