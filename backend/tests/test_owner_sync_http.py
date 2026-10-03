@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from database import turso_schema
 from database.owner_sync_schema import provision_owner_sync_candidate
+from models.owner_sync import parse_sync_request
 from service import owner_sessions as owners, owner_sync as http, owner_sync_repo as repo, security
 
 PASSWORD = "synthetic owner-sync HTTP password"
@@ -65,6 +66,12 @@ def request(request_id="http-test-0001", expected=0, *, value=0):
     }]}
 
 
+def receipt_headers(auth=None, payload=None):
+    original = request() if payload is None else payload
+    request_hash = parse_sync_request(json.dumps(original, ensure_ascii=False)).request_hash()
+    return {**(headers() if auth is None else auth), "X-Owner-Sync-Request-Hash": request_hash}
+
+
 def private(response):
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["pragma"] == "no-cache"
@@ -79,7 +86,7 @@ def test_success_replay_and_receipt_use_real_owner_sqlite_chain(client):
     assert first.json()["records"][0]["values"]["value"] == 0
     replay = client.post("/api/v2/owner/sync", headers=auth, json=request())
     assert (replay.status_code, replay.content) == (first.status_code, first.content)
-    receipt = client.get("/api/v2/owner/sync/requests/http-test-0001", headers=auth)
+    receipt = client.get("/api/v2/owner/sync/requests/http-test-0001", headers=receipt_headers(auth))
     assert receipt.status_code == 200
     assert receipt.json() == {"state": "matched", "status": 200, "result": first.json()}
     page = client.get("/api/v2/owner/sync", headers=auth)
@@ -96,6 +103,7 @@ def test_auth_precedes_body_and_connection(client, monkeypatch, credential):
         pytest.fail("untrusted credential reached body")
     monkeypatch.setattr(http, "_read_body", forbidden_body)
     auth = {"Authorization": "Bearer " + credential} if credential else {}
+    auth["X-Owner-Sync-Request-Hash"] = "0" * 64
     for path, method in (("/api/v2/owner/sync", client.post), ("/api/v2/owner/sync", client.get),
                          ("/api/v2/owner/sync/requests/http-test-0001", client.get)):
         response = method(path, headers=auth)
@@ -203,7 +211,7 @@ def test_logout_after_commit_does_not_deliver_private_success_or_undo_commit(cli
     with sqlite3.connect(database) as conn:
         assert conn.execute("SELECT revision FROM owner_sync_state").fetchone()[0] == 1
     # A new owner session may reconcile the accepted write across logout.
-    stored = client.get("/api/v2/owner/sync/requests/http-test-0001", headers=headers())
+    stored = client.get("/api/v2/owner/sync/requests/http-test-0001", headers=receipt_headers())
     assert stored.status_code == 200
     assert stored.json()["state"] == "matched"
 
@@ -314,10 +322,186 @@ def test_queries_reject_fixed_without_echoing_private_cursor(client, query):
 
 
 def test_receipt_absent_does_not_claim_definite_rollback(client):
-    response = client.get("/api/v2/owner/sync/requests/http-missing-001", headers=headers())
+    response = client.get("/api/v2/owner/sync/requests/http-missing-001", headers=receipt_headers(payload=request("http-missing-001")))
     assert response.status_code == 404
     assert response.json() == {"state": "unknown", "error": "sync_result_unknown"}
     private(response)
+
+
+def test_receipt_same_id_different_original_body_is_unknown_not_false_match(client):
+    auth = headers()
+    first = client.post("/api/v2/owner/sync", headers=auth, json=request())
+    assert first.status_code == 200
+    changed = client.post("/api/v2/owner/sync", headers=auth, json=request(value=1))
+    assert changed.status_code == 409
+    changed_headers = receipt_headers(auth, request(value=1))
+    unavailable = client.get("/api/v2/owner/sync/requests/http-test-0001", headers=changed_headers)
+    assert unavailable.status_code == 503
+    assert unavailable.json() == {"state": "unknown", "error": "sync_result_unknown"}
+    assert PRIVATE_NAME not in unavailable.text
+    assert changed_headers["X-Owner-Sync-Request-Hash"] not in unavailable.text
+    assert "http-test-0001" not in unavailable.text
+    original = client.get("/api/v2/owner/sync/requests/http-test-0001", headers=receipt_headers(auth))
+    assert original.status_code == 200
+    assert original.json() == {"state": "matched", "status": 200, "result": first.json()}
+    assert set(original.json()) == {"state", "status", "result"}
+    for response in (unavailable, original):
+        private(response)
+
+
+def test_receipt_preserves_original_conflict_result_only_for_exact_hash(client):
+    auth = headers()
+    assert client.post("/api/v2/owner/sync", headers=auth, json=request()).status_code == 200
+    conflict = request("http-conflict-002", value=1)
+    conflict["operations"][0]["changes"] = {"value": 1}
+    conflict["operations"][0]["base_values"] = {"value": 0}
+    first = client.post("/api/v2/owner/sync", headers=auth, json=conflict)
+    assert first.status_code == 409
+    matched = client.get("/api/v2/owner/sync/requests/http-conflict-002", headers=receipt_headers(auth, conflict))
+    assert matched.status_code == 200
+    assert matched.json() == {"state": "matched", "status": 409, "result": first.json()}
+    assert PRIVATE_NAME not in matched.text
+    private(matched)
+
+
+@pytest.mark.parametrize("value", [None, "", "0" * 63, "0" * 65, "A" * 64, "g" * 64,
+                                  " " + "0" * 64, "0" * 64 + " ", "0" * 64 + "," + "0" * 64])
+def test_receipt_hash_header_is_required_strict_and_checked_before_factory(value):
+    def forbidden_factory():
+        pytest.fail("invalid receipt header opened a connection")
+    app = FastAPI()
+    app.include_router(http.build_owner_sync_router(forbidden_factory))
+    auth = headers()
+    if value is not None:
+        auth["X-Owner-Sync-Request-Hash"] = value
+    with TestClient(app) as client:
+        response = client.get("/api/v2/owner/sync/requests/http-test-0001", headers=auth)
+    assert response.status_code == 422
+    assert response.json() == {"detail": "invalid_sync_request_hash"}
+    private(response)
+
+
+@pytest.mark.parametrize("second_name", ["X-Owner-Sync-Request-Hash", "x-owner-sync-request-hash"])
+def test_receipt_rejects_duplicate_hash_header_even_when_values_identical(second_name):
+    def forbidden_factory():
+        pytest.fail("duplicate receipt hash opened a connection")
+    app = FastAPI()
+    app.include_router(http.build_owner_sync_router(forbidden_factory))
+    auth = list(headers().items()) + [("X-Owner-Sync-Request-Hash", "0" * 64), (second_name, "0" * 64)]
+    with TestClient(app) as client:
+        response = client.get("/api/v2/owner/sync/requests/http-test-0001", headers=auth)
+    assert response.status_code == 422
+    assert response.json() == {"detail": "invalid_sync_request_hash"}
+    private(response)
+
+
+def test_receipt_rejects_query_without_echo_before_factory():
+    def forbidden_factory():
+        pytest.fail("receipt query opened a connection")
+    app = FastAPI()
+    app.include_router(http.build_owner_sync_router(forbidden_factory))
+    with TestClient(app) as client:
+        response = client.get("/api/v2/owner/sync/requests/http-test-0001?hash=secret-input", headers=receipt_headers())
+    assert response.status_code == 422
+    assert response.json() == {"detail": "invalid_sync_request_id"}
+    assert "secret-input" not in response.text
+    private(response)
+
+
+@pytest.mark.parametrize("mode", ["factory", "factory_http_exception", "storage", "missing_matched_result"])
+def test_receipt_unavailable_failures_do_not_leak_driver_or_unverified_body(database, monkeypatch, mode):
+    def connection():
+        if mode == "factory":
+            raise RuntimeError("secret-input/driver/path SELECT private")
+        if mode == "factory_http_exception":
+            raise http.HTTPException(502, "secret-input/private/hash")
+        return sqlite3.connect(database)
+    if mode == "storage":
+        with sqlite3.connect(database) as conn:
+            conn.execute("DROP TABLE owner_sync_receipts")
+    elif mode == "missing_matched_result":
+        monkeypatch.setattr(repo, "reconcile_sync_local", lambda *_args: repo.SyncReconciliation("matched", "http-test-0001"))
+    app = FastAPI()
+    app.include_router(http.build_owner_sync_router(connection))
+    with TestClient(app) as client:
+        response = client.get("/api/v2/owner/sync/requests/http-test-0001", headers=receipt_headers())
+    assert response.status_code == 503
+    assert response.json() == {"state": "unknown", "error": "sync_result_unknown"}
+    assert "secret-input" not in response.text and PRIVATE_NAME not in response.text
+    private(response)
+
+
+def test_receipt_close_failure_hides_matched_result_and_closes_connection(database):
+    with sqlite3.connect(database) as conn:
+        accepted = repo.apply_sync_local(conn, json.dumps(request()))
+        assert accepted.status == 200
+    closed = []
+    class FailClose(sqlite3.Connection):
+        def close(self):
+            super().close()
+            closed.append(True)
+            raise RuntimeError("secret-input matched private body/hash")
+    app = FastAPI()
+    app.include_router(http.build_owner_sync_router(lambda: sqlite3.connect(database, factory=FailClose)))
+    with TestClient(app) as client:
+        response = client.get("/api/v2/owner/sync/requests/http-test-0001", headers=receipt_headers())
+    assert closed == [True]
+    assert response.status_code == 503
+    assert response.json() == {"state": "unknown", "error": "sync_result_unknown"}
+    assert "secret-input" not in response.text and PRIVATE_NAME not in response.text
+    private(response)
+
+
+def test_receipt_logout_after_reconciliation_does_not_deliver_private_result(client, monkeypatch):
+    auth = headers()
+    assert client.post("/api/v2/owner/sync", headers=auth, json=request()).status_code == 200
+    reconcile = repo.reconcile_sync_local
+    def read_then_logout(*args, **kwargs):
+        result = reconcile(*args, **kwargs)
+        assert result.state == "matched"
+        owners.reset_owner_sessions()
+        return result
+    monkeypatch.setattr(repo, "reconcile_sync_local", read_then_logout)
+    response = client.get("/api/v2/owner/sync/requests/http-test-0001", headers=receipt_headers(auth))
+    assert response.status_code == 401
+    assert PRIVATE_NAME not in response.text and "result" not in response.json()
+    private(response)
+
+
+def test_receipt_logout_before_worker_read_never_opens_connection(monkeypatch):
+    def forbidden_factory():
+        pytest.fail("revoked captured Owner opened receipt connection")
+    app = FastAPI()
+    app.include_router(http.build_owner_sync_router(forbidden_factory))
+    run = http.run_in_threadpool
+    async def revoke_before_worker(function, *args, **kwargs):
+        owners.reset_owner_sessions()
+        return await run(function, *args, **kwargs)
+    monkeypatch.setattr(http, "run_in_threadpool", revoke_before_worker)
+    with TestClient(app) as client:
+        response = client.get("/api/v2/owner/sync/requests/http-test-0001", headers=receipt_headers())
+    assert response.status_code == 401
+    assert PRIVATE_NAME not in response.text
+    private(response)
+
+
+def test_receipt_read_rate_limit_is_bounded_before_connection(database, monkeypatch):
+    monkeypatch.setattr(security, "PRIVATE_READ_MAX_REQUESTS", 1)
+    calls = []
+    def connection():
+        calls.append(True)
+        return sqlite3.connect(database)
+    app = FastAPI()
+    app.include_router(http.build_owner_sync_router(connection))
+    auth = receipt_headers()
+    with TestClient(app) as client:
+        first = client.get("/api/v2/owner/sync/requests/http-missing-001", headers=auth)
+        limited = client.get("/api/v2/owner/sync/requests/http-missing-001", headers=auth)
+    assert first.status_code == 404 and calls == [True]
+    assert limited.status_code == 429
+    assert int(limited.headers["retry-after"]) >= 1
+    for response in (first, limited):
+        private(response)
 
 
 def test_storage_failure_does_not_expose_driver_path_or_sql(monkeypatch):

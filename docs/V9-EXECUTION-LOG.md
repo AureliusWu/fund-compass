@@ -409,3 +409,68 @@ Linux 全量一次通过；131 个后端/工具/合同/workflow 源文件前后 
 ### 下一道门禁
 
 先推同一 feature 检查点，通过草稿 PR 运行既有三端标准 runner CI，PR 路径明确跳过 deploy/candidate_smoke/formal_smoke，不推 main。继续实现默认关闭的客户端 durable outbox/冲突/receipt 状态机，以及受控远端逻辑快照/原子前像/提交核对和独立恢复。应用版本仍 8.0.0；真实存储出口、云同步、多设备旅程和完整引用链未完成，不能发布 v9.0.0。
+
+## 2026-10-02 · 客户端候选队列与只读快照
+
+上一检查点 `b4eb596457c37905837d8e1164486faa62f58d48` 已推到同一 feature 分支并创建草稿 [PR #3](https://github.com/AureliusWu/fund-compass/pull/3)。既有云 CI [36958869253](https://github.com/AureliusWu/fund-compass/actions/runs/36958869253) 全部通过，实际测试 merge SHA `523d6d2bde90c281b5d36cd34846fc57244143c1`：后端 1576、前端 657、Worker 144 项；前端类型/构建与 Worker check/dry-run 通过，deploy/candidate_smoke/formal_smoke 按 PR 条件跳过。这是上一检查点的云 CI，不是本批部署。
+
+### 实现及独立复审
+
+- 纯同步 DTO 对原始 JSON、封闭字段、UTF-8/重复键/安全整数/数值 token 与成功、冲突、receipt、固定 upper 分页逐项验证；共享四个独立 Python/JS 摘要向量。没有请求、存储、会话或业务初始化副作用。
+- 显式注入的 IndexedDB 单槽 outbox 保存原 raw/hash，真实事务 CAS 防止跨标签争抢；事务 complete 后才返回，本地版本不因清槽归零，防止 ABA。quota/超时/损坏/不兼容结构不回退 localStorage，未知或 attempted 请求不允许删除/换 ID。
+- 候选控制器默认关闭、未接入应用 UI/实际 transport/Owner Store；发送前先提交 attempted，断线或未知结果保留原字节。receipt 使用原 ID/hash；仅显式手工确认可重发相同请求。完整固定 upper pull 是基线，POST 观察到的 head 不冒充 checkpoint，不自动改旧草稿。
+- Owner HTTP receipt 必须单一规范 `X-Owner-Sync-Request-Hash`；缺失/重复/错 hash 不泄露原收据，不存在/不可核对均 unknown。router 仍只由测试挂载；未来线上接入须更新显式 CORS allowlist。
+- 新 schema-8 只读快照模块使用固定单批 Hrana 3 SQL 事务，校验闭集 schema、typed 行/rowid/sequence、完整性、commit/autocommit/close，仅返回私有内存。无默认网络、凭据发现、文件输出或云 apply，历史快照不是应用时原子前像。
+
+独立复审实证两处控制器 P1：撤销发生于 transport 微任务前仍会启动 POST；同 key/kind 的错误数值成功响应会 confirmed。修复为实际调用前再核验取消/会话，以及逐 requested scalar 比对，原复现两例通过。另修复 outbox 仅请求 strict 却未核验实际 durability；降级、缺失和 getter 异常在任何写事务请求前拒绝。真实 fake-IDB commit 后、wrapper complete 前关闭会返回 closed，但重开仍保留已提交原字节；该窗口不是回滚证明。
+
+快照最初依据协议文字闭集拒绝合法 replication_index 与无 padding BLOB；对照 [官方序列化实现](https://github.com/tursodatabase/libsql/blob/main/libsql-hrana/src/proto.rs) 离线回放五类拒绝后，显式支持 optional null/规范 u64 字符串和两种规范 BLOB 编码。未知字段、错误尾位/乱 padding 和数值类型转换仍拒绝。没有用通配字段或重试掩盖失败。
+
+### 冻结质量门禁
+
+| 门禁 | 本批结果 | 证据范围 |
+| --- | --- | --- |
+| Windows 后端全量 | **1771 passed / 179.89 秒**，exit 0 | Python 3.14.4；独占合成 DB/basetemp、移除宿主凭据；67,438 条现有依赖弃用警告 |
+| Linux 后端全量 | **1771 passed / 181.46 秒**，exit 0 | Python 3.12.3 / SQLite 3.45.1；空环境+loopback 限制、独占合成 DB/basetemp；1 条 Starlette/httpx 弃用警告；只运行一次 |
+| 前端全量 | **51 文件 / 801 passed / 3.25 秒** | 候选 DTO 68、outbox 48、控制器 28 项纳入；合成测试不是物理浏览器/落盘验收 |
+| 前端类型/构建 | type-check、build、**PWA 7/7**，exit 0 | 1088 modules / 9.26 秒，候选模块未接生产入口 |
+| 局部生产包体 | **56 文件 raw 1,308,951 / gzip 466,698 bytes** | 相同 Node/zlib 口径三次读取一致，与上一冻结包体完全相同；非真实旅程测速 |
+
+Linux 148 个指定 backend/tools/contracts/workflows 源与固定数据文件前后摘要一致：`731b7c3377a2909bc31d73915f0ccf685df19cb630c803cb3d9c7eba34980fa6`。持久全量日志位于本机 Temp 私有任务目录，摘要 `3082d8bd31ca727bc1e8c09e0c5a55915a4f4b015281680caff6b712ca69aa29`；不宣称该指纹覆盖所有跨端文件。快照两文件分别冻结为 `2e2b5800f64f68c66f089c8f5edec7750808f6a78c4285eb3668dfdd0311df02` / `eb43680ad11291ad87d3a5068effead0b9c713b72b84748c54ed6ba0ebfbb0be`。
+
+新增仅 dev 的 fake-indexeddb 6.2.5 固定版本，下载摘要已与官方 npm 包一致，无生产依赖升级；它是内存实现，不证明物理磁盘耐久。初次新增等价数值 fixture 误将 field revision 写成 1.0，严格整数守卫正确拒绝；fixture 改为金融数值后通过，未放宽 DTO。另有错误调用脚本名 typecheck，已改用仓库 type-check 并通过。
+
+一次临时测试误调用 Windows Python alias，manager 在 backend/Python 下载了 runtime 后因缺 pytest 退出，未运行协议测试。原始失败保留；后续使用确切已有 Python 路径。该纯生成目录经确切路径核验已可恢复移出仓库到本机 Temp `fund-compass-python-alias-artifact-20261002-1133`，未删除/提交，不计入测试或源码证据。
+
+上述冻结测试早于下面的真实捕获及兼容性修改，不能作为修改后源码的全量证据。本批代码仍默认关闭真实同步，未上传持仓、改云 schema/平台/计费、旋转凭据或触发部署。应用三端仍 8.0.0；远端原子迁移/提交核对、独立恢复、真实 UI/设备/Owner/引用链、自然任务与正式证据未闭合，v9.0.0 发布仍 **BLOCKED**，总目标继续。
+
+### 真实候选读取失败及定位
+
+第一次只读捕获返回固定 `capture_sql_failed`，没有生成快照文件。受保护目标目录复核仍为空，不称迁移/恢复成功。随后执行一次同一冻结 SQL 计划的有界只读诊断：HTTP 200、batch 第 0 步 `query_only_on` 为 `SQL_PARSE_ERROR`，BEGIN 与全部后续读取 skipped，独立 `get_autocommit`/close 成功。诊断只输出固定步骤标签和错误分类，没有回显原始 SQL、上游消息、数据或凭据；不是浏览器登录失败，也没有进入业务读取/云写入。
+
+现场步骤与 [libSQL SQL 分类器](https://github.com/tursodatabase/libsql/blob/main/libsql-server/src/query_analysis.rs) 对 `query_only` 赋值的拒绝一致。修复采用明示的 `turso-fixed-read-v1`，保留默认严格路径、不自动降级或重试：固定事务和读取 SQL 不包含云端 DDL/DML/PRAGMA 赋值，保留 schema、typed 数据和事务关闭校验；真实 query_only 观察值单列，明确不宣称服务端强制禁止写入。修复后的测试和真实捕获另记，不覆盖此次失败。
+
+## 2026-10-03 · 真实快照及本地恢复演练
+
+恢复执行后核对工作区：feature HEAD 仍 `b4eb596457c37905837d8e1164486faa62f58d48`，严格默认保留，新增显式 profile 已落地。兼容性两源文件冻结 SHA 为 `3c3041a305fbc0ae1cb8922b6da47dcb2a6b44acfc0bc6f68efb2b72aa4339c7` / `36ffa53c1743f604b93676b1d221e68ce34a0bec2a5b7ce50d95aea1bf983a71`。独立只读复审无 P0/P1，隔离 snapshot 专项 **214 passed / 4.82 秒**，Python 3.14.4 / SQLite 3.50.4，1,655 条依赖弃用警告；前后两 SHA 未变。
+
+仓库外的捕获 wrapper 显式绑定该 module SHA、候选资源、两张固定辅助表和兼容 profile，TLS/no-proxy/no-redirect/零重试/一次发送，30 秒捕获预算和 60 秒进程上限，stderr 丢弃、stdout 闭集脱敏。父代理完整审查后修复准备稿 metadata 的 dict/set union 错误，再运行 **10 项合成测试全部通过 / 1.812 秒**、PowerShell 语法检查 0 错误；旧失败和旧脚本保持不变，不以准备状态冒充执行。
+
+真实一次捕获返回 `captured_and_locally_rehearsed`，闭集结构、typed 行/rowid/sequence、SQL commit/autocommit/close 通过：**schema 8 / 21 张表（含 SQLite sequence）/ 31,957 行**，`query_only_observed=0`，服务端写保护未验证。受保护目录仅当前用户/SYSTEM，文件 exclusive 创建、fsync/关闭并设只读；实际文件 SHA 再次核对一致。所有私人明细及凭据在仓库外，不上传 GitHub。
+
+| 绑定 | 摘要 |
+| --- | --- |
+| 源文件 / 逻辑备份 | `91701641e9c19afda8f238ddc8610d05dd9f505c9aa27da9be9f78c32d0058d5` |
+| 源 typed 行 | `fbd2dce0fe69b593ed964723fd6ea5ac3dd8fbc64b7cb6faf59d315993442846` |
+| 源结构 | `8f80638a6e5ace5ebddb15f2843b5883a5c1a5db4a82ee7a482725770c70be80` |
+| 本地计划 | `9705e911e2863e9c0d0367c32ca217fe5c83f3c150b1f58e10c36a2320b2d625` |
+| 目标 typed 行 | `e222cf3d64efb6a4929c3aa758d0d1094feeb1e008e71a2c734c724a29360a0f` |
+| 目标结构 | `2a1a0f72c71b4102ce00e10606456413bdf77887007adf7b0ac22618bce3ef74` |
+
+本地 8→9 演练明确验证 `legacy_rows_unchanged`、`local_logical_restore_verified`、`repository_roots_readback_verified`、`source_file_unchanged` 为 true。捕获历史快照不是应用时原子前像；`remote_verified`/`remote_applied`/`remote_restore_verified`/`formal_release_verified` 均为 false。此次没有云端 DDL/DML、schema 迁移、持仓上传、凭据/计费/平台变化或部署。远端仍 schema 8；下一步是受控原子迁移及 unknown 提交核对，不重复要求用户浏览器操作。
+
+修复后同一冻结源码的两平台全量通过：Windows **1812 passed / 172.91 秒**，exit 0，68,235 条现有依赖弃用警告；Linux **1812 passed / 206.80 秒**，exit 0，1 条 Starlette/httpx 弃用警告。148 个有限 source/data 文件两侧前后均为 `2f0b12260bc0b196d1902bb7d46ddca200e0b412c9bff7465331dfbb53a70217`。持久日志摘要分别为 Windows `bcb3edcbd1563c32a919bcd19314403b1d368c3998d8270eb8f5f72ea51fb809`、Linux `40b95a703b8ba80432a5b87a9cfe3b4be262f128d0fa39f58c12a70b87db5ee4`；测试均为隔离合成库，不访问真实云或凭据。
+
+电脑控制技能仅尝试识别既有 Chrome，发现未运行后启动已安装 Chrome；状态读取被平台停止，原因是无法可靠识别当前浏览器网址以执行安全检查。已停止全部 UI 输入，不重试或改用不受支持的控制/会话提取方式；没有操作 Turso 管理页、生成密钥或更改访问。直接数据库捕获路径不依赖此能力。
+
+提交前 fetch 发现远端状态已改变：main/原 feature 同为 `997e3b02603612498d8c0488e5884a3e86f1dd2e`，旧 PR #3 已 closed，原 feature 非快进重置。新 main 只在原 `5daddec` 之后增加海外账本数据，不包含三个 v9 feature 检查点。为保留远端当前状态，不强推/重开原 PR；本批改在新升级分支保存，再合入最新 main 数据并重新核对。上述测试早于合入；最终目标需绑定合入后的确切 SHA。

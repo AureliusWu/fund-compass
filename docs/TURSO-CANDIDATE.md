@@ -66,6 +66,18 @@ python tools/turso_scope_upgrade.py rehearse --source <closed-snapshot.db> --sou
 
 当前工具没有 apply、远端导出、原子前像/receipt/reconcile、独立远端恢复或发布能力；不能直接对真实候选库执行升级。
 
+### 2026-10-02：受限只读快照模块
+
+`backend/database/turso_scope_snapshot.py` 仅提供显式注入 transport 的 schema-8 捕获函数，没有默认网络实现、凭据发现、落盘或 apply。固定单批 Hrana 3 查询在同一 SQL 事务内读取闭集结构、typed 行、rowid/sequence 和完整性信息，只有确认提交、autocommit 和关闭成功后才返回私有内存 SQLite。只接受明示的固定辅助表 inventory，不执行远端返回的 DDL。
+
+默认 `query_mode_profile='query-only-v1'` 设置并严格要求远端 query_only=1；失败不自动降级。真实候选首次拒绝该赋值（`SQL_PARSE_ERROR`），因此增加显式 `turso-fixed-read-v1`：只发送仓库固定读取/事务语句，不含远端 DDL/DML/PRAGMA 赋值，仍保留全部事务、结构和 typed 数据门禁。兼容 profile 的 `query_only_observed` 必须为真实整数 0 或 1，`server_write_protection_verified=false`，不能用重建内存连接的 query_only=1 冒充远端写保护。
+
+响应最多 64 MiB、100,000 总行、单 cell 256 KiB、30 秒；transport 必须另外保证单次发送、禁止重定向和阻塞读取预算。官方协议实现中的 optional `replication_index` 和标准无 padding BLOB 编码按固定类型支持，未知字段仍拒绝，参见 [官方 Hrana 实现](https://github.com/tursodatabase/libsql/blob/main/libsql-hrana/src/proto.rs)。
+
+`consistent_sql_snapshot=true` 只表示本次历史 SQL 快照一致，不是应用时锁内前像。`remote_verified`、`remote_applied`、`remote_restore_verified`、`formal_release_verified`、`migration_rehearsed` 和 `apply_preimage_verified` 均保持 false。本地快照/恢复演练不代表远端升级、独立恢复或正式耐久资格；实际捕获结果另记执行记录。
+
+2026-10-03 已实际使用兼容 profile 完成一次候选只读捕获：31,957 行、21 张表（含 SQLite sequence），真实 query_only=0。快照保存在仓库外、仅当前用户/SYSTEM 可访问的只读文件中；本地 8→9 演练验证旧行不变、独立逻辑恢复、仓储读回及源文件不变。真实云端 schema 未改变；此证据不关闭远端迁移、独立远端恢复或跨部署耐久门禁。摘要与测试见 [执行记录](V9-EXECUTION-LOG.md)。
+
 ## 合成标记写入与独立连接读回
 
 ```powershell

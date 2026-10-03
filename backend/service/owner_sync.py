@@ -29,6 +29,7 @@ PRIVATE_HEADERS = {
     "Cache-Control": "no-store", "Pragma": "no-cache", "X-Content-Type-Options": "nosniff",
 }
 _REQUEST_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{7,127}\Z", re.ASCII)
+_REQUEST_HASH = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 _INTEGER = re.compile(r"(?:0|[1-9][0-9]{0,15})\Z", re.ASCII)
 
 
@@ -177,22 +178,32 @@ def build_owner_sync_router(connection_factory: Callable) -> APIRouter:
     async def receipt(request_id: str, request: Request, context=Depends(_private_auth("read_private"))):
         if not _REQUEST_ID.fullmatch(request_id) or request.query_params:
             raise _error(422, "invalid_sync_request_id")
+        hashes = request.headers.getlist("x-owner-sync-request-hash")
+        if len(hashes) != 1 or not _REQUEST_HASH.fullmatch(hashes[0]):
+            raise _error(422, "invalid_sync_request_hash")
+        request_hash = hashes[0]
 
         def read():
             _revalidate(context, "read_private")
             try:
                 with closing(connection_factory()) as conn:
-                    return repo.read_sync_receipt(conn, request_id)
-            except HTTPException:
-                raise
+                    return repo.reconcile_sync_local(conn, request_id, request_hash)
             except Exception:
-                raise _error(503, "sync_storage_unavailable") from None
+                # A driver/factory/close failure cannot establish whether an
+                # accepted write committed. Never echo the supplied hash or
+                # an unverified receipt, even if read succeeded before close.
+                return None
 
-        stored = await run_in_threadpool(read)
+        reconciliation = await run_in_threadpool(read)
         _revalidate(context, "read_private")
-        if stored is None:
+        unknown = {"state": "unknown", "error": "sync_result_unknown"}
+        if reconciliation is not None and reconciliation.state == "absent":
             # Missing receipt is not proof that an unknown write rolled back.
-            return JSONResponse({"state": "unknown", "error": "sync_result_unknown"}, status_code=404, headers=PRIVATE_HEADERS)
+            return JSONResponse(unknown, status_code=404, headers=PRIVATE_HEADERS)
+        if (reconciliation is None or reconciliation.state != "matched" or reconciliation.result is None
+                or reconciliation.result.status not in (200, 409)):
+            return JSONResponse(unknown, status_code=503, headers=PRIVATE_HEADERS)
+        stored = reconciliation.result
         return JSONResponse({"state": "matched", "status": stored.status, "result": stored.body}, headers=PRIVATE_HEADERS)
 
     return router
