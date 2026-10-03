@@ -541,3 +541,24 @@ sidecar 文件摘要不是 DTO 内部 raw schema 摘要；后者只保存在私�
 为避免 Temp 清理丢失检查点，另在仓库外 `fund-compass-private-backups/20261003-schema8-private02` 保存三个 exact 文件的非临时副本；受保护 user/SYSTEM-only 目录、CreateNew/fsync/关闭/只读、逐文件源与目标 SHA/ACL 均通过，实际 copy exit 0，原 Temp 文件未移动或删除，未复制凭据。该目录位于项目同级，不是 Git/Pages/CI artifact；本地另一份副本仍不是独立远端恢复、长期异地备份或云端耐久证明。
 
 四个 remote/apply/restore/formal 旗标均 false，query_only_observed=0、server_write_protection_verified=false；云库仍 schema 8，应用版本仍 8.0.0。正式纯编译候选的完整前后像/回执合成验证在仓库外推进，但父代理复审又发现其 safe metadata 构造闭集不足，已合成复现并要求新修订，未集成或发送该候选。下一步仍为闭合 compiler/响应核对、真实停写/容量/原子迁移与独立远端恢复；不删除旧 Gist、不更改凭据/计费或部署。
+
+### 纯本地迁移包集成门禁（2026-10-03）
+
+上述文档 checkpoint `73bc1dad93dddae2980c845cd3d7bb0b5dadc065` 的 [CI 37098559780](https://github.com/AureliusWu/fund-compass/actions/runs/37098559780) 已成功。实际日志核验 resolve、4 次 checkout 与 3 次 Verify exact source 均绑定 merge `6150d0b435aaad27d08675b69c7f659a2ecf206c`，parents 为 main `997e3b0` 与该 head。后端 **1859**、前端 **801**、Worker **144** 项通过；类型检查、构建、PWA 7/7、Worker dry-run 通过；deploy/candidate_smoke/formal_smoke 均 skipped，不是部署。
+
+旧 compiler 候选可通过 dataclass replacement 将未知私有键或伪造远端 flag 送入公开 `safe_metadata`；发送前重编译仍会拒绝，并非云写授权绕过。原失败候选和复现日志保留。新修订在构造与 getter 校验完整键闭集、exact native 类型、枚举/digest/包长度/计数/代码绑定及六项 literalFalse，getter 另核 metadata seal；198 项合成测试和全文独立复审未发现新增 P0/P1。seal 仅防元数据替换，不是签名或写入资格。
+
+已通过 `apply_patch` 接入 `backend/database/turso_scope_packet.py`、`tests/test_turso_scope_packet.py` 与独立内存 fixture。除 compiler 首行说明外与复审冻结源一致；测试只改模块 import 并增加 function-scoped socket/默认 DB/普通迁移禁止夹具，helper 移除 TEMP 原型/全局补丁/自动 benchmark。模块未被生产 main 或路由导入，没有网络、凭据发现、文件输入或 apply。固定 DDL、完整 raw/typed 前后像、schema CAS 与新回执精确十列在同一计划事务；旧回执保留，未知结果禁止自动重放或回收。包体/参数/artifact 是私人载荷，不上传公共产物；未来发送必须用外部原始 resource/plan/packet SHA 重编译，不能只检查安全摘要。
+
+| 项目门禁 | 实际终态 |
+| --- | --- |
+| Windows packet 专项 | **198 passed / 10.03 秒**，exit 0；1,681 条依赖弃用警告，stderr 空 |
+| Linux packet 专项 | **198 passed / 22.23 秒**，exit 0；无 pytest 警告 |
+| Windows backend 全量 | **2057 passed / 164.24 秒**，exit 0；74,022 条依赖弃用警告，stderr 空 |
+| Linux backend 全量 | **2057 passed / 194.47 秒**，exit 0；1 条既有 Starlette/httpx 弃用警告 |
+
+Windows Python 3.14 使用清空配置环境/新默认 SQLite/独立 basetemp，新增 198 项夹具禁止 socket、配置 DB 与普通迁移；不声称 Windows 全套 runner 具有全局网络封锁。Linux Ubuntu 24.04 / Python 3.12.3 / SQLite 3.45.1 使用 env-i、独立默认 DB/basetemp、禁止外部 socket 的插件；均无真实快照或凭据输入、未执行云操作。两平台有限 151 文件前后指纹均为 `cf9fd068503a0aaae92a24acaa6a7c0dc383135059e1283b057cba7a17694dce`。集成 source/tests/helper SHA 分别为 `ee01ad893e1db5c8cac4fdc082f2f0c00e2df3568b4d80a6c557f6d6eb0263e0` / `086c67dcf8520548f58c0874b2560f4e7bb928a7c362364a1333b48e29501a0c` / `24ef3868c480a323df6c91c4c5377ea97f630a0cf9f690d843418b42f74c864e`，父代理已独立读回日志及哈希。
+
+Windows 专项/全量 stdout SHA 为 `2712929068ff8ddbb31850d493faff2c6671fd16e11dc541d77d02d6ade1f579` / `7535895cc50425e2dc18495ed2f90ba210d9bd7babc3bd6c30a2a8aee45e86a9`；Linux 专项/全量 log SHA 为 `06b3de52546a871c18ba2558b36a55761ff1b6c85d8dadd0396fa6d14752fa10` / `8ec83f6f2949e245325fe9790d77e62b17e87934d1a28032fb3b9f8e334047fa`。本批项目接入无失败 attempt；仓库外候选首次语法失败与旧漏洞复现仍保留，不混为项目终态。
+
+仓库外 32,197 合成行容量样本产生 15,165,639 字节、586 步、最多 900 参数，本机执行 0.556947 秒；这是单次方向性本机结果，不是 Turso 事务限制/性能/云端应用证明。响应验证器仍在下一道纯本地门禁开发，无 sender 或真实对账。应用版本仍 8.0.0、云库 schema 8、六个 packet 远端资格 false；不合并 main、不创建 v9 Tag/Release、不删除 Gist、不更改凭据或收费配置。正式发布仍 BLOCKED，目标工作继续。

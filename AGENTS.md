@@ -51,6 +51,7 @@ uvicorn main:app --reload --port 8000
 - 物理 schema 9 独立于应用版本 8.0.0。SQLite 8→9 增量迁移须保留备份并验证旧链；已有 schema 9 缺少 scope 元数据不得自动补为 production。Turso 正常启动只读校验，旧远端 schema 8 在受控迁移前拒绝启动；禁止直接推 main 触发不兼容部署，禁止用 initialize 冒充增量迁移。
 - Iteration 19 的本地持仓编辑不代表云端确认：`local_pending` 不能作为 holding_version/revision，旧 Gist 上传不得解除当前行动的待确认门禁。PAT 与明确同步同意分开；默认不上传私人输入，撤销及迟到响应必须失效。仅关注、真实零份与未知份额保持不同语义；账户更名/删除保留 tombstone，已观察到的旧本地副本不可覆盖更新后的存储。
 - `tools/turso_scope_upgrade.py` 仅对显式、关闭的本地 SQLite 快照做有界 plan/rehearse；不连接 Turso、不读取凭据、不执行输入 DDL、不应用远端迁移。内存逻辑恢复不是远端恢复或正式发布资格，额外 operational 表须逐表固定合同审查，不以前缀豁免。
+- `backend/database/turso_scope_packet.py` 仅将已验证的私有内存捕获编译为有界、不可变的迁移包，不提供 transport/apply。原始 DDL 只作前后像数据，执行 DDL 必须来自仓库固定模板；公开摘要保持闭集且六项远端/正式资格为 false。包体、语句参数与 artifact 含私人数据，不得日志化或上传 CI。摘要/seal 不是来源认证或写入授权；未来发送前须以外部原始 resource/plan/packet SHA 重编译核验，未知提交不得自动重试或回收回执。
 - 缺失值不得用 `0` 代替；评分覆盖率低于 70% 时不得输出总分或星级。
 - 后端缓存回退最多允许 7 天并必须返回 `stale`/数据年龄；指数估值超过 7 天不得参与信号。
 - 组合历史只能使用全部成分都有净值的共同日期，禁止用前向填充制造零收益。

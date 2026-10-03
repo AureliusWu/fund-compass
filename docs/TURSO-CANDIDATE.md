@@ -88,6 +88,16 @@ DTO 不是签名、授权或锁内前像证明。未来原子 compiler 必须重
 
 2026-10-03 已通过新修订捕获工具执行一次真实只读保存：21 表 / 31,957 行，同次私有 sidecar 与 SQLite 镜像通过 source/resource/rows 三绑定，关闭后和本地演练后均重验；本地 8→9/独立逻辑恢复/仓储读回通过，云库未修改。原始结构和私人数据只在 user/SYSTEM-only、只读的仓库外文件；另保存非临时本机副本，未复制凭据、移动/删除旧文件或上传 GitHub。sidecar 文件 SHA `7f101cbb8e63243f5c640ed59bd1ca796105dd535c23b49fe3b651e46193fd08` 不是 raw DTO 摘要或锁内前像资格。所有 remote/apply/restore/formal 旗标继续 false；完整指纹、合成复审修复与本地备份边界见 [V9-EXECUTION-LOG.md](V9-EXECUTION-LOG.md)。
 
+### 本地不可变迁移包编译器（2026-10-03）
+
+`backend/database/turso_scope_packet.py` 接入纯本地 compiler，只接收已验证的私有 `CapturedSnapshot`；不读取凭据/输入路径，不连接云库，不提供 transport/apply。资源身份、显式 `sqlite-atan2-zero-v1` 和 canonical UTC 秒时间不可省略。重新验证 raw inventory、镜像/typed 行/引用链与有限可信源码后，生成不可变 bytes、native tuple 语句及响应规格。
+
+包内仅使用仓库固定 DDL。计划包含同一 `BEGIN IMMEDIATE` 下的完整 raw schema/typed 行前像、scope backfill、schema 8→9 CAS、完整旧业务后像、原回执保留及新回执十列校验，并编入条件回滚及 autocommit/close 请求；没有完整响应核对时仍属 unknown，不推断失败必然已回滚。不执行捕获的原始 SQL。回执身份稳定且与目标资源绑定，已有 reserved 槽位拒绝复用；丢失响应不自动重试或回收槽位。计划摘要与包摘要分别绑定，未来发送前必须以外部保存的原始 resource/plan/packet SHA 重编译精确比较整个 artifact，不接受包自身声明的身份。
+
+独立复审发现旧候选的公开摘要闭集缺口后，新修订在构造与每次访问均校验完整 keys/native 类型/绑定/六项 literalFalse 旗标并核对 metadata seal；未知私有字段、伪造远端成功和元数据替换拒绝。seal 不是签名、来源认证或写入授权。包体、语句参数和 artifact 含私人数据，不能打印、泛用序列化到公开响应或上传 CI/GitHub。六项远端/恢复/正式资格均 false。
+
+有界预算为 100,000 行、单 cell 256 KiB、镜像/包/响应各 64 MiB、每语句最多 900 参数、16,384 步、30 秒本地编译；不是 Turso 实际容量或事务时长证明。项目内无 TEMP 原型依赖，198 项隔离合成测试及 Windows/Linux 各 2057 项后端全量通过，有限源码前后未变；详见 [执行记录](V9-EXECUTION-LOG.md)。模块未挂载生产路由，响应核对/独立未知提交对账、真实停写/容量/云迁移/远端恢复/跨重启仍待完成，应用保持 8.0.0、云库保持 schema 8。
+
 ## 合成标记写入与独立连接读回
 
 ```powershell
