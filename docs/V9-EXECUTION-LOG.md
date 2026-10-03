@@ -474,3 +474,23 @@ Linux 148 个指定 backend/tools/contracts/workflows 源与固定数据文件�
 电脑控制技能仅尝试识别既有 Chrome，发现未运行后启动已安装 Chrome；状态读取被平台停止，原因是无法可靠识别当前浏览器网址以执行安全检查。已停止全部 UI 输入，不重试或改用不受支持的控制/会话提取方式；没有操作 Turso 管理页、生成密钥或更改访问。直接数据库捕获路径不依赖此能力。
 
 提交前 fetch 发现远端状态已改变：main/原 feature 同为 `997e3b02603612498d8c0488e5884a3e86f1dd2e`，旧 PR #3 已 closed，原 feature 非快进重置。新 main 只在原 `5daddec` 之后增加海外账本数据，不包含三个 v9 feature 检查点。为保留远端当前状态，不强推/重开原 PR；本批改在新升级分支保存，再合入最新 main 数据并重新核对。上述测试早于合入；最终目标需绑定合入后的确切 SHA。
+
+### 新分支、数据合入及最终复验
+
+本批保存为 `51c56a5`，新分支 `feat/v9-owner-sync-snapshot-20261003` 正常合入当前 main，形成 `9c422d499cb78d936dea38e52793ebd3707d5c5b`。合入只改三份海外账本数据，逐文件 Git blob 与 main 完全一致；后端/前端模块未覆盖改写，快照两 SHA 不变。已推送并创建、附着新草稿 [PR #4](https://github.com/AureliusWu/fund-compass/pull/4)，main 和原 feature 仍 `997e3b0`，未强推或重开原 PR。
+
+| 合入后门禁 | 结果 | 冻结证据 |
+| --- | --- | --- |
+| Windows 后端全量 | **1812 passed / 179.38 秒**，exit 0 | Python 3.14.4；空子进程环境、独立合成库；68,235 条依赖弃用警告 |
+| Linux 后端全量 | **1812 passed / 195.20 秒**，exit 0 | Python 3.12.3 / SQLite 3.45.1；空环境/loopback guard、独立合成库；1 条依赖弃用警告 |
+| 前端全量 | **51 文件 / 801 passed / 5.45 秒** | 14 条既有合成组件解析警告；不为掩盖警告做无关改写 |
+| 前端类型/构建 | type-check/build、**PWA 7/7**，exit 0 | Vite 1088 modules / 11.31 秒；命令时长另含准备及验证 |
+| 前端包体 | **56 文件 raw 1,308,951 / gzip 466,698 bytes** | 三次同口径读取完全相同，与先前基线无变化；非真实交互/网络性能 |
+
+后端 148 文件前后指纹均为 `d681db01fa5ff2d9e9ef66bc6426a49d5fbbc88866d16ac6fad7c8595c9dd273`，Windows/Linux 独立新任务目录不覆盖旧证据，日志摘要分别 `9b26aa647a413958bbc2945fa3ac3e99e91c1b1de92597024687f3317c0c118c` / `5bda357623e9e96f74498d5641b7a4e02eb4ee7393d3438542e92aa8ce35ce89`。前端有限 219 tracked 文件指纹前后均为 `3ee95ebe8d067477a49b57a0b1d48d5deb55f487a261fd4971e54b39af5993e7`，完整结果摘要 `e2214f911cddbc45601718673e982b1b1c313fc8d0df057e9ed2290efdea85da`。三个本地 gate 均确认相同 HEAD，源码未漂移。
+
+[云 CI 37095982484](https://github.com/AureliusWu/fund-compass/actions/runs/37095982484) 全部通过：head `9c422d499cb78d936dea38e52793ebd3707d5c5b`，实际 resolve/三端 checkout/Verify exact source 均为 merge SHA `40193b9101eae7418ce824c7ae8c844810e97710`。后端 **1812 passed / 55.84 秒**、前端 **801 passed**、Worker **144 passed**；前端类型/构建/PWA 及 Worker check/dry-run 通过，Worker dry-run 114.28 KiB / gzip 26.58 KiB。deploy/candidate_smoke/formal_smoke 均 skipped，是草稿 PR 回归，不是部署。公开仓库标准 runner，未启用付费 runner。
+
+Render 专用连接只读复核：候选服务仍 free/单实例/main auto-deploy；最新 live 为 `dep-davqqf6q1p3s73djsb2g`、main `997e3b0`，2026-10-02T13:11:43.9281Z 完成；上一 `dep-dav6acrncjis73da03e0` 已 deactivated。此为中断期间现有 main 的平台元数据，不是本 feature 上线或完整 smoke。未读取 Secret/私人日志、修改环境或触发新部署。
+
+继续保留 draft 与正式发布阻断，应用版本仍 8.0.0。下一安全切片为受控远端原子前像/迁移 receipt/unknown 核对；先用本地合成故障及容量验证，不能以本地快照、绿色 CI 或版本号替代真实云端应用/跨重启/独立恢复、完整同步与自然任务出口。
