@@ -78,6 +78,14 @@ python tools/turso_scope_upgrade.py rehearse --source <closed-snapshot.db> --sou
 
 2026-10-03 已实际使用兼容 profile 完成一次候选只读捕获：31,957 行、21 张表（含 SQLite sequence），真实 query_only=0。快照保存在仓库外、仅当前用户/SYSTEM 可访问的只读文件中；本地 8→9 演练验证旧行不变、独立逻辑恢复、仓储读回及源文件不变。真实云端 schema 未改变；此证据不关闭远端迁移、独立远端恢复或跨部署耐久门禁。摘要与测试见 [执行记录](V9-EXECUTION-LOG.md)。
 
+### 私有原始结构前像
+
+后续捕获结果新增 keyword-only、默认 None 的私有 `_schema_inventory`，旧两个位置参数及全部公开 `safe_metadata` 字段不变。捕获在闭集 schema/data/lineage/roundtrip 与 transport/response 清理成功后，保留同一次历史 SQL 事务的 `sqlite_master` 原始四列 tuple，包括 SQL=NULL 的自动索引和内置对象；SQL 拼写、空白、literal 不被改写。DTO 为 frozen/slots/repr=False，原始 typed 摘要具有独立版本域，内部绑定同次 resource/image/rows SHA。
+
+原始 SQL 只作为私有数据，模块不执行输入 DDL、不自动序列化/落盘、不进入日志或公开 metadata；`asdict()` 等泛用序列化仍会展开字段，因此禁止把私有 DTO 整体交给日志/公开响应。重建本地参考库和 normalized contract digest 只能验证支持合同，不能反推真实原始结构。旧快照不能补造这份前像；新消费者须重新捕获并保留旧 artifact。
+
+DTO 不是签名、授权或锁内前像证明。未来原子 compiler 必须重新核对闭集、raw digest、资源/镜像/行绑定，并在实际同一写事务内做完整 schema/typed 行断言；None、错绑、漂移或未知对象拒绝。历史捕获与实际云端迁移/独立恢复/跨重启门禁继续分开，所有六个 capture 放行旗标仍 false。模块 SHA 改变后旧 helper 必须按原 pin 拒绝，不自动更新旧脚本或把历史结果当成新源码证明。
+
 ## 合成标记写入与独立连接读回
 
 ```powershell

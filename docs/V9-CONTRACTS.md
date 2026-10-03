@@ -106,6 +106,12 @@ receipt 核对必须同时提供原始 request_id 和单一 `X-Owner-Sync-Reques
 
 本节仅覆盖本地候选事务/HTTP 故障模型。真实云同步启用、Turso CAS/事务适配、远端独立恢复、多设备 UI、Holding/Policy/Decision 新版本链及正式证据仍未完成，不关闭整个 I19-02 或存储发布出口。
 
+### 历史捕获的私有 raw schema 合同
+
+捕获结果的 `_schema_inventory` 为可缺省的私有 keyword-only 字段，不增加公开 metadata。成功捕获才构造 frozen/slots/repr=False DTO：完整原始四列 tuple、SQL NULL、精确 UTF-8 字节与顺序、版本化 typed 摘要，以及同次 resource/image/rows 内部绑定。格式等价只用于支持合同准入，raw 摘要仍区分任何拼写/空白变化；不得执行输入 DDL、从重建参考库反推原始 DDL、或用泛用 `asdict` 公开私有内容。
+
+构造 DTO 本身不认证来源；未来 compiler 须重验全部绑定及闭集并在真实锁内断言完整前像。旧结果 None 必须拒绝作为 apply 输入，不通过修改旧 artifact/helper pin 补造能力。此合同仅保存历史一致性证据，不开放 apply、生产验收写入或完整耐久资格。
+
 ## 本轮验收
 
 - 会话合同与真实路由响应匹配，机器写权限未扩张。

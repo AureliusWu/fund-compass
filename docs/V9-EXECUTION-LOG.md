@@ -494,3 +494,30 @@ Linux 148 个指定 backend/tools/contracts/workflows 源与固定数据文件�
 Render 专用连接只读复核：候选服务仍 free/单实例/main auto-deploy；最新 live 为 `dep-davqqf6q1p3s73djsb2g`、main `997e3b0`，2026-10-02T13:11:43.9281Z 完成；上一 `dep-dav6acrncjis73da03e0` 已 deactivated。此为中断期间现有 main 的平台元数据，不是本 feature 上线或完整 smoke。未读取 Secret/私人日志、修改环境或触发新部署。
 
 继续保留 draft 与正式发布阻断，应用版本仍 8.0.0。下一安全切片为受控远端原子前像/迁移 receipt/unknown 核对；先用本地合成故障及容量验证，不能以本地快照、绿色 CI 或版本号替代真实云端应用/跨重启/独立恢复、完整同步与自然任务出口。
+
+### 原子迁移 SQL 原型与真实数学能力预检
+
+上述门禁记录提交为 `df819d1dfaf9746c828ea5563e5f06f1c88f1653` 并正常推送。独立只读复审核对 [CI 37096630658](https://github.com/AureliusWu/fund-compass/actions/runs/37096630658) success：实际 resolve/后三端 checkout 与 exact-source 断言为 merge `6fb5f4dbb288ca5001372f958837331d99ec4a7c`，parents 为当前 main `997e3b0` 和该 head。后端 **1812 passed / 57.97 秒**、前端 **801 passed / 51 文件**、Worker **144 passed / 3 文件**；类型/构建、PWA 7/7、Worker dry-run 均通过。三类 deploy/smoke 仍 skipped，不是部署。
+
+仓库外冻结的合成原型已由父代理完整读取代码、测试、runner 与边界说明，有限文件 SHA 逐项核对，最终 **50 passed / 1.32 秒**、exit 0、541 条依赖弃用警告。31,957 个合成源行生成单 pipeline **306 steps / 每语句最多 900 args / 7,491,952 bytes**；本机 compile 1.482089 秒、apply 0.244243 秒、reconcile 0.681960 秒。失败/NULL/空 scalar 触发实际 SQL 错误，DDL/scope/version/receipt 前缀故障整事务回滚；真实本地提交后模拟丢响应、关闭重开同 id+digest 只读核对成功。原型不读取真实快照或凭据、不连接云、不编辑 repo；可变 Plan、显式 receipt rowid、完整输入准入与实际提供方容量/时限仍需正式硬化，不直接用于远端写入。
+
+为保留真实零值而不是缩窄合法数据域，原型使用显式 `sqlite-atan2-zero-v1` 检验 REAL 正负零；缺少数学能力或语义不符会在 DDL 前失败，不降级。父代理完整审查冻结数学探针的 Python/PowerShell/两类合成测试及 README，核对源和 wrapper SHA，准备测试为 **24 项 unittest / 0.718 秒**及 **25 项 PowerShell JSON/字节管道用例**，语法错误 0。
+
+随后仅使用用户给定的准确凭据文件、现有候选资源做**一次**有界只读数学 SELECT，无 FROM/表查询、DDL/DML、PRAGMA 赋值或第二次发送：真实 literal ±0、bound ±0、integer/REAL 绑定类型、autocommit、stream/session 关闭均为 verified true，固定 envelope `ok=true/error=null/permission_stop=false`。TLS 校验、无代理/netrc、无重定向、零重试、256 KiB/10 秒及 20 秒进程上限保持；只返回闭集布尔，不回显 URL/Token/原始结果或错误。此次四个 remote/apply/restore/formal gate 均为 false，数学能力不能证明真实迁移、并发锁、停写、恢复或持久化。
+
+原型 source SHA 为 `29fbfdcd13ce688087936d0fd4e15882e80467d73e91f7415a5c90613b1d8019`；最终测试/容量日志摘要分别 `efabfea5b1dea25035bd7935c0b6d6444b1dc1d2b7b6d3555cb9204d066b54b2` / `957fd5150a05b890ce12985eff0a453f2bf9bf3c161c782368842f138b491b20`。数学探针/进程 wrapper SHA 分别 `0daf409e326b6afb0dd17279b752833a258686dd0a5b80f3a988751e56008f94` / `da31ff3925752daf40a2c6d3285c4793dc697be3af3c9ea5713c8d0dea4a23de`，绑定旧 snapshot module `3c3041a3`；后续 source 改变必须使旧 pin 拒绝，不能机械把历史成功改写成新源码或自动更新旧 wrapper。
+
+### 私有 raw inventory 实现及两平台复验
+
+已将上述缺口落实为 capture 的私有 `_schema_inventory`：保留同次历史事务的完整原始四列、SQL=NULL/internal 对象，frozen/slots/repr=False、版本域 typed 摘要及同次 resource/image/rows 内部绑定；公开 metadata、kwargs、旧两参数构造兼容，不自动执行 DDL、输出/落盘原始结构，也不授予 apply 能力。格式等价准入仍不会把原始拼写改成归一化值。未来 compiler 必须重验闭集和各项绑定并在真实锁内断言，旧文件不能补造 raw inventory。独立只读复审未发现本补丁 P0/P1。
+
+首轮 Windows 新专项为 **1 failed / 260 passed**：故障模拟在 SQL 第一步失败后读取 skipped schema=None，导致 fake response 未生成；不是源库/云错误。修复为 SQL/cleanup 分支不读 schema，并将 raises 绑定真实固定 SQL/cleanup/schema 错误码，防止其他 fixture 异常假通过。失败日志保留，摘要 `278097c404b86d26a4ca1e47e0d9a0311f5a6b82277defd9afa42a384351f17a`；Linux 当时尚未执行，仅保留未使用 runner，不补造 Linux 失败。
+
+| 最终门禁 | 实际结果 |
+| --- | --- |
+| Windows snapshot | **261 passed / 5.75 秒**；exit 0；2,102 条依赖弃用警告 |
+| Linux snapshot | **261 passed / 6.01 秒**；exit 0 |
+| Windows backend 全量 | **1859 passed / 169.86 秒**；exit 0；69,362 条依赖弃用警告 |
+| Linux backend 全量 | **1859 passed / 177.14 秒**；exit 0；1 条 Starlette/httpx 弃用警告 |
+
+所有上述最终门禁绑定 source `8dae7943088f805e7a7719cfb37ac85c33d5043ecfc6d30884e77817edba7298`、tests `a136d776c3b0c444ce58495bb9c3860206bd624a2ad979f54cbac40e49764d08`，有限 148 文件两平台前后指纹同为 `ddd2c995b31e84b140236e4085490d3748864bef3d675f9cf1f44c1bfc4c0e12`。Windows 专项/全量日志摘要分别 `eb0d0a4ed600f5239b000702ab2b32625005365d14c600d249bc80cb0eeace56` / `0edea56d8d44b7f4ded8317b16f5a9eb73b11cef5121ac150eacb1ce5c70c110`；Linux 专项/全量分别 `77ebe814234ea993a7a1b12af5c46eea49dc825c03a1435cc689b307a1a1c206` / `ea55c179811f0c2cdf9a4f030d25a185287f73503d3e062d272ebffa495c0f4c`。独立目录/库/basetemp，无真实云、凭据或输入快照访问。前端/Worker 未修改，最新三端 CI 另绑定提交核验。

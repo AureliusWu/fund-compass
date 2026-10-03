@@ -73,11 +73,68 @@ class SnapshotTransport(Protocol):
     def close(self) -> None: ...
 
 
+_SCHEMA_INVENTORY_PROFILE = "captured-schema-inventory-v1"
+_SCHEMA_INVENTORY_DOMAIN = "fund-compass:captured-schema-inventory-v1"
+
+
+def _schema_inventory_digest(rows):
+    # Exact typed framing, not SQL normalization or a server-side certificate.
+    return hashlib.sha256(offline._json_bytes({
+        "domain": _SCHEMA_INVENTORY_DOMAIN,
+        "columns": ["type", "name", "tbl_name", "sql"],
+        "rows": [[offline._typed(value) for value in row] for row in rows],
+    })).hexdigest()
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class _ValidatedSchemaInventory:
+    """Private historical raw schema, never a signature or apply-time guard.
+
+    All source fields remain immutable native tuples/strings/null. A later
+    compiler must revalidate this closed inventory, its digest and resource /
+    image / row bindings against the selected source, then assert every object
+    under the actual write lock. Do not serialize with asdict or log its rows.
+    """
+    rows: tuple[tuple[str, str, str, str | None], ...]
+    exact_sha256: str
+    resource_sha256: str
+    source_image_sha256: str
+    source_rows_sha256: str
+    profile: str = field(default=_SCHEMA_INVENTORY_PROFILE, init=False)
+
+    def __post_init__(self):
+        if type(self.rows) is not tuple or not 1 <= len(self.rows) <= MAX_SCHEMA_ROWS:
+            _fail("capture_schema_mismatch")
+        previous = None
+        for row in self.rows:
+            if type(row) is not tuple or len(row) != 4:
+                _fail("capture_schema_mismatch")
+            kind, name, table, sql = row
+            if type(kind) is not str or kind not in {"table", "index", "trigger", "view"}:
+                _fail("capture_schema_mismatch")
+            for value in (kind, name, table):
+                if not _text(value) or "\x00" in value:
+                    _fail("capture_schema_mismatch")
+            if sql is not None:
+                _text(sql)
+            key = (kind.encode("utf-8"), name.encode("utf-8"))
+            if previous is not None and key <= previous:
+                _fail("capture_schema_mismatch")
+            previous = key
+        for digest in (self.exact_sha256, self.resource_sha256,
+                       self.source_image_sha256, self.source_rows_sha256):
+            if type(digest) is not str or not _SHA.fullmatch(digest):
+                _fail("capture_value_invalid")
+        if self.exact_sha256 != _schema_inventory_digest(self.rows):
+            _fail("capture_schema_mismatch")
+
+
 @dataclass
 class CapturedSnapshot:
     # Private ownership is explicit. repr must never dump source records.
     connection: sqlite3.Connection = field(repr=False)
     safe_metadata: dict
+    _schema_inventory: _ValidatedSchemaInventory | None = field(default=None, repr=False, kw_only=True)
 
     def close(self) -> None:
         self.connection.close()
@@ -440,6 +497,24 @@ def _assemble(reference, decoded, tables, budget, query_mode_profile="query-only
     return typed_digest, hashlib.sha256(image).hexdigest(), count
 
 
+def _captured_schema_inventory(decoded, *, resource_digest, image_digest, typed_digest, budget):
+    # Called only after _assemble has checked the closed supported reference
+    # inventory, typed data, lineage and roundtrip. Never derive raw SQL from
+    # the reconstructed reference: formatting has already been canonicalized.
+    rows = []
+    for row in decoded["schema"]:
+        budget.check()
+        rows.append(tuple(row))
+    rows = tuple(rows)
+    result = _ValidatedSchemaInventory(
+        rows=rows, exact_sha256=_schema_inventory_digest(rows),
+        resource_sha256=resource_digest, source_image_sha256=image_digest,
+        source_rows_sha256=typed_digest,
+    )
+    budget.check()
+    return result
+
+
 def capture_scope_snapshot(*, candidate_origin: str, token: str, transport: SnapshotTransport,
                            operational_tables: frozenset[str] = frozenset(),
                            optimizer_statistics: bool = False,
@@ -518,6 +593,8 @@ def capture_scope_snapshot(*, candidate_origin: str, token: str, transport: Snap
                 _fail("capture_cleanup_failed")
         budget.check()
         typed_digest, image_digest, rows = _assemble(reference, decoded, tables, budget, query_mode_profile)
+        schema_inventory = _captured_schema_inventory(decoded, resource_digest=resource_digest,
+            image_digest=image_digest, typed_digest=typed_digest, budget=budget)
         inventory_digest = hashlib.sha256(offline._json_bytes({
             "profile": "known-operational-v1", "tables": sorted(operational_tables),
             "optimizer_statistics": optimizer_statistics,
@@ -537,7 +614,7 @@ def capture_scope_snapshot(*, candidate_origin: str, token: str, transport: Snap
             "remote_applied": False, "remote_restore_verified": False,
             "formal_release_verified": False, "migration_rehearsed": False,
             "apply_preimage_verified": False,
-        })
+        }, _schema_inventory=schema_inventory)
         budget.check()
         reference = None
         return result

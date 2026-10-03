@@ -1,5 +1,6 @@
 """Synthetic Hrana transport over actual SQLite; no configured DB or cloud."""
 import base64
+from dataclasses import FrozenInstanceError, replace
 import hashlib
 import json
 import socket
@@ -787,3 +788,238 @@ def test_fixed_read_sql_and_autocommit_failures_still_close_without_success_or_r
         assert sqls[-2:] == ["COMMIT", "ROLLBACK"]
     else:
         assert sqls[-1] == "ROLLBACK" and "COMMIT" not in sqls
+
+
+def _raw_schema_rows(conn):
+    return tuple(tuple(row) for row in conn.execute(
+        "SELECT type,name,tbl_name,sql FROM main.sqlite_master ORDER BY type,name"))
+
+
+def _format_only_source_ddl(conn, table="funds"):
+    original = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone()[0]
+    changed = original.replace("CREATE TABLE", "CREATE \n  TABLE", 1)
+    assert changed != original
+    assert offline.turso_schema._normalize_ddl(changed) == offline.turso_schema._normalize_ddl(original)
+    conn.execute("PRAGMA writable_schema=ON")
+    try:
+        conn.execute("UPDATE sqlite_master SET sql=? WHERE type='table' AND name=?", (changed, table))
+        conn.commit()
+    finally:
+        conn.execute("PRAGMA writable_schema=OFF")
+    return original, changed
+
+
+@pytest.mark.parametrize("profile", QUERY_PROFILES)
+def test_private_inventory_retains_real_sqlite_raw_format_and_all_null_objects(source, profile):
+    conn = source()
+    original, changed = _format_only_source_ddl(conn)
+    expected = _raw_schema_rows(conn)
+    null_rows = tuple(row for row in expected if row[3] is None)
+    assert null_rows and any(row[1].startswith("sqlite_autoindex_") for row in null_rows)
+    with run(SQLiteHrana(conn), query_mode_profile=profile) as snapshot:
+        inventory = snapshot._schema_inventory
+        assert type(inventory) is capture._ValidatedSchemaInventory
+        assert inventory.profile == "captured-schema-inventory-v1"
+        assert inventory.rows == expected
+        assert type(inventory.rows) is tuple
+        assert all(type(row) is tuple and len(row) == 4
+                   and all(type(value) is str for value in row[:3])
+                   and (row[3] is None or type(row[3]) is str) for row in inventory.rows)
+        assert tuple(row for row in inventory.rows if row[3] is None) == null_rows
+        raw_sql = next(row[3] for row in inventory.rows if row[:2] == ("table", "funds"))
+        assert raw_sql == changed
+        assert snapshot.connection.execute("SELECT sql FROM sqlite_master WHERE name='funds'").fetchone()[0] == original
+        assert inventory.exact_sha256 == capture._schema_inventory_digest(expected)
+        assert inventory.resource_sha256 == snapshot.safe_metadata["resource_sha256"]
+        assert inventory.source_image_sha256 == snapshot.safe_metadata["source_sha256"]
+        assert inventory.source_rows_sha256 == snapshot.safe_metadata["source_rows_sha256"]
+        assert hashlib.sha256(snapshot.connection.serialize()).hexdigest() == inventory.source_image_sha256
+
+
+def test_raw_inventory_digest_distinguishes_format_even_when_safe_metadata_and_logical_image_are_same(source):
+    first_conn, second_conn = source(), source()
+    _format_only_source_ddl(second_conn)
+    with run(SQLiteHrana(first_conn)) as first, run(SQLiteHrana(second_conn)) as second:
+        assert first.safe_metadata == second.safe_metadata
+        assert first.connection.serialize() == second.connection.serialize()
+        assert first._schema_inventory.rows != second._schema_inventory.rows
+        assert first._schema_inventory.exact_sha256 != second._schema_inventory.exact_sha256
+
+
+def test_raw_inventory_digest_uses_exact_typed_domain_separated_framing():
+    rows = (("table", "synthetic", "synthetic", "CREATE TABLE synthetic(v TEXT DEFAULT 'a  b')"),
+            ("trigger", "synthetic_guard", "synthetic", "CREATE TRIGGER synthetic_guard AFTER INSERT ON synthetic BEGIN SELECT 'x'; END"))
+    expected_frame = {
+        "domain": "fund-compass:captured-schema-inventory-v1",
+        "columns": ["type", "name", "tbl_name", "sql"],
+        "rows": [[["text", value] for value in row] for row in rows],
+    }
+    expected = hashlib.sha256(offline._json_bytes(expected_frame)).hexdigest()
+    assert capture._schema_inventory_digest(rows) == expected
+    literal_changed = (rows[0][:-1] + (rows[0][3].replace("'a  b'", "'a b'"),), rows[1])
+    assert capture._schema_inventory_digest(literal_changed) != expected
+    assert offline.turso_schema._normalize_ddl(rows[0][3]) != offline.turso_schema._normalize_ddl(literal_changed[0][3])
+    null_sql = (("index", "sqlite_autoindex_synthetic_1", "synthetic", None),)
+    empty_sql = (("index", "sqlite_autoindex_synthetic_1", "synthetic", ""),)
+    assert capture._schema_inventory_digest(null_sql) != capture._schema_inventory_digest(empty_sql)
+    undomain_frame = {key: value for key, value in expected_frame.items() if key != "domain"}
+    assert expected != hashlib.sha256(offline._json_bytes(undomain_frame)).hexdigest()
+
+
+def test_private_inventory_is_immutable_and_never_added_to_public_metadata_or_repr(source):
+    with run(SQLiteHrana(source())) as snapshot:
+        inventory = snapshot._schema_inventory
+        with pytest.raises(FrozenInstanceError):
+            inventory.rows = ()
+        with pytest.raises(FrozenInstanceError):
+            inventory.exact_sha256 = "0" * 64
+        with pytest.raises(TypeError):
+            inventory.rows[0] = inventory.rows[0]
+        with pytest.raises(TypeError):
+            inventory.rows[0][3] = "private-replacement-marker"
+        assert not hasattr(inventory, "__dict__")
+        assert set(snapshot.safe_metadata) == {
+            "ok", "from_schema", "evidence_scope", "source_kind", "resource_sha256",
+            "source_sha256", "source_rows_sha256", "source_contract_sha256",
+            "operational_profile", "inventory_sha256", "query_mode_profile", "query_only_observed",
+            "server_write_protection_verified", "table_count", "row_count", "consistent_sql_snapshot",
+            "remote_verified", "remote_applied", "remote_restore_verified", "formal_release_verified",
+            "migration_rehearsed", "apply_preimage_verified",
+        }
+        public = repr(snapshot) + repr(inventory) + json.dumps(snapshot.safe_metadata)
+        assert all(marker not in public for marker in ("CREATE TABLE", "CREATE TRIGGER", ORIGIN, TOKEN, "private-fund-marker"))
+        # Old explicit two-positional construction remains supported, but is
+        # intentionally missing the private historical preimage capability.
+        legacy = capture.CapturedSnapshot(snapshot.connection, snapshot.safe_metadata)
+        assert legacy._schema_inventory is None
+        with pytest.raises(TypeError):
+            capture.CapturedSnapshot(snapshot.connection, snapshot.safe_metadata, inventory)
+
+
+@pytest.mark.parametrize("mutation", [
+    lambda rows: list(rows),
+    lambda rows: (list(rows[0]), *rows[1:]),
+    lambda rows: (),
+    lambda rows: (rows[0][:-1], *rows[1:]),
+    lambda rows: (("unreviewed", *rows[0][1:]), *rows[1:]),
+    lambda rows: ((rows[0][0], 1, *rows[0][2:]), *rows[1:]),
+    lambda rows: ((rows[0][0], rows[0][1], True, rows[0][3]), *rows[1:]),
+    lambda rows: ((*rows[0][:3], b"private-sql-bytes"), *rows[1:]),
+    lambda rows: ((*rows[0][:3], False), *rows[1:]),
+    lambda rows: ((rows[0][0], rows[0][1] + "\x00", *rows[0][2:]), *rows[1:]),
+    lambda rows: ((rows[0][0], rows[0][1], "\ud800", rows[0][3]), *rows[1:]),
+    lambda rows: (rows[0], *rows),
+    lambda rows: tuple(reversed(rows)),
+    lambda rows: (rows[0],) * 129,
+])
+def test_private_inventory_rejects_mutable_non_native_malformed_duplicate_unsorted_and_unbounded_rows(source, mutation):
+    with run(SQLiteHrana(source())) as snapshot:
+        inventory = snapshot._schema_inventory
+        with pytest.raises(capture.SnapshotError) as error:
+            replace(inventory, rows=mutation(inventory.rows))
+        assert TOKEN not in str(error.value) and "private" not in str(error.value)
+
+
+@pytest.mark.parametrize("field", ["exact_sha256", "resource_sha256", "source_image_sha256", "source_rows_sha256"])
+@pytest.mark.parametrize("value", [None, True, "", "A" * 64, "a" * 64 + "\n"])
+def test_private_inventory_digest_fields_are_exact_closed_lowercase_sha256(source, field, value):
+    with run(SQLiteHrana(source())) as snapshot:
+        with pytest.raises(capture.SnapshotError, match="^capture_value_invalid$"):
+            replace(snapshot._schema_inventory, **{field: value})
+
+
+def test_private_inventory_rejects_a_well_spelled_but_wrong_raw_digest(source):
+    with run(SQLiteHrana(source())) as snapshot:
+        with pytest.raises(capture.SnapshotError, match="^capture_schema_mismatch$"):
+            replace(snapshot._schema_inventory, exact_sha256="0" * 64)
+
+
+def test_private_inventory_is_built_only_after_cleanup_and_complete_assembly(source, monkeypatch):
+    transport = SQLiteHrana(source())
+    events = []
+    assemble, inventory = capture._assemble, capture._captured_schema_inventory
+    def assembling(*args, **kwargs):
+        assert transport.closed and transport.response.closed
+        result = assemble(*args, **kwargs)
+        events.append("assembled")
+        return result
+    def building(*args, **kwargs):
+        assert events == ["assembled"] and transport.closed and transport.response.closed
+        result = inventory(*args, **kwargs)
+        events.append("private_inventory")
+        return result
+    monkeypatch.setattr(capture, "_assemble", assembling)
+    monkeypatch.setattr(capture, "_captured_schema_inventory", building)
+    with run(transport) as snapshot:
+        assert snapshot._schema_inventory is not None
+        assert events == ["assembled", "private_inventory"]
+
+
+@pytest.mark.parametrize("failure", ["sql", "schema", "literal", "null_sql", "cleanup"])
+def test_failed_capture_never_constructs_or_returns_private_schema_inventory(source, monkeypatch, failure):
+    builds = []
+    def forbidden(*args, **kwargs):
+        builds.append(True)
+        raise AssertionError("private inventory must not be built after failure")
+    monkeypatch.setattr(capture, "_captured_schema_inventory", forbidden)
+    conn = source()
+    def mutate(payload, body):
+        if failure in {"sql", "cleanup"}:
+            return
+        schema = row_result(payload, body, "main.sqlite_master")["rows"]
+        if failure == "schema":
+            schema[0][2] = encode("private-unreviewed-table")
+        elif failure == "literal":
+            row = next(row for row in schema if row[0]["value"] == "trigger" and " is immutable'" in row[3]["value"])
+            row[3] = encode(row[3]["value"].replace(" is immutable'", " is  immutable'"))
+        elif failure == "null_sql":
+            row = next(row for row in schema if row[3]["type"] == "null")
+            row[3] = encode("")
+    transport = SQLiteHrana(conn, mutate=mutate, sql_error=0 if failure == "sql" else None,
+                            close_error=failure == "cleanup")
+    expected_code = {"sql": "capture_sql_failed", "cleanup": "capture_cleanup_failed"}.get(
+        failure, "capture_schema_mismatch")
+    with pytest.raises(capture.SnapshotError, match=f"^{expected_code}$"):
+        run(transport)
+    assert builds == []
+    assert transport.closed and transport.response.closed and len(transport.calls) == 1
+
+
+def test_private_raw_inventory_and_data_keep_same_historical_snapshot_with_concurrent_format_writer(source, tmp_path):
+    memory = source()
+    path = tmp_path / "synthetic-private-inventory-writer.db"
+    first = sqlite3.connect(path)
+    second = None
+    try:
+        memory.backup(first)
+        assert first.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
+        second = sqlite3.connect(path)
+        before_schema = _raw_schema_rows(first)
+        original = next(row[3] for row in before_schema if row[:2] == ("table", "funds"))
+        formatted = original.replace("CREATE TABLE", "CREATE \n  TABLE", 1)
+        changed = []
+        def before(index, sql):
+            if sql == 'SELECT rowid,* FROM main."funds" ORDER BY rowid LIMIT 100001':
+                assert first.in_transaction
+                second.execute("PRAGMA writable_schema=ON")
+                try:
+                    second.execute("UPDATE sqlite_master SET sql=? WHERE type='table' AND name='funds'", (formatted,))
+                    second.execute("UPDATE funds SET name='private-concurrent-writer' WHERE code='000001'")
+                    second.commit()
+                finally:
+                    second.execute("PRAGMA writable_schema=OFF")
+                changed.append(True)
+        transport = SQLiteHrana(first, before_step=before)
+        with run(transport) as snapshot:
+            assert changed == [True]
+            assert snapshot._schema_inventory.rows == before_schema
+            assert snapshot._schema_inventory.exact_sha256 == capture._schema_inventory_digest(before_schema)
+            assert _raw_schema_rows(second) != before_schema
+            assert snapshot.connection.execute("SELECT name FROM funds WHERE code='000001'").fetchone()[0] == "private-fund-marker"
+            assert second.execute("SELECT name FROM funds WHERE code='000001'").fetchone()[0] == "private-concurrent-writer"
+            assert snapshot.safe_metadata["apply_preimage_verified"] is False
+        assert len(transport.calls) == 1 and not first.in_transaction
+    finally:
+        if second is not None:
+            second.close()
+        first.close()
