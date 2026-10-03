@@ -69,18 +69,15 @@ def _pct(series):
     return round(cur, 2), round(below / len(vals) * 100, 1)
 
 
-def _value_col(df, prefer, avoid=("等权", "中位数")):
-    """按 prefer 优先级挑列，优先排除 avoid（等权/中位数）；再退而求其次；最后兜底首个数值列。"""
-    cols = [c for c in df.columns if c not in ("日期", "指数")]
-    for k in prefer:                                  # 含 prefer 且不含 avoid（市值加权口径）
-        for c in cols:
-            if k in str(c) and not any(a in str(c) for a in avoid):
-                return c
-    for k in prefer:                                  # 退一步：含 prefer（可能等权）
-        for c in cols:
-            if k in str(c):
-                return c
-    return cols[0] if cols else None
+def _value_col(df, prefer):
+    """仅认可乐咕已核对的市值加权滚动 PE/PB 列；未知或歧义列失败关闭。"""
+    supported = {"滚动市盈率", "市净率"}
+    requested = supported.intersection(prefer)
+    if len(requested) != 1:
+        return None
+    column = next(iter(requested))
+    # 重复同名列在真实 DataFrame 中会返回多列，不能静默选第一列。
+    return column if list(df.columns).count(column) == 1 else None
 
 
 def _series_from(ak, fn_name, sym, prefer, dump_cols):
@@ -98,7 +95,7 @@ def _series_from(ak, fn_name, sym, prefer, dump_cols):
     if dump_cols:
         print(f"[diag] {fn_name}('{sym}') columns: {list(df.columns)}")
     col = _value_col(df, prefer)
-    if not col or "日期" not in df.columns:
+    if not col or list(df.columns).count("日期") != 1:
         return None, None, None, col
     # Keep date and value from the same row.  Upstream ordering is not a
     # contract, and a trailing NaN must not lend its date to an older value.
@@ -163,51 +160,68 @@ def _valid_core_item(item: dict) -> bool:
 def _fetch_one_index(ak, name, candidates, dumped):
     last_warn = None
     partial = None
+
+    def item_for(sym, source_date, pe_data=None, pb_data=None):
+        return {
+            "name": name,
+            "symbol": sym,
+            "pe": pe_data[0] if pe_data is not None else None,
+            "pe_pct": pe_data[1] if pe_data is not None else None,
+            "pe_date": source_date if pe_data is not None else None,
+            "pb": pb_data[0] if pb_data is not None else None,
+            "pb_pct": pb_data[1] if pb_data is not None else None,
+            "pb_date": source_date if pb_data is not None else None,
+            "date": source_date,
+        }
+
     for sym in candidates:
+        # 仅在当前 symbol 的有界重试内保留成功观测；不读取旧产物，
+        # 不跨候选 symbol 拼接，也不把不同源日期的 PE/PB 当成同日数据。
+        pe_by_date = {}
+        pb_by_date = {}
         for attempt in range(1, FETCH_ATTEMPTS + 1):
             pe, pe_pct, d1, pe_col = _series_from(
                 ak,
                 "stock_index_pe_lg",
                 sym,
-                ("滚动市盈率", "市盈率"),
+                ("滚动市盈率",),
                 not dumped and attempt == 1,
             )
             pb, pb_pct, d2, pb_col = _series_from(
                 ak, "stock_index_pb_lg", sym, ("市净率",), False,
             )
+            if pe is not None and d1 is not None and _source_date(d1) == d1:
+                pe_by_date[d1] = (pe, pe_pct, pe_col)
+            if pb is not None and d2 is not None and _source_date(d2) == d2:
+                pb_by_date[d2] = (pb, pb_pct, pb_col)
+            common_dates = pe_by_date.keys() & pb_by_date.keys()
+            if common_dates:
+                source_date = max(common_dates)
+                pe_data = pe_by_date[source_date]
+                pb_data = pb_by_date[source_date]
+                print(f"[col] {name}: symbol={sym} pe列={pe_data[2]} pb列={pb_data[2]}")
+                return item_for(sym, source_date, pe_data, pb_data)
             if pe is None and pb is None:
                 last_warn = sym
                 if attempt < FETCH_ATTEMPTS:
                     print(f"[warn] {name}: symbol={sym} 空响应，重试 {attempt}/{FETCH_ATTEMPTS}")
                 continue
-            if pe is not None and pb is not None and d1 != d2:
+            if pe_by_date and pb_by_date:
                 print(
                     f"[warn] {name}: PE/PB 源日期不一致 symbol={sym} "
-                    f"pe_date={d1} pb_date={d2} attempt={attempt}/{FETCH_ATTEMPTS}"
+                    f"pe_date={max(pe_by_date)} pb_date={max(pb_by_date)} "
+                    f"attempt={attempt}/{FETCH_ATTEMPTS}"
                 )
                 last_warn = sym
                 continue
-            source_date = d1 or d2
-            if source_date is None:
-                last_warn = sym
-                continue
-            print(f"[col] {name}: symbol={sym} pe列={pe_col} pb列={pb_col}")
-            item = {
-                "name": name,
-                "symbol": sym,
-                "pe": pe,
-                "pe_pct": pe_pct,
-                "pe_date": d1,
-                "pb": pb,
-                "pb_pct": pb_pct,
-                "pb_date": d2,
-                "date": source_date,
-            }
-            if pe is not None and pb is not None:
-                return item
-            partial = item
             if attempt < FETCH_ATTEMPTS:
                 print(f"[warn] {name}: symbol={sym} PE/PB 不完整，重试 {attempt}/{FETCH_ATTEMPTS}")
+        if pe_by_date and not pb_by_date:
+            source_date = max(pe_by_date)
+            partial = item_for(sym, source_date, pe_data=pe_by_date[source_date])
+        elif pb_by_date and not pe_by_date:
+            source_date = max(pb_by_date)
+            partial = item_for(sym, source_date, pb_data=pb_by_date[source_date])
     if partial is not None:
         return partial
     print(f"[warn] {name} 候选 symbol 均失败: {candidates} last={last_warn}")

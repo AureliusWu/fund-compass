@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
-import { postPortfolioLab, type PortfolioLabResp } from '@/api/client'
+import { computed, onMounted, onBeforeUnmount, reactive, ref } from 'vue'
+import type { PortfolioLabResp } from '@/api/client'
 import { useFundsStore } from '@/stores/funds'
 import { useWatchlistStore } from '@/stores/watchlist'
 import { colorOf, num, pct } from '@/utils/format'
 import Chart from '@/components/Chart.vue'
 import { completePortfolioWeights, holdingMarketValue, valuationCoverage } from '@/utils/portfolioCoverage'
+import { aggregateFundHoldings } from '@/utils/holding-aggregation'
 
 interface LabItem { code: string; name: string; current: number | null; target: number | null; value: number | null; costComplete: boolean }
 
@@ -16,11 +17,12 @@ const loading = ref(true)
 const running = ref(false)
 const error = ref('')
 const result = ref<PortfolioLabResp | null>(null)
+const inputsComplete = ref(true)
 const coverage = computed(() => valuationCoverage(items))
 const unpricedItems = computed(() => coverage.value.missing)
 const missingCostItems = computed(() => items.filter((item) => !item.costComplete))
-const portfolioReady = computed(() => coverage.value.complete && missingCostItems.value.length === 0)
-const portfolioValue = computed(() => coverage.value.complete ? coverage.value.pricedValue : null)
+const portfolioReady = computed(() => inputsComplete.value && coverage.value.complete && missingCostItems.value.length === 0)
+const portfolioValue = computed(() => inputsComplete.value && coverage.value.complete ? coverage.value.pricedValue : null)
 const missingTargetItems = computed(() => items.filter((item) => item.target == null))
 const invalidTargetItems = computed(() => items.filter((item) => (
   item.target != null && (!Number.isFinite(item.target) || item.target < 0 || item.target > 100)
@@ -35,7 +37,9 @@ const targetTotal = computed<number | null>(() => {
   return Math.round(total * 10000) / 10000
 })
 const targetReady = computed(() => targetTotal.value === 100)
-const analysisReady = computed(() => portfolioReady.value && targetReady.value)
+// The legacy server endpoint is Admin-only. Browser personal analysis remains
+// closed until a restricted Owner endpoint and explicit input confirmation exist.
+const analysisReady = computed(() => false)
 const targetSummary = computed(() => {
   if (missingTargetItems.value.length) return `目标缺失 ${missingTargetItems.value.length} 项`
   if (invalidTargetItems.value.length) return `目标无效 ${invalidTargetItems.value.length} 项`
@@ -62,64 +66,36 @@ function updateTarget(item: LabItem, event: Event) {
   error.value = ''
 }
 
+let disposed = false
+onBeforeUnmount(() => { disposed = true })
 onMounted(async () => {
-  await watch.load(true)
-  const grouped = new Map<string, { code: string; name: string; shares: number; target?: number; costComplete: boolean }>()
-  for (const entry of watch.activeHoldings) {
-    if (!(entry.shares && entry.shares > 0)) continue
-    const row = grouped.get(entry.code) || {
-      code: entry.code, name: entry.name || entry.code, shares: 0,
-      target: entry.target_weight, costComplete: true,
-    }
-    row.shares += entry.shares
-    if (entry.cost == null || !Number.isFinite(entry.cost) || entry.cost < 0) row.costComplete = false
-    if (entry.target_weight != null) row.target = entry.target_weight
-    grouped.set(entry.code, row)
-  }
-  const loaded = await Promise.all([...grouped.values()].map(async (row) => {
-    try {
-      const detail = await funds.detail(row.code)
-      return { ...row, name: detail.name || row.name, value: holdingMarketValue(row.shares, detail.latest_nav) }
-    } catch { return { ...row, value: null } }
-  }))
-  const currentWeights = completePortfolioWeights(loaded)
-  loaded.forEach((row, index) => items.push({
-    code: row.code, name: row.name, value: row.value,
-    current: currentWeights?.[index] ?? null,
-    target: row.target ?? null,
-    costComplete: row.costComplete,
-  }))
-  loading.value = false
-  if (items.length && analysisReady.value) await run()
+  try {
+    await watch.load(true)
+    if (disposed) return
+    const grouped = aggregateFundHoldings(watch.activeHoldings)
+    inputsComplete.value = grouped.complete
+    const loaded = await Promise.all(grouped.funds.map(async (row) => {
+      try {
+        const detail = await funds.detail(row.code)
+        return { ...row, name: detail.name || row.name, value: row.shares == null ? null : row.shares === 0 ? 0 : holdingMarketValue(row.shares, detail.latest_nav) }
+      } catch { return { ...row, value: row.shares === 0 ? 0 : null } }
+    }))
+    if (disposed) return
+    const currentWeights = grouped.complete ? completePortfolioWeights(loaded) : null
+    loaded.forEach((row, index) => items.push({
+      code: row.code, name: row.name, value: row.value,
+      current: currentWeights?.[index] ?? null,
+      target: row.targetWeight,
+      costComplete: row.costComplete,
+    }))
+    if (!grouped.complete) error.value = '本地持仓输入不完整或账户重复，请先修正；未发送私人输入'
+  } catch { if (!disposed) error.value = '本地持仓读取失败；未发送私人输入' }
+  finally { if (!disposed) loading.value = false }
 })
 
 async function run() {
-  if (!items.length || running.value) return
-  if (!portfolioReady.value || portfolioValue.value == null || items.some((item) => item.current == null)) {
-    result.value = null
-    error.value = '存在未定价或成本缺失持仓，已停止权重、回测和再平衡计算'
-    return
-  }
-  if (!targetReady.value) {
-    result.value = null
-    error.value = targetValidationError.value || '目标权重必须完整且合计精确为 100.0%'
-    return
-  }
-  const requestItems: Array<{ code: string; current_weight: number; target_weight: number }> = []
-  for (const item of items) {
-    if (item.current == null || item.target == null) {
-      result.value = null
-      error.value = '当前权重或目标权重缺失，已停止组合实验'
-      return
-    }
-    requestItems.push({ code: item.code, current_weight: item.current, target_weight: item.target })
-  }
-  running.value = true; error.value = ''
-  try {
-    result.value = await postPortfolioLab(requestItems, portfolioValue.value)
-  } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : '组合分析失败'
-  } finally { running.value = false }
+  result.value = null
+  error.value = '私人组合分析暂未启用：等待受限 Owner 分析接口，本地输入未发送'
 }
 
 const curveOption = computed(() => {
@@ -147,11 +123,17 @@ const curveOption = computed(() => {
       <van-loading v-if="loading" class="center" />
       <van-empty v-else-if="!items.length" description="持仓基金为空" />
       <template v-else>
+        <section class="coverage-error" role="status">
+          <b>本机组合草稿</b>
+          <span>当前只在本机显示持仓与编辑目标；不会自动发送私人权重、账户、成本或组合金额。</span>
+          <span>组合回测与再平衡暂未启用，待受限 Owner 分析接口及输入确认流程完成后开放。</span>
+          <span>已定价组合金额：{{ portfolioValue == null ? '--' : num(portfolioValue, 2) }}。目标修改仅为此页草稿，尚未保存。</span>
+        </section>
         <section v-if="!portfolioReady" class="coverage-error" role="alert">
           <b>组合实验已暂停</b>
           <span v-if="unpricedItems.length">净值覆盖 {{ coverage.pricedCount }}/{{ coverage.totalCount }} 只；未定价：{{ unpricedItems.map((item) => item.name).join('、') }}。</span>
           <span v-if="missingCostItems.length">成本缺失：{{ missingCostItems.map((item) => item.name).join('、') }}。</span>
-          <span>缺失净值不会按 0 生成权重；净值或成本未完整时不会进入组合实验。</span>
+          <span>缺失净值不会按 0 生成权重；账户/份额、净值或成本未完整时不会进入组合实验。</span>
         </section>
         <section class="weights-band">
           <div class="band-head"><b>组合权重</b><span :class="{ warn: !targetReady }">{{ targetSummary }}</span></div>
@@ -174,7 +156,7 @@ const curveOption = computed(() => {
             </label>
           </div>
           <div v-if="targetValidationError" class="target-error" role="alert">{{ targetValidationError }}</div>
-          <van-button block type="primary" size="small" :loading="running" :disabled="!analysisReady" @click="run">重新计算</van-button>
+          <van-button block type="primary" size="small" :loading="running" :disabled="!analysisReady" @click="run">私人组合分析待启用</van-button>
           <div v-if="error" class="error" role="alert">{{ error }}</div>
         </section>
 

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "I21-02 proposed natural-language filter v1",
+  "type": "object",
+  "minProperties": 1,
+  "additionalProperties": false,
+  "properties": {
+    "type": { "enum": [null, "股票型", "混合型", "债券型", "指数型", "QDII", "FOF"] },
+    "r1m_min": { "$ref": "#/$defs/return_threshold" },
+    "r3m_min": { "$ref": "#/$defs/return_threshold" },
+    "r6m_min": { "$ref": "#/$defs/return_threshold" },
+    "r1y_min": { "$ref": "#/$defs/return_threshold" },
+    "r3y_min": { "$ref": "#/$defs/return_threshold" },
+    "ytd_min": { "$ref": "#/$defs/return_threshold" },
+    "fee_max": { "type": "number", "minimum": 0, "maximum": 100 },
+    "sort": { "enum": ["r1m", "r3m", "r6m", "r1y", "r3y", "ytd", "fee"] },
+    "unsupported": { "type": "array", "maxItems": 20, "items": { "type": "string", "minLength": 1, "maxLength": 100 } }
+  },
+  "$defs": { "return_threshold": { "type": "number", "minimum": -100, "maximum": 100000 } },
+  "$comment": "Parser rejects duplicate JSON keys, non-finite values, whitespace-only unsupported entries and output over 4096 UTF-16 code units. Bounds are input-execution guards, not investment guidance or bounds on market data. This is a proposal: show query, all applied conditions and dataset date; explicit user confirmation is required. Any unsupported condition blocks the entire execution. Null type or empty unsupported alone is not executable. Fee sorts ascending, other fields descending, default r1y is displayed. No model-generated fund values/actions are accepted."
+}

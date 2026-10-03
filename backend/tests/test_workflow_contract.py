@@ -7,7 +7,6 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = ROOT / ".github" / "workflows"
 AUTO_COMMIT_WORKFLOWS = (
-    "calibrate-strategy.yml",
     "enrich-holdings.yml",
     "enrich-managers.yml",
     "fund-universe.yml",
@@ -139,6 +138,31 @@ def test_calibration_workflows_are_candidate_only() -> None:
         source = (ROOT / "tools" / name).read_text(encoding="utf-8")
         assert "AUTO_PROMOTE" not in source
         assert "explicit_admin_only" in source
+
+
+def test_private_calibration_is_bounded_and_never_published() -> None:
+    source = workflow("calibrate-strategy.yml")
+
+    assert "contents: read" in source
+    assert "contents: write" not in source
+    assert "actions: write" not in source
+    assert "id: calibration" in source
+    assert "CALIBRATION_OUTCOME_ATTEMPTS: '3'" in source
+    assert "CALIBRATION_OUTCOME_TIMEOUT_SECONDS: '45'" in source
+    assert "CALIBRATION_OUTCOME_TOTAL_BUDGET_SECONDS: '150'" in source
+    assert "CALIBRATION_OUTCOME_RETRY_AFTER_MAX_SECONDS: '15'" in source
+    assert "CALIBRATION_OUTCOME_MAX_RESPONSE_BYTES: '8388608'" in source
+    assert "CALIBRATION_ALLOW_INSECURE_LOOPBACK" not in source
+    assert "if: always()" in source
+    assert "BLOCKED_PRIVATE_SINK_REQUIRED" in source
+    assert "private_output_published: false" in source
+    assert "actions/upload-artifact" not in source
+    assert "git add" not in source
+    assert "git commit" not in source
+    assert "git push" not in source
+    assert "gh workflow run" not in source
+    assert "frontend/public/data/strategy-calibration.json" not in source
+    assert "backend/data/strategy-params.json" not in source
 
 
 def test_enrichment_branches_preserve_good_artifacts_then_report_any_failure() -> None:

@@ -78,6 +78,9 @@ class FakeAkshare:
     def stock_index_pe_lg(self, symbol):
         return self.frame
 
+    def stock_index_pb_lg(self, symbol):
+        return self.frame
+
 
 def screener_row(code="000001"):
     fields = [""] * 21
@@ -464,6 +467,238 @@ def test_index_fetch_still_fails_closed_after_bounded_retries(monkeypatch):
 
     assert index_valuation._fetch_one_index(object(), "中证500", ["中证500"], False) is None
     assert len(calls) == index_valuation.FETCH_ATTEMPTS * 2
+
+
+@pytest.mark.parametrize("first_metric", ["pe", "pb"])
+def test_index_fetch_preserves_alternating_success_with_same_source_date(monkeypatch, first_metric):
+    empty = (None, None, None, None)
+    pe = (12.0, 50.0, "2026-08-12", "滚动市盈率")
+    pb = (1.2, 40.0, "2026-08-12", "市净率")
+    responses = iter([pe, empty, empty, pb] if first_metric == "pe" else [empty, pb, pe, empty])
+    calls = []
+
+    def alternating_series(ak, fn_name, sym, prefer, dump_cols):
+        calls.append((fn_name, sym))
+        return next(responses)
+
+    monkeypatch.setattr(index_valuation, "_series_from", alternating_series)
+
+    result = index_valuation._fetch_one_index(object(), "沪深300", ["沪深300"], False)
+
+    assert result is not None
+    assert index_valuation._valid_core_item(result) is True
+    assert result["pe"] == 12.0
+    assert result["pb"] == 1.2
+    assert result["pe_date"] == result["pb_date"] == result["date"] == "2026-08-12"
+    assert len(calls) == 4
+
+
+def test_index_fetch_does_not_combine_alternating_success_from_different_dates(monkeypatch):
+    responses = iter([
+        (12.0, 50.0, "2026-08-12", "滚动市盈率"), (None, None, None, None),
+        (None, None, None, None), (1.2, 40.0, "2026-08-11", "市净率"),
+        (None, None, None, None), (None, None, None, None),
+    ])
+    monkeypatch.setattr(index_valuation, "_series_from", lambda *args: next(responses))
+
+    assert index_valuation._fetch_one_index(object(), "沪深300", ["沪深300"], False) is None
+
+
+def test_index_fetch_matches_only_a_source_date_observed_for_both_metrics(monkeypatch):
+    responses = iter([
+        (12.0, 50.0, "2026-08-12", "滚动市盈率"),
+        (1.1, 35.0, "2026-08-11", "市净率"),
+        (None, None, None, None),
+        (1.2, 40.0, "2026-08-12", "市净率"),
+    ])
+    monkeypatch.setattr(index_valuation, "_series_from", lambda *args: next(responses))
+
+    result = index_valuation._fetch_one_index(object(), "沪深300", ["沪深300"], False)
+
+    assert result["pe"] == 12.0
+    assert result["pb"] == 1.2
+    assert result["pb_pct"] == 40.0
+    assert result["pe_date"] == result["pb_date"] == result["date"] == "2026-08-12"
+
+
+def test_index_fetch_does_not_cache_invalid_source_dates(monkeypatch):
+    def invalid_date_series(ak, fn_name, sym, prefer, dump_cols):
+        if fn_name == "stock_index_pe_lg":
+            return 12.0, 50.0, "2026-02-31", "滚动市盈率"
+        return 1.2, 40.0, "2026-02-31", "市净率"
+
+    monkeypatch.setattr(index_valuation, "_series_from", invalid_date_series)
+
+    assert index_valuation._fetch_one_index(object(), "沪深300", ["沪深300"], False) is None
+
+
+def test_index_fetch_does_not_combine_success_from_different_candidate_symbols(monkeypatch):
+    calls = []
+
+    def different_symbol_series(ak, fn_name, sym, prefer, dump_cols):
+        calls.append((fn_name, sym))
+        if sym == "first" and fn_name == "stock_index_pe_lg":
+            return 12.0, 50.0, "2026-08-12", "滚动市盈率"
+        if sym == "second" and fn_name == "stock_index_pb_lg":
+            return 1.2, 40.0, "2026-08-12", "市净率"
+        return None, None, None, None
+
+    monkeypatch.setattr(index_valuation, "_series_from", different_symbol_series)
+
+    result = index_valuation._fetch_one_index(object(), "沪深300", ["first", "second"], False)
+
+    assert result is not None
+    assert result["symbol"] == "second"
+    assert result["pe"] is None and result["pe_date"] is None
+    assert result["pb"] == 1.2
+    assert index_valuation._valid_core_item(result) is False
+    assert len(calls) == 2 * index_valuation.FETCH_ATTEMPTS * 2
+
+
+def test_index_fetch_success_cache_is_not_shared_between_runs(monkeypatch):
+    current_metric = {"name": "stock_index_pe_lg"}
+
+    def single_metric_series(ak, fn_name, sym, prefer, dump_cols):
+        if fn_name != current_metric["name"]:
+            return None, None, None, None
+        if fn_name == "stock_index_pe_lg":
+            return 12.0, 50.0, "2026-08-12", "滚动市盈率"
+        return 1.2, 40.0, "2026-08-12", "市净率"
+
+    monkeypatch.setattr(index_valuation, "_series_from", single_metric_series)
+    first = index_valuation._fetch_one_index(object(), "沪深300", ["沪深300"], False)
+    current_metric["name"] = "stock_index_pb_lg"
+    second = index_valuation._fetch_one_index(object(), "沪深300", ["沪深300"], False)
+
+    assert first["pe"] == 12.0 and first["pb"] is None
+    assert second["pe"] is None and second["pb"] == 1.2
+    assert index_valuation._valid_core_item(first) is False
+    assert index_valuation._valid_core_item(second) is False
+
+
+@pytest.mark.parametrize(
+    ("fn_name", "prefer", "wrong_column"),
+    [
+        ("stock_index_pe_lg", ("滚动市盈率",), "等权滚动市盈率"),
+        ("stock_index_pe_lg", ("滚动市盈率",), "滚动市盈率中位数"),
+        ("stock_index_pe_lg", ("滚动市盈率",), "静态市盈率"),
+        ("stock_index_pe_lg", ("滚动市盈率",), "市盈率"),
+        ("stock_index_pe_lg", ("滚动市盈率",), "成交量"),
+        ("stock_index_pe_lg", ("滚动市盈率",), "滚动市盈率（加权）"),
+        ("stock_index_pb_lg", ("市净率",), "等权市净率"),
+        ("stock_index_pb_lg", ("市净率",), "市净率中位数"),
+        ("stock_index_pb_lg", ("市净率",), "pb"),
+    ],
+)
+def test_index_series_rejects_unknown_or_different_valuation_basis(fn_name, prefer, wrong_column):
+    frame = FakeFrame(**{
+        "日期": [f"2026-07-{day:02d}" for day in range(1, 31)],
+        wrong_column: list(range(1, 31)),
+    })
+
+    assert index_valuation._value_col(frame, prefer) is None
+    assert index_valuation._series_from(FakeAkshare(frame), fn_name, "沪深300", prefer, False) == (
+        None, None, None, None,
+    )
+
+
+@pytest.mark.parametrize(
+    ("fn_name", "column", "value"),
+    [("stock_index_pe_lg", "滚动市盈率", 12.0), ("stock_index_pb_lg", "市净率", 1.2)],
+)
+def test_index_series_selects_only_exact_verified_column_among_other_metrics(fn_name, column, value):
+    dates = [f"2026-07-{day:02d}" for day in range(1, 31)]
+    frame = FakeFrame(**{
+        "日期": dates,
+        "指数": [999.0] * 30,
+        "静态市盈率": [555.0] * 30,
+        "等权滚动市盈率": [555.0] * 30,
+        "滚动市盈率中位数": [555.0] * 30,
+        "等权市净率": [555.0] * 30,
+        "市净率中位数": [555.0] * 30,
+        column: [value] * 30,
+    })
+
+    assert index_valuation._series_from(FakeAkshare(frame), fn_name, "沪深300", (column,), False) == (
+        value, 100.0, "2026-07-30", column,
+    )
+
+
+@pytest.mark.parametrize("column", ["滚动市盈率", "市净率"])
+def test_index_value_column_rejects_duplicate_exact_columns(column):
+    frame = FakeFrame(**{"日期": ["2026-08-12"], column: [12.0]})
+    frame.columns.append(column)
+
+    assert index_valuation._value_col(frame, (column,)) is None
+
+
+def test_index_value_column_rejects_ambiguous_requested_metric():
+    frame = FakeFrame(日期=["2026-08-12"], 滚动市盈率=[12.0], 市净率=[1.2])
+
+    assert index_valuation._value_col(frame, ("滚动市盈率", "市净率")) is None
+
+
+def test_index_series_rejects_duplicate_date_columns():
+    frame = FakeFrame(日期=["2026-08-12"], 滚动市盈率=[12.0])
+    frame.columns.append("日期")
+
+    assert index_valuation._series_from(
+        FakeAkshare(frame), "stock_index_pe_lg", "沪深300", ("滚动市盈率",), False,
+    ) == (None, None, None, "滚动市盈率")
+
+
+def test_index_series_keeps_real_zero_and_thirty_sample_requirement():
+    dates = [f"2026-07-{day:02d}" for day in range(1, 31)]
+    frame = FakeFrame(日期=dates, 滚动市盈率=[*range(1, 30), 0])
+
+    current, percentile, source_date, _ = index_valuation._series_from(
+        FakeAkshare(frame), "stock_index_pe_lg", "沪深300", ("滚动市盈率",), False,
+    )
+
+    assert current == 0
+    assert percentile == 3.3
+    assert source_date == "2026-07-30"
+    too_short = FakeFrame(日期=dates[:29], 滚动市盈率=list(range(1, 30)))
+    assert index_valuation._series_from(
+        FakeAkshare(too_short), "stock_index_pe_lg", "沪深300", ("滚动市盈率",), False,
+    ) == (None, None, None, "滚动市盈率")
+
+
+@pytest.mark.parametrize("failure", ["403", "wrong_column"])
+def test_index_valuation_upstream_failure_preserves_existing_file_and_core_gate(
+    failure, tmp_path, monkeypatch,
+):
+    output = tmp_path / "index-valuation.json"
+    original = b"old-good-artifact"
+    output.write_bytes(original)
+    calls = []
+
+    class FailingAkshare:
+        __version__ = "synthetic-only"
+
+        def _fetch(self, symbol):
+            calls.append(symbol)
+            if failure == "403":
+                response = requests.Response()
+                response.status_code = 403
+                raise requests.HTTPError("upstream status=403", response=response)
+            return FakeFrame(
+                日期=[f"2026-07-{day:02d}" for day in range(1, 31)],
+                成交量=list(range(1, 31)),
+            )
+
+        stock_index_pe_lg = _fetch
+        stock_index_pb_lg = _fetch
+
+    monkeypatch.setitem(sys.modules, "akshare", FailingAkshare())
+    monkeypatch.setattr(index_valuation, "OUT", str(output))
+
+    assert index_valuation.main() == 1
+    assert output.read_bytes() == original
+    assert len(index_valuation.CORE_INDICES) == 6
+    assert len(calls) == sum(len(candidates) for candidates in index_valuation.LG_SYMBOLS.values()) * (
+        index_valuation.FETCH_ATTEMPTS * 2
+    )
 
 
 def test_index_series_sorts_parseable_dates_before_selecting_current_value():

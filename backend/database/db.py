@@ -18,6 +18,8 @@ from typing import Iterator
 from urllib.parse import parse_qs, urlsplit
 from urllib.request import url2pathname
 
+from service import repository_scopes
+
 log = logging.getLogger(__name__)
 
 DB_PATH = os.environ.get(
@@ -27,7 +29,8 @@ DB_PATH = os.environ.get(
 
 DEFAULT_TIMEOUT_SECONDS = 8.0
 MAX_TIMEOUT_SECONDS = 60.0
-V8_SCHEMA_VERSION = 8
+# Physical schema revision; immutable payload versions and software SemVer stay unchanged.
+V8_SCHEMA_VERSION = 9
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS funds (
@@ -342,6 +345,8 @@ V8_SCHEMA_STATEMENTS = (
     """,
 )
 
+V8_SCHEMA_STATEMENTS += repository_scopes.schema_statements()
+
 
 V8_IMMUTABLE_TABLES = (
     "evidence_snapshots",
@@ -353,6 +358,7 @@ V8_IMMUTABLE_TABLES = (
     "portfolio_decision_snapshots",
     "portfolio_outcome_evaluations",
     "notification_events",
+    *repository_scopes.SCOPE_TABLES,
 )
 
 V8_SCHEMA_TABLES = (*V8_IMMUTABLE_TABLES, "idempotency_responses")
@@ -376,6 +382,7 @@ REQUIRED_SCHEMA_OBJECTS = {
         "portfolio_outcome_evaluations",
         "notification_events",
         "idempotency_responses",
+        *repository_scopes.SCOPE_TABLES,
     },
     "index": {
         "idx_funds_type",
@@ -396,7 +403,10 @@ REQUIRED_SCHEMA_OBJECTS = {
         "idx_portfolio_outcome_evaluation_date",
         "idx_notification_event",
         "idx_notification_decision",
+        "idx_v8_record_scope",
     },
+    "view": {"production_" + table for table in repository_scopes.VIEW_TABLES},
+    "trigger": {"scoped_record_requires_root"},
 }
 
 
@@ -762,7 +772,7 @@ def _v8_schema_contract_errors(conn: sqlite3.Connection) -> list[str]:
             errors.append(f"{index_name} missing index on {table}")
         elif actual_index != expected_index:
             errors.append(f"{index_name} index definition mismatch on {table}")
-    return errors
+    return errors + repository_scopes.schema_errors(conn)
 
 
 def _verify_v8_schema_contract(conn: sqlite3.Connection) -> None:
@@ -779,9 +789,9 @@ def _verify_v8_schema_contract(conn: sqlite3.Connection) -> None:
 def _schema_needs_migration(conn: sqlite3.Connection) -> bool:
     """Mirror every idempotent schema mutation performed during startup."""
     rows = conn.execute(
-        "SELECT type,name FROM sqlite_master WHERE type IN ('table','index','trigger')"
+        "SELECT type,name FROM sqlite_master WHERE type IN ('table','index','trigger','view')"
     ).fetchall()
-    names_by_type: dict[str, set[str]] = {"table": set(), "index": set(), "trigger": set()}
+    names_by_type: dict[str, set[str]] = {"table": set(), "index": set(), "trigger": set(), "view": set()}
     for row in rows:
         names_by_type.setdefault(str(row[0]), set()).add(str(row[1]))
     for object_type, required_names in REQUIRED_SCHEMA_OBJECTS.items():
@@ -1024,6 +1034,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
         repaired_portfolio_outcome = True
     for statement in V8_SCHEMA_STATEMENTS:
         conn.execute(statement)
+    repository_scopes.backfill_legacy_production(conn, allow_legacy=version < V8_SCHEMA_VERSION)
     idempotency_cols = {
         row["name"] for row in conn.execute("PRAGMA table_info(idempotency_responses)")
     }
