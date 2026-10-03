@@ -86,6 +86,8 @@ python tools/turso_scope_upgrade.py rehearse --source <closed-snapshot.db> --sou
 
 DTO 不是签名、授权或锁内前像证明。未来原子 compiler 必须重新核对闭集、raw digest、资源/镜像/行绑定，并在实际同一写事务内做完整 schema/typed 行断言；None、错绑、漂移或未知对象拒绝。历史捕获与实际云端迁移/独立恢复/跨重启门禁继续分开，所有六个 capture 放行旗标仍 false。模块 SHA 改变后旧 helper 必须按原 pin 拒绝，不自动更新旧脚本或把历史结果当成新源码证明。
 
+2026-10-03 已通过新修订捕获工具执行一次真实只读保存：21 表 / 31,957 行，同次私有 sidecar 与 SQLite 镜像通过 source/resource/rows 三绑定，关闭后和本地演练后均重验；本地 8→9/独立逻辑恢复/仓储读回通过，云库未修改。原始结构和私人数据只在 user/SYSTEM-only、只读的仓库外文件；另保存非临时本机副本，未复制凭据、移动/删除旧文件或上传 GitHub。sidecar 文件 SHA `7f101cbb8e63243f5c640ed59bd1ca796105dd535c23b49fe3b651e46193fd08` 不是 raw DTO 摘要或锁内前像资格。所有 remote/apply/restore/formal 旗标继续 false；完整指纹、合成复审修复与本地备份边界见 [V9-EXECUTION-LOG.md](V9-EXECUTION-LOG.md)。
+
 ## 合成标记写入与独立连接读回
 
 ```powershell

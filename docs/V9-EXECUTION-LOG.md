@@ -521,3 +521,23 @@ Render 专用连接只读复核：候选服务仍 free/单实例/main auto-deplo
 | Linux backend 全量 | **1859 passed / 177.14 秒**；exit 0；1 条 Starlette/httpx 弃用警告 |
 
 所有上述最终门禁绑定 source `8dae7943088f805e7a7719cfb37ac85c33d5043ecfc6d30884e77817edba7298`、tests `a136d776c3b0c444ce58495bb9c3860206bd624a2ad979f54cbac40e49764d08`，有限 148 文件两平台前后指纹同为 `ddd2c995b31e84b140236e4085490d3748864bef3d675f9cf1f44c1bfc4c0e12`。Windows 专项/全量日志摘要分别 `eb0d0a4ed600f5239b000702ab2b32625005365d14c600d249bc80cb0eeace56` / `0edea56d8d44b7f4ded8317b16f5a9eb73b11cef5121ac150eacb1ce5c70c110`；Linux 专项/全量分别 `77ebe814234ea993a7a1b12af5c46eea49dc825c03a1435cc689b307a1a1c206` / `ea55c179811f0c2cdf9a4f030d25a185287f73503d3e062d272ebffa495c0f4c`。独立目录/库/basetemp，无真实云、凭据或输入快照访问。前端/Worker 未修改，最新三端 CI 另绑定提交核验。
+
+### 私有 sidecar 实际保存与非临时备份（2026-10-03）
+
+代码 checkpoint `1e260836acdb47769975687dd738c20df3ce1e75` 的 [CI 37097342554](https://github.com/AureliusWu/fund-compass/actions/runs/37097342554) 已 success。独立实际日志核验 resolve EVENT_SHA、4 个 checkout 和 3 个 Verify exact source 均为 merge `9163af85aff67a6517cdfba1604f4e2540c11024`。后端 **1859 passed / 51.64 秒**、pip check；前端 **801 passed / 51 文件**、type-check/build/PWA 7/7；Worker **144 passed / 3 文件**、check/dry-run 均通过。三类 deploy/smoke 仍 skipped，不是部署、耐久或正式发布证据。
+
+新私有捕获工具由父代理全文审查并核对冻结指纹。修订 01 的合成测试虽 27/37 通过，独立复审发现大小写 JSON 键覆盖 P1 与子文件 ACL 证据 P2；没有用它执行真实捕获，原文件和失败日志均保留。修订 02 改用 Ordinal 字典、拒绝大小写碰撞/未知键，目录要求 CI|OI/None，成功前复核两个 exact 子文件 owner/ACL/只读/非 reparse。最终 **27 Python tests / 2.881 秒**、**54 PowerShell cases / parser 0**、exit 0，独立复审所报缺口闭合。helper/wrapper SHA 分别 `41f8da4a25c3124152afb084dfd6ecd046ae03fd95162e3d26faf5bd69518ad1` / `e14c935c438324255832ce5d66670b85c3f90307ea0ed433dadfb28907a75ac0`，producer 仍为上述 `8dae7943`。
+
+随后父代理使用用户指定的准确凭据文件，对同一候选资源执行**一次**有界 fixed-read 捕获，无重试、浏览器、管理请求或云端 DDL/DML。实际 exit 0：schema 8 / **21 表 / 31,957 行**，保留同次历史原始结构；本地 8→9、独立逻辑恢复、仓储读回、旧行与源文件不变均 true。父代理再次核验文件 SHA、owner=current user、仅 user/SYSTEM 两条 Allow ACE、只读/非 reparse；原始 SQL、私人行和凭据均不进入仓库/输出。
+
+| 私有闭合文件 | 字节数 | SHA256 |
+| --- | ---: | --- |
+| SQLite 源镜像 | 3,969,024 | `91701641e9c19afda8f238ddc8610d05dd9f505c9aa27da9be9f78c32d0058d5` |
+| 原始结构 sidecar 文件 | 27,236 | `7f101cbb8e63243f5c640ed59bd1ca796105dd535c23b49fe3b651e46193fd08` |
+| 闭集安全结果日志 | 2,517 | `818e95266256f222c6a21f57a39c468c857ae6319cd432350f47ca4a65be43b9` |
+
+sidecar 文件摘要不是 DTO 内部 raw schema 摘要；后者只保存在私有文件，必须按版本域和 source/resource/rows 三绑定重验。新镜像与此前镜像摘要相同，表示本次读取的数据一致，不是给旧文件补造 raw inventory。此次工具调用及父进程总时长不作为远端 SQL 时长或性能门禁。
+
+为避免 Temp 清理丢失检查点，另在仓库外 `fund-compass-private-backups/20261003-schema8-private02` 保存三个 exact 文件的非临时副本；受保护 user/SYSTEM-only 目录、CreateNew/fsync/关闭/只读、逐文件源与目标 SHA/ACL 均通过，实际 copy exit 0，原 Temp 文件未移动或删除，未复制凭据。该目录位于项目同级，不是 Git/Pages/CI artifact；本地另一份副本仍不是独立远端恢复、长期异地备份或云端耐久证明。
+
+四个 remote/apply/restore/formal 旗标均 false，query_only_observed=0、server_write_protection_verified=false；云库仍 schema 8，应用版本仍 8.0.0。正式纯编译候选的完整前后像/回执合成验证在仓库外推进，但父代理复审又发现其 safe metadata 构造闭集不足，已合成复现并要求新修订，未集成或发送该候选。下一步仍为闭合 compiler/响应核对、真实停写/容量/原子迁移与独立远端恢复；不删除旧 Gist、不更改凭据/计费或部署。
