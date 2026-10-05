@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch as observe } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { showToast } from 'vant'
 import { getFunds, type FundListItem } from '@/api/client'
 import { useWatchlistStore } from '@/stores/watchlist'
-import { loadScreener, filterAndSortRank, rankMetric, screenQuality, type ScreenFund, type ScreenPresetId } from '@/utils/screener'
-import { loadManagers, type Manager } from '@/utils/managers'
+import { loadScreener, screenerFreshness, filterAndSortRank, rankMetric, type ScreenerDataset, type ScreenFund, type ScreenPresetId } from '@/utils/screener'
+import { loadManagerDataset, managerSnapshotFreshness, type Manager, type ManagerDataset } from '@/utils/managers'
 import { pct, colorOf } from '@/utils/format'
 import { parseQuery, applySpec, specSummary } from '@/utils/nlselect'
 import type { FilterSpec } from '@/utils/nlselect'
@@ -124,14 +124,44 @@ function pickPreset(id: ScreenPresetId) {
 
 // ── 基金经理模式 ──
 const managersAll = ref<Manager[]>([])
+const managerDataset = ref<ManagerDataset | null>(null)
+const managerAge = ref<{ ageDays: number | null; stale: boolean }>({ ageDays: null, stale: true })
 const mgrLoading = ref(false)
 const mgrErr = ref('')
 const expanded = ref('')
+let managerGeneration = 0
+let managerController: AbortController | null = null
+let managerAgeTimer: ReturnType<typeof setTimeout> | null = null
+function refreshManagerAge() {
+  if (managerAgeTimer) clearTimeout(managerAgeTimer)
+  managerAge.value = managerSnapshotFreshness(managerDataset.value?.collectedOn ?? null)
+  if (!managerDataset.value || mode.value !== 'manager') return
+  // A local midnight timer updates the visible age without polling the source.
+  const now = Date.now()
+  const nextBeijingDay = Math.floor((now + 8 * 3_600_000) / 86_400_000) * 86_400_000 + 86_400_000 - 8 * 3_600_000
+  managerAgeTimer = setTimeout(refreshManagerAge, nextBeijingDay - now + 1)
+}
+function cancelManagerLoad() {
+  managerGeneration++
+  managerController?.abort()
+  managerController = null
+  mgrLoading.value = false
+  if (managerAgeTimer) clearTimeout(managerAgeTimer)
+  managerAgeTimer = null
+}
 async function ensureManagers() {
-  if (managersAll.value.length || mgrLoading.value) return
+  if (managersAll.value.length) { refreshManagerAge(); return }
+  if (mgrLoading.value) return
+  const generation = ++managerGeneration
+  const controller = new AbortController()
+  managerController = controller
   mgrLoading.value = true; mgrErr.value = ''
   try {
-    managersAll.value = await loadManagers()
+    const dataset = await loadManagerDataset({ signal: controller.signal })
+    if (generation !== managerGeneration || controller.signal.aborted) return
+    managerDataset.value = dataset
+    managersAll.value = dataset.managers
+    refreshManagerAge()
     if (route.query.mode === 'manager' && typeof route.query.q === 'string') {
       const managerId = typeof route.query.manager_id === 'string' ? route.query.manager_id : ''
       expanded.value = managersAll.value.find((manager) =>
@@ -139,9 +169,10 @@ async function ensureManagers() {
       )?.id || ''
     }
   }
-  catch { mgrErr.value = '暂无基金经理数据（待富集任务生成后可用）' }
-  finally { mgrLoading.value = false }
+  catch { if (generation === managerGeneration) mgrErr.value = '暂无基金经理数据（待富集任务生成后可用）' }
+  finally { if (generation === managerGeneration) { mgrLoading.value = false; managerController = null } }
 }
+onBeforeUnmount(cancelManagerLoad)
 const managerResults = computed(() => {
   const k = q.value.trim()
   if (!k || !managersAll.value.length) return []
@@ -156,31 +187,71 @@ const nlSpec = ref<FilterSpec | null>(null)
 const nlLoading = ref(false)
 const nlErr = ref('')
 const nlDone = ref(false)
+const nlProposalQuery = ref('')
+const nlDataset = ref<ScreenerDataset | null>(null)
 const nlFiltered = ref<ScreenFund[]>([])
 const nlTop = computed(() => nlFiltered.value.slice(0, 200))
+let nlGeneration = 0
+let nlController: AbortController | null = null
+
+function cancelNlSearch(message = '') {
+  nlGeneration++
+  nlController?.abort()
+  nlController = null
+  nlLoading.value = false; nlDone.value = false
+  nlSpec.value = null; nlDataset.value = null; nlProposalQuery.value = ''
+  nlFiltered.value = []; nlErr.value = message
+}
+
+observe(nlQuery, () => {
+  if (nlLoading.value || nlSpec.value || nlDone.value) cancelNlSearch('需求已修改，请重新解析并核对条件')
+})
+onBeforeUnmount(() => cancelNlSearch())
 
 async function runNlSearch() {
   const q = nlQuery.value.trim()
-  if (!q) return
-  nlErr.value = ''; nlSpec.value = null; nlFiltered.value = []; nlDone.value = false
+  if (!q || nlLoading.value) return
+  cancelNlSearch()
+  const generation = nlGeneration
+  const controller = new AbortController()
+  nlController = controller
   nlLoading.value = true
   try {
-    // 并行：解析 NL + 加载排行数据
-    const [spec, dataset] = await Promise.all([parseQuery(q), loadScreener()])
-    if (dataset.stale) throw new Error('排行数据已过期，AI 选基已暂停')
+    // Check the real dataset before starting an optional, potentially paid POST.
+    const dataset = await loadScreener({ signal: controller.signal })
+    if (generation !== nlGeneration) return
+    if (!dataset.funds.length) throw new Error('暂无可用排行数据，未调用 AI')
+    if (dataset.stale || screenerFreshness(dataset.updated).stale) throw new Error('排行数据已过期，AI 选基已暂停')
+    const spec = await parseQuery(q, { signal: controller.signal })
+    if (generation !== nlGeneration || controller.signal.aborted) return
     nlSpec.value = spec
-    nlFiltered.value = applySpec(dataset.funds, spec)
+    nlDataset.value = dataset
+    nlProposalQuery.value = q
+    rankAll.value = dataset.funds; rankUpdated.value = dataset.updated
+    rankAgeDays.value = dataset.ageDays; rankStale.value = dataset.stale
+    if (spec.unsupported?.length) nlErr.value = '包含未支持条件，未执行筛选。请修改需求后重新解析。'
   } catch (e) {
-    nlErr.value = e instanceof Error ? e.message : '解析失败'
+    if (generation === nlGeneration) nlErr.value = e instanceof Error ? e.message : '解析失败'
   } finally {
-    nlLoading.value = false; nlDone.value = true
-    if (!rankAll.value.length) rankAll.value = (await loadScreener().catch(() => ({
-      funds: [], updated: '', ageDays: 0, stale: true,
-    }))).funds
+    if (generation === nlGeneration) { nlLoading.value = false; nlController = null }
   }
 }
 
+function confirmNlSearch() {
+  if (!nlSpec.value || !nlDataset.value || nlLoading.value || nlProposalQuery.value !== nlQuery.value.trim()) return
+  if (screenerFreshness(nlDataset.value.updated).stale) {
+    cancelNlSearch('排行数据已过期，未执行筛选')
+    return
+  }
+  try {
+    nlFiltered.value = applySpec(nlDataset.value.funds, nlSpec.value)
+    nlDone.value = true
+  } catch (error) { nlErr.value = error instanceof Error ? error.message : '筛选失败' }
+}
+
 function switchMode(m: 'rank' | 'basic' | 'manager' | 'nl') {
+  if (mode.value === 'nl' && m !== 'nl') cancelNlSearch()
+  if (mode.value === 'manager' && m !== 'manager') cancelManagerLoad()
   mode.value = m
   if (m === 'rank') ensureRank()
   else if (m === 'manager') ensureManagers()
@@ -266,6 +337,14 @@ onMounted(() => {
     <!-- 基金经理模式 -->
     <template v-else-if="mode === 'manager'">
       <div class="page-body" style="padding-top:8px">
+        <div v-if="managerDataset && !mgrLoading && !mgrErr" class="hint" data-testid="manager-provenance">
+          来源：天天基金经理索引 · 采集日 {{ managerDataset.collectedOn }} ·
+          {{ managerAge.ageDays == null ? '采集年龄未知' : '已采集 ' + managerAge.ageDays + ' 天' }}。
+          指标基准日未知，任职回报仅供历史参考，不代表当前表现。
+        </div>
+        <div v-if="managerDataset && managerAge.stale && !mgrLoading && !mgrErr" class="stale-warning">
+          {{ managerAge.ageDays == null ? '采集日期无法核验' : '经理索引已超过 7 天' }}，关联基金和任职信息仅供历史查阅。
+        </div>
         <van-loading v-if="mgrLoading" style="text-align:center;padding:40px" />
         <van-empty v-else-if="mgrErr" :description="mgrErr" />
         <van-empty v-else-if="!q.trim()" description="输入基金经理姓名搜索（如 张坤、葛兰）" />
@@ -273,7 +352,7 @@ onMounted(() => {
         <van-cell-group v-else inset>
           <template v-for="m in managerResults" :key="m.id">
             <van-cell :title="m.name"
-              :label="m.company + ' · 现任 ' + m.codes.length + ' 只 · 任职回报 ' + m.ret + ' · ' + m.scale"
+              :label="m.company + ' · 采集时在管 ' + m.codes.length + ' 只 · 历史任职回报 ' + (m.ret || '--') + ' · ' + (m.scale || '--')"
               is-link @click="expanded = expanded === m.id ? '' : m.id" />
             <div v-if="expanded === m.id" class="mgr-funds">
               <div class="mgr-fund" v-for="(c, i) in m.codes" :key="c" @click="router.push('/fund/' + c)">
@@ -291,17 +370,24 @@ onMounted(() => {
         <textarea v-model="nlQuery" placeholder="用中文描述你想找的基金，例如：近3年收益超50%的混合型基金，按近3年排序"
           rows="3" @keydown.ctrl.enter="runNlSearch" @keydown.meta.enter="runNlSearch"></textarea>
         <van-button class="nl-btn" size="small" type="primary" :loading="nlLoading"
-          @click="runNlSearch" :disabled="!nlQuery.trim()">AI 筛选</van-button>
-        <span class="nl-hint">Ctrl+Enter 发送。需先配置 AI（在基金详情页）。</span>
+          @click="runNlSearch" :disabled="!nlQuery.trim()">解析条件</van-button>
+        <van-button v-if="nlLoading" size="small" @click="cancelNlSearch('请求已取消，可以重新解析')">取消</van-button>
+        <span class="nl-hint">Ctrl+Enter 解析；先核对条件再筛选。仅发送输入需求到你配置的 AI 服务；BYOK 调用可能收费，取消不保证免计费；无后台调用或自动重试。</span>
       </div>
       <div class="page-body" style="padding-top:8px">
         <van-loading v-if="nlLoading" style="text-align:center;padding:40px" />
-        <van-empty v-else-if="nlErr" :description="nlErr" />
-        <template v-else-if="nlDone">
-          <div class="nl-tags" v-if="nlSpec">
-            <span class="nl-tag" v-for="t in specSummary(nlSpec)" :key="t">{{ t }}</span>
-            <span class="nl-tag warn" v-for="u in (nlSpec.unsupported || [])" :key="u">不支持：{{ u }}</span>
+        <template v-else>
+          <van-empty v-if="nlErr" :description="nlErr" />
+          <div v-if="nlSpec" class="card">
+            <div class="nl-hint">原需求：{{ nlProposalQuery }} · 排行数据 {{ nlDataset?.updated }}</div>
+            <div class="nl-hint">AI 仅提出条件，不能证明已完整理解需求；请核对以下全部生效条件。</div>
+            <div class="nl-tags">
+              <span class="nl-tag" v-for="t in specSummary(nlSpec)" :key="t">{{ t }}</span>
+              <span class="nl-tag warn" v-for="u in (nlSpec.unsupported || [])" :key="u">不支持：{{ u }}</span>
+            </div>
+            <van-button v-if="!nlDone" size="small" type="primary" :disabled="!!nlErr || !!nlSpec.unsupported?.length" @click="confirmNlSearch">确认条件并筛选</van-button>
           </div>
+        <template v-if="nlDone">
           <van-empty v-if="!nlFiltered.length" description="没有匹配的基金，试试放宽条件" image-size="50" />
           <template v-else>
             <div class="hint">命中 {{ nlFiltered.length }} 只{{ nlFiltered.length > 200 ? '（显示前 200）' : '' }}</div>
@@ -320,7 +406,8 @@ onMounted(() => {
             </van-cell>
           </template>
         </template>
-        <van-empty v-else description="输入筛选条件后点击「AI 筛选」" image-size="60" />
+          <van-empty v-else-if="!nlSpec && !nlErr" description="输入需求后解析并核对筛选条件" image-size="60" />
+        </template>
       </div>
     </template>
 

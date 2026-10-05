@@ -26,7 +26,11 @@ describe('overseas accuracy metadata', () => {
     }))
   })
 
-  afterEach(() => vi.useRealTimers())
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
 
   it('attaches sample-backed confidence to a modeled estimate', async () => {
     await loadOverseasAccuracy(true)
@@ -119,5 +123,84 @@ describe('overseas accuracy metadata', () => {
     expect(result.accuracySamples).toBe(0)
     expect(result.confidence).toBe('精度样本重新积累中')
     expect(result.accuracyUpdatedAt).toBeUndefined()
+  })
+})
+
+describe('overseas accuracy request recovery', () => {
+  const report = {
+    updated_at: '2026-07-10', summary: { '012920': {
+      samples: 0, status: 'collecting', confidence: '样本积累中',
+      mae: null, bias: null, direction_accuracy: null, error_band: null,
+    } }, records: [],
+  }
+  beforeEach(() => {
+    vi.resetModules()
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+    vi.resetModules()
+  })
+
+  it.each(['fetch', 'body'])('does not retain a failed %s promise forever', async phase => {
+    const { loadOverseasAccuracy: load } = await import('./overseasAccuracy')
+    const fetchMock = vi.fn().mockImplementationOnce(() => phase === 'fetch'
+      ? new Promise(() => {})
+      : Promise.resolve({ ok: true, status: 200, json: () => new Promise(() => {}) }))
+      .mockResolvedValueOnce({ ok: true, status: 200, json: () => Promise.resolve(report) })
+    vi.stubGlobal('fetch', fetchMock)
+    const pending = load()
+    await vi.advanceTimersByTimeAsync(12_001)
+    expect(await pending).toBeNull()
+    expect(await load()).toMatchObject({ summary: { '012920': { mae: null, error_band: null } } })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('rejects malformed numeric metadata without poisoning a retry', async () => {
+    const { loadOverseasAccuracy: load } = await import('./overseasAccuracy')
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ ...report, summary: { '012920': { ...report.summary['012920'], error_band: '0' } } }) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(report) })
+    vi.stubGlobal('fetch', fetchMock)
+    expect(await load()).toBeNull()
+    expect(await load()).toMatchObject({ summary: { '012920': { error_band: null } } })
+  })
+
+  it('does not cancel another public report request when one caller aborts', async () => {
+    const { loadOverseasAccuracy: load } = await import('./overseasAccuracy')
+    let resolveDefault!: (value: unknown) => void
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => new Promise(() => {}))
+      .mockResolvedValueOnce({ ok: true, json: () => new Promise(resolve => { resolveDefault = resolve }) })
+    vi.stubGlobal('fetch', fetchMock)
+    const controller = new AbortController()
+    const cancelled = load(false, { signal: controller.signal })
+    const shared = load()
+    expect(load()).toBe(shared)
+    await vi.advanceTimersByTimeAsync(0)
+    controller.abort()
+    expect(await cancelled).toBeNull()
+    expect(fetchMock.mock.calls[1][1].signal.aborted).toBe(false)
+    resolveDefault(report)
+    expect(await shared).toMatchObject({ updated_at: '2026-07-10' })
+  })
+
+  it('keeps a newer forced generation when an older request finishes later', async () => {
+    const { loadOverseasAccuracy: load } = await import('./overseasAccuracy')
+    let resolveOld!: (value: unknown) => void
+    const newer = { ...report, updated_at: '2026-07-11' }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => new Promise(resolve => { resolveOld = resolve }) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(newer) })
+    vi.stubGlobal('fetch', fetchMock)
+    const old = load()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(await load(true)).toMatchObject({ updated_at: '2026-07-11' })
+    resolveOld(report)
+    await old
+    expect(await load()).toMatchObject({ updated_at: '2026-07-11' })
+    expect(fetchMock.mock.calls[1][1].cache).toBe('reload')
   })
 })

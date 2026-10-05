@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:fund-compass:owner-session:v1",
+  "title": "Single-owner browser session v1",
+  "description": "Short-lived browser credential; never a machine credential or persistent browser value.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["access_token", "token_type", "expires_at", "owner_id", "scopes"],
+  "properties": {
+    "access_token": { "type": "string", "pattern": "^own_[A-Za-z0-9_-]{43}$", "minLength": 47, "maxLength": 47 },
+    "token_type": { "const": "Bearer" },
+    "expires_at": { "type": "string", "format": "date-time" },
+    "owner_id": { "const": "owner" },
+    "scopes": {
+      "type": "array", "uniqueItems": true,
+      "items": { "enum": ["read_private", "write_holdings", "run_personal_analysis"] },
+      "minItems": 3, "maxItems": 3
+    }
+  },
+  "x-endpoints": {
+    "login": "POST /api/v2/owner/session",
+    "inspect": "GET /api/v2/owner/session",
+    "logout": "DELETE /api/v2/owner/session"
+  },
+  "x-security": {
+    "maximum_ttl_seconds": 1800,
+    "maximum_sessions": 8,
+    "browser_storage": "memory_only",
+    "server_storage": "token_digest_only_in_single_process_memory",
+    "restart_behavior": "reauthentication_required",
+    "cache_control": "no-store",
+    "machine_tokens_accepted_for_login": false,
+    "machine_write_permissions": false
+  }
+}

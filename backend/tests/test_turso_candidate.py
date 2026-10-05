@@ -6,6 +6,8 @@ import sqlite3
 
 import pytest
 
+from database.turso import TursoHTTPError
+
 
 SCRIPT = Path(__file__).resolve().parents[2] / "tools" / "turso_candidate.py"
 SPEC = importlib.util.spec_from_file_location("turso_candidate", SCRIPT)
@@ -147,7 +149,7 @@ def test_initialize_is_explicit_idempotent_and_keeps_probe(tmp_path):
     with sqlite3.connect(path) as conn:
         assert conn.execute(
             "SELECT version FROM _schema_version WHERE singleton=1",
-        ).fetchone() == (8,)
+        ).fetchone() == (9,)
 
 
 def test_initialize_refuses_unknown_database_without_partial_schema(tmp_path):
@@ -229,3 +231,96 @@ def test_provider_failures_are_redacted(phase):
     for value in (ENV["TURSO_AUTH_TOKEN"], ENV["TURSO_DATABASE_URL"], "private-row"):
         assert value not in out + err
     local.close()
+
+
+@pytest.mark.parametrize("status,error", [
+    (401, "candidate_authentication_rejected"),
+    (403, "candidate_access_denied"),
+    (429, "candidate_rate_limited"),
+    (500, "candidate_service_unavailable"),
+    (503, "candidate_service_unavailable"),
+    (599, "candidate_service_unavailable"),
+    (301, "candidate_operation_failed"),
+    (402, "candidate_operation_failed"),
+    (409, "candidate_operation_failed"),
+])
+@pytest.mark.parametrize("phase", ["connect", "execute", "commit", "close"])
+def test_typed_http_failures_have_fixed_codes_and_no_success_output(status, error, phase):
+    local = sqlite3.connect(":memory:")
+    calls = []
+
+    def failure():
+        exc = TursoHTTPError(status)
+        # Even a changed message must never become a CLI output source.
+        exc.args = (ENV["TURSO_AUTH_TOKEN"] + " private-row",)
+        raise exc
+
+    class Connection:
+        def execute(self, *args):
+            if phase == "execute":
+                failure()
+            return local.execute(*args)
+
+        def commit(self):
+            if phase == "commit":
+                failure()
+            local.commit()
+
+        def rollback(self):
+            local.rollback()
+
+        def close(self):
+            # A later cleanup error must not replace an earlier HTTP error.
+            if phase == "close":
+                failure()
+            raise RuntimeError("private-finally-cleanup-marker")
+
+    def connect(*args, **kwargs):
+        calls.append(1)
+        if phase == "connect":
+            failure()
+        return Connection()
+
+    try:
+        code, out, err = invoke(["write-probe", "--candidate"], connect)
+        assert code == 1 and not out and len(calls) == 1
+        assert json.loads(err) == {"ok": False, "error": error}
+        for value in (ENV["TURSO_AUTH_TOKEN"], ENV["TURSO_DATABASE_URL"], "private-row", "committed"):
+            assert value not in out + err
+    finally:
+        local.close()
+
+
+class IntegerStatus(int):
+    pass
+
+
+class UnsafeStatus:
+    def __eq__(self, other):
+        pytest.fail("Malformed statuses must not be compared")
+
+    def __str__(self):
+        pytest.fail("Malformed statuses must not be stringified")
+
+
+@pytest.mark.parametrize("status", [
+    True, False, None, "401", 401.0, 99, 600,
+    IntegerStatus(200), IntegerStatus(401), UnsafeStatus(),
+])
+def test_mutated_typed_status_cannot_create_an_authentication_claim(status):
+    exc = TursoHTTPError(401)
+    exc.status_code = status
+    assert module._operation_error_code(exc) == "candidate_operation_failed"
+
+
+def test_missing_typed_status_falls_back_without_handler_failure():
+    exc = TursoHTTPError(401)
+    del exc.status_code
+    assert module._operation_error_code(exc) == "candidate_operation_failed"
+
+
+@pytest.mark.parametrize("kind", [RuntimeError, sqlite3.OperationalError, type("DerivedHTTPError", (TursoHTTPError,), {})])
+def test_provider_messages_and_lookalike_status_attributes_are_not_trusted(kind):
+    exc = kind(401) if issubclass(kind, TursoHTTPError) else kind("HTTP 401 revoked invalid token")
+    exc.status_code = 401
+    assert module._operation_error_code(exc) == "candidate_operation_failed"

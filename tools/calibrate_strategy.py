@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """跨基金策略校准：只生成候选与审计建议，active 只能由管理员显式变更。"""
 import datetime as dt
+import http.client
 import json
 import math
 import os
 import random
+import socket
 import statistics
 import sys
+import time
+import urllib.error
+import urllib.parse
 import urllib.request
 from collections import Counter
 from pathlib import Path
@@ -25,6 +30,69 @@ MIN_VALID = int(os.environ.get("CALIBRATION_MIN_VALID", "12"))
 MAX_FUNDS = int(os.environ.get("CALIBRATION_MAX_FUNDS", "30"))
 FUND_API_BASE = os.environ.get("FUND_API_BASE", "").rstrip("/")
 PRIVATE_READ_TOKEN = os.environ.get("PRIVATE_READ_TOKEN", "").strip()
+
+
+def _bounded_env_int(name: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(os.environ.get(name, str(default)))
+    except (TypeError, ValueError):
+        raise RuntimeError(f"{name} must be an integer") from None
+    if not minimum <= value <= maximum:
+        raise RuntimeError(f"{name} must be between {minimum} and {maximum}")
+    return value
+
+
+OUTCOME_ATTEMPTS = _bounded_env_int("CALIBRATION_OUTCOME_ATTEMPTS", 3, 1, 5)
+OUTCOME_TIMEOUT_SECONDS = _bounded_env_int(
+    "CALIBRATION_OUTCOME_TIMEOUT_SECONDS", 45, 1, 120,
+)
+OUTCOME_TOTAL_BUDGET_SECONDS = _bounded_env_int(
+    "CALIBRATION_OUTCOME_TOTAL_BUDGET_SECONDS", 150, 1, 600,
+)
+OUTCOME_BACKOFF_SECONDS = _bounded_env_int(
+    "CALIBRATION_OUTCOME_BACKOFF_SECONDS", 5, 0, 30,
+)
+OUTCOME_RETRY_AFTER_MAX_SECONDS = _bounded_env_int(
+    "CALIBRATION_OUTCOME_RETRY_AFTER_MAX_SECONDS", 15, 0, 60,
+)
+OUTCOME_MAX_RESPONSE_BYTES = _bounded_env_int(
+    "CALIBRATION_OUTCOME_MAX_RESPONSE_BYTES", 8 * 1024 * 1024, 1024, 16 * 1024 * 1024,
+)
+OUTCOME_READ_CHUNK_BYTES = 64 * 1024
+ALLOW_INSECURE_LOOPBACK = (
+    os.environ.get("CALIBRATION_ALLOW_INSECURE_LOOPBACK", "").strip() == "1"
+)
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Never forward the private bearer credential to a redirect target."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+        del req, fp, code, msg, headers, newurl
+        return None
+
+    def _reject_redirect(self, req, fp, code, msg, headers):  # noqa: ANN001
+        del msg
+        raise urllib.error.HTTPError(
+            req.full_url, code, "private redirect rejected", headers, fp,
+        )
+
+    http_error_301 = _reject_redirect
+    http_error_302 = _reject_redirect
+    http_error_303 = _reject_redirect
+    http_error_307 = _reject_redirect
+    http_error_308 = _reject_redirect
+
+
+OUTCOME_OPENER = urllib.request.build_opener(_NoRedirectHandler())
+
+
+class _OutcomeTransientError(RuntimeError):
+    pass
+
+
+class _OutcomePermanentError(RuntimeError):
+    pass
 
 
 def sample_codes() -> list[tuple[str, str]]:
@@ -101,23 +169,204 @@ def aggregate(rows: list[dict]) -> dict:
     }
 
 
+def _retry_after_seconds(headers) -> int | None:  # noqa: ANN001
+    if headers is None:
+        return None
+    raw = headers.get("Retry-After")
+    if not isinstance(raw, str):
+        return None
+    value = raw.strip()
+    if not value.isdigit():
+        return None
+    if len(value) > 10:
+        return OUTCOME_RETRY_AFTER_MAX_SECONDS
+    return min(int(value), OUTCOME_RETRY_AFTER_MAX_SECONDS)
+
+
+def _outcome_endpoint() -> str:
+    if any(character in FUND_API_BASE for character in ("\\", "\r", "\n", "\t", " ")):
+        raise RuntimeError("FUND_API_BASE must be an HTTPS origin")
+    try:
+        parsed = urllib.parse.urlsplit(FUND_API_BASE)
+        port = parsed.port
+    except ValueError:
+        raise RuntimeError("FUND_API_BASE must be an HTTPS origin") from None
+    if (
+        not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in ("", "/")
+    ):
+        raise RuntimeError("FUND_API_BASE must be an HTTPS origin")
+    loopback = parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+    if parsed.scheme != "https" and not (
+        parsed.scheme == "http" and loopback and ALLOW_INSECURE_LOOPBACK
+    ):
+        raise RuntimeError("FUND_API_BASE must be an HTTPS origin")
+    host = f"[{parsed.hostname}]" if ":" in parsed.hostname else parsed.hostname
+    authority = f"{host}:{port}" if port is not None else host
+    return urllib.parse.urlunsplit((
+        parsed.scheme,
+        authority,
+        "/api/private/strategy/outcomes",
+        "",
+        "",
+    ))
+
+
+def _bounded_read_transport(response):  # noqa: ANN001
+    """Return stdlib-style read1/socket handles or fail closed."""
+    read1 = getattr(response, "read1", None)
+    socket_target = getattr(
+        getattr(getattr(response, "fp", None), "raw", None),
+        "_sock",
+        None,
+    )
+    settimeout = getattr(socket_target, "settimeout", None)
+    if not callable(read1) or not callable(settimeout):
+        raise _OutcomePermanentError("unsupported_transport")
+    return read1, settimeout
+
+
+def _read_outcome_payload(response, deadline: float) -> dict:  # noqa: ANN001
+    content_length = response.headers.get("Content-Length") if response.headers else None
+    if isinstance(content_length, str) and content_length.isdigit():
+        if len(content_length) > 10 or int(content_length) > OUTCOME_MAX_RESPONSE_BYTES:
+            raise _OutcomePermanentError("response_too_large")
+
+    chunks: list[bytes] = []
+    received = 0
+    read1, settimeout = _bounded_read_transport(response)
+    while received <= OUTCOME_MAX_RESPONSE_BYTES:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise _OutcomeTransientError("deadline_exceeded")
+        try:
+            settimeout(max(0.001, remaining))
+            chunk = read1(min(
+                OUTCOME_READ_CHUNK_BYTES,
+                OUTCOME_MAX_RESPONSE_BYTES + 1 - received,
+            ))
+        except (TimeoutError, socket.timeout, urllib.error.URLError,
+                http.client.IncompleteRead, ConnectionError, OSError):
+            raise _OutcomeTransientError("network") from None
+        if time.monotonic() >= deadline:
+            raise _OutcomeTransientError("deadline_exceeded")
+        if not chunk:
+            break
+        if not isinstance(chunk, bytes):
+            raise _OutcomePermanentError("invalid_body")
+        chunks.append(chunk)
+        received += len(chunk)
+    if received > OUTCOME_MAX_RESPONSE_BYTES:
+        raise _OutcomePermanentError("response_too_large")
+    try:
+        payload = json.loads(b"".join(chunks).decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise _OutcomePermanentError("invalid_json") from None
+    if time.monotonic() >= deadline:
+        raise _OutcomeTransientError("deadline_exceeded")
+    return payload
+
+
+def _outcome_error_message(code: str) -> str:
+    messages = {
+        "authentication_rejected": "outcome audit authentication rejected",
+        "redirect_rejected": "outcome audit redirect rejected",
+        "request_rejected": "outcome audit request rejected",
+        "response_too_large": "outcome audit response exceeds byte limit",
+        "invalid_body": "outcome audit returned an invalid body",
+        "invalid_json": "outcome audit returned invalid JSON",
+        "unsupported_transport": "outcome audit transport does not support bounded reads",
+    }
+    return messages.get(code, "outcome audit request failed")
+
+
 def fetch_outcomes() -> dict:
+    """Read private governance with bounded GET-only cold-start recovery."""
     if not FUND_API_BASE:
         raise RuntimeError("FUND_API_BASE is required for outcome governance")
     if not PRIVATE_READ_TOKEN:
         raise RuntimeError("PRIVATE_READ_TOKEN is required for outcome governance")
-    try:
+
+    endpoint = _outcome_endpoint()
+    overall_deadline = time.monotonic() + OUTCOME_TOTAL_BUDGET_SECONDS
+    last_transient = "network"
+    completed_attempts = 0
+    payload = None
+    for attempt in range(1, OUTCOME_ATTEMPTS + 1):
+        remaining = overall_deadline - time.monotonic()
+        if remaining <= 0:
+            last_transient = "deadline_exceeded"
+            break
+        completed_attempts = attempt
+        attempt_deadline = min(
+            overall_deadline,
+            time.monotonic() + OUTCOME_TIMEOUT_SECONDS,
+        )
         req = urllib.request.Request(
-            f"{FUND_API_BASE}/api/private/strategy/outcomes",
+            endpoint,
             headers={
+                "Accept": "application/json",
                 "Authorization": f"Bearer {PRIVATE_READ_TOKEN}",
                 "User-Agent": "sinan-calibration",
             },
+            method="GET",
         )
-        with urllib.request.urlopen(req, timeout=30) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except Exception as ex:
-        raise RuntimeError(f"outcome audit unavailable: {type(ex).__name__}") from ex
+        retry_after = None
+        try:
+            with OUTCOME_OPENER.open(
+                req,
+                timeout=max(0.001, attempt_deadline - time.monotonic()),
+            ) as response:
+                payload = _read_outcome_payload(response, attempt_deadline)
+        except urllib.error.HTTPError as ex:
+            status = ex.code if type(ex.code) is int else None
+            retry_after = _retry_after_seconds(ex.headers)
+            try:
+                ex.close()
+            except Exception:
+                pass
+            if status in (401, 403):
+                raise RuntimeError(_outcome_error_message("authentication_rejected")) from None
+            if status is not None and 300 <= status < 400:
+                raise RuntimeError(_outcome_error_message("redirect_rejected")) from None
+            if status in (408, 425, 429) or (status is not None and 500 <= status < 600):
+                last_transient = "transient_http"
+            else:
+                raise RuntimeError(_outcome_error_message("request_rejected")) from None
+        except _OutcomePermanentError as ex:
+            raise RuntimeError(_outcome_error_message(ex.args[0])) from None
+        except _OutcomeTransientError as ex:
+            last_transient = ex.args[0]
+        except (TimeoutError, socket.timeout, urllib.error.URLError,
+                http.client.IncompleteRead, ConnectionError, OSError):
+            last_transient = "network"
+        except Exception:
+            raise RuntimeError(_outcome_error_message("request_failed")) from None
+        else:
+            break
+
+        payload = None
+        if attempt >= OUTCOME_ATTEMPTS:
+            break
+        delay = min(
+            OUTCOME_RETRY_AFTER_MAX_SECONDS,
+            max(OUTCOME_BACKOFF_SECONDS * attempt, retry_after or 0),
+        )
+        remaining = overall_deadline - time.monotonic()
+        if remaining <= delay:
+            last_transient = "deadline_exceeded"
+            break
+        if delay:
+            time.sleep(delay)
+
+    if payload is None:
+        raise RuntimeError(
+            f"outcome audit unavailable after {completed_attempts} attempt(s): {last_transient}"
+        ) from None
     if (
         not isinstance(payload, dict)
         or payload.get("redacted") is True

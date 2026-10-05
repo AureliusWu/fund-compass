@@ -2,29 +2,39 @@
 import { ref, computed, onMounted } from 'vue'
 import { useWatchlistStore } from '@/stores/watchlist'
 import { useFundsStore } from '@/stores/funds'
-import { fetchEstimates, latestNavMove, preferredDailyMove, type Estimate, type NavMove } from '@/utils/estimate'
+import { estimateDataFreshness, fetchEstimates, latestNavMove, preferredDailyMove, type Estimate, type NavMove } from '@/utils/estimate'
 import { colorOf } from '@/utils/format'
 import Chart from '@/components/Chart.vue'
-import { compileStoryData, generateStorySummary, type StoryData } from '@/utils/story'
+import {
+  compileStoryData,
+  storyCoverageDateText,
+  type RawStoryScoreEvidence,
+  type RawStorySignalEvidence,
+  type StoryData,
+} from '@/utils/story'
+import { FREE_TEXT_AI_UNAVAILABLE } from '@/utils/ai'
+import { aggregateFundHoldings } from '@/utils/holding-aggregation'
 
 const watch = useWatchlistStore()
 const funds = useFundsStore()
 
 const loading = ref(true)
 const story = ref<StoryData | null>(null)
-const summary = ref('')
-const summaryLoading = ref(false)
+const inputError = ref('')
+const zeroHoldingCount = ref(0)
+const emptyDescription = ref('还没有正持仓数据。去自选页添加持仓。')
 const exporting = ref(false)
 const exportErr = ref('')
 const cardRef = ref<HTMLElement | null>(null)
 
 const meta = ref<Record<string, {
   nav: number | null
+  navDate: string | null
+  navStale: boolean | null
   type: string
   navMove: NavMove | null
-  signal?: string | null
-  score?: number | null
-  star?: number | null
+  signalEvidence: RawStorySignalEvidence | null
+  scoreEvidence: RawStoryScoreEvidence | null
 }>>({})
 const est = ref<Record<string, Estimate | null>>({})
 
@@ -32,29 +42,71 @@ onMounted(async () => {
   loading.value = true
   try {
     await watch.load(true)
-    const held = watch.activeHoldings.filter((e) => e.shares && e.shares > 0)
+    // Validate every account before selecting economic positions. Otherwise an
+    // explicit holding with unknown shares could disappear from the denominator.
+    const entries = watch.activeHoldings
+    const inputs = aggregateFundHoldings(entries)
+    if (!inputs.complete) {
+      story.value = null
+      inputError.value = '持仓输入不完整、无效或账户重复；组合总额保持未知（--），已暂停排行和长图导出。请在自选页修正原记录；缺失份额不会按 0 处理。'
+      return
+    }
+    const isHolding = (entry: typeof entries[number]) => entry.position_kind === 'holding'
+      || entry.position_kind == null && typeof entry.shares === 'number' && entry.shares > 0
+    zeroHoldingCount.value = entries.filter(entry => !entry.deleted && isHolding(entry) && entry.shares === 0).length
+    const held = entries.filter(entry => !entry.deleted && isHolding(entry)
+      && typeof entry.shares === 'number' && Number.isFinite(entry.shares) && entry.shares > 0)
+    if (!held.length) {
+      story.value = null
+      emptyDescription.value = zeroHoldingCount.value
+        ? `有 ${zeroHoldingCount.value} 条 0 份持仓记录，不计入正持仓金额和排行；可在自选页继续编辑。`
+        : '仅关注基金不计入持仓金额和排行；请在自选页录入正持仓。'
+      return
+    }
     const codes = [...new Set(held.map((e) => e.code))]
 
     // 并行拉取数据
     const estMap = await fetchEstimates(codes)
     estMap.forEach((v, k) => { est.value[k] = v })
 
-    await Promise.all(held.map(async (e) => {
+    await Promise.all(codes.map(async (code) => {
       try {
         const [d, sig, sc] = await Promise.all([
-          funds.detail(e.code),
-          funds.signal(e.code).catch(() => null),
-          funds.score(e.code).catch(() => null),
+          funds.detail(code),
+          funds.signal(code).catch(() => null),
+          funds.score(code).catch(() => null),
         ])
-        meta.value[e.code] = {
-          nav: d.latest_nav, type: d.type || '其他',
+        meta.value[code] = {
+          nav: d.latest_nav,
+          navDate: d.latest_nav_date,
+          navStale: typeof d.stale === 'boolean' ? d.stale : null,
+          type: d.type || '其他',
           navMove: latestNavMove(d.nav_history),
-          signal: sig?.signal,
-          score: sc?.score ?? null,
-          star: sc?.star ?? null,
+          signalEvidence: sig ? {
+            value: sig.signal,
+            coverage: sig.coverage ?? null,
+            stale: typeof sig.data_stale === 'boolean' ? sig.data_stale : null,
+            asOfDate: sig.as_of_date ?? null,
+          } : null,
+          scoreEvidence: sc ? {
+            score: sc.score,
+            star: sc.star,
+            coverage: sc.coverage,
+            eligible: sc.eligible,
+            stale: typeof sc.data_stale === 'boolean' ? sc.data_stale : null,
+            asOfDate: sc.as_of_date ?? null,
+          } : null,
         }
       } catch {
-        meta.value[e.code] = { nav: null, type: '其他', navMove: null }
+        meta.value[code] = {
+          nav: null,
+          navDate: null,
+          navStale: null,
+          type: '其他',
+          navMove: null,
+          signalEvidence: null,
+          scoreEvidence: null,
+        }
       }
     }))
 
@@ -62,52 +114,46 @@ onMounted(async () => {
     const hlds = held.map((e) => {
       const m = meta.value[e.code]
       const nav = m?.nav ?? null
-      const value = nav != null ? e.shares! * nav : 0
-      const move = preferredDailyMove(est.value[e.code], m?.navMove, m?.type || e.name)
-      const today = move && move.change != null && move.baseNav != null
+      const estimate = est.value[e.code]
+      const move = preferredDailyMove(estimate, m?.navMove, m?.type || e.name)
+      const today = move && move.change != null && Number.isFinite(move.change)
+        && move.baseNav != null && Number.isFinite(move.baseNav) && move.baseNav > 0
         ? e.shares! * move.baseNav * move.change / 100 : null
+      const usesDetailNav = Boolean(today != null && m?.navMove && move?.label === '净' && move.date === m.navMove.date)
+      const todayStale = today == null
+        ? null
+        : usesDetailNav
+          ? m?.navStale ?? null
+          : estimate
+            ? estimateDataFreshness(estimate) !== 'fresh'
+            : null
       return {
         code: e.code, name: e.name || e.code, type: m?.type || '其他',
-        value, shares: e.shares!, cost: e.cost ?? 0, nav,
-        today, signal: m?.signal, score: m?.score, star: m?.star,
+        shares: e.shares!, cost: e.cost ?? null,
+        nav, navDate: m?.navDate ?? null, navStale: m?.navStale ?? null,
+        today, todayDate: today != null ? move?.date ?? null : null, todayStale,
+        detailStale: m?.navStale ?? null,
+        signalEvidence: m?.signalEvidence ?? null,
+        scoreEvidence: m?.scoreEvidence ?? null,
       }
     })
 
-    const totalValue = hlds.reduce((s, h) => s + h.value, 0)
-    const totalCost = hlds.reduce((s, h) => s + h.shares * h.cost, 0)
-    const totalToday = hlds.reduce((s, h) => s + (h.today ?? 0), 0)
-
-    story.value = compileStoryData({
-      holdings: hlds,
-      totalValue, totalCost,
-      totalProfit: totalValue - totalCost,
-      totalRate: totalCost > 0 ? ((totalValue - totalCost) / totalCost) * 100 : null,
-      todayEst: hlds.some((h) => h.today != null) ? totalToday : null,
-    })
+    story.value = compileStoryData({ holdings: hlds })
   } catch { /* skip */ }
   finally { loading.value = false }
 })
 
-async function genSummary() {
-  if (!story.value) return
-  summaryLoading.value = true
-  try {
-    summary.value = await generateStorySummary(story.value)
-  } catch { /* skip */ }
-  finally { summaryLoading.value = false }
-}
-
 // 持仓收益排序图
 const barOption = computed(() => {
-  if (!story.value) return null
-  const sorted = [...story.value.holdings].sort((a, b) => b.rate - a.rate)
+  if (!story.value?.coverage.returns.publishable) return null
+  const sorted = [...story.value.holdings].sort((a, b) => (b.rate as number) - (a.rate as number))
   return {
     grid: { left: 90, right: 50, top: 10, bottom: 28 },
     tooltip: { trigger: 'axis' },
     xAxis: { type: 'value', axisLabel: { fontSize: 10, formatter: '{value}%' } },
     yAxis: { type: 'category', data: sorted.map((h) => h.name).reverse(), axisLabel: { fontSize: 10, width: 80, overflow: 'truncate' }, inverse: true },
     series: [{
-      type: 'bar', data: sorted.map((h) => +h.rate.toFixed(2)).reverse(),
+      type: 'bar', data: sorted.map((h) => +(h.rate as number).toFixed(2)).reverse(),
       itemStyle: { color: (p: any) => p.value >= 0 ? '#C44536' : '#3D8B63' },
     }],
   }
@@ -131,27 +177,54 @@ async function doExport() {
 }
 
 const fp = (n: number | null | undefined) => n != null ? (n >= 0 ? '+' : '') + n.toFixed(2) + '%' : '--'
-const fn = (n: number) => n.toLocaleString('zh-CN', { maximumFractionDigits: 2 })
+const fn = (n: number | null | undefined) => n != null && Number.isFinite(n)
+  ? n.toLocaleString('zh-CN', { maximumFractionDigits: 2 })
+  : '--'
+const signedFn = (n: number | null | undefined) => n != null && Number.isFinite(n)
+  ? (n >= 0 ? '+' : '') + fn(n)
+  : '--'
+
+function totalValueLabel(data: StoryData): string {
+  const coverage = data.coverage.valuation
+  if (coverage.futureDate.length) return '总市值（日期异常）'
+  if (coverage.stale.length) return '总市值（含旧净值）'
+  if (coverage.freshnessUnknown.length || coverage.dated !== coverage.covered) return '净值市值（日期/新鲜度未知）'
+  if (coverage.dates.length > 1) return '净值市值（跨日期）'
+  return '总市值'
+}
+
+function totalProfitLabel(data: StoryData): string {
+  const coverage = data.coverage.valuation
+  if (coverage.futureDate.length) return '累计收益（日期异常）'
+  if (coverage.stale.length) return '累计收益（含旧净值）'
+  if (coverage.freshnessUnknown.length || coverage.dated !== coverage.covered || coverage.dates.length > 1) {
+    return '累计收益（非同日口径）'
+  }
+  return '累计收益'
+}
 </script>
 
 <template>
   <div class="page">
     <van-nav-bar title="数据故事">
       <template #right>
-        <van-button size="mini" plain icon="down" :loading="exporting" @click="doExport">导出长图</van-button>
+        <van-button size="mini" plain icon="down" :loading="exporting" :disabled="loading || !story" @click="doExport">导出长图</van-button>
       </template>
     </van-nav-bar>
 
     <div class="page-body">
       <van-loading v-if="loading" style="text-align:center;padding:40px" />
-      <van-empty v-else-if="!story" description="还没有持仓数据。去自选页添加持仓。" />
+      <section v-else-if="inputError" class="sc-coverage-warning" role="alert">{{ inputError }}</section>
+      <van-empty v-else-if="!story" :description="emptyDescription" />
+
+      <div v-if="story && zeroHoldingCount" class="sc-coverage-warning" role="status">另有 {{ zeroHoldingCount }} 条 0 份持仓记录；不计入正持仓金额和排行，可在自选页继续编辑。</div>
 
       <template v-if="story">
         <div class="story-card" ref="cardRef">
           <!-- 头部 -->
           <div class="sc-header">
             <div class="sc-brand">司南基金 · 组合周报</div>
-            <div class="sc-date">{{ new Date(story.generated).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' }) }}</div>
+            <div class="sc-date">报告生成于 {{ new Date(story.generated).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' }) }}</div>
           </div>
 
           <!-- 总览 -->
@@ -159,25 +232,57 @@ const fn = (n: number) => n.toLocaleString('zh-CN', { maximumFractionDigits: 2 }
             <div class="sc-sec-title">组合总览</div>
             <div class="sc-overview">
               <div class="sc-ov">
-                <span class="sco-label">总市值</span>
+                <span class="sco-label">{{ totalValueLabel(story) }}</span>
                 <span class="sco-val big">{{ fn(story.totalValue) }}</span>
               </div>
               <div class="sc-ov">
-                <span class="sco-label">累计收益</span>
+                <span class="sco-label">{{ totalProfitLabel(story) }}</span>
                 <span class="sco-val" :style="{ color: colorOf(story.totalProfit) }">
-                  {{ story.totalProfit >= 0 ? '+' : '' }}{{ fn(story.totalProfit) }}
+                  {{ signedFn(story.totalProfit) }}
                   <em>{{ fp(story.totalRate) }}</em>
                 </span>
               </div>
-              <div class="sc-ov" v-if="story.todayEst != null">
-                <span class="sco-label">今日估算</span>
+              <div class="sc-ov">
+                <span class="sco-label">单日变动合计</span>
                 <span class="sco-val" :style="{ color: colorOf(story.todayEst) }">
-                  {{ story.todayEst >= 0 ? '+' : '' }}{{ fn(story.todayEst) }}
+                  {{ signedFn(story.todayEst) }}
                 </span>
               </div>
               <div class="sc-ov">
                 <span class="sco-label">持仓数量</span>
                 <span class="sco-val">{{ story.holdingCount }} 只</span>
+              </div>
+            </div>
+            <div class="sc-trace">
+              <div>
+                净值覆盖 {{ story.coverage.valuation.covered }}/{{ story.coverage.valuation.total }}
+                · 数据日期 {{ storyCoverageDateText(story.coverage.valuation) }}
+              </div>
+              <div>成本覆盖 {{ story.coverage.cost.covered }}/{{ story.coverage.cost.total }}</div>
+              <div>
+                单日变动覆盖 {{ story.coverage.today.covered }}/{{ story.coverage.today.total }}
+                · 数据日期 {{ storyCoverageDateText(story.coverage.today) }}
+              </div>
+            </div>
+            <div class="sc-coverage-warning" v-if="!story.coverage.valuation.publishable || !story.coverage.cost.publishable || !story.coverage.today.publishable || story.coverage.valuation.stale.length || story.coverage.valuation.freshnessUnknown.length || story.coverage.valuation.dates.length > 1">
+              <div v-if="!story.coverage.valuation.complete">
+                缺失净值：{{ story.coverage.valuation.missing.join('、') || '未知持仓' }}；总市值保留为 --。
+                <template v-if="story.coverage.valuation.covered > 0">已定价小计 {{ fn(story.pricedValue) }}，不代表组合总市值。</template>
+              </div>
+              <div v-if="story.coverage.valuation.futureDate.length">未来净值日期已拒绝：{{ story.coverage.valuation.futureDate.join('、') }}；总市值与累计收益保留为 --。</div>
+              <div v-if="story.coverage.valuation.stale.length">旧净值：{{ story.coverage.valuation.stale.join('、') }}；金额基于旧数据，不代表当前市值。</div>
+              <div v-if="story.coverage.valuation.freshnessUnknown.length">净值新鲜度未知：{{ story.coverage.valuation.freshnessUnknown.join('、') }}。</div>
+              <div v-if="story.coverage.valuation.complete && story.coverage.valuation.dated < story.coverage.valuation.covered && !story.coverage.valuation.futureDate.length">部分净值缺少有效数值日期，日期保持未知。</div>
+              <div v-if="story.coverage.valuation.dates.length > 1">净值来自不同市场日期，金额按各自最近可用净值计算。</div>
+              <div v-if="!story.coverage.cost.complete">缺失成本：{{ story.coverage.cost.missing.join('、') || '未知持仓' }}；累计收益保留为 --。</div>
+              <div v-if="!story.coverage.today.complete">单日变动数据未完整，不发布部分持仓合计。</div>
+              <div v-else-if="!story.coverage.today.publishable">
+                单日变动未通过日期/新鲜度门禁，不发布合计：
+                <template v-if="story.coverage.today.dates.length > 1">来源跨日期；</template>
+                <template v-if="story.coverage.today.dated < story.coverage.today.covered">日期缺失；</template>
+                <template v-if="story.coverage.today.futureDate.length">未来日期；</template>
+                <template v-if="story.coverage.today.stale.length">旧数据；</template>
+                <template v-if="story.coverage.today.freshnessUnknown.length">新鲜度未知；</template>
               </div>
             </div>
           </div>
@@ -191,6 +296,11 @@ const fn = (n: number) => n.toLocaleString('zh-CN', { maximumFractionDigits: 2 }
                 {{ sig }} {{ cnt }}
               </span>
             </div>
+            <div class="sc-trace">
+              <div>可信信号覆盖 {{ story.coverage.signal.covered }}/{{ story.coverage.signal.total }} · 数据日期 {{ storyCoverageDateText(story.coverage.signal) }}</div>
+              <div>可信评分覆盖 {{ story.coverage.score.covered }}/{{ story.coverage.score.total }} · 数据日期 {{ storyCoverageDateText(story.coverage.score) }}</div>
+            </div>
+            <div class="sc-missing" v-if="!story.coverage.signal.complete || !story.coverage.score.complete">未通过 70% 覆盖、新鲜度、有效日期或评分资格门禁的旧版证据统一显示为“未知”。</div>
           </div>
 
           <!-- 持仓收益排行 -->
@@ -198,22 +308,26 @@ const fn = (n: number) => n.toLocaleString('zh-CN', { maximumFractionDigits: 2 }
             <div class="sc-sec-title">持仓收益对比</div>
             <Chart :option="barOption" height="220px" />
           </div>
+          <div class="sc-section" v-else-if="story.holdingCount > 0">
+            <div class="sc-sec-title">持仓收益对比</div>
+            <div class="sc-missing">持仓收益覆盖 {{ story.coverage.returns.covered }}/{{ story.coverage.returns.total }}，未通过覆盖、同日日期与新鲜度门禁，暂不排名。</div>
+          </div>
 
           <!-- 极值 -->
-          <div class="sc-section" v-if="story.bestHolding && story.worstHolding">
+          <div class="sc-section" v-if="story.bestHolding || story.worstHolding || story.bestToday || story.worstToday">
             <div class="sc-sec-title">持仓亮点</div>
-            <van-cell title="🏆 最佳持仓" :value="story.bestHolding.name" :label="fp(story.bestHolding.rate)" />
-            <van-cell title="📉 需关注" :value="story.worstHolding.name" :label="fp(story.worstHolding.rate)" />
-            <van-cell v-if="story.bestToday" title="🔥 今日最强" :value="story.bestToday.name"
+            <van-cell v-if="story.bestHolding" title="🏆 最佳持仓" :value="story.bestHolding.name" :label="fp(story.bestHolding.rate)" />
+            <van-cell v-if="story.worstHolding" title="📉 需关注" :value="story.worstHolding.name" :label="fp(story.worstHolding.rate)" />
+            <van-cell v-if="story.bestToday" title="🔥 单日最强" :value="story.bestToday.name"
               :label="(story.bestToday.today! >= 0 ? '+' : '') + story.bestToday.today!.toFixed(2)" />
-            <van-cell v-if="story.worstToday" title="❄ 今日最弱" :value="story.worstToday.name"
+            <van-cell v-if="story.worstToday" title="❄ 单日最弱" :value="story.worstToday.name"
               :label="(story.worstToday.today! >= 0 ? '+' : '') + story.worstToday.today!.toFixed(2)" />
           </div>
 
-          <!-- LLM 摘要 -->
-          <div class="sc-section" v-if="summary">
-            <div class="sc-sec-title">AI 点评</div>
-            <div class="sc-summary">{{ summary }}</div>
+          <!-- 自由文本 AI 暂停，不生成或伪装降级摘要 -->
+          <div class="sc-section">
+            <div class="sc-sec-title">AI 摘要暂不可用</div>
+            <div class="sc-summary" role="status">{{ FREE_TEXT_AI_UNAVAILABLE }}</div>
           </div>
 
           <!-- 免责声明 -->
@@ -221,15 +335,8 @@ const fn = (n: number) => n.toLocaleString('zh-CN', { maximumFractionDigits: 2 }
         </div>
 
         <!-- 操作按钮 -->
-        <div class="act-row" v-if="!summary">
-          <van-button plain icon="gem-o" size="small" :loading="summaryLoading" @click="genSummary" block>
-            AI 生成一句话总结
-          </van-button>
-        </div>
-        <div class="act-row" v-if="summary">
-          <van-button plain icon="replay" size="small" :loading="summaryLoading" @click="genSummary" block>
-            重新生成
-          </van-button>
+        <div class="act-row">
+          <van-button plain icon="gem-o" size="small" disabled block>AI 自由文本摘要已暂停</van-button>
         </div>
         <div class="export-err" v-if="exportErr">{{ exportErr }}</div>
       </template>
@@ -255,6 +362,9 @@ const fn = (n: number) => n.toLocaleString('zh-CN', { maximumFractionDigits: 2 }
 .sco-val { display: block; font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 2px; }
 .sco-val.big { font-size: 24px; }
 .sco-val em { font-style: normal; font-size: 13px; margin-left: 6px; }
+.sc-trace { display: grid; gap: 3px; margin-top: 9px; color: var(--text-hint); font-size: 10px; line-height: 1.5; }
+.sc-coverage-warning { display: grid; gap: 4px; margin-top: 8px; padding: 8px 10px; color: var(--text-secondary); background: var(--chip-bg); border-radius: 7px; font-size: 11px; line-height: 1.55; }
+.sc-missing { color: var(--text-secondary); font-size: 12px; line-height: 1.6; }
 .sc-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .sc-chip { padding: 4px 10px; border-radius: 12px; font-size: 12px; }
 .sc-summary { font-size: 13px; line-height: 1.8; color: var(--text-secondary); white-space: pre-line; }

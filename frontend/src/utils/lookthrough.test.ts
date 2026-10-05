@@ -8,6 +8,7 @@ vi.mock('./holdings', () => ({
 
 describe('computeLookthrough', () => {
   afterEach(() => {
+    vi.useRealTimers()
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
     vi.resetModules()
@@ -194,5 +195,55 @@ describe('computeLookthrough', () => {
     expect(result.source).toBe('top10')
     expect(result.stockDisclosureDates).toEqual([])
     expect(result.hasUndatedStockFallback).toBe(true)
+  })
+
+  it('bounds enrichment body parsing and leaves a timeout retryable', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-02T04:00:00Z'))
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: () => new Promise(() => {}) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: () => Promise.resolve(enrich('F1', {
+        holdings: [{ code: '600001', name: '股票A', ratio: 10 }], industries: [],
+      })) })
+    vi.stubGlobal('fetch', fetchMock)
+    const { loadEnrich } = await import('./lookthrough')
+    const pending = loadEnrich('F1')
+    await vi.advanceTimersByTimeAsync(6001)
+    expect(await pending).toBeNull()
+    expect(fetchMock.mock.calls[0][1].signal.aborted).toBe(true)
+    expect(await loadEnrich('F1')).toMatchObject({ code: 'F1', holdings_as_of: '2026-06-30' })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not cache a cancelled enrich response that completes late', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-02T04:00:00Z'))
+    let resolveBody!: (value: unknown) => void
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true, status: 200, json: () => new Promise(resolve => { resolveBody = resolve }),
+    }).mockResolvedValueOnce({ ok: false, status: 404 })
+    vi.stubGlobal('fetch', fetchMock)
+    const { loadEnrich } = await import('./lookthrough')
+    const controller = new AbortController()
+    const pending = loadEnrich('F1', controller.signal)
+    await vi.advanceTimersByTimeAsync(0)
+    controller.abort()
+    expect(await pending).toBeNull()
+    resolveBody(enrich('F1', { holdings: [{ code: '600001', name: '股票A', ratio: 10 }], industries: [] }))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(await loadEnrich('F1')).toBeNull()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('revalidates cached disclosure age instead of keeping an expired success', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-02T04:00:00Z'))
+    mockFetchByCode({ F1: enrich('F1', {
+      holdings: [{ code: '600001', name: '股票A', ratio: 10 }], industries: [],
+    }) })
+    const { loadEnrich } = await import('./lookthrough')
+    expect(await loadEnrich('F1')).toBeTruthy()
+    vi.setSystemTime(new Date('2028-01-03T04:00:00Z'))
+    expect(await loadEnrich('F1')).toBeNull()
   })
 })

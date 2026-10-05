@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { showToast } from 'vant'
+import { showConfirmDialog, showToast } from 'vant'
 import { useFundsStore } from '@/stores/funds'
 import { useWatchlistStore } from '@/stores/watchlist'
 import { pct, num, colorOf, signalColor } from '@/utils/format'
@@ -12,10 +12,11 @@ import Chart from '@/components/Chart.vue'
 import DcaCalc from '@/components/DcaCalc.vue'
 import { estimateDataFreshness, fetchEstimate, latestNavMove, preferredDailyMove, type Estimate } from '@/utils/estimate'
 import { getHoldings, type Holding } from '@/utils/holdings'
-import { templateInterpret, llmInterpret } from '@/utils/interpret'
-import { getAiConfig, setAiConfig, hasAiKey, providerDef, PROVIDERS, type AiConfig } from '@/utils/ai'
+import { templateInterpret } from '@/utils/interpret'
+import { FREE_TEXT_AI_UNAVAILABLE, getAiConfig, setAiConfig, hasAiKey, providerDef, PROVIDERS, type AiConfig } from '@/utils/ai'
 import { findSimilar, type ScreenFund } from '@/utils/screener'
 import type { FundDetail, ScoreResp, SignalResp, BacktestResp, DecisionResp } from '@/api/client'
+import { entryId } from '@/utils/gist'
 
 const route = useRoute()
 const router = useRouter()
@@ -35,6 +36,8 @@ const holdingsDone = ref(false)
 const loading = ref(true)
 const refreshing = ref(false)
 const error = ref('')
+let loadGeneration = 0
+let disposed = false
 
 function openManager() {
   if (!detail.value?.manager) return
@@ -49,49 +52,15 @@ const holdingsReportDate = computed(() => holdings.value[0]?.reportDate || null)
 
 const COMP_NAMES: Record<string, string> = { return: '收益', risk: '风险', management: '管理', cost: '成本' }
 
-// 智能解读：B 规则版即时计算（随数据到达响应式更新），A LLM 版按需触发
+// 规则解读随数据更新；自由文本 AI 暂停，不读取或改写旧解读缓存。
 const interp = computed(() =>
   detail.value ? templateInterpret(detail.value, score.value, signal.value, bt.value) : null,
 )
 const aiCfg = ref<AiConfig>(getAiConfig())
 const aiReady = ref(hasAiKey())
-const aiText = ref('')
-const aiLoading = ref(false)
-const aiErr = ref('')
 const cfgShow = ref(false)
 const curDef = computed(() => providerDef(aiCfg.value.provider))
 
-// 持久化 AI 解读（按基金代码缓存，离开页面不丢失）
-const AI_CACHE_KEY = 'sinan_ai_text'
-function loadAiCache(c: string) {
-  try {
-    const m = JSON.parse(localStorage.getItem(AI_CACHE_KEY) || '{}')
-    return m[c] || ''
-  } catch { return '' }
-}
-function saveAiCache(c: string, t: string) {
-  try {
-    const m = JSON.parse(localStorage.getItem(AI_CACHE_KEY) || '{}')
-    m[c] = t
-    localStorage.setItem(AI_CACHE_KEY, JSON.stringify(m))
-  } catch { /* quota */ }
-}
-// 挂载时恢复缓存
-aiText.value = loadAiCache(code)
-
-async function runAi() {
-  if (!detail.value) return
-  aiErr.value = ''; aiText.value = ''; aiLoading.value = true
-  try {
-    const text = await llmInterpret(detail.value, score.value, signal.value, bt.value)
-    aiText.value = text
-    saveAiCache(code, text)
-  } catch (e) {
-    aiErr.value = e instanceof Error ? e.message : 'AI 解读失败'
-  } finally {
-    aiLoading.value = false
-  }
-}
 function saveCfg() {
   aiCfg.value.apiKey = aiCfg.value.apiKey.trim()
   setAiConfig(aiCfg.value)
@@ -114,32 +83,28 @@ async function loadSimilar() {
 }
 
 async function loadData(showInitialLoading = true) {
+  const generation = ++loadGeneration
+  const active = () => !disposed && generation === loadGeneration
   if (showInitialLoading) loading.value = true
   error.value = ''
   estDone.value = false
   holdingsDone.value = false
   // 页面显示估值与后端决策并行取数；后端会独立获取盘中行情并写入可追溯决策上下文。
-  fetchEstimate(code, !showInitialLoading).then((e) => { est.value = e }).finally(() => { estDone.value = true })
-  getHoldings(code).then((h) => { holdings.value = h }).finally(() => { holdingsDone.value = true })
+  fetchEstimate(code, !showInitialLoading).then((e) => { if (active()) est.value = e }).catch(() => {}).finally(() => { if (active()) estDone.value = true })
+  getHoldings(code).then((h) => { if (active()) holdings.value = h }).catch(() => {}).finally(() => { if (active()) holdingsDone.value = true })
   try {
-    await watch.load()
-    const userHoldings = watch.holdingsFor(code)
-    const targets = userHoldings.map((item) => item.target_weight).filter((value): value is number => value != null && Number.isFinite(value))
-    const a = await funds.analyze(code, {
-      held: userHoldings.length > 0,
-      target_weight: targets.length ? targets.reduce((sum, value) => sum + value, 0) : undefined,
-      force: !showInitialLoading,
-    })
+    // Public legacy analysis receives only the fund code and cache refresh intent.
+    const a = await funds.analyze(code, { force: !showInitialLoading })
+    if (!active()) return
     detail.value = a.detail
     score.value = a.score
     signal.value = a.signal
     bt.value = a.backtest
     decision.value = a.decision
   } catch {
-    error.value = '加载失败，后端是否已启动？'
+    if (active()) error.value = '加载失败，后端是否已启动？'
   } finally {
-    loading.value = false
-    refreshing.value = false
+    if (active()) { loading.value = false; refreshing.value = false }
   }
 }
 
@@ -151,6 +116,7 @@ onMounted(async () => {
   watch.load().catch(() => {})
   loadData()
 })
+onBeforeUnmount(() => { disposed = true; loadGeneration++ })
 
 const btOption = computed(() => {
   const s = bt.value?.strategy?.curve || []
@@ -166,6 +132,11 @@ const btOption = computed(() => {
       { name: '一直持有', type: 'line' as const, showSymbol: false, data: b.map((p) => p.v), lineStyle: { color: '#D24A3A' }, itemStyle: { color: '#D24A3A' } },
     ],
   }
+})
+
+const backtestExcess = computed(() => {
+  const value = bt.value?.outperform
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
 })
 
 const navOption = computed(() => {
@@ -211,8 +182,21 @@ async function toggleWatch() {
   try {
     await watch.toggle(code, detail.value?.name)
     showToast(watch.has(code) ? '已加入自选' : '已移出自选')
-  } catch {
-    showToast('操作失败')
+  } catch (cause) {
+    if (!(cause && typeof cause === 'object' && 'code' in cause && cause.code === 'requires-confirmation')) {
+      showToast('操作失败，本地记录未修改'); return
+    }
+    const records = watch.recordsFor(code)
+    const expected = records.map(row => ({ id: row.id || entryId(row.code, row.account), snapshot: watch.entrySnapshot(row.id || entryId(row.code, row.account)) || '' }))
+    try {
+      await showConfirmDialog({ title: '确认移出本地记录', message: `将移出该基金的 ${records.length} 条本地记录（含持仓/多账户）；不会发起交易。` })
+      if (disposed) return
+      await watch.remove(code, undefined, { confirmed: true, expected })
+      showToast('已移出本地记录')
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error) showToast('记录已变化或保存失败，请重新确认')
+      // Dialog cancellation preserves the exact local records.
+    }
   }
 }
 </script>
@@ -237,7 +221,7 @@ async function toggleWatch() {
       </van-empty>
       <template v-else-if="detail">
         <div v-if="detail.stale" class="data-warning">数据源暂不可用，当前展示 {{ detail.updated_at || detail.latest_nav_date }} 的历史缓存；评分与决策已降级。</div>
-        <FundDetailV8Panel :code="code" />
+        <FundDetailV8Panel :code="code" :local-holding-pending="watch.hasLocalChanges()" />
 
         <div class="legacy-divider" role="separator">
           <span>历史详情与旧版指标</span>
@@ -276,29 +260,23 @@ async function toggleWatch() {
           @click="router.push('/report/' + code)">生成体检报告</van-button>
 
         <div class="sec">旧版决策建议</div>
+        <div v-if="decision" class="data-warning">以下为公开基金信息形成的旧版参考，不使用本机持仓、成本或目标权重，也不代表新输入已确认或已保存为 V8 决策。</div>
         <DecisionCard v-if="decision" :decision="decision" />
 
         <div class="sec">旧版智能解读</div>
         <div class="card interp" v-if="interp">
           <div class="verdict" :class="interp.tone">{{ interp.verdict }}</div>
-          <div v-if="aiText" class="ai-box">
-            <div class="ai-tag">AI 解读 · {{ curDef.label }}</div>
-            <div class="ai-text">{{ aiText }}</div>
-          </div>
           <div class="isec" v-for="(x, i) in interp.sections" :key="i">
             <span class="ih">{{ x.h }}</span><span class="it">{{ x.t }}</span>
           </div>
-          <div v-if="aiErr" class="ai-err">{{ aiErr }}</div>
+          <div class="ai-hint" role="status">{{ FREE_TEXT_AI_UNAVAILABLE }}</div>
           <div class="ai-bar">
-            <van-button size="mini" plain type="primary" :loading="aiLoading"
-              @click="aiReady ? runAi() : (cfgShow = true)">
-              {{ aiReady ? (aiText ? '重新生成' : 'AI 生成解读') : '配置 AI' }}
-            </van-button>
-            <van-icon v-if="aiReady" name="setting-o" size="17" color="#A8B2A8" @click="cfgShow = true" />
+            <van-button size="mini" plain type="primary" disabled>AI 自由文本解读已暂停</van-button>
+            <van-button size="mini" plain @click="cfgShow = true">配置 AI</van-button>
             <span v-if="aiReady" class="ai-prov">{{ curDef.label }}</span>
           </div>
-          <div class="ai-hint">上为规则解读，免费离线。配置 AI（DeepSeek / 通义 / OpenAI / Claude… 自带 Key）可生成更自然的点评（按量计费）。</div>
-          <div v-if="!aiText" class="disc">以上为数据解读，仅供个人参考，不构成投资建议。</div>
+          <div class="ai-hint">上为规则解读，免费离线。已有 AI 配置与解读缓存保留，暂停期间不展示旧 AI 解读或调用模型。</div>
+          <div class="disc">以上为数据解读，仅供个人参考，不构成投资建议。</div>
         </div>
 
         <van-cell-group inset>
@@ -417,8 +395,10 @@ async function toggleWatch() {
               {{ signal.disclaimer || '择时信号仅为风险 / 时机参考，非买卖指令。' }}
               <template v-if="bt && bt.available && bt.strategy && bt.benchmark">
                 本基金回测：择时 {{ pct(bt.strategy.total_return) }} vs 一直持有 {{ pct(bt.benchmark.total_return) }}
-                 <em v-if="bt.outperform != null" :style="{ color: colorOf(bt.outperform) }">（{{ bt.outperform >= 0 ? '择时跑赢' : '择时跑输' }} {{ Math.abs(bt.outperform).toFixed(2) }}%）</em><em v-else>（超额数据不足）</em>。
-                优质基金长期持有 / 定投通常更优，勿据此轻易卖出。
+                <em v-if="backtestExcess == null">（超额数据不足，暂不比较）</em>
+                <em v-else-if="backtestExcess === 0">（本次历史回测收益持平）</em>
+                <em v-else :style="{ color: colorOf(backtestExcess) }">（本次历史区间{{ backtestExcess > 0 ? '择时跑赢' : '择时跑输' }} {{ Math.abs(backtestExcess).toFixed(2) }}%）</em>。
+                历史回测不代表未来表现，勿据此直接作买卖决策。
               </template>
             </div>
           </div>
