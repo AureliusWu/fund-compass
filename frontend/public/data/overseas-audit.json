@@ -2,7 +2,9 @@
   "status": "warning",
   "errors": [],
   "warnings": [
-    "已保留并排除 17 条历史日期轴错位样本"
+    "已保留并排除 17 条历史日期轴错位样本",
+    "最后有效预测已过去 146.0 小时",
+    "最后有效结算已过去 122.3 小时"
   ],
   "stats": {
     "records": 74,
@@ -15,8 +17,8 @@
     "prediction_expected": false,
     "effective_predictions_for_observation": 0,
     "legacy_misaligned": 17,
-    "prediction_effective_age_hours": 71.9,
-    "settlement_effective_age_hours": 48.2
+    "prediction_effective_age_hours": 146.0,
+    "settlement_effective_age_hours": 122.3
   },
-  "updated_at": "2026-10-02T21:10:17+08:00"
+  "updated_at": "2026-10-05T23:13:41+08:00"
 }
