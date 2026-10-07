@@ -5,7 +5,7 @@
     "applied_at": "2026-08-13T13:46:49+08:00",
     "legacy_records_retained": 17
   },
-  "updated_at": "2026-10-06T21:33:54+08:00",
+  "updated_at": "2026-10-07T21:49:54+08:00",
   "summary": {
     "539002": {
       "samples": 22,
@@ -5803,18 +5803,18 @@
     }
   ],
   "pipeline": {
-    "last_run_at": "2026-10-06T21:33:54+08:00",
+    "last_run_at": "2026-10-07T21:49:54+08:00",
     "quotes_count": 0,
     "details_count": 3,
     "alignment_version": "observation-target-v2",
     "legacy_misaligned_records": 17,
     "legacy_last_prediction_at": "2026-07-17T16:38:44+08:00",
     "legacy_last_settlement_at": "2026-07-21T17:13:24+08:00",
-    "heartbeat_at": "2026-10-06T21:33:54+08:00",
+    "heartbeat_at": "2026-10-07T21:49:54+08:00",
     "run_mode": "scheduled",
-    "scheduled_for": "2026-10-06T14:35+08:00",
-    "delay_minutes": 418.92,
-    "observation_date": "2026-10-06",
+    "scheduled_for": "2026-10-07T14:35+08:00",
+    "delay_minutes": 434.9,
+    "observation_date": "2026-10-07",
     "calendar_supported": true,
     "calendar_source": "https://www.sse.com.cn/disclosure/dealinstruc/closed/",
     "trading_day": false,
@@ -5834,6 +5834,6 @@
     "last_effective_prediction_at": "2026-09-29T21:16:28+08:00",
     "last_settlement_at": "2026-09-30T20:57:13+08:00",
     "last_effective_settlement_at": "2026-09-30T20:57:13+08:00",
-    "scheduled_observation_date": "2026-10-06"
+    "scheduled_observation_date": "2026-10-07"
   }
 }
