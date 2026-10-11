@@ -562,3 +562,94 @@ Windows Python 3.14 使用清空配置环境/新默认 SQLite/独立 basetemp，
 Windows 专项/全量 stdout SHA 为 `2712929068ff8ddbb31850d493faff2c6671fd16e11dc541d77d02d6ade1f579` / `7535895cc50425e2dc18495ed2f90ba210d9bd7babc3bd6c30a2a8aee45e86a9`；Linux 专项/全量 log SHA 为 `06b3de52546a871c18ba2558b36a55761ff1b6c85d8dadd0396fa6d14752fa10` / `8ec83f6f2949e245325fe9790d77e62b17e87934d1a28032fb3b9f8e334047fa`。本批项目接入无失败 attempt；仓库外候选首次语法失败与旧漏洞复现仍保留，不混为项目终态。
 
 仓库外 32,197 合成行容量样本产生 15,165,639 字节、586 步、最多 900 参数，本机执行 0.556947 秒；这是单次方向性本机结果，不是 Turso 事务限制/性能/云端应用证明。响应验证器仍在下一道纯本地门禁开发，无 sender 或真实对账。应用版本仍 8.0.0、云库 schema 8、六个 packet 远端资格 false；不合并 main、不创建 v9 Tag/Release、不删除 Gist、不更改凭据或收费配置。正式发布仍 BLOCKED，目标工作继续。
+
+### 中断后基线复核与正常数据合入（2026-10-11）
+
+恢复时 feature HEAD 为 `731297445545d0ce031acb02b8298a49a47b01b9`，工作区干净。[CI 37099567508](https://github.com/AureliusWu/fund-compass/actions/runs/37099567508) 已核对实际日志：resolve、4 次 checkout、3 次 exact-source 断言均为 merge `112ae9472a7416d6ef59d7d3a1e9af98d896e06a`，parents 为 `997e3b0` 与该 head。后端 **2057 passed / 42.02 秒**、pip check；前端 **801 passed / 51 文件**、类型/构建/PWA 7/7；Worker **144 passed / 3 文件**、类型/dry-run 通过。deploy/candidate_smoke/formal_smoke 全部 skipped，不能作为部署或耐久证据。
+
+只读 fetch 发现 main 已至 `1231fc6b7e065275f4ef3a04a4911d60f5e8f88c`，新增 6 个 bot 提交、74 个公开数据变更，无代码/工作流变化；与 feature 相对旧 base 的变更文件无交集。已正常合入升级分支，产生 `7511d807fc7467e887277c72356de6e719f9f41d`，没有 reset、force push 或 main 合并。保留基金全集、富集、经理/筛选清单及配套哈希分片整组更新。旧 CI 不覆盖新 main 的合成 merge，最终 checkpoint 需重新绑定 CI。
+
+海外账本 10-07 的更新是非交易日 heartbeat，仍 74 条；最后有效预测 09-29、结算 09-30。最新 audit 保留并排除 17 条错轴样本，并记录有效预测/结算 `192.6h / 168.9h` 旧化警告。不能把文件刷新日期改写为有效样本日期，也不能将非交易日 heartbeat 当成自然交易日/周任务验收。
+
+正常 merge 的本地前端/Worker 6 门禁均 exit 0：前端 **801 / 51 文件**、type-check、build **1088 modules / 11.92 秒**、PWA **7/7**；Worker **144 / 3 文件**、type-check、Wrangler dry-run **114.28 KiB / gzip 26.58 KiB**。仅 dry-run 保留 proxy 环境警告；未安装依赖、改锁文件或部署。前后 HEAD 均为 `7511d807`，有限 240 文件指纹均为 `aefa0a1149cde3ab58e54ae116e3d6d728a9315b7334d76724f8e85e69e3de5d`，manifest SHA `64e8f5696ff755ba27145ae00bfdb5b803b2a1e5ecc4a15e771822f0188f0c67`。此证据只覆盖该前端/Worker 基线，不覆盖后续响应验证器修改或实机性能。
+
+Render 专用连接只读核验现有候选服务 free/单实例/main auto-deploy，live 为 `dep-db34sck9v7es73cc0490`、commit `1231fc6b`，2026-10-07T13:51:44.940106Z 完成。没有读取 Secret、修改配置、创建资源或触发部署/重启。请求日志工具要求另行确认 workspace，未绕过其选择要求；不以日志缺失猜测根因。
+
+| 公开基线检查 | 结果与证据 | 时长 |
+| --- | --- | --- |
+| Pages 构建身份 | `release.json` HTTP 200；commit 为 `1231fc6b` | 797 ms |
+| API 首次健康请求 | 25 秒上限后取消，没有获取响应，不记 PASS | 25,300 ms |
+| API 后续独立有界采样 | HTTP 200/application-json；status=ok、version=8.0.0、deployment.commit=`1231fc6b`、universe=28010 | 1,053 ms |
+| 云存储资格 | engine=libsql、persistence=turso_candidate、durable=false；仍提示未完成生产跨重启读回 | 未验收 |
+
+健康响应的 started_at 为 `2026-10-11T11:17:48.198867+08:00`。首次超时后服务启动、后续请求成功，与冷启动相符，但未取得平台日志，不能据此确证唯一根因。上述是旧版本候选的只读身份/健康采样，未执行真实浏览器旅程、升级/迁移、跨重启或独立恢复；完整生产验证 verdict 为 **BLOCKED**。应用版本仍 8.0.0；本轮没有重新查询云库 schema，不把 10-03 的 schema 8 历史观察冒充当前新证据。
+
+### 自然任务真实失败诊断（2026-10-11）
+
+仅用已配置 GitHub 访问只读核对实际 schedule 终态与必要脱敏日志，未手工触发、下载私人 artifact 或修改 workflow。远端 main 仍 `1231fc6b`；下列是现有 main 的自然运行，不是本分支新实现已经上线。
+
+| 自然运行 | 实际终态及有限直接证据 |
+| --- | --- |
+| 10-05 [holdings 37272579779](https://github.com/AureliusWu/fund-compass/actions/runs/37272579779) | failure；holdings/screener 已成功提交，指数仅 3/6；中证100缺 PB、500全部候选为空、1000缺 PE。没有该 run 的 403 证据 |
+| 10-05 [managers 37276042956](https://github.com/AureliusWu/fund-compass/actions/runs/37276042956)、[universe 37288636068](https://github.com/AureliusWu/fund-compass/actions/runs/37288636068) | success；4355 位经理/28010 只基金，不能把指数失败泛化为全部富集失败 |
+| 10-05 [calibration 37278915090](https://github.com/AureliusWu/fund-compass/actions/runs/37278915090) | failure；固定必要错误 `outcome audit unavailable: TimeoutError`，上传/提交 skipped；没有鉴权失败或确定冷启动根因证据 |
+| 10-05/06/07 overseas `37330956706` / `37471771672` / `37631626027` | success 但 non_trading_day，quotes/predictions/effective/settled 全零；不计真实交易窗口 |
+| 10-08 [overseas 37788483412](https://github.com/AureliusWu/fund-compass/actions/runs/37788483412)、10-09 [37938597743](https://github.com/AureliusWu/fund-compass/actions/runs/37938597743) | 均 failure；delayed_same_day / quotes=21 / predictions=effective=settled=0，audit 报 ZERO_EFFECTIVE 和 STALE_EFFECTIVE_PREDICTION，数据提交 skipped |
+
+相关 workflow 均 active；周末没有预期 schedule。海外运行预计北京时间 14:35，10-05～09 实际创建在 21:33～23:12，创建后 3～8 秒即开始；没有依据把小时级延迟确定归因并发队列。失败不提交导致 main 心跳停在 10-07，而非任务没有触发。
+
+源码推导的额外确定阻断：2026 国庆日历下 observation=10-09 → target=10-08 → expected base=09-30，相隔 8 自然日；main 的 7 日限制使正确 base 也被拒绝。这不是读取真实基金详情的结果，不能推断 10-08 的具体拒绝分支，更不能补造历史预测或简单放宽全部陈旧来源。两个失败 run 的 consecutive-zero 均为 2，结合 main 保留旧值 1，可推断失败发生状态没有跨 run 持续留存；应独立保留运维发生状态，不能强行提交不合格财务数据。后续需逐模型日期/原因诊断、明确假日跨期规则、公开运维状态持久化与私有校准 sink 完成；六核心及真实样本门槛不降，I20 仍未完成。
+
+进一步只读源码核验：合法国内假日日期轴不等于财务收益证据合格。现有行情字段为单日 change，不能直接作为 09-30→10-08 的跨期收益；假日修复必须逐腿具备准确 interval-return 证据，否则保留 `period_return_required` 拒绝而非降低陈旧门槛。真实 API 的 stale/data_age_hours 也不能被假日例外豁免。producer/audit/calibrate/export 需共用日期/特征合同并保留追加休市日配置，另以闭集非财务 journal 留存失败 run，不提交四个不合格财务产物。当前 heartbeat/updated_at 取抓取前时钟，workflow 写入的 GITHUB_RUN_STARTED_AT 未被 producer 消费；需明确平台创建/实际执行、脚本开始、输入完成与产物完成时间，不能把开始时间当作成功落账时间。这些是后续待实现设计，不是本轮已经修复的结论。
+
+### 响应合同核验接入与首轮跨平台失败（2026-10-11）
+
+接入纯本地 `turso_scope_response.py` 及 152 项隔离合成测试。必须按外部原始 resource/plan/packet SHA 重编译后，才解释提供的响应字节；前后核 compiler 与自身源码，保留 30 秒总合作预算。`acknowledged` 只表示字节满足本地合同，不认证真实传输、提交、权限或恢复；五项 remote/apply/restore/formal/retry 旗标均 false，没有生产路由导入、sender 或未知提交对账读回器。完整 87 个故障位置仍逐项实际执行，不能以枚举数量替代执行。
+
+仓库外冻结修订 02 的第 04 次 attempt 为 **152 passed / 32.50 秒**、exit 0、stderr 空，实际打印 87 个故障位置；source SHA `313078fceff4c093cdc92181d5d888278d3c815bfeb818fe464ea56e533de7de`。旧候选漏洞复现和第 02 次 `1 failed / 146 passed` 仍保留；该失败是 origin 与原始身份失配检查顺序的固定 reason 不一致，已修复并复审，没有改写失败结果。项目测试仅改正式模块 import，接入时 tests SHA `dcb7b92463f31282df5ce6a215db44f9e980900347c4e82e56f2bb15c00d7c9b`。
+
+| 首轮项目门禁 | 实际结果 |
+| --- | --- |
+| Windows packet + response | **350 passed / 45.97 秒**；exit 0，stderr 空 |
+| Windows backend 全量 | **2209 passed / 277.32 秒**；exit 0，stderr 空；依赖弃用警告保留 |
+| Linux packet + response | **1 failed / 349 passed / 263.80 秒**；exit 1 |
+| Linux backend 全量 | **1 failed / 2208 passed / 537.40 秒**；exit 1；1 条既有 Starlette/httpx 弃用警告 |
+
+两平台首轮绑定 HEAD `7511d807` 与有限 227 文件前后相同指纹 `bf7f1755059dadb1ba642731929cbd6b3063350e63bc99101a263dc703e6fbcf`。Windows 专项/全量 stdout SHA 分别 `ee152132e9e2f832f29b9377ebb1c9899bad436b5d66814d31d0ec738ed964db` / `d723d497ab39ced1c0a3f8fa09df078529f3827b34d3c9aaff305fe68d33e305`；Linux 专项/全量 log SHA 分别 `13090d4491f2204c5394bca465c66e796dd4c786713c5764f07e66e866ec851e` / `c1086dd1e0332f67290383e6189b98d06fcabfd06a730a4ce8a7932d44009890`，Linux manifest SHA `7e8c4436e02d84be5ff95b0bd4826a96fbc23a95040d6e590b99b5ea6b000b64`。隔离条件同前述 Windows/WSL 门禁，不是操作系统安全沙箱或云端资格。
+
+两次 Linux 失败均为 `test_every_executable_step_fault_has_exact_prefix_rollback`：期望 rollback_acknowledged、实际 unknown_requires_reconcile。原 traceback 没有位置和固定 reason，不能先归因单次核验预算或语义错误；Windows PASS 不覆盖 Linux FAIL。原 attempt 已正常结束、完整日志保留，后续须用真实时钟/原预算/不改变返回值的隔离诊断定位，再用新源码指纹完整复验，禁止跳过 87 位、放宽时限或把旧 PASS 移植到新源码。
+
+### 捕获阶段回调生命周期定位与最小修复（2026-10-11）
+
+父代理与独立复审均全文读取隔离诊断及 wrapper、核对冻结 SHA 后，在同一 Ubuntu 24.04 / Python 3.12.3 / SQLite 3.45.1 / 原 venv 与 `/mnt/d` 挂载上实际运行默认模式一次；未运行 timing 模式。复用原测试的内存 fixture、文件/Socket/配置 DB 门禁，包装原 capture progress 时无条件委托并保留原返回值；不改时钟、预算、SQL 步数或清理 handler。完整 87 位实际终态为 exit 1 / 总 60.6037983 秒，1 次 BEGIN 拒绝确认、85 次回滚确认、1 次 unknown；所有旧 typed rows 均不变。
+
+唯一 unknown 在 **index 81**：reason=`identity_invalid`，单次核验 **0.229716 秒**；该位原 capture progress 实际 `calls=1 / aborts=1 / expired=true`。直接证据支持旧捕获阶段 handler 随 `CapturedSnapshot.connection` 移交而残留，随后旧阶段到期中断编译身份准入，而非这次核验耗尽 30 秒。没有实测 Path.resolve 开销，不把挂载元数据当作已证根因。12 个有限源码、4 个诊断文件与 wrapper 前后 pin 相同；原专项/全量失败日志未改。stdout/manifest SHA 分别 `8a466291034a6751bf0222aaf576d76fe018b1f7cf5050060fc97c39ca1e8b26` / `63058b1a0cbf2226fc1c84950fcf9449e18e27da48b665e3677244c1b351e616`。stderr 132 字节仅为 WSL localhost 代理/NAT 提示，摘要 `b280c454d6f559e56eb3f5ed39f3ba084b8d1744a3ff7fe016b21ff86dea1aca`。
+
+最小补丁只在成功交接前解除**已完成 capture 阶段**的 `set_progress_handler`，前后仍 `budget.check()`；没有改变 query_only、图像/原始结构/旧行摘要、公共 false 资格或通用 `_new_memory`，失败仍关闭私有连接。后续 compiler 的私有 reference/decoder 仍绑定独立新预算。增加 4 项内存阶段回归：旧 capture deadline 过期后有界只读查询可用且 DML 拒绝；外部原 SHA 仍触发两次真实 compile/rehydrate；捕获中原 SQLite callback 超时实际中断并关闭；新 compiler 的实际 progress 与固定 timeout 拒绝仍生效。仅做阶段 deadline 故障注入，不是假时钟或真实性能测量。87 位原测试保持，失败信息只新增固定 index/reason。
+
+补丁 capture / lifecycle tests / response tests SHA 分别 `78d0801fba7e78bd8b72a909c8bdb2acee5e8f4a7d63e038f543ed02df4faa0d` / `3baba86338da8f8847fc0607958524ce230e0165d7d40e43e83bd8523dbca843` / `a80644f56e44d057ffc198cb701ef50267229a0ec46a0a097cd5761a4f951c4d`；响应模块 `313078fc` 与 compiler `ee01ad89` 未变。新有限清单包含 lifecycle 测试共 228 文件，指纹 `85304052e8c5fdf61b0972b6ce752d3e144961d33cdd8890e5e74520b829dfa3`。旧候选/诊断 freeze 必须拒绝新 capture digest，不更新旧 pin 或把旧 PASS 改写成修复证据；最终完整新门禁另列终态。
+
+接入回归首轮 Windows 四组专项为 **1 failed / 614 passed / 47.31 秒**，全量为 **1 failed / 2212 passed / 200.79 秒**，均 exit 1、stderr 空、源码前后仍上述 `85304052`；原 87 位故障循环实际 PASS。唯一失败是新首项生命周期测试故意只读 INSERT 后的自动提交断言：Python SQLite 的隐式 BEGIN 在被拒绝 DML 之前开始，拒绝写入不自动结束该测试事务；数据/只读/摘要断言已通过。这不是捕获修复失败，也不放行整个门禁。专项/全量 stdout SHA 分别 `171068fc712f9963f5bc2da7d966a76858503a38c9ab926a28c870f4d68b5746` / `15ec2e0d1c708868596a948313e337b98b1f2beb4d6f1c6533317f6e5e875c9f`，原失败目录/日志保留，没有为已知测试卫生问题再启动 Linux。
+
+全量正常结束后，经独立只读复审，仅完善测试卫生：DML 尝试前完整核对绑定；保持只读 INSERT 拒绝；显式 rollback **测试自己发起的内存事务**，再完整核对来源摘要/query_only/autocommit 与 callback/abort 计数。不删除或放宽断言，不用于真实未知提交的回放/回收，也没有修改生产补丁。最终 lifecycle tests SHA `dfa7d16182dcfe9afa5ecc92b15538076bed3af1da1ee9f5a33d81974f84514c`，有限 228 文件最终冻结 `c84d6179818c8691edd51f3a5262b60b1055190ed4ab8ad80d2b83f3cf3006cf`；新 Windows/Linux 完整复验绑定此冻结，实际终态下述记录。
+
+最终新 attempt 的四道门禁均实际 exit 0，无 failed/error/skipped/xfail/xpass；两平台专项均打印 `synthetic_executable_fault_positions=87`：
+
+| 修复后最终门禁 | 实际终态 |
+| --- | --- |
+| Windows snapshot + lifecycle + packet + response | **615 passed / 55.67 秒**，5,995 条依赖弃用警告；wall 57.310 秒、stderr 空 |
+| Windows backend 全量 | **2213 passed / 224.67 秒**，79,826 条依赖弃用警告；wall 227.185 秒、stderr 空 |
+| Linux 同四组专项 | **615 passed / 177.76 秒**，pytest/tee/WSL/wrapper 均 exit 0 |
+| Linux backend 全量 | **2213 passed / 357.22 秒**，1 条既有 Starlette/httpx 弃用警告；pytest/tee/WSL/wrapper 均 exit 0 |
+
+Windows Python 3.14.4 / SQLite 3.50.4 与 Linux Ubuntu 24.04 / Python 3.12.3 / SQLite 3.45.1 均使用原运行时、隔离环境/新默认 DB 与 basetemp；新增测试沿用原限定内存/Socket/配置 DB/可信源码 I/O 门禁，Linux 另有 loopback-only 插件，不声称 OS 安全沙箱。Linux 专项 UTC `03:54:52→03:57:52`，全量 `03:57:52→04:04:06`；整组 wall 562.9166954 秒。没有提高 30 秒生产预算、删除故障位置、修改依赖或重跑覆盖旧 FAIL。
+
+四门禁前后 HEAD 为 `7511d807fc7467e887277c72356de6e719f9f41d`，228 项源码指纹均为上述 `c84d6179`；父代理另从当前全部 228 文件独立重建同值，逐文件 drift 为 0。测试的是该父 HEAD 加本次未提交冻结代码，不以父 HEAD 或此本机指纹冒充新提交的 CI 身份。Windows 专项/全量 stdout SHA 为 `7af0e4ef0b0c42d8049ea265086e6e86aed507de26e71a74d806c4522555c13d` / `0eb10aabc244d754576fe8cd5a6206692f5a94a7e9cdb662398b13dc73e7b276`，result SHA 为 `fba9f6bc49749f34d03fb9138458763786f2fec049a9892efd359de2bb950cc0` / `b0a1884279252aa7b42610c1f25f7a1e1461e016d155a5d1fd57f19860ca4342`。Linux 专项/全量 log SHA 为 `1371135111ece18bb7e17adee9b0bee6a24d4436a76d4c4b3796ef5c62199dad` / `9d6c7ce785309b1b85999003f5efd06ec532dbb5f6290aa56356cd3ffe2aad02`，manifest SHA `a530bef910cd14a8bd8ef8aabea0d15bbea6a90f874fc83d7bb76b335c257169`，日志摘要均由父代理独立读回核对。
+
+提交前限定检查 8 个自有变更文件：敏感模式命中 1 条，经全文核对为原生合成 fixture 地址 `synthetic-candidate`，精确允许该字面量后其余命中 0；不打印或收集真实凭据/私人包/响应。远端 main 再核仍 `1231fc6b`，PR #4 仍 OPEN/DRAFT。该切片可作为升级分支 checkpoint 提交推送；不是云迁移、跨重启、独立远端恢复、真实用户/自然窗口或 v9 发布资格，三端版本仍 8.0.0。
+
+### 定时任务下一切片的独立静态复审（2026-10-11）
+
+指数 producer 的 `_valid_core_item` 在类型判断之前调用 `.get()`，且空日期可形成 `None == None`；main 对完整六核心没有 `0 <= age <= 7` 生产资格检查，因此畸形输入可能异常，完整但陈旧/未来数据可能覆盖产物。消费端仍有七日新鲜度阻断，没有证据证明本轮已经生成错误交易信号。最小候选须先检查原生对象和合法源日期，再以北京时间核验六核心年龄，拒绝未来日期，失败保留原文件；不混源/同日口径、不补零、不降低六核心门槛。
+
+私有 GET 已有 3 次、单次 45 秒/总 150 秒的正文/socket 有界读取与固定错误，不把旧 main 的 TimeoutError 误称为当前分支缺重试。新发现的缺口是 response 关闭之后、结构检查和最终返回之前未复核期限，可能超期仍成功返回；拟补合作式真实 monotonic 检查并丢弃超期 payload，而非宣称可抢占阻塞 DNS/关闭操作。严格私有摘要 JSON 版本与独立 authenticated durable sink 是另外的合同/发布门禁，不能机械要求旧响应新增 `available:true` 或移除公开输出保护。本段仅为源码复审，候选仍在仓库外准备，未实施或运行新测试。

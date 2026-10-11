@@ -616,6 +616,12 @@ def capture_scope_snapshot(*, candidate_origin: str, token: str, transport: Snap
             "apply_preimage_verified": False,
         }, _schema_inventory=schema_inventory)
         budget.check()
+        # The capture budget protects construction, not the lifetime of the
+        # caller-owned readonly image. Later compilers install their own fresh
+        # budgets on private reference/decoder connections. Keep query_only and
+        # every image/identity binding intact when handing this connection over.
+        reference.set_progress_handler(None, 0)
+        budget.check()  # Include phase-handler removal before ownership moves.
         reference = None
         return result
     except SnapshotError:
