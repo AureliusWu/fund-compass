@@ -358,6 +358,10 @@ def test_index_valuation_uses_source_date_and_reports_optional_gaps(tmp_path, mo
     fake_akshare = object()
     monkeypatch.setitem(sys.modules, "akshare", fake_akshare)
     monkeypatch.setattr(index_valuation, "OUT", str(output))
+    monkeypatch.setattr(
+        index_valuation, "_beijing_today",
+        lambda now=None: index_valuation.datetime.date(2026, 8, 12),
+    )
     rows = [{
         "name": name,
         "date": "2026-08-11" if name == "沪深300" else "2026-08-12",

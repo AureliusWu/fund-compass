@@ -25,6 +25,7 @@ OUT = os.path.join(ROOT, "frontend", "public", "data", "index-valuation.json")
 BEIJING = datetime.timezone(datetime.timedelta(hours=8), "Asia/Shanghai")
 CORE_INDICES = {"沪深300", "上证50", "上证180", "中证100", "中证500", "中证1000"}
 FETCH_ATTEMPTS = 3
+MAX_CORE_AGE_DAYS = 7
 
 # 乐咕乐股 symbol（中文全称，简称可能 KeyError）。key 是司南内部标准指数名，
 # value 是按稳定性排序的候选 symbol；CI 逐个尝试，成功才写入。
@@ -133,7 +134,13 @@ def _source_date(value) -> str | None:
 
 
 def _finite_number(value, *, positive: bool = False, percentile: bool = False) -> bool:
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+    if type(value) not in (int, float):
+        return False
+    try:
+        finite = math.isfinite(value)
+    except OverflowError:
+        return False
+    if not finite:
         return False
     if positive and value <= 0:
         return False
@@ -142,16 +149,32 @@ def _finite_number(value, *, positive: bool = False, percentile: bool = False) -
     return True
 
 
+def _canonical_source_date(value) -> str | None:
+    """Published records contain native, canonical ISO dates, not date-like objects."""
+    if type(value) is not str:
+        return None
+    parsed = _source_date(value)
+    return parsed if parsed == value else None
+
+
+def _beijing_today(now: datetime.datetime | None = None) -> datetime.date:
+    instant = now if now is not None else datetime.datetime.now(datetime.timezone.utc)
+    return instant.astimezone(BEIJING).date()
+
+
 def _valid_core_item(item: dict) -> bool:
-    source_date = _source_date(item.get("date"))
+    if type(item) is not dict or type(item.get("name")) is not str:
+        return False
+    source_date = _canonical_source_date(item.get("date"))
     return (
-        isinstance(item, dict)
+        source_date is not None
         and item.get("name") in CORE_INDICES
         and _finite_number(item.get("pe"), positive=True)
         and _finite_number(item.get("pb"), positive=True)
         and _finite_number(item.get("pe_pct"), percentile=True)
         and _finite_number(item.get("pb_pct"), percentile=True)
-        and source_date == item.get("date")
+        and type(item.get("pe_date")) is str
+        and type(item.get("pb_date")) is str
         and item.get("pe_date") == source_date
         and item.get("pb_date") == source_date
     )
@@ -247,6 +270,14 @@ def main():
     except Exception as e:
         print("指数估值富集失败:", e)
         return 1
+    if type(data) is not list or any(
+        type(item) is not dict
+        or type(item.get("name")) is not str
+        or not item["name"]
+        for item in data
+    ):
+        print("指数估值返回非原生记录合同")
+        return 1
     valid_core = {item["name"] for item in data if _valid_core_item(item)}
     missing_core = sorted(CORE_INDICES - valid_core)
     if missing_core:
@@ -255,12 +286,21 @@ def main():
 
     returned = {item["name"] for item in data}
 
-    os.makedirs(os.path.dirname(OUT), exist_ok=True)
-    source_dates = [_source_date(item.get("date")) for item in data]
+    source_dates = [_canonical_source_date(item.get("date")) for item in data]
     if not source_dates or any(date is None for date in source_dates):
         print("指数估值含缺失或无效源日期")
         return 1
     now = datetime.datetime.now(BEIJING)
+    today = _beijing_today(now)
+    for item, source_date in zip(data, source_dates):
+        age_days = (today - datetime.date.fromisoformat(source_date)).days
+        if age_days < 0:
+            print("指数估值源日期晚于当前北京时间日期")
+            return 1
+        if item["name"] in CORE_INDICES and age_days > MAX_CORE_AGE_DAYS:
+            print("核心指数估值源日期已过期")
+            return 1
+    os.makedirs(os.path.dirname(OUT), exist_ok=True)
     missing = sorted(set(LG_SYMBOLS) - returned)
     payload = {
         "schema_version": 2,

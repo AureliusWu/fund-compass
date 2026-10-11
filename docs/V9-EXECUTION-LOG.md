@@ -648,8 +648,37 @@ Windows Python 3.14.4 / SQLite 3.50.4 与 Linux Ubuntu 24.04 / Python 3.12.3 / S
 
 提交前限定检查 8 个自有变更文件：敏感模式命中 1 条，经全文核对为原生合成 fixture 地址 `synthetic-candidate`，精确允许该字面量后其余命中 0；不打印或收集真实凭据/私人包/响应。远端 main 再核仍 `1231fc6b`，PR #4 仍 OPEN/DRAFT。该切片可作为升级分支 checkpoint 提交推送；不是云迁移、跨重启、独立远端恢复、真实用户/自然窗口或 v9 发布资格，三端版本仍 8.0.0。
 
+本批 8 文件 / 1646 新增 / 3 删除已正常提交为 `2709106be090cfc1afde449a3ab8f45710590e47` 并推送升级分支，工作区在接入下一切片前干净。新 [CI 38110519958](https://github.com/AureliusWu/fund-compass/actions/runs/38110519958) 于 `2026-10-11T04:07:37Z` 实际 completed/success；父代理与独立代理均核对 resolve EVENT_SHA、4 次 checkout、3 次 exact-source 为 `35296f9c78d23236d1aea6abef9c748a6efa9ca5`，GitHub commit API 的 parents 精确为 main `1231fc6b` 与该 head。后端 **2213 passed / 50.02 秒**、pip check 无 broken requirements；前端 **801 / 51 文件 / 7.02 秒**、类型检查、1088 modules/build 7.58 秒、PWA 7/7；Worker **144 / 3 文件 / 551ms**、类型检查、dry-run 114.28 KiB/gzip 26.58 KiB 通过。deploy/candidate_smoke/formal_smoke 三 job 实际 skipped、steps 空，未发布或改变云端。
+
+CI 警告保留：后端 1 条既有 Starlette/httpx 弃用，前端 source-map 弃用及 Vue 测试 stub 警告；前端和 Worker 的 npm ci 各报告 **7 vulnerabilities（2 moderate / 5 high）**。数量不是已证明的生产可利用性，已安排保持锁文件不变的只读 advisory/可达性核查，不能直接忽略或进行 force 升级。此 CI 只覆盖 `2709106` 的真实 PR merge，不覆盖随后 P1 变更，不替代部署、持久化/恢复、自然任务或正式 v9 验收。
+
 ### 定时任务下一切片的独立静态复审（2026-10-11）
 
 指数 producer 的 `_valid_core_item` 在类型判断之前调用 `.get()`，且空日期可形成 `None == None`；main 对完整六核心没有 `0 <= age <= 7` 生产资格检查，因此畸形输入可能异常，完整但陈旧/未来数据可能覆盖产物。消费端仍有七日新鲜度阻断，没有证据证明本轮已经生成错误交易信号。最小候选须先检查原生对象和合法源日期，再以北京时间核验六核心年龄，拒绝未来日期，失败保留原文件；不混源/同日口径、不补零、不降低六核心门槛。
 
-私有 GET 已有 3 次、单次 45 秒/总 150 秒的正文/socket 有界读取与固定错误，不把旧 main 的 TimeoutError 误称为当前分支缺重试。新发现的缺口是 response 关闭之后、结构检查和最终返回之前未复核期限，可能超期仍成功返回；拟补合作式真实 monotonic 检查并丢弃超期 payload，而非宣称可抢占阻塞 DNS/关闭操作。严格私有摘要 JSON 版本与独立 authenticated durable sink 是另外的合同/发布门禁，不能机械要求旧响应新增 `available:true` 或移除公开输出保护。本段仅为源码复审，候选仍在仓库外准备，未实施或运行新测试。
+私有 GET 已有 3 次、单次 45 秒/总 150 秒的正文/socket 有界读取与固定错误，不把旧 main 的 TimeoutError 误称为当前分支缺重试。新发现的缺口是 response 关闭之后、结构检查和最终返回之前未复核期限，可能超期仍成功返回；拟补合作式真实 monotonic 检查并丢弃超期 payload，而非宣称可抢占阻塞 DNS/关闭操作。严格私有摘要 JSON 版本与独立 authenticated durable sink 是另外的合同/发布门禁，不能机械要求旧响应新增 `available:true` 或移除公开输出保护。本段记录候选接入前的静态复审；随后实施和实际验证另列，不以本段授予测试通过。
+
+### 无浏览器候选库只读复核（2026-10-11）
+
+使用用户明确提供的确切本机配置文件，仅识别两行格式并通过隔离子进程环境交给已全文审阅的 `tools/turso_candidate.py --timeout 5 inspect`。首次本机配置形状检查因地址/Token 顺序假定不符而在启动网络之前拒绝；安全类型识别确认实际为 Token 在前、地址在后，未输出其值或解析令牌权限。随后真实检查 exit 0 / wall 2.596 秒：`connectivity=true / schema_version=8 / schema_version_source=schema_table / table_count=20 / fund_count=28010`。仅固定 SELECT 和只读版本/结构聚合，没有 DDL/DML、初始化、迁移、轮换、重试或私人账本读取。
+
+此处 schema 8 是 10-11 的新远端观察，不再仅引用 10-03 的旧记录；基金目录数量与本轮公开 API 基线一致。它证实可经正常数据库凭据绕过 Dashboard/OAuth 读取，仍不证明写权限、最小权限、跨宿主重启、独立恢复、免费用量或 v9 发布资格。新分支物理 schema 9 与该远端 schema 8 不兼容，不能直接合并 main 触发自动部署。
+
+### I20 原生日期与成功返回期限最小修复（2026-10-11）
+
+实际接入上述两处生产补丁：指数记录先校验原生对象/名称、有限原生指标及非空 canonical 源日期，再按同一北京时间瞬间拒绝未来日期与超过七日的六核心；拒绝均在创建临时文件之前完成，保留原产物字节。可选旧 partial 保留真实日期/null，整体 `updated` 仍取最旧日期，不把它冒充新鲜完整数据。私有 GET 对正常 context 关闭、旧合同结构检查和最终返回补真实 monotonic 复核；总预算不足停止，仅单次超时且仍有总预算时才允许原 GET 重试。没有提高原 3 次 / 45 秒 / 150 秒、添加鉴权重试、删掉隐私断言或宣称可抢占 DNS/清理。
+
+新增 42 个参数化回归；实际隔离 Collect 为新文件 **42**、五文件专项 **188**、后端全量 **2255**，收集不等于测试通过。collection receipt SHA `9fec7994f70e5ed269894700e5bc0f95f15c12f1e853622a5868f87c809e0798`。旧成功 enrichment fixture 明确其原来的北京时间，保留旧日期/空值断言。新增真实 sleep/deadline 回归未伪造时钟或改生产默认参数，provider 均合成注入，未请求真实金融来源。
+
+| 同源实际终态 | 结果 |
+| --- | --- |
+| Windows 五文件专项 | **188 passed / 4.69 秒**，5204 条既有弃用警告；wall 5.828 秒、exit 0、stderr 空 |
+| Windows backend 全量 | **2255 passed / 262.32 秒**，81280 条既有弃用警告；wall 265.244 秒、exit 0、stderr 空，实际低于原 300 秒监督 |
+| Linux 同五文件专项 | **188 passed / 6.64 秒**，pytest/tee exit 0 |
+| Linux backend 全量 | **2255 passed / 389.01 秒**，1 条既有 Starlette/httpx 弃用警告；pytest/tee/WSL/wrapper exit 0 |
+
+四项 failed/error/skipped/xfail/xpass 均 0。Windows 保留原 Python 3.14.4 / SQLite 3.50.4，Linux 原 Ubuntu 24.04 / Python 3.12.3 / SQLite 3.45.1；清空子进程环境、每次新默认 DB/basetemp、禁用 byte/cache、Linux loopback 守卫保持。Linux 专项 UTC `04:20:14→04:20:22`，全量 `04:20:22→04:27:02`；wrapper wall 411.7834892 秒。Linux 沿用原无外层硬截止，不把这次耗时称为云性能通过。
+
+两平台测试均绑定父 HEAD `2709106be090cfc1afde449a3ab8f45710590e47` 加本次工作树、229 文件 SHA `775c95a3bed56abb6f9e28c4d35c926555e0b40467cda561c317215a94f57e6d`，pre/post 相同；父代理独立按全部文件重算并核当前逐文件 drift 0。Windows 专项/全量 stdout SHA `bf41baeae4e529196d98143dd0747fd65323294b720bed541880519d9f7ccecc` / `10bc25916a25e44c3ab4169892695c253152baabe5666115314b73e210400ce9`；result SHA `fa2b2e8b07f2b259e01ab69e846b28d343d66add311bbbfcb5a11f4aa3b05372` / `cd1f1c3d80b73795aa91fe0c7edc5f74696b3dc0d887560742a28b5a293caef7`。Linux 专项/全量 log SHA `96eac20a036ff8cf76991341a8d4b4f2dd0208e2805329def19d5b765c137b78` / `458072f4ce1fdf8fed296d4de7e8baab3abb19363038c30b4a12dbb9fe0957d6`，manifest SHA `f6fcdcdd05032f1cb425b4fc27eb4b851170919dd6da4a2c3bf41207f1a872a4`，由父代理核对真实文件与前后摘要。
+
+此切片只关闭这两处代码健壮性缺口，不证明六核心免费源已真实恢复、private durable sink、自然连续窗口、schema 迁移、云恢复或 v9 正式发布。未更新三端 8.0.0、main、凭据、云配置、远端数据或旧失败证据；新提交的 CI 身份须随后实际核验。

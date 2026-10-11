@@ -284,6 +284,13 @@ def _outcome_error_message(code: str) -> str:
     return messages.get(code, "outcome audit request failed")
 
 
+def _require_outcome_return_budget(deadline: float, completed_attempts: int) -> None:
+    if time.monotonic() >= deadline:
+        raise RuntimeError(
+            f"outcome audit unavailable after {completed_attempts} attempt(s): deadline_exceeded"
+        ) from None
+
+
 def fetch_outcomes() -> dict:
     """Read private governance with bounded GET-only cold-start recovery."""
     if not FUND_API_BASE:
@@ -322,6 +329,9 @@ def fetch_outcomes() -> dict:
                 timeout=max(0.001, attempt_deadline - time.monotonic()),
             ) as response:
                 payload = _read_outcome_payload(response, attempt_deadline)
+            # Context cleanup belongs to this attempt, not an unbudgeted success path.
+            if time.monotonic() >= attempt_deadline:
+                raise _OutcomeTransientError("deadline_exceeded")
         except urllib.error.HTTPError as ex:
             status = ex.code if type(ex.code) is int else None
             retry_after = _retry_after_seconds(ex.headers)
@@ -367,6 +377,8 @@ def fetch_outcomes() -> dict:
         raise RuntimeError(
             f"outcome audit unavailable after {completed_attempts} attempt(s): {last_transient}"
         ) from None
+    return_deadline = min(overall_deadline, attempt_deadline)
+    _require_outcome_return_budget(return_deadline, completed_attempts)
     if (
         not isinstance(payload, dict)
         or payload.get("redacted") is True
@@ -376,6 +388,8 @@ def fetch_outcomes() -> dict:
         or not isinstance(payload.get("summary"), list)
     ):
         raise RuntimeError("outcome audit returned an invalid or redacted contract")
+    # Keep legacy validation unchanged; include its completion in the same real budget.
+    _require_outcome_return_budget(return_deadline, completed_attempts)
     return payload
 
 
