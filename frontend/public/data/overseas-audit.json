@@ -3,8 +3,9 @@
   "errors": [],
   "warnings": [
     "已保留并排除 17 条历史日期轴错位样本",
-    "最后有效预测已过去 192.6 小时",
-    "最后有效结算已过去 168.9 小时"
+    "计划任务延迟至跨日；已跳过预测，仅持久化真实结算与审计证据",
+    "最后有效预测已过去 314.8 小时",
+    "最后有效结算已过去 291.1 小时"
   ],
   "stats": {
     "records": 74,
@@ -13,12 +14,12 @@
       "legacy_misaligned": 17,
       "settled": 55
     },
-    "prediction_due": false,
+    "prediction_due": true,
     "prediction_expected": false,
     "effective_predictions_for_observation": 0,
     "legacy_misaligned": 17,
-    "prediction_effective_age_hours": 192.6,
-    "settlement_effective_age_hours": 168.9
+    "prediction_effective_age_hours": 314.8,
+    "settlement_effective_age_hours": 291.1
   },
-  "updated_at": "2026-10-07T21:50:37+08:00"
+  "updated_at": "2026-10-13T00:01:55+08:00"
 }
