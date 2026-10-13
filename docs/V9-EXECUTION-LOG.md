@@ -694,3 +694,22 @@ CI 警告保留：后端 1 条既有 Starlette/httpx 弃用，前端 source-map 
 保留 source-map 弃用、Vue 测试 stub、Worker 合成 HTTP 503 与 dry-run 的一次网络守卫警告。Worker 早期失败为本机 launcher/空 npmrc/过严网络守卫，未收集到业务测试；旧 exit 0 的 npm 包装 typecheck 未执行真实 tsc，明确不采用。最终修正 native COMSPEC 并直接运行实际 CLI，未更改业务源码/门槛。两个 runner 创建的空目录移入 TEMP recoverable 目录，未删除用户数据。
 
 四个 package/lock SHA 依次为 `6cd3293672e06cbba535dbde6ffb17e22940eb5446664cf8cfadb2621712380a`、`3a0518598aae3703e37f6c1a11b85765de022db827a99339e4d8abb6d672c38a`、`aaae27b85856e8d549236c2883a73dbccd9bd86c0b6a849409675ee227cf0cf6`、`f708b585e85c30d820b479d3db0835ca0169dd7f507c3dedd846d356cdcb913c`。前端 219 文件 pre/post 指纹 `c760bce161bf99c18582f1b7b98eed3e76d21cd13c4a555c05e3d11dea99bf87`；Worker 16 项 `c2c1be1f3f093f4745ad174f11900d8c9fc1b4eba0cf85d364334cdc1481f911`。前端 test/build/audit 日志 SHA `0b88ca162b59c510956163d425b1e3ddf65ef6dbc18eeded60dc0731c25b86ad` / `6e76199cb1a0e4a785b4558e2fe62c761ab495ff76bba89a818d7845b4885c28` / `fe7643ffc0fce71dee14db4d1981ff00d4d8d4c6a8f5f8e24da21a1b637736a5`；Worker manifest `cf782e41ece7755328c8a566b2d8137f3be5d7c5aa08922c6040be98758830d2`。均绑定父 HEAD `3cddf47` 加这批未提交文件，10-13 复核字节仍相同；新提交 CI 另验，不替代云迁移/恢复、自然任务或 v9 正式发布。三端应用版本仍为 8.0.0。
+
+### 海外任务恢复日记纯核与双系统终态（2026-10-13）
+
+新增 `tools/overseas_run_journal.py` 与 110 项合成回归，只有测试导入，尚未接入生产 workflow。日记严格限定公开原生 JSON/容量/日期/运行身份；仅保留实际 terminal 事件与最后有效公共产物指针。当前连续零按最新交易日终态重算，真正 qualified 可清除当前零/陈旧告警，但保留历史失败；随后失败再次降级。金融产出与 CI dispatch 错误分轴，不把“commit 后 CI 失败”当作金融零产出。manual/节假日/不支持日历/跨日不能冒充合格交易窗口，缺历史的精确计数为 null。传入四文件摘要/commit 不是来源签名，remote/apply/restore/formal/retry 均 false。
+
+首轮 Windows 为 **102 passed / 7 failed / 2 errors**：六个 missing-field 测试先在 helper 取缺键失败，一项超大参数自动 pytest ID 超过 Windows 环境限制；重复键用例先撞另一输入宽度边界。保留原失败日志。仅修正测试的独立 binding、明确短 ID、边界内重复键位置，使原输入/拒绝断言实际抵达生产校验；纯核未变。独立复审无新增 P0/P1。最终实际结果：
+
+| 门禁 | 终态 |
+| --- | --- |
+| Windows journal 专项 | **110 passed / 0.33s**，exit 0 |
+| Windows backend 全量 | **2365 passed / 206.12s**，85,024 条既有依赖弃用；wall 208.923s、exit 0、stderr 空 |
+| Linux journal 专项 | **110 passed / 0.98s**，pytest/tee exit 0 |
+| Linux backend 全量 | **2365 passed / 334.31s**，1 条既有 Starlette/httpx 弃用；pytest/tee/WSL/wrapper exit 0 |
+
+10-11 Linux 首 attempt 因应用中断而失去进程，没有 full summary/manifest，明确不是 PASS。10-13 检查原 handle 不存在、无对应 live runner 后才启动新 attempt；实际 UTC `15:14:08Z→15:19:45Z`，wall 342.196s，无外层新硬截止。沿用 Windows Python 3.14.4/SQLite 3.50.4 与 Ubuntu 24.04 Python 3.12.3/SQLite 3.45.1、清空凭据环境、新 DB/basetemp、禁 byte/cache；Linux loopback 守卫 self-check 实际通过。原回归位置、生产期限/隐私断言未放宽。
+
+测试绑定父 HEAD `3cddf47` 加本次未提交代码，core/test SHA 为 `47f5e6685401844a9ef47fb613393e995762329885776f5fc85987f82ffc7c45` / `a59562b634eeba84b0a9c10e45b4b885ae8b167ce4fe9d2c0454643b0e379f2e`。Linux 231 项 canonical LF 源码 pre/post 指纹 `11f49eed6cb12ab304c669132822ed524a976f4e6fffe53e942dd874fe5b285f`，父代理逐文件独立重算 drift 0，repo/runner/log pin 均一致。Windows 源清单范围/分隔方式不同，不与 Linux 冒称同一个 aggregate；逐文件 core/test 相同。Windows 全量 stdout SHA `e0141f7eab60d84518d04c0aa1dcd2889fc536e3519ed6a34ef60cae47355d47`；Linux focused/full SHA `937922b278a6c38faf59b89a47ae73268252b56e32c753262500fb6043214ea1` / `8786529422ebcab7921c7e44dae7ac725f64920748d59558e5074b9ea19e4e20`，manifest `7040cc57219b47e9ef4ba808183ba9af1245460886e88cbf98dec7e976869fd0`。
+
+这只是已验证日记算法，不是生产失败状态已持久化、提供方已恢复、连续五交易窗口/两周周期已通过。10-13 只读自然任务进一步确认：10-12 overseas heartbeat 跨日且有效数 0；10-13 同日运行抓到 21 报价但 predictions/effective/settled 全 0、audit 失败。下一步需实际 producer receipt、发布四文件绑定与失败 ops-only 持久化接线，不能靠改“成功”标签或刷新日期解除门禁。
