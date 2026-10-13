@@ -713,3 +713,17 @@ CI 警告保留：后端 1 条既有 Starlette/httpx 弃用，前端 source-map 
 测试绑定父 HEAD `3cddf47` 加本次未提交代码，core/test SHA 为 `47f5e6685401844a9ef47fb613393e995762329885776f5fc85987f82ffc7c45` / `a59562b634eeba84b0a9c10e45b4b885ae8b167ce4fe9d2c0454643b0e379f2e`。Linux 231 项 canonical LF 源码 pre/post 指纹 `11f49eed6cb12ab304c669132822ed524a976f4e6fffe53e942dd874fe5b285f`，父代理逐文件独立重算 drift 0，repo/runner/log pin 均一致。Windows 源清单范围/分隔方式不同，不与 Linux 冒称同一个 aggregate；逐文件 core/test 相同。Windows 全量 stdout SHA `e0141f7eab60d84518d04c0aa1dcd2889fc536e3519ed6a34ef60cae47355d47`；Linux focused/full SHA `937922b278a6c38faf59b89a47ae73268252b56e32c753262500fb6043214ea1` / `8786529422ebcab7921c7e44dae7ac725f64920748d59558e5074b9ea19e4e20`，manifest `7040cc57219b47e9ef4ba808183ba9af1245460886e88cbf98dec7e976869fd0`。
 
 这只是已验证日记算法，不是生产失败状态已持久化、提供方已恢复、连续五交易窗口/两周周期已通过。10-13 只读自然任务进一步确认：10-12 overseas heartbeat 跨日且有效数 0；10-13 同日运行抓到 21 报价但 predictions/effective/settled 全 0、audit 失败。下一步需实际 producer receipt、发布四文件绑定与失败 ops-only 持久化接线，不能靠改“成功”标签或刷新日期解除门禁。
+
+安全依赖切片 `11f08b4` 与日记切片 `65aac4a` 已分别正常提交；在干净工作区核对主线增量 30 文件/交集 0 后，合入公开数据 main `d749647`，得到 `b51c1df5baf008e27d4216c2283b60d14c7523d3` 并正常推送升级分支。一次 PowerShell 未展开 diff range 的只读命令打印 usage；后续用显式 range 独立核对上述清单及 merge parents，没有用错误输出中的空列表作验证证据。主线本身未被合入升级代码，没有强推。
+
+[新 CI 38421791188](https://github.com/AureliusWu/fund-compass/actions/runs/38421791188) 于 `2026-10-13T15:26:22Z` 实际 success。父代理与独立代理核对 EVENT_SHA、四次 checkout、三端 exact-source=`6edef24028b4d2719f9a6fd94b9d2b5e5ae562c0`；其 parents 精确为 main `d749647` 与上述 head，tested tree `131e01bec0bad29b861845e5ad63a469c48ddbb3` 与 head tree 相同。后端 **2365 passed/85.51s**、pip check clean；前端 **801/51 files/4.48s**、类型/build 5.28s/PWA7/7；Worker **144/3 files/1.03s**、类型/dry-run114.28KiB/gzip26.58KiB。前端/Worker 实际 npm ci 均 **0 vulnerabilities**；既有弃用/stub/合成503警告保留。deploy、formal_smoke、candidate_smoke 实际 skipped、空 steps；PR #4 body 已更新、仍 OPEN/DRAFT。此成功不覆盖随后海外诊断/派生数值未提交改动，也不证明部署或 v9 正式发布。
+
+### 海外零产出原因与派生数值 P1 修复（2026-10-13）
+
+实际接入固定 stage/reason 聚合计数，区分详情/日期/净值证据、超七日跨期、目标日报价缺失、覆盖不足、非法参数、fallback 与重复日记录。pipeline 只记录原因/count，不输出基金身份、净值明细或异常自由文本；没有把行情数量等同有效预测，没有放宽日期轴/七日/覆盖门槛。显式非法 min_weight 拒绝，缺省零保持原兼容；bool 和巨大整数转换不再冒充有效数字。
+
+独立复审追踪出既有 P1：有限 base/change 可乘出无限 predicted_nav，旧有效计数仍接受。最小修复在 append 前拒绝非有限/非正/四位舍入后零，固定 `prediction_invalid_nav`；旧行有效计数同步核派生值和存在的 stored 值。结算路径跳过坏历史形状/元素，非有限实际收益或误差不改状态、不伪造 settled。缺 stored 字段的正常旧行仍兼容，不宣称整个任意 ledger 已通用净化。新增 40 项原生合成回归，独立复审确认 P1 已关闭，无新 P0/P1。
+
+最终清凭据环境、新默认 DB/basetemp、cache/byte off 的 Windows 实测：collection 新旧专项 **65**、全量 **2405**；专项 **65 passed/0.29s**、1560 条既有依赖弃用，wall1.130s；全量 **2405 passed/202.03s**、86553 条既有弃用，wall204.664s，均 exit0、stderr空、未触及原300s监督。真实 provider/network 被 synthetic 注入；代理设置是辅助拒绝，不声称 OS 安全沙箱或提供方真实恢复。首轮更窄诊断原代码测试已正常结束才修改 P1，旧日志保留；其双 quiet 输出不作为最终计数摘要，最终明确重置 addopts 输出实际 PASS 数。
+
+最终父 HEAD `b51c1df` 加本切片 232 文件 canonical LF 前后指纹 `dad2d5e1485043626b85e4ec19464aee370bf751690aaade1472f499a7a28bb8`，父代理全部重算/current drift0。production/test SHA `f27a3c65642aa3aec9b197f1455af2198df83287e7180cf8064559495862c592` / `f76ead071026f9a564c07eec6fb3a5b1de57a71311f173a666763ce9bd61d75d`；专项/full stdout SHA `c1d40aac3c124bedb123c86494c430cbed17be90516440c2fc5d9797ccd8b504` / `11357f73581265e774cd29c9941b4cebe410a50bee77f2327e3b8ac13f4bbc3f`；manifest `3718ce4fc65e824474b6a23c1e5a229ff032194966d9fba8f0206be8034ac9f9`。这不是真实零产出已修复或自然恢复窗口；新提交 CI 另验，仍不直接推 main/更新 v9 版本。
