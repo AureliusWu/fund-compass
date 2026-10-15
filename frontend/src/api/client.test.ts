@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as apiClient from './client'
+import { withRequestDeadline } from './request'
 import { clearOwnerSession, loginOwnerSession } from '@/stores/ownerSession'
 const SYNTHETIC_TOKEN = 'own_' + 'a'.repeat(43)
 import {
@@ -94,6 +95,42 @@ describe('API request resilience', () => {
       kind: 'http',
       status: 503,
     })
+  })
+
+  it.each([404, 409])('ordinary API requests still reject %s before decoding', async status => {
+    const json = vi.fn()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status, json }))
+    await expect(request('/not-a-sync-request')).rejects.toMatchObject({ kind: 'http', status })
+    expect(json).not.toHaveBeenCalled()
+  })
+
+  it('shared deadline never starts an operation for an already-aborted caller', async () => {
+    const operation = vi.fn(), controller = new AbortController()
+    controller.abort()
+    await expect(withRequestDeadline(operation, controller.signal)).rejects.toMatchObject({ kind: 'cancelled' })
+    expect(operation).not.toHaveBeenCalled()
+  })
+
+  it('shared deadline covers non-fetch validation and rejects its late completion', async () => {
+    vi.useFakeTimers()
+    let finish!: (value: string) => void
+    const pending = withRequestDeadline(async (_signal, ensureActive) => {
+      const value = await new Promise<string>(resolve => { finish = resolve })
+      ensureActive()
+      return value
+    }, undefined, 100)
+    const assertion = expect(pending).rejects.toMatchObject({ kind: 'timeout' })
+    await vi.advanceTimersByTimeAsync(100)
+    await assertion
+    finish('synthetic late value')
+    await Promise.resolve()
+    await expect(pending).rejects.toMatchObject({ kind: 'timeout' })
+  })
+
+  it('shared deadline checks elapsed monotonic time even before its timer callback can run', async () => {
+    vi.stubGlobal('performance', { now: vi.fn().mockReturnValueOnce(0).mockReturnValueOnce(0).mockReturnValue(101) })
+    await expect(withRequestDeadline(async (_signal, ensureActive) => { ensureActive(); return 'late' },
+      undefined, 100)).rejects.toMatchObject({ kind: 'timeout' })
   })
 })
 

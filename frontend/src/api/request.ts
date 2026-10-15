@@ -13,37 +13,56 @@ export class ApiError extends Error {
   }
 }
 
-export function assertOwnerApiTransport(): void {
-  // Node unit tests run in Vite's development environment with synthetic data.
-  // Real browser sessions must use HTTPS, except local development loopback.
-  if (typeof window === 'undefined' && import.meta.env.DEV && BASE === '/api') return
+export function ownerApiTarget(): string {
+  // This is always the configured API, never a caller-supplied destination.
+  // A relative development target needs a real origin; do not invent one for
+  // outbox identity in a headless process.
   try {
-    const url = typeof window !== 'undefined' ? new URL(BASE, window.location.origin) : new URL(BASE)
+    const origin = typeof globalThis.location !== 'undefined' ? globalThis.location.origin
+      : typeof window !== 'undefined' ? window.location.origin : undefined
+    const url = origin === undefined ? new URL(BASE) : new URL(BASE, origin)
     const localDevelopment = import.meta.env.DEV && url.protocol === 'http:'
       && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
     if ((url.protocol !== 'https:' && !localDevelopment) || url.username || url.password
-      || url.search || url.hash || !url.pathname.endsWith('/api')) throw new Error('unsafe')
+      || url.search || url.hash || BASE !== BASE.trim() || BASE.includes('\\')
+      || !url.pathname.endsWith('/api')) throw new Error('unsafe')
+    return url.href
   } catch {
     throw new ApiError('私人会话需要安全的 API 地址', 'http', 400)
   }
 }
 
-export async function fetchWithDeadline<T>(
-  url: string,
-  init?: RequestInit,
-  decode: (response: Response, signal: AbortSignal) => Promise<T> = response => response.json() as Promise<T>,
+export function assertOwnerApiTransport(): void {
+  // Retain the existing synthetic Node test boundary for public/session tests.
+  // A real sync transport still requires ownerApiTarget's canonical identity.
+  if (typeof window === 'undefined' && typeof globalThis.location === 'undefined'
+    && import.meta.env.DEV && BASE === '/api') return
+  ownerApiTarget()
+}
+
+export async function withRequestDeadline<T>(
+  operation: (signal: AbortSignal, ensureActive: () => void) => Promise<T>,
+  signal?: AbortSignal,
   timeoutMs = REQUEST_TIMEOUT_MS,
 ): Promise<T> {
   const controller = new AbortController()
   let timedOut = false
-  const forwardAbort = () => controller.abort(init?.signal?.reason)
-  if (init?.signal?.aborted) forwardAbort()
-  else init?.signal?.addEventListener('abort', forwardAbort, { once: true })
+  const forwardAbort = () => controller.abort(signal?.reason)
+  if (signal?.aborted) forwardAbort()
+  else signal?.addEventListener('abort', forwardAbort, { once: true })
+  const start = globalThis.performance.now()
   const timer = globalThis.setTimeout(() => {
     timedOut = true
     controller.abort('timeout')
   }, timeoutMs)
   const ensureActive = () => {
+    // Immediate stream/hash continuations may starve timer callbacks. Include
+    // their elapsed monotonic time in the same deadline, not a fresh timeout.
+    const now = globalThis.performance.now()
+    if (!controller.signal.aborted && (!Number.isFinite(now) || now < start || now - start >= timeoutMs)) {
+      timedOut = true
+      controller.abort('timeout')
+    }
     if (controller.signal.aborted) {
       throw new ApiError(timedOut ? '请求超时，请稍后重试' : '请求已取消', timedOut ? 'timeout' : 'cancelled')
     }
@@ -56,12 +75,7 @@ export async function fetchWithDeadline<T>(
       rejectOnAbort = () => reject(new ApiError(timedOut ? '请求超时，请稍后重试' : '请求已取消', timedOut ? 'timeout' : 'cancelled'))
       controller.signal.addEventListener('abort', rejectOnAbort, { once: true })
     })
-    const res = await Promise.race([
-      fetch(url, { ...init, signal: controller.signal }), cancelled,
-    ])
-    ensureActive()
-    if (!res.ok) throw new ApiError(`HTTP ${res.status}`, 'http', res.status)
-    const payload: T = await Promise.race([decode(res, controller.signal), cancelled])
+    const payload: T = await Promise.race([operation(controller.signal, ensureActive), cancelled])
     ensureActive()
     return payload
   } catch (error) {
@@ -71,8 +85,24 @@ export async function fetchWithDeadline<T>(
   } finally {
     globalThis.clearTimeout(timer)
     if (rejectOnAbort) controller.signal.removeEventListener('abort', rejectOnAbort)
-    init?.signal?.removeEventListener('abort', forwardAbort)
+    signal?.removeEventListener('abort', forwardAbort)
   }
+}
+
+export async function fetchWithDeadline<T>(
+  url: string,
+  init?: RequestInit,
+  decode: (response: Response, signal: AbortSignal) => Promise<T> = response => response.json() as Promise<T>,
+  timeoutMs = REQUEST_TIMEOUT_MS,
+): Promise<T> {
+  return withRequestDeadline(async (signal, ensureActive) => {
+    const res = await fetch(url, { ...init, signal })
+    ensureActive()
+    if (!res.ok) throw new ApiError(`HTTP ${res.status}`, 'http', res.status)
+    const payload = await decode(res, signal)
+    ensureActive()
+    return payload
+  }, init?.signal ?? undefined, timeoutMs)
 }
 
 export function requestJson<T>(url: string, init?: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {

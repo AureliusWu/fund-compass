@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { watch } from 'vue'
 import {
   clearOwnerSession, getOwnerSessionMetadata, hasOwnerSession, loginOwnerSession,
-  logoutOwnerSession, ownerSession, ownerSessionGeneration, requestOwnerRead,
+  logoutOwnerSession, ownerSession, ownerSessionGeneration, requestOwnerRead, requestOwnerSync,
 } from './ownerSession'
 const SYNTHETIC_TOKEN = 'own_' + 'a'.repeat(43)
 
@@ -72,7 +72,8 @@ describe('in-memory Owner session', () => {
     const fetchMock = vi.fn().mockResolvedValue(response(loginResponse()))
     vi.stubGlobal('fetch', fetchMock)
     await loginOwnerSession('synthetic-password')
-    for (const path of ['/health', '/v2/outcomes/settle', '/portfolio/lab', 'https://other.example/api/private/watchlist', '/v2/private/fund/510300/decision?force=true']) {
+    for (const path of ['/health', '/v2/outcomes/settle', '/portfolio/lab', '/v2/owner/sync',
+      'https://other.example/api/private/watchlist', '/v2/private/fund/510300/decision?force=true']) {
       await expect(requestOwnerRead(path)).rejects.toMatchObject({ status: 400 })
     }
     expect(fetchMock).toHaveBeenCalledTimes(1)
@@ -184,5 +185,31 @@ describe('in-memory Owner session', () => {
     await loginOwnerSession('synthetic-password')
     await expect(getOwnerSessionMetadata()).rejects.toMatchObject({ status: 502 })
     expect(hasOwnerSession()).toBe(false)
+  })
+
+  it('requires an Owner session for the dedicated sync exchange without exporting a credential', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(requestOwnerSync({ kind: 'changes', parameters: { sinceRevision: 0, limit: 100 } },
+      new AbortController().signal, 'a'.repeat(64))).rejects.toMatchObject({ kind: 'redacted', status: 401 })
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(ownerSession.value).toBeNull()
+  })
+
+  it('does not turn the sync exchange into an arbitrary authenticated URL/method/header client', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(response(loginResponse()))
+    vi.stubGlobal('fetch', fetchMock)
+    await loginOwnerSession('synthetic-password')
+    for (const operation of [
+      { kind: 'delete', url: '/v2/outcomes/settle' },
+      { kind: 'changes', parameters: { sinceRevision: 0, limit: 100 }, method: 'POST' },
+      { kind: 'receipt', requestId: 'synthetic-request-0001', requestHash: 'a'.repeat(64), url: 'https://foreign.invalid' },
+      { kind: 'changes', parameters: { sinceRevision: 0, limit: 100 }, headers: { Authorization: 'synthetic-machine' } },
+    ]) {
+      await expect(requestOwnerSync(operation as never, new AbortController().signal, 'a'.repeat(64)))
+        .rejects.toMatchObject({ status: 400 })
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(hasOwnerSession()).toBe(true)
   })
 })

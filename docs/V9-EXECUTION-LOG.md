@@ -795,3 +795,15 @@ CI 警告保留：后端 1 条既有 Starlette/httpx 弃用，前端 source-map 
 正常接入门禁实际专项 collection214，run **214 passed/57.32s**（wall58.345s）；全量 collection2696，run **2696 passed/231.36s**，UTC `2026-10-15T07:46:44.9804281Z→07:50:38.7237840Z`、wall233.7405433s。均exit0/未超时/stderr空，正常插件、原300s监督、byte/cache约束不变；bootstrap绑定本轮全新实际db.DB_PATH，默认DB未创建。全量99387条既有依赖/插件弃用警告保留。没有读取真实Token/私有备份或调用候选数据库。
 
 239项源raw-byte前后聚合 `a90a9de814e125e7c204f29bb72c46805f19b0f01b8f870d4796f8e3a12ac791`，父代理独立逐文件重算/current drift0后才更新本日志与计划。runner SHA `593a0a3072c03a974a0345675f91a54c11c624d4ed0a3a6bcaffc12a4c2b58da`；全量stdout SHA `2fd0751cf982446ad48cd72bcb65e1f201bb1bc224ec3fbac88f892b3381f7e9`、manifest `be545806b434435f029e2f165f7fa4b707cb9bde1c95bd4221e814fa932ae243`。这是普通项目回归与模拟发送合同证据，不是实际远端发送、迁移、持久化、恢复或正式发布；前端与Owner main入口切片另验。
+
+该5文件传输切片已正常提交并快进推送 `c5730e177e9538d5cee7895af244cd022bf36d3c`，未包含并行Owner main或前端未提交改动；未推进main、修改版本或部署。
+
+### Owner客户端HTTP接入（2026-10-15，默认不启动同步）
+
+新增显式HTTP adapter，连接既有候选控制器合同与Owner内存会话；仅允许写入/changes/receipt三个封闭操作，原请求摘要与目标复验、有界UTF8原始响应，保留409/404语义。统一12秒超时覆盖懒加载/摘要/请求/正文，撤销/到期/迟到401按generation隔离；失败清理不覆盖原错误，未知写仍留outbox不自动重发。重的合同核仅在实际同步操作动态加载。构造只计算API端点指纹，不发请求/开库，不代表数据库身份、存储已就绪或UI已授权；未注册到页面，不改变默认关闭、Gist、Holding/Policy/Decision或行动门禁。
+
+父代理与独立代理全文复审6文件无新增P0/P1。普通本地专项 **90/3 files**、全量 **862/52 files** 与vue-tsc实际通过，分别wall6.097/5.286/10.073秒。原首轮harness在Node启动前因author清单大小写排序与runner Ordinal不一致失败，日志保留不计PASS；逐路径/SHA/bytes确认221源码完全相同后，只在新TEMP修正清单顺序/digest，runner字节、源码、断言、正常工具与300秒预算均未改。最终9阶段全部exit0/pre/post PASS、无超时/输出丢失；Vue组件解析既有警告及TEMP outDir提示完整保留，未消音。
+
+按性能技能实际3次新TEMP构建、各原7项PWA校验均通过。三份完整产物均138文件/17,071,875 bytes，digest=`1950057fc0cc8fff4d5bf83e243988fc54a3442d59bb4491b0055e6dd44c026a`；构建wall27.701/17.927/13.328秒，median17.927/worst27.701。JS38文件raw1,132,069/gzip415,717 bytes，CSS21文件208,539/64,915，HTML1,633/855；gzip是逐文件.NET GZipStream Optimal合计，不跨压缩算法或旧CI机器比较。缺少同机旧版及真实页面交互基线，不能据此宣称完整性能回归PASS。未覆盖已部署PWA、多设备/离线真实旅程或云持久化。
+
+221源全部阶段前后及父代理当前逐项重算无漂移，Ordinal聚合 `a34002ce2b362904455b52b0d9018df1ce1bccf2084d810441c2d2b1b1d29b31`；runner SHA `1bad115afd42398a9e759dc847cc40599f4c0bc54e3adab8e3f1db3fd9504b4d`，harness-pins SHA `4e9db6f454662890297c191df4bc2b387f82cc6c6fe37a679efce2c760af7580`。full manifest `87eaa9343dba945e62e0b2790e51028295a765d7665f19ac274e1b40b93383ff`，三build manifest `ac1e258ed8ac832dc11217b8a4fabcf4e3ac0247be11e9a41de0b4ecb594c53a` / `6c08cdc4164ef7ae1157473e8c6838d45b844739fc37da02ea838d28a87a7406` / `3878bbd76068f2a899488710c2cb477fd4aa59021a3053b98f5239d299475ee7`。父代理独立读取9个真实manifest/日志并复核输出SHA；本批不关闭I19整项或v9发布。
