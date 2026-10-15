@@ -781,3 +781,17 @@ CI 警告保留：后端 1 条既有 Starlette/httpx 弃用，前端 source-map 
 此前两次失败完整保留：第一轮18通过、1 oversized case在setup+teardown报2 errors，根因为pytest将大bytes参数展开到超过Windows环境变量长度，原stdout `4bd93e8882abba26df362ebf3a9e92fcaae6676297ff214883b316c53defd846`；仅加固定短ID、保持所有原输入与断言，另修独立ALL_EVENTS不再被case清空。第二轮19个fixture初始push失败、candidate0，原stdout `3440809934928ba83ccc6c956e23e783327cc6c68aa6973883fb4909703d1f02`；该轮只存child stderr SHA，不能确诊Git原始错误。新短TEMP只加受限合成stderr记录后通过，不能反推旧具体根因。没有改production/测试断言/guard/300s换绿。
 
 最终Git专项stdout SHA `01564f11b1470c690719cedcc13a64661d48362118d3fb873184bb9ead3b457e`、result `907b17900b1a9315ac790590602e09d6d9ddf40819cdcabb72ab067ad71b9d6e`、完整journal `85e88383eb726e1eab23b80f6ed699270a5be4cc2e8f7aac436c3cb9ed0430cb`、manifest `782af045d0d1f3d228c1e6ada0c4ea36926a4f7b1a0be78bcc15243fbb741bb5`；父代理实际读summary/result/13条push结果并重算输出SHA。专用gitattributes固定hook的LF，提交还须显式100755，避免本地autocrlf=true损坏解释器行；未批量改写其他文件换行。
+
+上述8文件切片已正常提交并推送 `8a0ee3327552889bb187bc7133a7778ee789b06e`。[CI 38698945319](https://github.com/AureliusWu/fund-compass/actions/runs/38698945319) 实际终态success/`07:30:42Z`，独立代理核四次checkout/三端exact-source=`37b69fe6357df6c8f0565633e8055e81a53307da`；GitData parents=d017+8a0ee33，merge/head tree均`7a2c8e4be8ce3edb7f3417da8cf664fa4c5d861e`，远端hook mode100755。backend **2622/126.09s**、pip check clean；frontend **801**、类型/build/PWA7/7，Worker **144**、类型/Wrangler dry-run，两端npm0 vulnerabilities。deploy/candidate_smoke/formal_smoke实际均skipped/steps空；不是主线已启用或v9发布。
+
+### 单次物理传输接入（2026-10-15，尚未真实远端调用）
+
+新增 `turso_scope_transport.py`，显式origin/Token、外部原始三SHA重编译、精确原字节data POST；单实例锁/一次发送、TLS验证、无环境代理/netrc、无redirect或HTTP重试，有界stream/协作30秒与源码前后核对。401/403/429保留固定STOP，任何网络/清理/校验不确定性不返回成功；Session.close仅关闭本地连接，不能代替SQL close/commit。固定读回另需显式调用，不自动跟随未知写入。顶层再主动调用会创建新实例，外部操作者仍不得回放未知结果；没有默认生产route或CLI、没有读取真实Token/备份或执行迁移。
+
+实现364行与594行合成测试经父代理及独立代理全文静态复审，未发现P0/P1。原冻结core SHA `3a2dca89e073f7a3fdf6f147176d8a0081730803766aeb3975887b2b9135fa4f`，test `b0aa57a941862b4f961a1af4a0ac333ebf3e37dcce7e3c699822df1a7923a524`。TEMP实际 **74 passed/11.09s**（监督14.910s），collect74；两阶段exit0/stderr空/guard0，116pins前后与父代理当前重算drift0，聚合 `8315be9cb69bf3d94e50014d8f8bae761d577304ab97df0a57e381a232579260`。test stdout `075b10689b1dbf1eea98a2728983d34cc41867d5a85caf9210cce1643644334c`、manifest `b5c09e8cbe2a303155d22e5e0971180022916f3e5e6135a94058cf17ff1884ad`。
+
+此前collect失败均保留且不计PASS：正常requests导入的urllib3 IPv6能力probe和pytest捕获/日志对Windows NUL设备的规范化与严格guard冲突，尚未执行候选。仅在全新harness中冻结严格原生NUL、导入时临时关闭可选IPv6probe并finally恢复、显式将pytest日志写本次允许的run目录；网络/文件SQL/其他文件拒绝、sticky失败、正常插件、原300s和全部候选测试断言未放宽。此为FakeSession兼容，不是实际网络/TLS/IPv6证明。正常接入只移除TEMP loader改标准模块导入及说明文字，core字节未变、test SHA=`a025bfac48dbb7e0651c96935a5c35f4250a78a8350deefbe1d6df023db3a4bd`；项目专项/全量另验，不因此关闭实际停写备份、容量、远端迁移/独立恢复与Owner业务出口。
+
+正常接入门禁实际专项 collection214，run **214 passed/57.32s**（wall58.345s）；全量 collection2696，run **2696 passed/231.36s**，UTC `2026-10-15T07:46:44.9804281Z→07:50:38.7237840Z`、wall233.7405433s。均exit0/未超时/stderr空，正常插件、原300s监督、byte/cache约束不变；bootstrap绑定本轮全新实际db.DB_PATH，默认DB未创建。全量99387条既有依赖/插件弃用警告保留。没有读取真实Token/私有备份或调用候选数据库。
+
+239项源raw-byte前后聚合 `a90a9de814e125e7c204f29bb72c46805f19b0f01b8f870d4796f8e3a12ac791`，父代理独立逐文件重算/current drift0后才更新本日志与计划。runner SHA `593a0a3072c03a974a0345675f91a54c11c624d4ed0a3a6bcaffc12a4c2b58da`；全量stdout SHA `2fd0751cf982446ad48cd72bcb65e1f201bb1bc224ec3fbac88f892b3381f7e9`、manifest `be545806b434435f029e2f165f7fa4b707cb9bde1c95bd4221e814fa932ae243`。这是普通项目回归与模拟发送合同证据，不是实际远端发送、迁移、持久化、恢复或正式发布；前端与Owner main入口切片另验。
