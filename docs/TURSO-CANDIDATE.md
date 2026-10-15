@@ -110,6 +110,14 @@ DTO 不是签名、授权或锁内前像证明。未来原子 compiler 必须重
 
 捕获阶段预算只约束构建过程，不是交接后的快照生命周期 TTL。成功交接前须在预算前后检查之间解除该阶段的 SQLite progress handler；query_only、图像与身份绑定不变，失败仍关闭私有连接。后续 compiler 在独立 reference/decoder 上建立新预算，不继承过期 capture 回调。10-11 的原 Linux 失败已用真实时钟诊断为该回调残留，修复与新门禁终态见执行记录；旧冻结工具/packet 的源码 pin 不因修复自动更新或重新获准。
 
+### 本地读回合同核（2026-10-13）
+
+`backend/database/turso_scope_reconcile.py` 接收原 schema-8 私有捕获、完整不可变 artifact、独立保存的原 resource/plan/packet SHA 和明确 native `read_schema=8|9`。完整重编译与原图像再次绑定后，只生成固定单事务读取：原始 schema/临时 schema、数据库列表/header、完整性、全表 typed 行及 reserved receipt 两路查询，最后 COMMIT/条件ROLLBACK/autocommit/close。没有默认 transport、凭据发现、输入路径、远端写入或重试，不执行输入 DDL。
+
+提供字节只有精确全后像与十列回执一致才为 `matched`；完整原前像、无回执且 reserved 槽位为空才为 `missing`，其余 `unknown`。missing 是历史读回形状，不证明请求当前未提交、已停写或可重放；matched 也不证明响应来源、云端耐久或恢复成功。权限只在原身份和同源 stream 绑定后的固定槽识别；外部身份/源错误不能冒充平台权限拒绝。公开 verdict 闭集、构造/getter/seal 验证，五项 remote/apply/restore/formal/retry 始终 false。
+
+沿用响应64MiB、100,000行、单cell256KiB、schema128、深度24/节点2,000,000和30秒合作式总预算，包括重编译、解析、源码前后核验和结果构造。库模块未挂载生产路由；合成协议测试与完整仓库门禁详见执行记录，不代表真实独立远端对账、受控迁移或发布已通过。
+
 ## 合成标记写入与独立连接读回
 
 ```powershell

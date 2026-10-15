@@ -727,3 +727,27 @@ CI 警告保留：后端 1 条既有 Starlette/httpx 弃用，前端 source-map 
 最终清凭据环境、新默认 DB/basetemp、cache/byte off 的 Windows 实测：collection 新旧专项 **65**、全量 **2405**；专项 **65 passed/0.29s**、1560 条既有依赖弃用，wall1.130s；全量 **2405 passed/202.03s**、86553 条既有弃用，wall204.664s，均 exit0、stderr空、未触及原300s监督。真实 provider/network 被 synthetic 注入；代理设置是辅助拒绝，不声称 OS 安全沙箱或提供方真实恢复。首轮更窄诊断原代码测试已正常结束才修改 P1，旧日志保留；其双 quiet 输出不作为最终计数摘要，最终明确重置 addopts 输出实际 PASS 数。
 
 最终父 HEAD `b51c1df` 加本切片 232 文件 canonical LF 前后指纹 `dad2d5e1485043626b85e4ec19464aee370bf751690aaade1472f499a7a28bb8`，父代理全部重算/current drift0。production/test SHA `f27a3c65642aa3aec9b197f1455af2198df83287e7180cf8064559495862c592` / `f76ead071026f9a564c07eec6fb3a5b1de57a71311f173a666763ce9bd61d75d`；专项/full stdout SHA `c1d40aac3c124bedb123c86494c430cbed17be90516440c2fc5d9797ccd8b504` / `11357f73581265e774cd29c9941b4cebe410a50bee77f2327e3b8ac13f4bbc3f`；manifest `3718ce4fc65e824474b6a23c1e5a229ff032194966d9fba8f0206be8034ac9f9`。这不是真实零产出已修复或自然恢复窗口；新提交 CI 另验，仍不直接推 main/更新 v9 版本。
+
+该切片已正常提交并推送 `92f8f73dce21bc226fd4a03aedafa3aa6b73e4d4`。[CI 38424249294](https://github.com/AureliusWu/fund-compass/actions/runs/38424249294) 于 `2026-10-13T15:43:19Z` 实际 success；父代理通过普通连接器独立读取 run/jobs/四个 job 原始日志，核 EVENT_SHA、checkout 与三端 exact-source 均为 `5ec6b50171687ff6050338d49b0b3c0bcccbbc64`。tested merge parents 为 main `d749647` 与上述 head，tested tree `f066ecd97770b5d2d810fda8f2b0e44b867aae9c` 与 head tree 相同。后端 **2405 passed/65.78s**、pip check clean；前端 **801/51 files**、类型/build 5.78s/PWA7/7；Worker **144/3 files**、类型/dry-run114.28KiB/gzip26.58KiB。两端 npm ci 均 **0 vulnerabilities**。deploy/formal_smoke/candidate_smoke 实际 skipped，未部署。普通 gh 两次 EOF、一次连接器日志传输错误均保留为技术失败，成功的普通连接器读回另计；没有认证提取、重跑 workflow 或绕过权限。更新 PR body 的 gh 请求另遇 EOF，普通连接器随后明确 403/FORBIDDEN，已停止该外部写入路径，未改凭据或尝试绕过；最新版描述仅保留本地 TEMP，远端 body 仍为先前 checkpoint，不宣称同步成功。
+
+### 线上候选只读复核（2026-10-13）
+
+普通 Render 连接器只读确认 `fund-compass-api-v8-candidate` 为 free、单实例、main 自动部署，latest deploy `dep-db6g8u49v7es73a3f950` live，commit `d749647e47b8bf819f4b41d1271e578f0804f49e`，不是升级分支。Pages release.json HTTP200/1.904s 同样指向该 main commit。公开 API health 首次 HTTP200/37.230s，随后 HTTP200/0.651s；`status=ok`、`version=8.0.0`、`universe=28019`、`universe_ready=true`、`started_at=2026-10-13T23:43:51.641472+08:00`。实际 database 为 libsql/turso_candidate，`durable=false`，明确尚未通过生产跨重启读回验收。
+
+首次投影误把 scalar universe 当嵌套对象、读取不存在的 ok/persistence 字段得到 null；随后核源定义与真实顶层 keys，未将这些错误投影解释成实际缺失/健康故障。代表性公开 `/api/fund/012920` HTTP200/2.370s，latest_nav_date=2026-10-09、history800，最后四日期为09-29/09-30/10-08/10-09，error不存在。只是当前有限字段快照，不倒推此前定时零产出原因，也不是六核心来源恢复、完整浏览器 smoke、跨重启持久化或 v9 发布证明。37秒与启动时间只与冷启动相符，未读受 workspace 选择限制的 Render 日志，不能认定唯一根因。
+
+### 读回合同核接入与门禁隔离纠正（2026-10-14）
+
+接入 `backend/database/turso_scope_reconcile.py`：原 schema-8 捕获与外部三 SHA 完整重编译，固定只读单事务计划及全前/后像、十列 reserved receipt 两路对照，闭集 matched/missing/unknown 与权限 STOP。没有 transport、凭据读取、远端写入或重试；missing 不授予回放，matched 不认证来源或耐久，五项 remote/apply/restore/formal/retry 全 false。独立全文复审无新增 P0/P1。先前 TEMP 合成134项实际 passed/51.35s，core SHA `72535b43e7e1f11831343c2a021fe65f2aac89954a4381d6b213b1ef422e51bf`；正常接入仅删除 TEMP loader 改模块导入，再补 foreign stream+AUTH / 外部身份非法+AUTH 两项交叉回归，原断言/访问 guards 不变。集成 test SHA `4f72b3183a3716967a9564e716d771d66e2cc842f48833bc8374f53d74d2061a`，窄范围独立复核通过。
+
+新 runner 源审发现此前 Windows helper 设置 `DEFAULT_DB_PATH` 环境变量，但当前 db.py 实际读取 `FUND_DB` 或仓库默认路径；该变量本身**没有隔离真实默认 DB**。此前 PASS 数和源码/日志结果仍是真实测试结果，撤回“仅凭这个变量已使用新默认 DB”的隔离声明。这不证明旧测试触及私人库，未追读任何私人文件。新 runner 清空凭据环境后、pytest 前显式把 `db.DB_PATH` 指向新 TEMP、断言并打印实际身份；正常插件保留，新 basetemp、byte/cache off、原300秒监督不变。
+
+正常集成五文件门禁实际 collection751/0.97s；run **751 passed/87.25s**、7912条既有插件弃用，wall88.442s、exit0、未超时、stderr空、新默认DB未创建。实际UTC `2026-10-13T16:05:23.2878452Z→16:06:51.7335772Z`，北京时间已10-14。234项源码 pre/post SHA `f00ee9854f6fd75acf555174d30841ce31a90f42e38baa5fefebee1067893626`；父代理按全部文件独立重算/current drift0。runner SHA `c36830a1f79078f91388230124bf3fe89032a9980de46aa853e41e68b75b7e0c`、focused stdout SHA `3359661c528ef0d94c4ed1dfdee5e50b780a22cc9da468136f0b79fd6928581a`、manifest SHA `f91ef839cce0cd2a41332e69086d4deb6b8463ba6c30545876494128d58a7fb1`。backend 全量仍单独核验，不把专项或纯字节核当远端迁移/恢复/正式发布。
+
+### 中断恢复与正常集成全量终态（2026-10-15）
+
+上次全量 collection 为2541，但真实 run 在应用中断后失去 handle39194，没有 full stdout/stderr/manifest，只有遗留 basetemp；不计PASS。10-15先核该 handle不存在及无对应活动子进程，再检查原234项源逐文件/current drift0、原runner字节未变，才在全新 TEMP attempt 中补跑；未重用/删除旧目录、未同时启动重复 full、未提高原300秒监督或放宽任何断言/插件。
+
+新 attempt 实际UTC `2026-10-15T05:16:28.5868989Z→05:20:46.4550757Z`，Windows Python3.14.4/SQLite3.50.4/正常pytest插件。全量 **2541 passed/252.89s**、91402条依赖/插件弃用警告，wall257.8622872s、exit0、timed_out=false、stderr空。bootstrap明确实际新 `db.DB_PATH`，未创建默认数据库。原136项集成新增测试与所有既有后端测试一并执行，未接触真实provider/私有配置/云迁移。
+
+完整234源 raw-byte pre/post 指纹仍为 `f00ee9854f6fd75acf555174d30841ce31a90f42e38baa5fefebee1067893626`，父代理按manifest全部文件独立重算/current drift0；runner仍 `c36830a1f79078f91388230124bf3fe89032a9980de46aa853e41e68b75b7e0c`。full stdout SHA `6ab41976c9370d4261e1e656e3f0165f22442d0dd1cae09d1ec409fb6517ca3f`，manifest SHA `e23139fd659a43c649813c0f168a40091b5f0ece8d63e5694d6aec3622caaa9a`。独立恢复复审再次确认current core/test及四旧pins一致、无P0/P1；本批仍是本地合同核，不是实际发送、远端对账、应用跨重启/恢复或发布证据。
