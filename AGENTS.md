@@ -54,6 +54,7 @@ uvicorn main:app --reload --port 8000
 - `backend/database/turso_scope_packet.py` 仅将已验证的私有内存捕获编译为有界、不可变的迁移包，不提供 transport/apply。原始 DDL 只作前后像数据，执行 DDL 必须来自仓库固定模板；公开摘要保持闭集且六项远端/正式资格为 false。包体、语句参数与 artifact 含私人数据，不得日志化或上传 CI。摘要/seal 不是来源认证或写入授权；未来发送前须以外部原始 resource/plan/packet SHA 重编译核验，未知提交不得自动重试或回收回执。
 - `backend/database/turso_scope_response.py` 仅核验提供的响应字节与外部原始 SHA 重编译包的本地合同；acknowledged/session_closed 不是真实传输、提交或关闭证明。构造/getter 均须闭合身份/状态/权限关系，前后核对自身及 compiler 源码并保持总预算；未知或权限错误不重试，所有 remote/apply/restore/formal/retry 旗标均为 false。不得作为 sender、未知提交对账读回器或发布放行来源。
 - `backend/database/turso_scope_reconcile.py` 仅构建固定只读计划并核验提供的读回字节；matched 须完整后像和十列回执一致，missing 须完整原前像且保留槽位为空。二者均不认证来源，missing 不证明仍未提交/可回放；未知或已绑定权限错误停止，不换凭据、不重试。原 schema-8 捕获及外部 resource/plan/packet SHA 必须独立保留，remote/apply/restore/formal/retry 均 false；不得把纯本地合同核当真实 transport、远端对账或发布资格。
+- `tools/record_overseas_ops.py` 只以本次原生 producer/audit 计数和日期上下文记录公开任务；缺失/冲突不造零。金融四文件仅在 main 确认后绑定 digest；运维日记独立写固定 `ops/overseas-run-journal` 分支的唯一普通 JSON，不 checkout/执行分支代码、不借金融 index、更不推进 main 使精确 CI 失效。固定可信 pre-push hook 核本次服务端通告的旧 OID/本地新 OID/唯一 ref，仍是普通推送、不是 main 与 ops 的跨 ref 事务；main 后变可留下已写日记但必须失败、不回滚或重试。金融结果和 CI dispatch 失败分轴；未知 push/已观察 ref 变化不重试。不要把合成/mock Git 门禁当成实际远端留存或自然恢复。
 - 缺失值不得用 `0` 代替；评分覆盖率低于 70% 时不得输出总分或星级。
 - 后端缓存回退最多允许 7 天并必须返回 `stale`/数据年龄；指数估值超过 7 天不得参与信号。
 - 组合历史只能使用全部成分都有净值的共同日期，禁止用前向填充制造零收益。

@@ -751,3 +751,33 @@ CI 警告保留：后端 1 条既有 Starlette/httpx 弃用，前端 source-map 
 新 attempt 实际UTC `2026-10-15T05:16:28.5868989Z→05:20:46.4550757Z`，Windows Python3.14.4/SQLite3.50.4/正常pytest插件。全量 **2541 passed/252.89s**、91402条依赖/插件弃用警告，wall257.8622872s、exit0、timed_out=false、stderr空。bootstrap明确实际新 `db.DB_PATH`，未创建默认数据库。原136项集成新增测试与所有既有后端测试一并执行，未接触真实provider/私有配置/云迁移。
 
 完整234源 raw-byte pre/post 指纹仍为 `f00ee9854f6fd75acf555174d30841ce31a90f42e38baa5fefebee1067893626`，父代理按manifest全部文件独立重算/current drift0；runner仍 `c36830a1f79078f91388230124bf3fe89032a9980de46aa853e41e68b75b7e0c`。full stdout SHA `6ab41976c9370d4261e1e656e3f0165f22442d0dd1cae09d1ec409fb6517ca3f`，manifest SHA `e23139fd659a43c649813c0f168a40091b5f0ece8d63e5694d6aec3622caaa9a`。独立恢复复审再次确认current core/test及四旧pins一致、无P0/P1；本批仍是本地合同核，不是实际发送、远端对账、应用跨重启/恢复或发布证据。
+
+该切片最终为 `40f629e9800a8531b01ede650f80df0a08e21211`，并合入 main `d017e3941278b91afcbac305ee065358c2039d02` 的唯一新 bot 公开数据提交，3个JSON/交集0，升级 head=`1cb88dbc7901b04dc9e7a008fee62e1e30adf5ba`，已正常推送。第一次 GitHub GH007 拒绝公布私人邮箱；保留本地 before-email 备份，仅重建本轮两个未发布提交的 no-reply 元数据，两棵 tree 精确不变、CAS 更新本地分支后正常快进推送，没有关闭隐私保护/强推/改远端历史；仅本仓库以后提交改用已核账号的 no-reply，不更改其他项目或全局配置。
+
+[CI 38686766076](https://github.com/AureliusWu/fund-compass/actions/runs/38686766076) 实际 `2026-10-15T05:26:09Z→05:28:13Z` completed/success。独立代理核 EVENT_SHA/四次checkout/三端exact-source=`d636688f9c1659fa0a3f2aeb5123f6df7c671efb`、GitData parents为d017与1cb88db，tested tree=`bdba17afdf44b35f7b14a76c1d77fc995440906f`等于该head。backend **2541/100.94s**、pip check clean；frontend **801/51/7.84s**、类型/build7.42s/PWA7/7；Worker **144/3/572ms**、类型/dry-run114.28KiB/gzip26.58KiB；两个npm ci均0 vulnerabilities。deploy/formal_smoke/candidate_smoke均skipped/steps0，不覆盖随后未提交的ops接线。
+
+新主线公开产物显示10-14在20:17:51+08:00、比14:35晚342.86分钟，quotes21/details3/predictions3/effective3/settled0，目标净值10-13；audit warning、errors空，最后有效结算仍09-30/年龄335.4h。是旧producer的一次真实自然产出恢复，不是本轮修复已上线或五窗口/两周周期通过。
+
+### 原生任务接线候选与双轴测试修正（2026-10-15）
+
+接入有限 `tools/record_overseas_ops.py` 与71项合成回归、简化海外workflow：一次producer→校准→独立audit→export→确认四金融文件与main commit→exact CI dispatch，再将公开失败历史写入独立ops唯一JSON树。bootstrap只认确定不存在的ref，历史拒额外代码/可执行位/symlink，未知push/ref变化停止；不改main/index/HEAD保存运维日记，不把提前到午夜的新交易日算漏跑。金融成功与派发失败分轴，manual/假日/跨日/未知日历不冒充有效自然窗口。
+
+首个冻结TEMP门禁实际 **180 passed/1 failed**：测试在ci_dispatch失败分支把执行原因套在金融reason，和同文件及既有journal的双轴合同冲突；production本来正确保持financial_qualified及workflow_reason=ci_dispatch_failed。原stdout SHA `365a8dbdb10052d71aec4684ca04521829822206481f98f7a8d34a079975ddce`完整保留。仅新修订测试统一检查workflow_reason，并分别强制金融reason；原outcome/pointer/base/其余断言不变，未改production/guard/插件/300秒监督、未跳过。
+
+新8源TEMP mirror actual collection181；run **181 passed/36.48s**、2772条既有弃用，wall38.107s/exit0/无超时/stderr空；40正常插件保留、guard违规0，8原source及mirror全前后SHA一致。core SHA `3f25fe3f1208afd20f6ca045d1da848b14ab82e21851d912b4fa8bd784e4204b`，test `ecc22a216234e9ff41d8a4ce97960b0518f97156df8a8f2d5f9e7ff68ef252dc`，workflow `a5b7d3d2197d08665c77af3250a7107a65ad4a9bc1e635e317d0ea5fb91bb489`。stdout `3d1dace0aecea8a078b245da9c76dbb072ed4409b1868cd75daed599817e2813`、result `a4c84f0905aae8e81424400ed7c0b4d37f5a4334b688912538e57c51c38b1be2`、manifest `fe60fdf8af620530f9c42fac70b976ffabfa5d8ec9699879dbd911d7a307ff43`，父代理实际读结果/summary并哈希确认。此处所有Git/provider均mock；真实本地Git行为、正常仓库全量、真实远端ops分支/权限/自然恢复及UI消费仍单独验收，未在main启用。
+
+### 定时接线全量修正与普通推送并发保护（2026-10-15）
+
+首个正常集成全量实际为 **2609 passed / 3 failed / 259.99s**，并非PASS；3条旧workflow测试仍要求YAML里直接出现shell dispatch/API检查/export，实际逻辑已进入统一runner。保留失败stdout `c1607f2ce0ea625ca61707575d880faa073860d083db202f3babb021cce6785e`，没有改成仅检查入口存在：新合同以YAML+AST核唯一入口、明确API无旧fallback、原生六阶段及独立audit、成功门禁、四文件闭集、已确认精确SHA单次dispatch、独立ops树及未知不重推。其他writer原断言保留。
+
+独立静态复审指出普通push自身并不绑定此前ls-remote：分支被删除或回退时仍可能成功。新增固定可信 `tools/overseas-hooks/pre-push`，仅接受本次服务端通告旧OID、请求新OID和唯一固定ref完全匹配的一行；通过hook后仍由Git接收协议核旧OID。没有force/lease、history rewrite、分支保护修改或未知重试；它不提供main+ops跨ref原子性，main最后检查后变化可能留下ops写入，必须报告失败且保留现场。
+
+修订正常门禁actual collection254/全量2622；专项 **254 passed/1.84s**，全量 **2622 passed/253.87s**（UTC `07:05:20.5564348Z→07:09:37.0190411Z`，wall256.4597218s）。均exit0、原300s未触、正常插件/byte/cache约束保留、stderr空；实际新db.DB_PATH未创建。95784条既有依赖/插件弃用不隐去。237源raw-byte前后指纹 `bab3f14e8cce79eb70715f2c2c6767cfdb30135b817cf716e23a9572642afc9e`，父代理独立逐文件重算current drift0；之后仅补本日志与AGENTS说明。core/test/hook SHA分别 `8079376835ddf2691e12a5e5dd30b55ef2694106292c14d541c35e42f65d997f` / `2c4cb439e2072b01f0f5971fdfeb8dab768449360a61e17d4cdcb676c3d26e8d` / `ba4864242f13ecd65bceb63fd05de85dc0d3a67ce7f0e37ff4719bbcf9c33999`；workflow合同test `a7036a942f939cb849a3eb8cc91416a608ab6cc13729d376a0f51c62019c853f`。全量stdout `0902c31ecf38f86b1abff742fef6c24a0c2b26a8ce87e4bb8fc6a43a70c59fe7`，manifest `3d9737088a65fa527a3cd79e1e9ed16aa2d052f09636f23d5770b0c0b4ff8212`。
+
+线上只读刷新：Render free/单实例/main，最新live `dep-db7n66ugekts73e3u2ag` 为 `d017e3941278b91afcbac305ee065358c2039d02`；Pages release.json HTTP200同SHA。API健康首次45.111s超时，随后HTTP200/1.034s、version8.0.0、universe28019、started_at=`2026-10-15T15:07:30.09815+08:00`、libsql/turso_candidate/durable=false。与休眠唤醒相符，但没有受控日志证据，不确认为唯一原因。get_service的实际startCommand仍无显式`--workers 1`，不能把仓库候选render.yaml当线上配置已同步。以上不证明升级分支部署、跨重启持久化、自然恢复或v9正式发布。
+
+真实本地Git专项最终 **19 passed/51.84s**，UTC `07:24:06.197Z→07:24:59.395Z`、wall53.158s、exit0、guard0、正常40plugins、7生产输入/harness/Git二进制前后无漂移；使用固定Git.exe、新TEMP/file-only bare+work、四份纯合成文件，未用实际repo的refs/数据/配置或真实远端。761条完整命令=252candidate+509fixture；候选13次普通push全部实际启用固定hook，删除/祖先回退各前两次建链成功、第三次真实拒绝并保持已删除/回退状态，sibling同样拒绝；main最后检查后变化与成功push失去确认按原断言保留实际副作用、失败且无重试。专项不声称跨ref原子、广告后race实测、GitHub权限或自然恢复。
+
+此前两次失败完整保留：第一轮18通过、1 oversized case在setup+teardown报2 errors，根因为pytest将大bytes参数展开到超过Windows环境变量长度，原stdout `4bd93e8882abba26df362ebf3a9e92fcaae6676297ff214883b316c53defd846`；仅加固定短ID、保持所有原输入与断言，另修独立ALL_EVENTS不再被case清空。第二轮19个fixture初始push失败、candidate0，原stdout `3440809934928ba83ccc6c956e23e783327cc6c68aa6973883fb4909703d1f02`；该轮只存child stderr SHA，不能确诊Git原始错误。新短TEMP只加受限合成stderr记录后通过，不能反推旧具体根因。没有改production/测试断言/guard/300s换绿。
+
+最终Git专项stdout SHA `01564f11b1470c690719cedcc13a64661d48362118d3fb873184bb9ead3b457e`、result `907b17900b1a9315ac790590602e09d6d9ddf40819cdcabb72ab067ad71b9d6e`、完整journal `85e88383eb726e1eab23b80f6ed699270a5be4cc2e8f7aac436c3cb9ed0430cb`、manifest `782af045d0d1f3d228c1e6ada0c4ea36926a4f7b1a0be78bcc15243fbb741bb5`；父代理实际读summary/result/13条push结果并重算输出SHA。专用gitattributes固定hook的LF，提交还须显式100755，避免本地autocrlf=true损坏解释器行；未批量改写其他文件换行。

@@ -1,0 +1,33 @@
+#!/usr/bin/env python
+"""Fixed single-ref expected-old guard. No credentials, output or network."""
+import os
+import re
+import sys
+
+
+def accepts(args, env, raw):
+    if len(args) != 2 or args[0] != "origin" or type(raw) is not bytes or len(raw) > 4096:
+        return False
+    ref, old, new = (env.get(key, "") for key in
+                     ("OVERSEAS_PUSH_REF", "OVERSEAS_PUSH_OLD", "OVERSEAS_PUSH_NEW"))
+    if ref not in ("refs/heads/main", "refs/heads/ops/overseas-run-journal"):
+        return False
+    if any(type(value) is not str or re.fullmatch(r"[0-9a-f]{40}", value) is None
+           for value in (old, new)) or new == "0" * 40:
+        return False
+    if ref == "refs/heads/main" and old == "0" * 40:
+        return False
+    # For a raw-SHA refspec Git supplies that exact expression as local-ref.
+    expected = f"{new} {new} {ref} {old}\n".encode("ascii")
+    return raw == expected
+
+
+def main():
+    try:
+        return 0 if accepts(sys.argv[1:], os.environ, sys.stdin.buffer.read(4097)) else 1
+    except Exception:
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
