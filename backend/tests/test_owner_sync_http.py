@@ -527,6 +527,16 @@ def test_write_rate_limit_is_bounded_before_body(client, monkeypatch):
     private(response)
 
 
-def test_candidate_router_not_mounted_in_main():
+def test_owner_sync_router_is_mounted_in_main_without_opening_a_connection(monkeypatch):
+    from database import db
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("router inspection opened a configured connection")
+    monkeypatch.setattr(db, "get_conn", forbidden)
+    monkeypatch.setattr(db, "_database_file", forbidden)
     import main
-    assert not any(getattr(route, "path", "").startswith("/api/v2/owner/sync") for route in main.app.routes)
+    routes = {(route.path, method) for route in main.app.routes
+              for method in getattr(route, "methods", ()) if route.path.startswith("/api/v2/owner/sync")}
+    assert routes == {
+        ("/api/v2/owner/sync", "POST"), ("/api/v2/owner/sync", "GET"),
+        ("/api/v2/owner/sync/requests/{request_id}", "GET"),
+    }

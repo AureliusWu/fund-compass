@@ -110,9 +110,17 @@ def _verify_core(conn, actual: dict) -> dict:
     expected = dict(expected_objects())
     expected.update(_implicit_indexes(False))
     if ("table", "_schema_version") in actual:
+        if not _same_ddl(actual[("table", "_schema_version")], VERSION_DDL):
+            raise sqlite3.DatabaseError("Owner sync core schema contract mismatch")
         expected[("table", "_schema_version")] = VERSION_DDL
-        rows = conn.execute("SELECT singleton,version FROM _schema_version").fetchall()
-        if len(rows) != 1 or tuple(rows[0]) != (1, 9):
+        # Do not transfer arbitrary version TEXT/BLOBs or unbounded rows.
+        # A metadata match never replaces the exact core schema checks below.
+        rows = conn.execute(
+            "SELECT CASE WHEN typeof(singleton) = 'integer' AND singleton = 1 THEN 1 ELSE 0 END,"
+            "CASE WHEN typeof(version) = 'integer' AND version = 9 THEN 1 ELSE 0 END "
+            "FROM _schema_version LIMIT 2"
+        ).fetchmany(2)
+        if len(rows) != 1 or tuple(rows[0]) != (1, 1):
             raise sqlite3.DatabaseError("Owner sync core schema version mismatch")
     for key, ddl in expected.items():
         if key not in actual or not _same_ddl(actual[key], ddl):

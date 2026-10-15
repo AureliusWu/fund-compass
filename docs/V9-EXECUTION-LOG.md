@@ -807,3 +807,25 @@ CI 警告保留：后端 1 条既有 Starlette/httpx 弃用，前端 source-map 
 按性能技能实际3次新TEMP构建、各原7项PWA校验均通过。三份完整产物均138文件/17,071,875 bytes，digest=`1950057fc0cc8fff4d5bf83e243988fc54a3442d59bb4491b0055e6dd44c026a`；构建wall27.701/17.927/13.328秒，median17.927/worst27.701。JS38文件raw1,132,069/gzip415,717 bytes，CSS21文件208,539/64,915，HTML1,633/855；gzip是逐文件.NET GZipStream Optimal合计，不跨压缩算法或旧CI机器比较。缺少同机旧版及真实页面交互基线，不能据此宣称完整性能回归PASS。未覆盖已部署PWA、多设备/离线真实旅程或云持久化。
 
 221源全部阶段前后及父代理当前逐项重算无漂移，Ordinal聚合 `a34002ce2b362904455b52b0d9018df1ce1bccf2084d810441c2d2b1b1d29b31`；runner SHA `1bad115afd42398a9e759dc847cc40599f4c0bc54e3adab8e3f1db3fd9504b4d`，harness-pins SHA `4e9db6f454662890297c191df4bc2b387f82cc6c6fe37a679efce2c760af7580`。full manifest `87eaa9343dba945e62e0b2790e51028295a765d7665f19ac274e1b40b93383ff`，三build manifest `ac1e258ed8ac832dc11217b8a4fabcf4e3ac0247be11e9a41de0b4ecb594c53a` / `6c08cdc4164ef7ae1157473e8c6838d45b844739fc37da02ea838d28a87a7406` / `3878bbd76068f2a899488710c2cb477fd4aa59021a3053b98f5239d299475ee7`。父代理独立读取9个真实manifest/日志并复核输出SHA；本批不关闭I19整项或v9发布。
+
+上述9文件客户端切片已正常提交并快进推送 `4ca9077d9931b0a9d93bb8e331dc3bd97c965c73`。[CI 38704151923](https://github.com/AureliusWu/fund-compass/actions/runs/38704151923) 实际completed/success、终态更新`2026-10-15T08:16:35Z`。独立核四次checkout/三端exact-source=`b08fc70f3903537210379f34c15baba06ebbc1ce`，Git对象API parents=d017+4ca，merge/head同tree=`4b8e22a3fc3255417862d6bd2cc4d3b9301738f9`。backend **2696/130.96s**、pip check clean；frontend **862/52 files**、类型/正常build7.37s/PWA7/7；Worker **144/3 files**、类型及Wrangler仅dry-run；两端npm ci均0 vulnerabilities。deploy/candidate_smoke/formal_smoke真实skipped/steps0。前一c573 CI因后续push被取消，不将其计PASS；最终4ca覆盖两切片。
+
+两个初次普通API读EOF原样保留，后续普通读取正常；未改网络/认证/配置或重跑工作流。父代理实际读取run/jobs/四raw日志关键行与AUDIT，并重算整套11项证据SHA无漂移，外部清单SHA=`e2defd96aee0f5e7afbc64b024b926442b1180cbd9e6a0c72ad04a75587c6bcf`。不覆盖之后未提交的Owner main/CORS切片，也不是任何部署/迁移/恢复资格。
+
+### 配置候选的真实只读连接刷新（2026-10-15）
+
+UTC `08:29:26.3262808Z` 使用此前明确配置的候选凭据，仅通过既有`tools/turso_candidate.py --timeout 5 inspect`读取连通性/结构和公开计数。清环境、有界30秒外部监督、无初始化/探针写入或私人账本枚举；实际exit0、wall2.794s、无超时、输出完整。结果connectivity=true、schema_table版本**8**、普通表20、fund_count28019。未打印/解码/复制/旋转Token，不依赖浏览器或更换认证。
+
+该结果确认这份配置可以正常连到候选，不能解释为当前云库已迁到9或Owner扩展已准备，也不证明Render配置与它严格同一身份。账户配额/实际停写和锁内新备份、受控迁移、独立恢复与业务跨重启仍未验收；本次只读不能补齐这些门禁。
+
+### 主应用Owner同步入口与存储边界（2026-10-15）
+
+将既有受限router接入main，仅用已有、核心9与Owner扩展完整的普通本地SQLite路径；鉴权/独立consent、提交前会话重验、原始请求幂等与未知结果合同不变。工厂在解析路径/读取连接设置前拒绝Turso和所有file: URI/内存/UNC；缺库或不兼容时固定503、不创建父目录/文件、不补DDL，失败关闭连接。独立复审发现最初草案会丢弃mode=ro/immutable语义后强开rw，该草案未集成或运行；最终明确只支持普通本地文件，不重解释URI，也不宣称识别所有网络文件系统。
+
+同次修复既有可选_schema_version读取边界：未核DDL前fetchall及任意TEXT/BLOB可无界传入Python。现在先匹配固定DDL，再以SQL typeof/值条件仅投影两个0/1、LIMIT2/fetchmany2，完整core/extension检查保留；不承诺SQLite引擎I/O时限。新增真实内存SQL回归包含1024行、巨大TEXT/BLOB、坏DDL先拒绝及正确元数据不可代替完整schema。
+
+补齐既有V9合同要求的CORS请求header闭集，固定Authorization/Content-Type与两个Owner同步header，另保留标准safelisted headers；Pages/两个本地开发来源不扩大、无ambient credentials，未知origin/header预检拒绝且不进入存储。新增main27、metadata13、CORS9合计49项；旧“router未挂载”断言仅改为三条精确method/path合同，其他既有HTTP输入/断言保留。主应用TestClient请求与新CORS测试刻意不进入lifespan，不能当作实际启动、受控迁移、远端事务或耐久证据。
+
+正常四阶段首次运行全部通过：专项collection/run **405/405 passed，85.25s**；全量collection/run **2745/2745 passed，254.45s**。full UTC `2026-10-15T08:28:15.0824265Z→08:32:31.9219262Z`、supervisor256.8360047s、exit0、未触原300s、输出完整、stderr空。正常插件/byte-cache约束保留，实际新db.DB_PATH默认DB未创建；105176条现存Python3.14依赖弃用警告完整保留，不静默。没有真实Owner密码/Token、远端写入或重跑换绿。
+
+241源前后raw-byte聚合 `31fba07da21a5bca7402e108832cb407bba3417745eb9dc17da2314ea66bb9ca`，父代理独立逐文件重算current drift0后才记本段；runner SHA `9c5fc91f9f6d950480fb4f397a94a2d48e7c34aa6dab116e7f9ea32190a71569`，外部seal `94c0cd6085d5b3733a07b58721edab2f3e2e87118a5326f9ce50394569541d23`。full stdout `eea5e9ff3a075341be79a5e4bf03bad11fcb3b8c9c7cc03fe596543d3f98bb80`，manifest `373f308fd46761ee1109af75aa4c483c84b4abddec7ec39f9c11743aeb00ed2b`。本切片不开放Turso Owner写入，不修改应用8.0.0版本、Gist、Holding/Policy/Decision门禁或正式发布资格；页面仍单独接线验收。

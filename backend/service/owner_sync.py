@@ -1,8 +1,7 @@
-"""Owner-only HTTP candidate, registered explicitly in isolated test apps.
+"""Owner-only HTTP sync with explicit local SQLite connections.
 
-No main.py registration, environment lookup, configured database access or
-automatic schema provisioning. The connection factory must create an explicit
-local SQLite connection in the calling thread. Turso integration is separate.
+The configured factory only opens an existing, fully extended local database.
+No automatic provisioning, startup migration or remote adapter is used here.
 """
 from __future__ import annotations
 
@@ -10,6 +9,7 @@ import asyncio
 from contextlib import closing
 import json
 import re
+import sqlite3
 from collections.abc import Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, Security
@@ -18,6 +18,8 @@ from fastapi.security import HTTPAuthorizationCredentials
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import ClientDisconnect
 
+from database import db
+from database.owner_sync_schema import verify_owner_sync_schema
 from models.owner_sync import MAX_BODY_BYTES, MAX_SAFE_INTEGER, SyncValidationError, parse_sync_request
 from service import owner_sessions as owners
 from service import owner_sync_repo as repo
@@ -115,8 +117,39 @@ def _query(request: Request) -> dict:
     return {"since_revision": since, "upper_revision": upper, "limit": limit, "cursor": cursor}
 
 
+def configured_local_sync_connection() -> sqlite3.Connection:
+    """Open an existing configured local file; never create or extend its schema."""
+    conn = None
+    try:
+        if db.database_backend() != "sqlite":
+            raise sqlite3.DatabaseError("local_only")
+        raw = db.DB_PATH
+        if (type(raw) is not str or not raw or raw.lower().startswith("file:")
+                or raw == ":memory:" or raw.startswith(("\\\\", "//"))):
+            raise sqlite3.DatabaseError("plain_local_file_required")
+        path = db._database_file()
+        if path is None or path.drive.startswith("\\\\") or not path.is_file():
+            raise sqlite3.DatabaseError("existing_local_file_required")
+        timeout = db._timeout_seconds()
+        conn = sqlite3.connect(path.as_uri() + "?mode=rw", uri=True, timeout=timeout)
+        conn.row_factory = sqlite3.Row
+        conn.execute(f"PRAGMA busy_timeout = {int(timeout * 1000)}")
+        conn.execute("PRAGMA foreign_keys = ON")
+        if conn.execute("PRAGMA foreign_keys").fetchone()[0] != 1:
+            raise sqlite3.DatabaseError("foreign_keys_unavailable")
+        verify_owner_sync_schema(conn)
+        return conn
+    except Exception:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        raise sqlite3.DatabaseError("Owner sync local storage is unavailable") from None
+
+
 def build_owner_sync_router(connection_factory: Callable) -> APIRouter:
-    """Build a test/candidate router; calling this does not open a database."""
+    """Build an explicit-connection router; constructing it opens no database."""
     router = APIRouter(prefix="/api/v2/owner/sync", tags=["owner-sync-candidate"])
 
     @router.post("")

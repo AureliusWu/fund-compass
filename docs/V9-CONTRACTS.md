@@ -96,13 +96,15 @@ AI POST 使用共享 deadline，fetch、流式 body 与解析总计 30 秒，流
 
 changes 以固定 upper revision 和 `(revision,key)` 游标读取同一事务快照，分页最多 200 项；并发新写不会混进旧分页。当前记录与最新 change 快照/头部进行完整性核验，但不宣称防止任意直接 SQL 篡改。
 
-候选 HTTP router 仅由测试显式挂载，尚未加入 `main.py`，前端 Store 尚未接入真实应用。写入需 Owner/write_holdings 和独立 `X-Owner-Sync-Consent: owner-sync-v1`，读取需 Owner/read_private，机器凭据不能替代；请求体最长 5 秒，鉴权和限频在读 body 前，body 后、事务前、commit 前及私有响应前重新核验摘要会话。撤销阻止尚未提交的写入和迟到私人响应，不能撤销已接受的提交。所有候选响应固定脱敏且 no-store，不保存原始 Bearer。
+HTTP router 已接入 `main.py` 代码，配置工厂只允许普通路径下已有、核心9及Owner扩展完整的本地SQLite；不存在、不兼容或Turso固定拒绝，不自动创建文件/补表。所有file: URI一律在解析前拒绝，不能丢弃mode=ro/immutable等语义后强开rw；内存/UNC亦拒绝，不宣称识别所有网络文件系统。原远端schema8启动拒绝与应用lifespan未变。前端已具备显式HTTP adapter，尚未接入页面；本地请求回归与实际部署另行验收。
 
-receipt 核对必须同时提供原始 request_id 和单一 `X-Owner-Sync-Request-Hash`（严格 64 位小写十六进制）。缺失、重复、混合或非规范 header 在打开仓储前拒绝；仅 ID 匹配不返回确认结果。匹配返回 `{state:matched,status:200|409,result:原响应}`；不存在或不可核对返回 unknown，均不能推断未提交。未来实际挂载必须同步显式 CORS header allowlist，不以测试 router 通过冒充线上可用。
+写入需 Owner/write_holdings 和独立 `X-Owner-Sync-Consent: owner-sync-v1`，读取需 Owner/read_private，机器凭据不能替代；请求体最长 5 秒，鉴权和限频在读 body 前，body 后、事务前、commit 前及私有响应前重新核验摘要会话。撤销阻止尚未提交的写入和迟到私人响应，不能撤销已接受的提交。所有候选响应固定脱敏且 no-store，不保存原始 Bearer。可选核心_schema_version必须先匹配固定DDL，再以SQL类型/值闭集投影读取最多两行；不传任意TEXT/BLOB到Python，不替代完整core/extension校验，也不是SQLite引擎I/O时限。
+
+receipt 核对必须同时提供原始 request_id 和单一 `X-Owner-Sync-Request-Hash`（严格 64 位小写十六进制）。缺失、重复、混合或非规范 header 在打开仓储前拒绝；仅 ID 匹配不返回确认结果。匹配返回 `{state:matched,status:200|409,result:原响应}`；不存在或不可核对返回 unknown，均不能推断未提交。CORS请求header显式允许Authorization、Content-Type及上述两个Owner同步header（另保留浏览器标准safelisted headers），只认既有Pages/本机开发来源，不启用ambient credentials；CORS预检不连接存储，也不代替请求鉴权。不以本地router通过冒充线上可用。
 
 客户端候选模块仅显式构造，默认关闭，没有全局 IndexedDB、fetch、Gist、自选或凭据读取。纯 DTO 核对原文/hash 和封闭响应；注入式 IndexedDB outbox 使用严格 durability 的真实事务 CAS，原请求发出前先保存 attempted，只在事务 complete 后确认本地保存。严格 durability 不支持或降级时拒绝，不回退 localStorage。close/timeout 即使抛错也不证明本地未提交，重开后必须读回真实槽位。
 
-控制器保留原 request_id/raw/hash，unknown 不自动重发或清空；仅显式人工确认可重发相同字节。授权/会话 generation 在实际网络调用前及响应消费前重核验，忽略 AbortSignal 的迟到 transport 也不能发布私人结果。成功/匹配 receipt 必须逐项核对 key/kind/deleted 和所请求字段的实际值，错误值保持 unknown。POST 观察到的 head 不是已完成 pull checkpoint；只有固定 upper 的全部分页完成才更新基线，已有草稿不自动 rebase。该模块尚未接 UI/实际网络/Owner 会话，fake IndexedDB 测试不是物理浏览器落盘、旧 PWA 或跨设备验收。
+控制器保留原 request_id/raw/hash，unknown 不自动重发或清空；仅显式人工确认可重发相同字节。授权/会话 generation 在实际网络调用前及响应消费前重核验，忽略 AbortSignal 的迟到 transport 也不能发布私人结果。成功/匹配 receipt 必须逐项核对 key/kind/deleted 和所请求字段的实际值，错误值保持 unknown。POST 观察到的 head 不是已完成 pull checkpoint；只有固定 upper 的全部分页完成才更新基线，已有草稿不自动 rebase。显式HTTP adapter已接Owner内存会话，构造仅计算API端点指纹，不请求或开库；仍未接UI，fake IndexedDB测试不是物理浏览器落盘、旧PWA或跨设备验收。
 
 本节仅覆盖本地候选事务/HTTP 故障模型。真实云同步启用、Turso CAS/事务适配、远端独立恢复、多设备 UI、Holding/Policy/Decision 新版本链及正式证据仍未完成，不关闭整个 I19-02 或存储发布出口。
 
