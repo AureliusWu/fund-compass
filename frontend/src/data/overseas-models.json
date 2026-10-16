@@ -5,7 +5,7 @@
     "applied_at": "2026-08-13T13:46:49+08:00",
     "legacy_records_excluded": 17
   },
-  "updated_at": "2026-10-15T20:01:45+08:00",
+  "updated_at": "2026-10-16T19:51:44+08:00",
   "models": {
     "539002": {
       "name": "建信新兴市场混合(QDII)A",
@@ -337,28 +337,28 @@
         }
       },
       "candidate": {
-        "version": "candidate-20261015",
-        "created_at": "2026-10-15T20:01:45+08:00",
-        "data_fingerprint": "99b1e1f19e730cc1b880b1920cdcb3d6bbbb049699b0cf0adb7bb42cb1264c2b",
-        "data_effective_at": "2026-10-15T20:00:49+08:00",
+        "version": "candidate-20261016",
+        "created_at": "2026-10-16T19:51:44+08:00",
+        "data_fingerprint": "ecf4d7c32e6f480d79069be1c39416a6e42a52ea3469ac9f66ac89fa139c00ea",
+        "data_effective_at": "2026-10-16T19:50:55+08:00",
         "status": "rejected",
-        "samples": 21,
-        "split_date": "2026-09-10",
-        "train_samples": 14,
+        "samples": 22,
+        "split_date": "2026-09-14",
+        "train_samples": 15,
         "validation_samples": 7,
         "baseline": {
           "samples": 7,
-          "mae": 0.7767,
-          "bias": 0.2306,
+          "mae": 0.7842,
+          "bias": 0.223,
           "direction_accuracy": 100.0,
-          "extreme_mae": 0.8116
+          "extreme_mae": 0.765
         },
         "candidate": {
           "samples": 7,
-          "mae": 0.7836,
-          "bias": 0.6197,
+          "mae": 0.8106,
+          "bias": 0.6467,
           "direction_accuracy": 100.0,
-          "extreme_mae": 0.7643
+          "extreme_mae": 0.5812
         },
         "parameters": {
           "scale": 0.8,
@@ -415,10 +415,10 @@
         "min_samples": 20,
         "poor_cycles": 0,
         "drift_evidence": {
-          "samples": 21,
-          "previous_mae": 0.895,
-          "recent_mae": 0.713,
-          "recent_direction_accuracy": 70.0
+          "samples": 22,
+          "previous_mae": 0.858,
+          "recent_mae": 0.693,
+          "recent_direction_accuracy": 80.0
         },
         "active_change_policy": "explicit_admin_only",
         "candidate_eligible_for_admin_review": false,

@@ -1,29 +1,50 @@
 {
   "alignment_version": "observation-target-v2",
   "models": {
-    "018147": {
+    "012920": {
+      "accuracy_status": "collecting",
+      "alignment_version": "observation-target-v2",
+      "base_nav": 3.4578,
+      "base_nav_date": "2026-10-14",
+      "code": "012920",
+      "coverage": 33.98,
+      "direction_accuracy": 64.3,
+      "error_p80": 2.802,
+      "mae": 1.572,
+      "market_time": "2026-10-15T16:05:31+08:00",
+      "model_version": "v1-2026q1-style",
+      "name": "易方达全球成长精选混合(QDII)人民币A",
+      "observed_at": "2026-10-16T19:50:55+08:00",
+      "predicted_change": -2.2167,
+      "predicted_nav": 3.3812,
+      "prediction_date": "2026-10-16",
+      "sample_count": 14,
+      "status": "pending",
+      "target_nav_date": "2026-10-15"
+    },
+    "539002": {
       "accuracy_status": "healthy",
       "alignment_version": "observation-target-v2",
-      "base_nav": 2.292,
-      "base_nav_date": "2026-10-13",
-      "code": "018147",
+      "base_nav": 2.249,
+      "base_nav_date": "2026-10-14",
+      "code": "539002",
       "coverage": 64.33,
-      "direction_accuracy": 81.0,
-      "error_p80": 1.171,
-      "mae": 0.787,
-      "market_time": "2026-10-14T16:04:36+08:00",
+      "direction_accuracy": 87.0,
+      "error_p80": 1.251,
+      "mae": 0.782,
+      "market_time": "2026-10-15T16:05:31+08:00",
       "model_version": "v1-2026q1-holdings",
-      "name": "建信新兴市场混合(QDII)C",
-      "observed_at": "2026-10-15T20:00:49+08:00",
-      "predicted_change": -4.2523,
-      "predicted_nav": 2.1945,
-      "prediction_date": "2026-10-15",
-      "sample_count": 21,
+      "name": "建信新兴市场混合(QDII)A",
+      "observed_at": "2026-10-16T19:50:55+08:00",
+      "predicted_change": -1.6162,
+      "predicted_nav": 2.2127,
+      "prediction_date": "2026-10-16",
+      "sample_count": 23,
       "status": "pending",
-      "target_nav_date": "2026-10-14"
+      "target_nav_date": "2026-10-15"
     }
   },
   "schema": 1,
   "source_schema": 2,
-  "source_updated_at": "2026-10-15T20:00:49+08:00"
+  "source_updated_at": "2026-10-16T19:50:55+08:00"
 }
