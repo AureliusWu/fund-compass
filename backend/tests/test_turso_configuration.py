@@ -19,11 +19,12 @@ def test_candidate_bootstrap_is_atomic_idempotent_and_preserves_constraints(loca
     assert turso_schema.initialize_candidate(local_conn)["changed"] is True
     assert turso_schema.initialize_candidate(local_conn)["changed"] is False
     assert local_conn.execute("PRAGMA user_version").fetchone()[0] == 0
-    assert local_conn.execute("SELECT version FROM _schema_version").fetchone()[0] == 8
+    assert local_conn.execute("SELECT version FROM _schema_version").fetchone()[0] == 9
     assert local_conn.execute("PRAGMA foreign_key_check").fetchall() == []
     db._verify_v8_schema_contract(local_conn)
     triggers = local_conn.execute("SELECT count(*) FROM sqlite_master WHERE type='trigger'").fetchone()[0]
-    assert triggers == len(db.V8_IMMUTABLE_TABLES) * 2
+    assert triggers == len(db.V8_IMMUTABLE_TABLES) * 2 + 1
+    assert local_conn.execute("SELECT 1 FROM sqlite_master WHERE name='scoped_record_requires_root'").fetchone()
 
 
 def test_remote_startup_will_not_create_schema(local_conn):
@@ -44,11 +45,11 @@ def test_candidate_refuses_incompatible_existing_database_without_writes(local_c
 
 def test_candidate_rejects_future_version_and_trigger_drift(local_conn):
     turso_schema.initialize_candidate(local_conn)
-    local_conn.execute("UPDATE _schema_version SET version=9")
+    local_conn.execute("UPDATE _schema_version SET version=10")
     local_conn.commit()
     with pytest.raises(sqlite3.DatabaseError, match="Unsupported"):
         turso_schema.verify_schema(local_conn)
-    local_conn.execute("UPDATE _schema_version SET version=8")
+    local_conn.execute("UPDATE _schema_version SET version=9")
     local_conn.execute("DROP TRIGGER immutable_evidence_snapshots_update")
     local_conn.commit()
     with pytest.raises(sqlite3.DatabaseError, match="differs"):

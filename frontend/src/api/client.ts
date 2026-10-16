@@ -1,44 +1,6 @@
-// 后端基址：开发走 Vite 代理 /api → localhost:8000；
-// 生产用环境变量 VITE_API_BASE 指向已部署后端（Railway/Render）。
-const BASE = (import.meta.env.VITE_API_BASE as string) || '/api'
-const REQUEST_TIMEOUT_MS = 12_000
-
-export class ApiError extends Error {
-  constructor(
-    message: string,
-    readonly kind: 'timeout' | 'network' | 'http' | 'redacted',
-    readonly status?: number,
-  ) {
-    super(message)
-    this.name = 'ApiError'
-  }
-}
-
-export async function request<T>(
-  path: string,
-  init?: RequestInit,
-  timeoutMs = REQUEST_TIMEOUT_MS,
-): Promise<T> {
-  const controller = new AbortController()
-  const forwardAbort = () => controller.abort(init?.signal?.reason)
-  init?.signal?.addEventListener('abort', forwardAbort, { once: true })
-  const timer = globalThis.setTimeout(() => controller.abort('timeout'), timeoutMs)
-
-  try {
-    const res = await fetch(BASE + path, { cache: 'no-store', ...init, signal: controller.signal })
-    if (!res.ok) throw new ApiError(`HTTP ${res.status}`, 'http', res.status)
-    return res.json() as Promise<T>
-  } catch (error) {
-    if (error instanceof ApiError) throw error
-    if (controller.signal.aborted && !init?.signal?.aborted) {
-      throw new ApiError('请求超时，请稍后重试', 'timeout')
-    }
-    throw new ApiError('网络连接失败，请稍后重试', 'network')
-  } finally {
-    globalThis.clearTimeout(timer)
-    init?.signal?.removeEventListener('abort', forwardAbort)
-  }
-}
+import { ApiError, request } from './request'
+import { hasOwnerSession, requestOwnerRead } from '@/stores/ownerSession'
+export { ApiError, request } from './request'
 
 const req = request
 
@@ -47,12 +9,22 @@ interface RedactedOwnerRead {
 }
 
 /**
- * Owner-scoped GETs keep their legacy public URL but fail closed with HTTP 403
+ * Authenticated Owner GETs use audited private URLs. Anonymous GETs keep their
+ * legacy public URL but fail closed with HTTP 403
  * so a cached pre-v8 client cannot mistake a smaller redacted payload for the
  * former full DTO. During a mixed rollout an older backend may still return a
  * 200 redacted marker; accept only that marker and reject every full shape.
  */
 async function readOwnerScoped<T>(path: string): Promise<T> {
+  if (hasOwnerSession()) {
+    const privatePath = path.startsWith('/v2/')
+      ? path.replace('/v2/', '/v2/private/') : '/private' + path
+    const payload = await requestOwnerRead<T | RedactedOwnerRead>(privatePath)
+    if (payload && typeof payload === 'object' && (payload as RedactedOwnerRead).redacted === true) {
+      throw new ApiError('私人数据未公开', 'redacted')
+    }
+    return payload as T
+  }
   try {
     const payload = await req<T | RedactedOwnerRead>(path)
     if (payload && typeof payload === 'object' && (payload as RedactedOwnerRead).redacted === true) {
@@ -330,6 +302,7 @@ export interface DecisionResp {
   }
 }
 export interface DecisionContextParams {
+  /** @deprecated Public legacy reads never use personal holding inputs. */
   held?: boolean
   target_weight?: number
   current_weight?: number
@@ -337,12 +310,8 @@ export interface DecisionContextParams {
   force?: boolean
 }
 export const getDecision = (code: string, p?: DecisionContextParams) => {
-  const u = new URLSearchParams()
-  if (p?.held != null) u.set('held', String(p.held))
-  if (p?.target_weight != null) u.set('target_weight', String(p.target_weight))
-  if (p?.current_weight != null) u.set('current_weight', String(p.current_weight))
-  const q = u.toString()
-  return req<DecisionResp>(`/fund/${code}/decision` + (q ? '?' + q : ''))
+  void p // Compatibility signature only; public fund information, not personal analysis.
+  return req<DecisionResp>(`/fund/${code}/decision`)
 }
 
 export interface PortfolioDecisionItem {
@@ -374,12 +343,8 @@ export interface PortfolioDecisionsResp {
     amount: number | null
   }[]
 }
-export const postPortfolioDecisions = (items: PortfolioDecisionItem[], portfolioValue?: number) =>
-  req<PortfolioDecisionsResp>('/portfolio/decisions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ items, portfolio_value: portfolioValue }),
-  })
+export const postPortfolioDecisions = (_items: PortfolioDecisionItem[], _portfolioValue?: number): Promise<PortfolioDecisionsResp> =>
+  Promise.reject(new ApiError('私人组合分析暂未启用：等待受限 Owner 分析接口，本地输入未发送', 'cancelled'))
 
 export type V8Action = 'buy' | 'dca' | 'watch' | 'add' | 'hold' | 'reduce' | 'sell'
 export type V8UserState = 'unheld' | 'held'
@@ -631,8 +596,8 @@ export interface V8StrategyPerformance {
 }
 
 /**
- * Owner-scoped V8 reads are deliberately unavailable to anonymous browser
- * clients. The legacy public URLs fail closed with 403 (or a redacted marker
+ * Owner-scoped V8 reads require a short-lived in-memory Owner session. The
+ * legacy public URLs fail closed with 403 (or a redacted marker
  * during mixed rollout), which readOwnerScoped maps to the unavailable UI. Snapshot creation,
  * settlement, notification and rebalance routes require Worker/Admin
  * credentials and must never be called from public frontend code.
@@ -682,13 +647,11 @@ export interface PortfolioLabResp {
   stress: { name: string; return: number; pnl: number | null }[]
 }
 export const postPortfolioLab = (
-  items: { code: string; current_weight: number; target_weight: number }[],
-  portfolioValue?: number,
-) => req<PortfolioLabResp>('/portfolio/lab', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ items, portfolio_value: portfolioValue }),
-})
+  _items: { code: string; current_weight: number; target_weight: number }[],
+  _portfolioValue?: number,
+): Promise<PortfolioLabResp> => Promise.reject(new ApiError(
+  '私人组合分析暂未启用：等待受限 Owner 分析接口，本地输入未发送', 'cancelled',
+))
 
 export interface PortfolioOutcomesResp {
   total: number; mature: number; pending: number
@@ -710,12 +673,8 @@ export interface AnalyzeResp {
   decision: DecisionResp
 }
 export const getAnalyze = (code: string, p?: DecisionContextParams) => {
-  const u = new URLSearchParams()
-  if (p?.held != null) u.set('held', String(p.held))
-  if (p?.target_weight != null) u.set('target_weight', String(p.target_weight))
-  if (p?.current_weight != null) u.set('current_weight', String(p.current_weight))
-  const query = u.toString()
-  return req<AnalyzeResp>(`/fund/${code}/analyze${query ? '?' + query : ''}`)
+  void p // Compatibility signature only; never transmit local positions via a public URL.
+  return req<AnalyzeResp>(`/fund/${code}/analyze`)
 }
 
 export const getWatchlist = () => readOwnerScoped<{ items: WatchItem[] }>('/watchlist')

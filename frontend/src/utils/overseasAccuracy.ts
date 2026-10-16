@@ -1,4 +1,5 @@
 import type { Estimate } from './estimate'
+import { requestJson } from '@/api/request'
 
 export interface AccuracySummary {
   samples: number
@@ -62,14 +63,61 @@ export function accuracyEffectiveAt(report: AccuracyReport, samples: number): st
 }
 
 let reportPromise: Promise<AccuracyReport | null> | null = null
+let reportCache: AccuracyReport | null = null
+let generation = 0
 
-export function loadOverseasAccuracy(force = false): Promise<AccuracyReport | null> {
-  if (!reportPromise || force) {
-    reportPromise = fetch(`${import.meta.env.BASE_URL}data/overseas-accuracy.json`, { cache: force ? 'reload' : 'default' })
-      .then((response) => response.ok ? response.json() as Promise<AccuracyReport> : null)
-      .catch(() => null)
+function object(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function nullableNumber(value: unknown): boolean {
+  return value === null || (typeof value === 'number' && Number.isFinite(value))
+}
+
+function validWindow(value: unknown): boolean {
+  return value == null || (object(value) && Number.isInteger(value.samples) && Number(value.samples) >= 0
+    && ['mae', 'bias', 'direction_accuracy'].every(field => typeof value[field] === 'number' && Number.isFinite(value[field])))
+}
+
+function validReport(value: unknown): value is AccuracyReport {
+  if (!object(value) || typeof value.updated_at !== 'string' || !object(value.summary) || !Array.isArray(value.records)) return false
+  if (value.pipeline != null && !object(value.pipeline)) return false
+  if (!Object.values(value.summary).every(row => object(row) && Number.isInteger(row.samples) && Number(row.samples) >= 0
+    && ['collecting', 'healthy', 'degraded', 'frozen'].includes(String(row.status))
+    && typeof row.confidence === 'string'
+    && ['mae', 'bias', 'direction_accuracy', 'error_band'].every(field => nullableNumber(row[field]))
+    && validWindow(row.rolling_5) && validWindow(row.rolling_20)
+    && (row.error_percentiles == null || (object(row.error_percentiles)
+      && ['p50', 'p80', 'p95'].every(field => nullableNumber((row.error_percentiles as Record<string, unknown>)[field])))))) return false
+  return value.records.every(row => object(row) && typeof row.code === 'string' && typeof row.status === 'string'
+    && ['predicted_change', 'actual_change', 'error'].every(field => row[field] === undefined || nullableNumber(row[field])))
+}
+
+export function loadOverseasAccuracy(force = false, options?: { signal?: AbortSignal }): Promise<AccuracyReport | null> {
+  const signal = options?.signal
+  if (signal?.aborted) return Promise.resolve(null)
+  if (force) {
+    generation += 1
+    reportCache = null
+    reportPromise = null
   }
-  return reportPromise
+  if (reportCache) return Promise.resolve(reportCache)
+  // Only un-cancellable callers share an in-flight promise. A caller's signal
+  // cannot terminate another component's request for the same public report.
+  if (!signal && reportPromise) return reportPromise
+  const currentGeneration = generation
+  const pending = requestJson<unknown>(`${import.meta.env.BASE_URL}data/overseas-accuracy.json`, {
+    cache: force ? 'reload' : 'default', signal,
+  }).then(value => {
+    if (!validReport(value) || signal?.aborted) return null
+    if (currentGeneration === generation) reportCache = value
+    return value
+  }).catch(() => null).finally(() => {
+    // Failed/null promises must not prevent a later request from recovering.
+    if (reportPromise === pending) reportPromise = null
+  })
+  if (!signal) reportPromise = pending
+  return pending
 }
 
 export async function attachAccuracy(estimate: Estimate): Promise<Estimate> {

@@ -29,6 +29,7 @@ from models.v8 import (
     stable_id,
 )
 from strategy.decision_v2 import build_decision_diff, default_portfolio_policy
+from service import repository_scopes as scopes
 
 
 POSITIVE_ACTIONS = {"buy", "dca", "add"}
@@ -123,21 +124,86 @@ def _assert_id(actual: str, expected: str, kind: str) -> None:
         raise SnapshotConflictError(f"{kind} deterministic id does not match payload")
 
 
-def _existing_model(conn, table: str, id_column: str, identifier: str, model_type):
-    row = conn.execute(
-        f"SELECT payload_json FROM {table} WHERE {id_column}=?",
-        (identifier,),
-    ).fetchone()
+def _existing_model(conn, table: str, id_column: str, identifier: str, model_type, *, scope=scopes.PRODUCTION):
+    sql, params = scopes.model_query(table, id_column, identifier, scope)
+    row = conn.execute(sql, params).fetchone()
     return model_type.model_validate_json(row["payload_json"]) if row else None
 
 
-def save_evidence(snapshot: EvidenceSnapshot) -> EvidenceSnapshot:
+def _write_reference(conn, table, id_column, identifier, model_type):
+    """Private write-only lookup; caller must guard persisted scope before use.
+
+    Inspect reserved legacy provenance as well as scope so an old hidden row
+    cannot evade the existing acceptance boundary via a changed child payload.
+    """
+    row = conn.execute(f"SELECT payload_json FROM {table} WHERE {id_column}=?", (identifier,)).fetchone()
+    return model_type.model_validate_json(row["payload_json"]) if row else None
+
+
+def _acceptance_preflight(candidate, scope=scopes.PRODUCTION):
+    scope = scopes.validate_scope(scope)
+    if scope != scopes.PRODUCTION and db.database_backend() != "sqlite":
+        raise ValueError("local_acceptance_write_forbidden")
+    from service.persistence_verification import preflight_repository_write
+    preflight_repository_write(candidate)
+
+
+def _acceptance_guard(conn, kind, candidate, *references, scope=scopes.PRODUCTION):
+    from service.persistence_verification import guard_repository_write
+    guard_repository_write(conn, kind, candidate, *references, scope=scope)
+    for reference in references:
+        for root_kind, model in (("evidence", EvidenceSnapshot), ("holding", HoldingVersion),
+                                 ("policy", PortfolioPolicy), ("decision", DecisionSnapshot)):
+            if isinstance(reference, model):
+                scopes.assert_record_scope(conn, root_kind, getattr(reference, scopes.ROOTS[root_kind][1]), scope)
+    if kind in scopes.ROOTS:
+        scopes.assert_record_scope(conn, kind, getattr(candidate, scopes.ROOTS[kind][1]), scope)
+
+
+def _decision_lineages(conn, identifiers):
+    """One parameterized lookup for persisted provenance, including roots."""
+    identifiers = list(dict.fromkeys(identifiers))
+    if not identifiers:
+        return {}
+    placeholders = ",".join("?" for _ in identifiers)
+    rows = conn.execute(
+        f"""SELECT d.decision_id,d.evidence_id,d.holding_version,d.policy_version,
+            d.payload_json AS decision_payload,
+            e.payload_json AS evidence_payload,h.payload_json AS holding_payload,
+            p.payload_json AS policy_payload FROM decision_snapshots d
+            LEFT JOIN evidence_snapshots e ON e.evidence_id=d.evidence_id
+            LEFT JOIN holding_versions h ON h.holding_version=d.holding_version
+            LEFT JOIN portfolio_policy_versions p ON p.policy_version=d.policy_version
+            WHERE d.decision_id IN ({placeholders})""", identifiers,
+    ).fetchall()
+    result = {}
+    for row in rows:
+        if any(row[field] is None for field in ("evidence_payload", "holding_payload", "policy_payload")):
+            raise LookupError("decision has incomplete persisted references")
+        lineage = tuple(model.model_validate_json(row[field]) for model, field in (
+            (DecisionSnapshot, "decision_payload"), (EvidenceSnapshot, "evidence_payload"),
+            (HoldingVersion, "holding_payload"), (PortfolioPolicy, "policy_payload"),
+        ))
+        decision, evidence, holding, policy = lineage
+        if (decision.decision_id != row["decision_id"]
+                or decision.evidence_id != row["evidence_id"] or evidence.evidence_id != row["evidence_id"]
+                or decision.holding_version != row["holding_version"] or holding.holding_version != row["holding_version"]
+                or decision.policy_version != row["policy_version"] or policy.policy_version != row["policy_version"]
+                or decision.fund_code != evidence.fund_code or decision.fund_code != holding.fund_code):
+            raise SnapshotConflictError("persisted decision references disagree with their projections")
+        result[row["decision_id"]] = lineage
+    return result
+
+
+def save_evidence(snapshot: EvidenceSnapshot, *, scope=scopes.PRODUCTION) -> EvidenceSnapshot:
+    _acceptance_preflight(snapshot, scope)
     identity = _evidence_identity(snapshot)
     _assert_id(snapshot.evidence_id, stable_id("ev", identity), "evidence")
     payload = _model_payload(snapshot)
     semantic_sha = payload_sha256(identity)
     with db.transaction(immediate=True) as conn:
-        existing = _existing_model(conn, "evidence_snapshots", "evidence_id", snapshot.evidence_id, EvidenceSnapshot)
+        _acceptance_guard(conn, "evidence", snapshot, scope=scope)
+        existing = _existing_model(conn, "evidence_snapshots", "evidence_id", snapshot.evidence_id, EvidenceSnapshot, scope=scope)
         if existing is not None:
             if payload_sha256(_evidence_identity(existing)) != semantic_sha:
                 raise SnapshotConflictError("stored evidence id has different content")
@@ -191,13 +257,14 @@ def save_evidence(snapshot: EvidenceSnapshot) -> EvidenceSnapshot:
                     snapshot.created_at.isoformat(), _json(state_payload),
                 ),
             )
+        scopes.register_record(conn, "evidence", snapshot.evidence_id, scope)
     return snapshot
 
 
-def get_evidence(evidence_id: str) -> EvidenceSnapshot | None:
+def get_evidence(evidence_id: str, *, scope=scopes.PRODUCTION) -> EvidenceSnapshot | None:
     conn = db.get_conn()
     try:
-        return _existing_model(conn, "evidence_snapshots", "evidence_id", evidence_id, EvidenceSnapshot)
+        return _existing_model(conn, "evidence_snapshots", "evidence_id", evidence_id, EvidenceSnapshot, scope=scope)
     finally:
         conn.close()
 
@@ -210,13 +277,13 @@ def latest_evidence(fund_code: str, *, at: datetime | None = None) -> EvidenceSn
     try:
         if at is None:
             row = conn.execute(
-                """SELECT payload_json FROM evidence_snapshots
+                """SELECT payload_json FROM production_evidence_snapshots
                    WHERE fund_code=? ORDER BY created_at DESC,rowid DESC LIMIT 1""",
                 (fund_code,),
             ).fetchone()
         else:
             row = conn.execute(
-                """SELECT payload_json FROM evidence_snapshots
+                """SELECT payload_json FROM production_evidence_snapshots
                    WHERE fund_code=? AND created_at<=?
                    ORDER BY created_at DESC,rowid DESC LIMIT 1""",
                 (fund_code, at.isoformat()),
@@ -226,13 +293,15 @@ def latest_evidence(fund_code: str, *, at: datetime | None = None) -> EvidenceSn
         conn.close()
 
 
-def save_holding(version: HoldingVersion) -> HoldingVersion:
+def save_holding(version: HoldingVersion, *, scope=scopes.PRODUCTION) -> HoldingVersion:
+    _acceptance_preflight(version, scope)
     identity = _holding_identity(version)
     _assert_id(version.holding_version, stable_id("hold", identity), "holding")
     semantic_sha = payload_sha256(identity)
     payload = _model_payload(version)
     with db.transaction(immediate=True) as conn:
-        existing = _existing_model(conn, "holding_versions", "holding_version", version.holding_version, HoldingVersion)
+        _acceptance_guard(conn, "holding", version, scope=scope)
+        existing = _existing_model(conn, "holding_versions", "holding_version", version.holding_version, HoldingVersion, scope=scope)
         if existing is not None:
             if payload_sha256(_holding_identity(existing)) != semantic_sha:
                 raise SnapshotConflictError("stored holding id has different content")
@@ -249,37 +318,39 @@ def save_holding(version: HoldingVersion) -> HoldingVersion:
                 version.source, version.created_at.isoformat(), _json(payload), semantic_sha,
             ),
         )
+        scopes.register_record(conn, "holding", version.holding_version, scope)
     return version
 
 
-def get_holding(holding_version: str | None) -> HoldingVersion | None:
+def get_holding(holding_version: str | None, *, scope=scopes.PRODUCTION) -> HoldingVersion | None:
     if not holding_version:
         return None
     conn = db.get_conn()
     try:
-        return _existing_model(conn, "holding_versions", "holding_version", holding_version, HoldingVersion)
+        return _existing_model(conn, "holding_versions", "holding_version", holding_version, HoldingVersion, scope=scope)
     finally:
         conn.close()
 
 
-def save_policy(policy: PortfolioPolicy) -> PortfolioPolicy:
+def save_policy(policy: PortfolioPolicy, *, scope=scopes.PRODUCTION) -> PortfolioPolicy:
+    _acceptance_preflight(policy, scope)
     identity = _policy_identity(policy)
     _assert_id(policy.policy_version, stable_id("pol", identity), "policy")
     semantic_sha = payload_sha256(identity)
     payload = _model_payload(policy)
     with db.transaction(immediate=True) as conn:
-        existing = _existing_model(conn, "portfolio_policy_versions", "policy_version", policy.policy_version, PortfolioPolicy)
+        _acceptance_guard(conn, "policy", policy, scope=scope)
+        existing = _existing_model(conn, "portfolio_policy_versions", "policy_version", policy.policy_version, PortfolioPolicy, scope=scope)
         if existing is not None:
             if payload_sha256(_policy_identity(existing)) != semantic_sha:
                 raise SnapshotConflictError("stored policy id has different content")
             return existing
-        rows = conn.execute(
-            """SELECT p.payload_json
-               FROM portfolio_policy_versions p
-               LEFT JOIN portfolio_policy_versions child
-                 ON child.supersedes=p.policy_version
-               WHERE child.policy_version IS NULL"""
-        ).fetchall()
+        if policy.supersedes:
+            predecessor = _write_reference(conn, "portfolio_policy_versions", "policy_version", policy.supersedes, PortfolioPolicy)
+            if predecessor is not None:
+                _acceptance_guard(conn, "policy", policy, predecessor, scope=scope)
+        sql, params = scopes.policy_tips_query(scope)
+        rows = conn.execute(sql, params).fetchall()
         if not rows:
             if policy.supersedes is not None:
                 raise ValueError("the first policy cannot supersede another version")
@@ -287,6 +358,7 @@ def save_policy(policy: PortfolioPolicy) -> PortfolioPolicy:
             if len(rows) != 1:
                 raise SnapshotConflictError("stored policy history contains multiple chain tips")
             tip = PortfolioPolicy.model_validate_json(rows[0]["payload_json"])
+            _acceptance_guard(conn, "policy", policy, tip, scope=scope)
             if policy.supersedes != tip.policy_version:
                 raise ValueError("new policy must supersede the current chain tip")
             if policy.effective_at <= tip.effective_at:
@@ -308,6 +380,7 @@ def save_policy(policy: PortfolioPolicy) -> PortfolioPolicy:
                 policy.supersedes, _json(payload), semantic_sha,
             ),
         )
+        scopes.register_record(conn, "policy", policy.policy_version, scope)
     return policy
 
 
@@ -320,7 +393,7 @@ def get_policy(policy_version: str | None = None, *, at: datetime | None = None)
     return read_policy(policy_version, at=at)
 
 
-def read_policy(policy_version: str | None = None, *, at: datetime | None = None) -> PortfolioPolicy:
+def read_policy(policy_version: str | None = None, *, at: datetime | None = None, scope=scopes.PRODUCTION) -> PortfolioPolicy:
     """Read an effective policy without creating the default policy row."""
     current = at or _now()
     if current.tzinfo is None:
@@ -330,7 +403,7 @@ def read_policy(policy_version: str | None = None, *, at: datetime | None = None
         conn = db.get_conn()
         try:
             policy = _existing_model(
-                conn, "portfolio_policy_versions", "policy_version", policy_version, PortfolioPolicy,
+                conn, "portfolio_policy_versions", "policy_version", policy_version, PortfolioPolicy, scope=scope,
             )
         finally:
             conn.close()
@@ -341,8 +414,12 @@ def read_policy(policy_version: str | None = None, *, at: datetime | None = None
         return policy
     conn = db.get_conn()
     try:
+        scope = scopes.validate_scope(scope)
+        table = scopes.production_table("portfolio_policy_versions") if scope == scopes.PRODUCTION else "portfolio_policy_versions"
         rows = conn.execute(
-            "SELECT payload_json FROM portfolio_policy_versions ORDER BY effective_at DESC, created_at DESC"
+            f"SELECT p.payload_json FROM {table} p JOIN v8_record_scopes s "
+            "ON s.record_kind='policy' AND s.record_id=p.policy_version WHERE s.scope_key=? "
+            "ORDER BY p.effective_at DESC,p.created_at DESC", (scope.key,),
         ).fetchall()
     finally:
         conn.close()
@@ -363,26 +440,27 @@ def read_policy_history() -> list[PortfolioPolicy]:
     conn = db.get_conn()
     try:
         rows = conn.execute(
-            "SELECT payload_json FROM portfolio_policy_versions ORDER BY effective_at DESC, created_at DESC"
+            "SELECT payload_json FROM production_portfolio_policy_versions ORDER BY effective_at DESC, created_at DESC"
         ).fetchall()
         return [PortfolioPolicy.model_validate_json(row["payload_json"]) for row in rows]
     finally:
         conn.close()
 
 
-def save_decision(snapshot: DecisionSnapshot) -> DecisionSnapshot:
+def save_decision(snapshot: DecisionSnapshot, *, scope=scopes.PRODUCTION) -> DecisionSnapshot:
+    _acceptance_preflight(snapshot, scope)
     _assert_id(snapshot.decision_id, stable_id("dec", _decision_identity(snapshot)), "decision")
     payload = _model_payload(snapshot)
     semantic = _without(payload, "created_at")
     semantic_sha = payload_sha256(semantic)
     with db.transaction(immediate=True) as conn:
-        evidence = _existing_model(
+        evidence = _write_reference(
             conn, "evidence_snapshots", "evidence_id", snapshot.evidence_id, EvidenceSnapshot,
         )
-        holding = _existing_model(
+        holding = _write_reference(
             conn, "holding_versions", "holding_version", snapshot.holding_version, HoldingVersion,
         )
-        policy = _existing_model(
+        policy = _write_reference(
             conn, "portfolio_policy_versions", "policy_version", snapshot.policy_version, PortfolioPolicy,
         )
         if evidence is None:
@@ -391,6 +469,7 @@ def save_decision(snapshot: DecisionSnapshot) -> DecisionSnapshot:
             raise LookupError("decision holding version does not exist")
         if policy is None:
             raise LookupError("decision policy version does not exist")
+        _acceptance_guard(conn, "decision", snapshot, evidence, holding, policy, scope=scope)
         if evidence.fund_code != snapshot.fund_code or holding.fund_code != snapshot.fund_code:
             raise ValueError("decision, evidence, and holding fund codes must match")
         if holding.user_state != snapshot.user_state:
@@ -405,7 +484,7 @@ def save_decision(snapshot: DecisionSnapshot) -> DecisionSnapshot:
             raise ValueError("decision cannot reference a future holding state")
         if policy.created_at > snapshot.created_at or policy.effective_at > snapshot.created_at:
             raise ValueError("decision cannot reference a future policy")
-        existing = _existing_model(conn, "decision_snapshots", "decision_id", snapshot.decision_id, DecisionSnapshot)
+        existing = _existing_model(conn, "decision_snapshots", "decision_id", snapshot.decision_id, DecisionSnapshot, scope=scope)
         if existing is not None:
             if payload_sha256(_without(_model_payload(existing), "created_at")) != semantic_sha:
                 raise SnapshotConflictError("stored decision id has different output")
@@ -430,13 +509,14 @@ def save_decision(snapshot: DecisionSnapshot) -> DecisionSnapshot:
                 _json(payload), semantic_sha,
             ),
         )
+        scopes.register_record(conn, "decision", snapshot.decision_id, scope)
     return snapshot
 
 
-def get_decision(decision_id: str) -> DecisionSnapshot | None:
+def get_decision(decision_id: str, *, scope=scopes.PRODUCTION) -> DecisionSnapshot | None:
     conn = db.get_conn()
     try:
-        return _existing_model(conn, "decision_snapshots", "decision_id", decision_id, DecisionSnapshot)
+        return _existing_model(conn, "decision_snapshots", "decision_id", decision_id, DecisionSnapshot, scope=scope)
     finally:
         conn.close()
 
@@ -461,7 +541,7 @@ def latest_decision(
             clauses.append("created_at<=?")
             params.append(at.isoformat())
         row = conn.execute(
-            f"""SELECT payload_json FROM decision_snapshots
+            f"""SELECT payload_json FROM production_decision_snapshots
                 WHERE {' AND '.join(clauses)}
                 ORDER BY created_at DESC,rowid DESC LIMIT 1""",
             params,
@@ -475,7 +555,7 @@ def decision_history(fund_code: str, limit: int = 50) -> list[DecisionSnapshot]:
     conn = db.get_conn()
     try:
         rows = conn.execute(
-            """SELECT payload_json FROM decision_snapshots WHERE fund_code=?
+            """SELECT payload_json FROM production_decision_snapshots WHERE fund_code=?
                ORDER BY created_at DESC, rowid DESC LIMIT ?""",
             (fund_code, max(1, min(200, int(limit)))),
         ).fetchall()
@@ -491,13 +571,13 @@ def diff_for_decision(decision: DecisionSnapshot) -> DecisionDiff:
     conn = db.get_conn()
     try:
         current = conn.execute(
-            "SELECT rowid,created_at FROM decision_snapshots WHERE decision_id=?",
+            "SELECT rowid,created_at FROM production_decision_snapshots WHERE decision_id=?",
             (decision.decision_id,),
         ).fetchone()
         if current is None:
             raise LookupError("decision is not persisted")
         row = conn.execute(
-            """SELECT payload_json FROM decision_snapshots
+            """SELECT payload_json FROM production_decision_snapshots
                WHERE fund_code=? AND decision_id<>?
                  AND (created_at<? OR (created_at=? AND rowid<?))
                ORDER BY created_at DESC,rowid DESC LIMIT 1""",
@@ -648,6 +728,7 @@ def build_portfolio_decision_snapshot(
 def save_portfolio_decision(
     snapshot: PortfolioDecisionSnapshot,
 ) -> PortfolioDecisionSnapshot:
+    _acceptance_preflight(snapshot)
     identity = _portfolio_decision_identity(snapshot)
     _assert_id(
         snapshot.portfolio_decision_id,
@@ -657,7 +738,8 @@ def save_portfolio_decision(
     payload = _model_payload(snapshot)
     semantic_sha = payload_sha256(identity)
     with db.transaction(immediate=True) as conn:
-        policy = _existing_model(
+        _acceptance_guard(conn, "portfolio_decision", snapshot)
+        policy = _write_reference(
             conn,
             "portfolio_policy_versions",
             "policy_version",
@@ -666,15 +748,13 @@ def save_portfolio_decision(
         )
         if policy is None:
             raise LookupError("portfolio decision policy does not exist")
+        lineages = _decision_lineages(conn, [item.decision_id for item in snapshot.components])
+        _acceptance_guard(conn, "portfolio_decision", snapshot, policy,
+                          *(record for lineage in lineages.values() for record in lineage))
         component_decision_dates: list[date] = []
         for component in snapshot.components:
-            decision = _existing_model(
-                conn,
-                "decision_snapshots",
-                "decision_id",
-                component.decision_id,
-                DecisionSnapshot,
-            )
+            lineage = lineages.get(component.decision_id)
+            decision = lineage[0] if lineage else None
             if decision is None:
                 raise LookupError(f"portfolio component decision does not exist: {component.fund_code}")
             if (
@@ -696,13 +776,7 @@ def save_portfolio_decision(
                 or not _close(component.target_weight, guidance.target_weight)
             ):
                 raise ValueError("portfolio target weight does not match decision guidance")
-            holding = _existing_model(
-                conn,
-                "holding_versions",
-                "holding_version",
-                component.holding_version,
-                HoldingVersion,
-            )
+            holding = lineage[2] if lineage else None
             if holding is None:
                 raise LookupError("portfolio component holding version does not exist")
             expected_current = 0.0 if holding.user_state == "unheld" else holding.current_weight
@@ -766,7 +840,7 @@ def portfolio_decision_snapshots(limit: int = 100) -> list[PortfolioDecisionSnap
     conn = db.get_conn()
     try:
         rows = conn.execute(
-            """SELECT payload_json FROM portfolio_decision_snapshots
+            """SELECT payload_json FROM production_portfolio_decision_snapshots
                ORDER BY julianday(created_at) DESC,rowid DESC LIMIT ?""",
             (max(1, min(10_000, int(limit))),),
         ).fetchall()
@@ -932,7 +1006,7 @@ def _peer_benchmark(
 ) -> tuple[float | None, int]:
     rows = conn.execute(
         """SELECT d.payload_json AS decision_json,e.payload_json AS evidence_json
-           FROM decision_snapshots d JOIN evidence_snapshots e ON e.evidence_id=d.evidence_id
+           FROM production_decision_snapshots d JOIN production_evidence_snapshots e ON e.evidence_id=d.evidence_id
            WHERE d.decision_id<>? AND d.fund_code<>? AND e.fund_type=?
              AND julianday(d.created_at)<=julianday(?)
              AND julianday(e.created_at)<=julianday(?)
@@ -992,6 +1066,7 @@ def _max_drawdown(base_nav: float, path: Iterable[float]) -> float:
 
 
 def save_outcome(outcome: OutcomeEvaluation) -> OutcomeEvaluation:
+    _acceptance_preflight(outcome)
     identity = {
         "decision_id": outcome.decision_id,
         "evaluation_kind": outcome.evaluation_kind,
@@ -1003,14 +1078,12 @@ def save_outcome(outcome: OutcomeEvaluation) -> OutcomeEvaluation:
     semantic = _without(payload, "created_at")
     semantic_sha = payload_sha256(semantic)
     with db.transaction(immediate=True) as conn:
-        decision = _existing_model(
-            conn, "decision_snapshots", "decision_id", outcome.decision_id, DecisionSnapshot,
-        )
-        if decision is None:
+        _acceptance_guard(conn, "outcome", outcome)
+        lineage = _decision_lineages(conn, [outcome.decision_id]).get(outcome.decision_id)
+        if lineage is None:
             raise LookupError("outcome decision does not exist")
-        evidence = _existing_model(
-            conn, "evidence_snapshots", "evidence_id", decision.evidence_id, EvidenceSnapshot,
-        )
+        _acceptance_guard(conn, "outcome", outcome, *lineage)
+        decision, evidence, _holding, _policy = lineage
         if evidence is None or evidence.official_nav is None or evidence.official_nav_date is None:
             raise LookupError("outcome decision has no persisted official NAV evidence")
         if outcome.created_at < decision.created_at:
@@ -1121,7 +1194,7 @@ def save_outcome(outcome: OutcomeEvaluation) -> OutcomeEvaluation:
                 raise SnapshotConflictError("stored outcome id has different content")
             return existing
         collision = conn.execute(
-            """SELECT payload_json FROM outcome_evaluations
+            """SELECT payload_json FROM production_outcome_evaluations
                WHERE decision_id=? AND evaluation_kind=? AND horizon=?""",
             (outcome.decision_id, outcome.evaluation_kind, outcome.horizon),
         ).fetchone()
@@ -1221,7 +1294,7 @@ def settle_outcomes(decision_id: str, horizons: Iterable[int] = HORIZONS) -> lis
             if horizon not in HORIZONS:
                 raise ValueError("unsupported outcome horizon")
             existing = conn.execute(
-                """SELECT 1 FROM outcome_evaluations
+                """SELECT 1 FROM production_outcome_evaluations
                    WHERE decision_id=? AND evaluation_kind='horizon' AND horizon=?""",
                 (decision_id, horizon),
             ).fetchone()
@@ -1265,7 +1338,7 @@ def settle_outcomes(decision_id: str, horizons: Iterable[int] = HORIZONS) -> lis
             and evidence.estimate is not None
         ):
             existing = conn.execute(
-                """SELECT 1 FROM outcome_evaluations
+                """SELECT 1 FROM production_outcome_evaluations
                    WHERE decision_id=? AND evaluation_kind='qdii_target' AND horizon=0""",
                 (decision_id,),
             ).fetchone()
@@ -1300,7 +1373,7 @@ def outcome_rows(decision_id: str) -> list[OutcomeEvaluation]:
     conn = db.get_conn()
     try:
         rows = conn.execute(
-            """SELECT payload_json FROM outcome_evaluations WHERE decision_id=?
+            """SELECT payload_json FROM production_outcome_evaluations WHERE decision_id=?
                ORDER BY evaluation_kind,horizon""",
             (decision_id,),
         ).fetchall()
@@ -1332,8 +1405,8 @@ def historical_outcome_summary(
     try:
         rows = conn.execute(
             """SELECT o.payload_json
-               FROM outcome_evaluations o
-               JOIN decision_snapshots d ON d.decision_id=o.decision_id
+               FROM production_outcome_evaluations o
+               JOIN production_decision_snapshots d ON d.decision_id=o.decision_id
                WHERE d.fund_code=? AND d.strategy_version=?
                  AND o.evaluation_kind='horizon' AND o.horizon=?
                  AND o.evaluation_date<?
@@ -1465,6 +1538,7 @@ def _calculate_portfolio_outcome(
 def save_portfolio_outcome(
     outcome: PortfolioOutcomeEvaluation,
 ) -> PortfolioOutcomeEvaluation:
+    _acceptance_preflight(outcome)
     identity = {
         "portfolio_decision_id": outcome.portfolio_decision_id,
         "horizon": outcome.horizon,
@@ -1475,7 +1549,8 @@ def save_portfolio_outcome(
     semantic = _without(payload, "created_at")
     semantic_sha = payload_sha256(semantic)
     with db.transaction(immediate=True) as conn:
-        snapshot = _existing_model(
+        _acceptance_guard(conn, "portfolio_outcome", outcome)
+        snapshot = _write_reference(
             conn,
             "portfolio_decision_snapshots",
             "portfolio_decision_id",
@@ -1484,6 +1559,9 @@ def save_portfolio_outcome(
         )
         if snapshot is None:
             raise LookupError("portfolio outcome decision does not exist")
+        lineages = _decision_lineages(conn, [item.decision_id for item in snapshot.components])
+        _acceptance_guard(conn, "portfolio_outcome", outcome, snapshot,
+                          *(record for lineage in lineages.values() for record in lineage))
         if outcome.created_at < snapshot.created_at:
             raise ValueError("portfolio outcome cannot predate its decision")
         expected = _calculate_portfolio_outcome(
@@ -1508,7 +1586,7 @@ def save_portfolio_outcome(
                 raise SnapshotConflictError("stored portfolio outcome id has different content")
             return existing
         collision = conn.execute(
-            """SELECT payload_json FROM portfolio_outcome_evaluations
+            """SELECT payload_json FROM production_portfolio_outcome_evaluations
                WHERE portfolio_decision_id=? AND horizon=?""",
             (outcome.portfolio_decision_id, outcome.horizon),
         ).fetchone()
@@ -1550,7 +1628,7 @@ def portfolio_outcome_rows(
     conn = db.get_conn()
     try:
         rows = conn.execute(
-            """SELECT payload_json FROM portfolio_outcome_evaluations
+            """SELECT payload_json FROM production_portfolio_outcome_evaluations
                WHERE portfolio_decision_id=? ORDER BY horizon""",
             (portfolio_decision_id,),
         ).fetchall()
@@ -1575,7 +1653,7 @@ def settle_portfolio_outcomes(
         existing = {
             int(row["horizon"])
             for row in conn.execute(
-                """SELECT horizon FROM portfolio_outcome_evaluations
+                """SELECT horizon FROM production_portfolio_outcome_evaluations
                    WHERE portfolio_decision_id=?""",
                 (portfolio_decision_id,),
             ).fetchall()
@@ -1635,9 +1713,9 @@ def settle_all_portfolio_outcomes(limit: int = 100) -> dict:
     try:
         rows = conn.execute(
             """SELECT p.portfolio_decision_id
-               FROM portfolio_decision_snapshots p
+               FROM production_portfolio_decision_snapshots p
                WHERE (
-                 SELECT COUNT(*) FROM portfolio_outcome_evaluations o
+                 SELECT COUNT(*) FROM production_portfolio_outcome_evaluations o
                  WHERE o.portfolio_decision_id=p.portfolio_decision_id
                    AND o.horizon IN (5,20,60)
                ) < 3
@@ -1717,13 +1795,13 @@ def outcome_settlement_status(
         if requested:
             placeholders = ",".join("?" for _ in requested)
             rows = conn.execute(
-                f"""SELECT decision_id,payload_json FROM decision_snapshots
+                f"""SELECT decision_id,payload_json FROM production_decision_snapshots
                     WHERE decision_id IN ({placeholders})""",
                 requested,
             ).fetchall()
         else:
             rows = conn.execute(
-                """SELECT decision_id,payload_json FROM decision_snapshots
+                """SELECT decision_id,payload_json FROM production_decision_snapshots
                    ORDER BY julianday(created_at) DESC,rowid DESC LIMIT ?""",
                 (bounded_limit,),
             ).fetchall()
@@ -1748,7 +1826,7 @@ def outcome_settlement_status(
             existing = {
                 (item["evaluation_kind"], int(item["horizon"]))
                 for item in conn.execute(
-                    """SELECT evaluation_kind,horizon FROM outcome_evaluations
+                    """SELECT evaluation_kind,horizon FROM production_outcome_evaluations
                        WHERE decision_id=?""",
                     (decision.decision_id,),
                 ).fetchall()
@@ -1799,8 +1877,8 @@ def settle_all_outcomes(limit: int = 1000) -> dict:
     try:
         ids = [row[0] for row in conn.execute(
             """SELECT d.decision_id
-               FROM decision_snapshots d
-               JOIN evidence_snapshots e ON e.evidence_id=d.evidence_id
+               FROM production_decision_snapshots d
+               JOIN production_evidence_snapshots e ON e.evidence_id=d.evidence_id
                WHERE (
                  (
                    EXISTS (
@@ -1810,7 +1888,7 @@ def settle_all_outcomes(limit: int = 1000) -> dict:
                    )
                    AND (
                      (NOT EXISTS (
-                        SELECT 1 FROM outcome_evaluations o
+                        SELECT 1 FROM production_outcome_evaluations o
                         WHERE o.decision_id=d.decision_id
                           AND o.evaluation_kind='horizon' AND o.horizon=5
                       ) AND 5 <= (
@@ -1820,7 +1898,7 @@ def settle_all_outcomes(limit: int = 1000) -> dict:
                       ))
                      OR
                      (NOT EXISTS (
-                        SELECT 1 FROM outcome_evaluations o
+                        SELECT 1 FROM production_outcome_evaluations o
                         WHERE o.decision_id=d.decision_id
                           AND o.evaluation_kind='horizon' AND o.horizon=20
                       ) AND 20 <= (
@@ -1830,7 +1908,7 @@ def settle_all_outcomes(limit: int = 1000) -> dict:
                       ))
                      OR
                      (NOT EXISTS (
-                        SELECT 1 FROM outcome_evaluations o
+                        SELECT 1 FROM production_outcome_evaluations o
                         WHERE o.decision_id=d.decision_id
                           AND o.evaluation_kind='horizon' AND o.horizon=60
                       ) AND 60 <= (
@@ -1848,7 +1926,7 @@ def settle_all_outcomes(limit: int = 1000) -> dict:
                      WHERE target.code=d.fund_code AND target.date=e.target_nav_date
                    )
                    AND NOT EXISTS (
-                     SELECT 1 FROM outcome_evaluations o
+                     SELECT 1 FROM production_outcome_evaluations o
                      WHERE o.decision_id=d.decision_id
                        AND o.evaluation_kind='qdii_target' AND o.horizon=0
                    )
@@ -1887,8 +1965,8 @@ def strategy_performance(strategy_version: str) -> dict:
     try:
         rows = conn.execute(
             """SELECT o.payload_json,d.decision_id,e.fund_type
-               FROM outcome_evaluations o JOIN decision_snapshots d ON d.decision_id=o.decision_id
-               JOIN evidence_snapshots e ON e.evidence_id=d.evidence_id
+               FROM production_outcome_evaluations o JOIN production_decision_snapshots d ON d.decision_id=o.decision_id
+               JOIN production_evidence_snapshots e ON e.evidence_id=d.evidence_id
                WHERE d.strategy_version=? AND o.evaluation_kind='horizon'
                ORDER BY o.horizon,o.evaluation_date""",
             (strategy_version,),
@@ -2026,23 +2104,20 @@ def record_notification_events_batch(
         for identifier in identifiers
     ]
     with db.transaction(immediate=True) as conn:
+        _acceptance_guard(conn, "notification", events[0])
         placeholders = ",".join("?" for _ in identifiers)
-        found = {
-            row["decision_id"]
-            for row in conn.execute(
-                f"SELECT decision_id FROM decision_snapshots WHERE decision_id IN ({placeholders})",
-                identifiers,
-            ).fetchall()
-        }
-        missing = [identifier for identifier in identifiers if identifier not in found]
+        lineages = _decision_lineages(conn, identifiers)
+        missing = [identifier for identifier in identifiers if identifier not in lineages]
         if missing:
             raise LookupError(f"notification decision not found: {','.join(missing)}")
+        _acceptance_guard(conn, "notification", events[0],
+                          *(record for lineage in lineages.values() for record in lineage))
 
         if status == "attempted":
             event_ids = [event.notification_event_id for event in events]
             event_placeholders = ",".join("?" for _ in event_ids)
             claimed_rows = conn.execute(
-                f"""SELECT event_log_id,detail_json FROM notification_events
+                f"""SELECT event_log_id,detail_json FROM production_notification_events
                     WHERE notification_event_id IN ({event_placeholders})
                       AND status='attempted' AND natural_schedule=?""",
                 [*event_ids, int(natural_schedule)],
@@ -2065,7 +2140,7 @@ def record_notification_events_batch(
                 return results
             if not natural_schedule:
                 natural_terminal = conn.execute(
-                    f"""SELECT 1 FROM notification_events
+                    f"""SELECT 1 FROM production_notification_events
                         WHERE decision_id IN ({placeholders})
                           AND natural_schedule=1
                           AND substr(scheduled_window,1,10)=?
@@ -2080,7 +2155,7 @@ def record_notification_events_batch(
             if natural_schedule:
                 prior_rows = conn.execute(
                     f"""SELECT decision_id,notification_event_id,status,attempt_no,error_class
-                        FROM notification_events
+                        FROM production_notification_events
                         WHERE decision_id IN ({placeholders})
                           AND natural_schedule=1
                           AND substr(scheduled_window,1,10)=?
@@ -2110,7 +2185,7 @@ def record_notification_events_batch(
                     ]
             for event in events:
                 scheduled = conn.execute(
-                    """SELECT 1 FROM notification_events
+                    """SELECT 1 FROM production_notification_events
                        WHERE notification_event_id=? AND status='scheduled'
                          AND attempt_no=0 AND natural_schedule=? LIMIT 1""",
                     (event.notification_event_id, int(natural_schedule)),
@@ -2121,7 +2196,7 @@ def record_notification_events_batch(
         results: list[NotificationRecordResult] = []
         for event in events:
             existing_row = conn.execute(
-                "SELECT detail_json FROM notification_events WHERE event_log_id=?",
+                "SELECT detail_json FROM production_notification_events WHERE event_log_id=?",
                 (event.event_log_id,),
             ).fetchone()
             if existing_row:
@@ -2137,7 +2212,7 @@ def record_notification_events_batch(
 
             if status in {"sent", "failed", "compensated"}:
                 attempted = conn.execute(
-                    """SELECT 1 FROM notification_events
+                    """SELECT 1 FROM production_notification_events
                        WHERE notification_event_id=? AND status='attempted'
                          AND attempt_no=? AND natural_schedule=? LIMIT 1""",
                     (event.notification_event_id, attempt_no, int(natural_schedule)),
@@ -2193,7 +2268,7 @@ def notification_events(decision_id: str) -> list[NotificationEvent]:
     conn = db.get_conn()
     try:
         rows = conn.execute(
-            """SELECT detail_json FROM notification_events WHERE decision_id=?
+            """SELECT detail_json FROM production_notification_events WHERE decision_id=?
                ORDER BY occurred_at,event_log_id""",
             (decision_id,),
         ).fetchall()
@@ -2206,7 +2281,7 @@ def notification_was_sent(decision_id: str) -> bool:
     conn = db.get_conn()
     try:
         return bool(conn.execute(
-            """SELECT 1 FROM notification_events
+            """SELECT 1 FROM production_notification_events
                WHERE decision_id=? AND status IN ('sent','compensated') LIMIT 1""",
             (decision_id,),
         ).fetchone())

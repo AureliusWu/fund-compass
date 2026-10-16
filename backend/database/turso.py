@@ -27,6 +27,16 @@ _CONTROL = {"BEGIN", "COMMIT", "END", "ROLLBACK", "SAVEPOINT", "RELEASE"}
 _LEADING = re.compile(r"\A(?:\s+|--[^\n]*(?:\n|$)|/\*.*?\*/)*", re.S)
 
 
+class TursoHTTPError(sqlite3.OperationalError):
+    """A sanitized HTTP observation, not proof of token revocation or commit."""
+
+    def __init__(self, status_code: int):
+        if type(status_code) is not int or not 100 <= status_code <= 599:
+            raise ValueError("Invalid Turso HTTP status")
+        self.status_code = status_code
+        super().__init__("Turso HTTP request failed; no automatic retry")
+
+
 def _keyword(sql: str) -> str:
     if not isinstance(sql, str) or not sql.strip():
         raise sqlite3.ProgrammingError("SQL must be a nonempty string")
@@ -304,9 +314,14 @@ class Connection:
             )
         except requests.RequestException:
             self._invalidate("Turso request failed; outcome unknown, no automatic retry")
+        completed = False
         try:
-            if response.status_code != 200:
-                self._invalidate("Turso HTTP request failed; no automatic retry")
+            status = response.status_code
+            if type(status) is not int or not 100 <= status <= 599:
+                raise ValueError("invalid HTTP status")
+            if status != 200:
+                self._broken = True
+                raise TursoHTTPError(status) from None
             payload = response.json()
             if not isinstance(payload, dict):
                 raise ValueError("response is not an object")
@@ -321,11 +336,18 @@ class Connection:
             if not closing and (not isinstance(baton, str) or not baton):
                 raise ValueError("database stream unexpectedly closed")
             self._baton = baton
+            completed = True
             return results
         except (KeyError, TypeError, ValueError):
             self._invalidate("Turso returned an invalid or unsafe protocol response")
         finally:
-            response.close()
+            # Cleanup must not erase an earlier HTTP/protocol failure. A lone
+            # cleanup failure still invalidates the stream, with no raw detail.
+            try:
+                response.close()
+            except Exception:
+                if completed:
+                    self._invalidate("Turso response cleanup failed; no automatic retry")
 
     def _run(self, operation):
         # Server state, not guessed SQL text, decides whether a transaction is
@@ -446,17 +468,24 @@ class Connection:
     def close(self):
         if self._closed:
             return
+        completed = False
         try:
             if self._baton is not None and not self._broken:
                 result = self._pipeline([{"type": "close"}])[0]
                 if result.get("type") != "ok":
                     raise _remote_error(result.get("error"))
+            completed = True
         finally:
-            self._session.headers.pop("Authorization", None)
-            self._session.close()
-            self._closed = True
-            self._baton = None
-            self.in_transaction = False
+            try:
+                self._session.headers.pop("Authorization", None)
+                self._session.close()
+            except Exception:
+                if completed:
+                    self._invalidate("Turso connection cleanup failed; no automatic retry")
+            finally:
+                self._closed = True
+                self._baton = None
+                self.in_transaction = False
 
     def __enter__(self):
         self._check()

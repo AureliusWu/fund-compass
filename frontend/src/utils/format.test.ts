@@ -44,3 +44,11 @@ describe('stars', () => {
     expect(stars(0)).toBe('☆☆☆☆☆')
   })
 })
+
+describe('nonfinite financial values', () => {
+  it.each([Infinity, -Infinity, NaN])('never displays or colors %s as a real move', value => {
+    expect(pct(value)).toBe('--')
+    expect(num(value)).toBe('--')
+    expect(colorOf(value)).toBe('var(--text-muted)')
+  })
+})
