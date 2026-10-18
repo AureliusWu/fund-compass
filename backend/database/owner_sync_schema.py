@@ -12,6 +12,17 @@ MAX_SCHEMA_OBJECTS = 128
 MAX_SCHEMA_DDL_BYTES = 16 * 1024
 MAX_SCHEMA_NAME_BYTES = 256
 _SEQUENCE_DDL = "CREATE TABLE sqlite_sequence(name,seq)"
+# SQLite's normal PRAGMA optimize / ANALYZE may create this exact table.
+# Its planner data is not Owner data and is never read by this verifier.
+_SQLITE_STAT1_DDL = "CREATE TABLE sqlite_stat1(tbl,idx,stat)"
+# Optional operational state created by the normal universe-artifact importer.
+# This is a fixed schema allowance, not input DDL or a read of import metadata.
+_UNIVERSE_IMPORT_STATE_DDL = """CREATE TABLE universe_import_state (
+    singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
+    sha256 TEXT NOT NULL,
+    fund_count INTEGER NOT NULL CHECK(fund_count >= 0),
+    imported_at TEXT NOT NULL
+)"""
 OWNER_SYNC_DDL = {
     "owner_sync_schema": """CREATE TABLE owner_sync_schema (
       singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
@@ -135,6 +146,12 @@ def verify_owner_sync_schema(conn) -> None:
     expected = _verify_core(conn, actual)
     expected.update({("table", name): ddl for name, ddl in OWNER_SYNC_DDL.items()})
     expected.update(_implicit_indexes(True))
+    # Permit only this present, exact operational table. Unknown objects,
+    # including extra indexes or similarly named tables, remain rejected below.
+    if ("table", "universe_import_state") in actual:
+        expected[("table", "universe_import_state")] = _UNIVERSE_IMPORT_STATE_DDL
+    if ("table", "sqlite_stat1") in actual:
+        expected[("table", "sqlite_stat1")] = _SQLITE_STAT1_DDL
     if set(actual) != set(expected):
         raise sqlite3.DatabaseError("Owner sync schema contains missing or unknown objects")
     for key, ddl in expected.items():

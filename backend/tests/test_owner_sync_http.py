@@ -534,8 +534,10 @@ def test_owner_sync_router_is_mounted_in_main_without_opening_a_connection(monke
     monkeypatch.setattr(db, "get_conn", forbidden)
     monkeypatch.setattr(db, "_database_file", forbidden)
     import main
-    routes = {(route.path, method) for route in main.app.routes
-              for method in getattr(route, "methods", ()) if route.path.startswith("/api/v2/owner/sync")}
+    # FastAPI may retain included routers as nested route entries. Assert the
+    # public OpenAPI contract rather than its version-specific internal shape.
+    routes = {(path, method.upper()) for path, operations in main.app.openapi()["paths"].items()
+              for method in operations if path.startswith("/api/v2/owner/sync")}
     assert routes == {
         ("/api/v2/owner/sync", "POST"), ("/api/v2/owner/sync", "GET"),
         ("/api/v2/owner/sync/requests/{request_id}", "GET"),
