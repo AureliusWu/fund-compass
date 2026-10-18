@@ -29,6 +29,7 @@ export interface OwnerSyncCandidateStatus {
   readonly latestObservedHead: number | null
   readonly baselineReady: boolean
 }
+export type OwnerSyncBaseline = Readonly<{ pulledRevision: number; records: readonly OwnerSyncRecord[] }>
 type DraftOperation = Omit<OwnerSyncRequestInput['operations'][number], 'base_values'>
 type WriteOutcome = ReturnType<typeof parseSyncWriteResponse>
 
@@ -65,6 +66,7 @@ export function createOwnerSyncCandidate(options: {
   let latestObservedHead: number | null = null
   let baselineReady = false
   let lastResult: WriteOutcome | null = null
+  let lastResultGeneration: number | null = null
 
   function context(): SessionContext {
     const current = options.session()
@@ -82,6 +84,7 @@ export function createOwnerSyncCandidate(options: {
     latestObservedHead = null
     baselineReady = false
     lastResult = null
+    lastResultGeneration = null
   }
 
   function invalidate(): void {
@@ -146,6 +149,15 @@ export function createOwnerSyncCandidate(options: {
     })
   }
 
+  function getBaseline(): OwnerSyncBaseline | null {
+    const current = context()
+    if (!enabled || !current.authenticated || busy || !baselineReady
+      || baselineGeneration !== current.generation || lastCompletePulledRevision === null) return null
+    // Parsed records are already deeply frozen; never expose the mutable Map.
+    return Object.freeze({ pulledRevision: lastCompletePulledRevision,
+      records: Object.freeze([...baseline.values()]) })
+  }
+
   async function packet(snapshot: OwnerSyncOutboxSnapshot): Promise<BuiltOwnerSyncRequest> {
     if (!snapshot.entry) throw new OwnerSyncCandidateError('sync_invalid_transition')
     return restoreOwnerSyncRequest(snapshot.entry.rawBody, snapshot.entry.requestHash)
@@ -153,6 +165,7 @@ export function createOwnerSyncCandidate(options: {
 
   async function markUnknown(snapshot: OwnerSyncOutboxSnapshot): Promise<void> {
     lastResult = null
+    lastResultGeneration = null
     if (snapshot.entry?.state === 'confirmed' || snapshot.entry?.state === 'conflict') {
       state = snapshot.entry.state
       return
@@ -207,6 +220,7 @@ export function createOwnerSyncCandidate(options: {
     assertActive(captured)
     state = nextState
     lastResult = result
+    lastResultGeneration = captured.generation
     if (result.kind === 'success') {
       latestObservedHead = Math.max(latestObservedHead ?? 0, result.result.revision)
       // A global head observed in POST is NOT a completed pull checkpoint.
@@ -217,6 +231,7 @@ export function createOwnerSyncCandidate(options: {
 
   return {
     status,
+    getBaseline,
     setCloudConsent(value: boolean): void {
       if (typeof value !== 'boolean') throw new OwnerSyncCandidateError('sync_disabled')
       enabled = value
@@ -225,7 +240,7 @@ export function createOwnerSyncCandidate(options: {
     notifySessionChanged(): void { invalidate() },
     getLastResult(): WriteOutcome | null {
       const current = context()
-      return enabled && current.authenticated && baselineGeneration === current.generation ? lastResult : null
+      return enabled && current.authenticated && lastResultGeneration === current.generation ? lastResult : null
     },
     async hydratePending(): Promise<OwnerSyncCandidateStatus> {
       return exclusively(async captured => {
@@ -233,6 +248,7 @@ export function createOwnerSyncCandidate(options: {
         assertActive(captured)
         state = !snapshot.entry ? 'idle' : snapshot.entry.state === 'attempted' ? 'unknown' : snapshot.entry.state
         lastResult = null
+        lastResultGeneration = null
         return status()
       })
     },
@@ -402,6 +418,7 @@ export function createOwnerSyncCandidate(options: {
         assertActive(captured)
         state = 'idle'
         lastResult = null
+        lastResultGeneration = null
         return status()
       })
     },

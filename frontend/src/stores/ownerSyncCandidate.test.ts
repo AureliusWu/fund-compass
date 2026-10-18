@@ -374,4 +374,59 @@ describe('explicit owner sync candidate', () => {
     expect(f.transport.changes).toHaveBeenCalledTimes(1)
     expect(f.candidate.status()).toMatchObject({ baselineReady: false, lastCompletePulledRevision: null })
   })
+
+  it('exposes only a complete current frozen baseline, including tombstone lifecycle metadata', async () => {
+    const f = await fixture()
+    expect(f.candidate.getBaseline()).toBeNull()
+    f.candidate.setCloudConsent(true)
+    const tombstone = { ...record(), deleted: true }
+    f.transport.changes.mockResolvedValueOnce(page([tombstone], 1))
+    await f.candidate.pullBaseline()
+    const baseline = f.candidate.getBaseline()!
+    expect(baseline).toEqual({ pulledRevision: 1, records: [tombstone] })
+    expect(Object.isFrozen(baseline)).toBe(true)
+    expect(Object.isFrozen(baseline.records)).toBe(true)
+    expect(Object.isFrozen(baseline.records[0]!.values)).toBe(true)
+    expect(Reflect.set(baseline.records[0]!, 'deleted', false)).toBe(false)
+    let finish!: (value: ReturnType<typeof page>) => void
+    f.transport.changes.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const pending = f.candidate.pullBaseline()
+    await vi.waitFor(() => expect(f.transport.changes).toHaveBeenCalledTimes(2))
+    expect(f.candidate.getBaseline()).toBeNull()
+    finish(page([], 1))
+    await pending
+    expect(f.candidate.getBaseline()).toEqual(baseline)
+    f.setSession({ authenticated: true, generation: 2 })
+    expect(f.candidate.getBaseline()).toBeNull()
+    f.candidate.notifySessionChanged()
+    expect(f.candidate.getBaseline()).toBeNull()
+  })
+
+  it.each(['success', 'conflict'] as const)('shows a restored unknown matched %s without inventing a pulled baseline', async outcome => {
+    const f = await prepared()
+    f.transport.write.mockRejectedValueOnce(new Error('synthetic lost response'))
+    await f.candidate.sendPrepared()
+    const original = await buildOwnerSyncRequest(JSON.parse((await f.outbox.read()).entry!.rawBody))
+    const stored = outcome === 'success' ? success(original) : conflict()
+    f.transport.receipt.mockResolvedValue({ status: 200, rawBody: JSON.stringify({
+      state: 'matched', status: stored.status, result: JSON.parse(stored.rawBody),
+    }) })
+    let generation = 2
+    const restored = createOwnerSyncCandidate({ outbox: f.outbox, transport: f.transport,
+      session: () => ({ authenticated: true, generation }) })
+    restored.setCloudConsent(true)
+    await restored.hydratePending()
+    expect(restored.getBaseline()).toBeNull()
+    await restored.reconcilePending()
+    expect(restored.getLastResult()?.kind).toBe(outcome)
+    expect(restored.status()).toMatchObject({ baselineReady: false, lastCompletePulledRevision: null })
+    expect(restored.getBaseline()).toBeNull()
+    generation = 3
+    expect(restored.getLastResult()).toBeNull()
+    restored.notifySessionChanged()
+    restored.setCloudConsent(false)
+    expect(restored.getLastResult()).toBeNull()
+    expect(f.transport.write).toHaveBeenCalledTimes(1)
+  })
+
 })

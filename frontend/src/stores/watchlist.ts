@@ -10,6 +10,12 @@ const LS = 'sinan_watchlist_v2'
 const PUSH_DELAY = 4000
 const nowISO = () => new Date().toISOString()
 type LocalWatchEntry = WatchEntry & { local_pending?: true }
+export interface OwnerSyncWatchSnapshot {
+  readonly entries: readonly Readonly<WatchEntry & { local_pending?: true }>[]
+  readonly raw: string | null
+  readonly memory: string
+  readonly generation: number
+}
 const idOf = (entry: WatchEntry) => entry.id || entryId(entry.code, entry.account)
 const clone = (entries: LocalWatchEntry[]) => entries.map(entry => ({ ...entry }))
 
@@ -148,6 +154,26 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     const entry = entries.value.find(row => idOf(row) === id && !row.deleted)
     return entry ? JSON.stringify(entry) : null
   }
+  function readOwnerSyncSnapshot(): OwnerSyncWatchSnapshot {
+    if (localStorageError.value) throw new WatchMutationError('storage')
+    assertStorageBaseline()
+    try {
+      const memory = JSON.stringify(entries.value)
+      return Object.freeze({ raw: storageBaseline, memory, generation: mutationGeneration,
+        entries: Object.freeze(clone(entries.value).map(entry => Object.freeze(entry))) })
+    } catch { throw new WatchMutationError('invalid') }
+  }
+  function assertOwnerSyncSnapshot(snapshot: OwnerSyncWatchSnapshot): void {
+    if (localStorageError.value) throw new WatchMutationError('storage')
+    assertStorageBaseline()
+    try {
+      if (!snapshot || snapshot.raw !== storageBaseline || snapshot.generation !== mutationGeneration
+        || snapshot.memory !== JSON.stringify(entries.value)
+        || JSON.stringify(snapshot.entries) !== snapshot.memory) throw new WatchMutationError('conflict')
+    } catch { throw new WatchMutationError('conflict') }
+    // Observed-raw/generation guard only, not an atomic cross-tab transaction
+    // or an Owner revision. It never clears local_pending/externalUnconfirmed.
+  }
   const recordsFor = (code: string) => entries.value.filter(entry => entry.code === code && !entry.deleted)
   const hasLocalChanges = (code?: string) => localStorageError.value || externalUnconfirmed.value
     || entries.value.some(entry => entry.local_pending === true && (code === undefined || entry.code === code))
@@ -268,6 +294,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
   return {
     items, entries, activeHoldings, accounts, loaded, syncing, lastSync, hasToken, legacySyncEnabled, localStorageError, localStatus,
     load, has, add, remove, toggle, setHolding, holdingsFor, recordsFor, saveHolding, entrySnapshot, hasLocalChanges, localPending,
+    readOwnerSyncSnapshot, assertOwnerSyncSnapshot,
     setToken, setLegacySyncEnabled, manualUpload: push, manualDownload: pull, clearCloud, push, pull,
   }
 })

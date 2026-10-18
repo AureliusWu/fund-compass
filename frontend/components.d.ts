@@ -22,6 +22,7 @@ declare module 'vue' {
     LocalHoldingGate: typeof import('./src/components/LocalHoldingGate.vue')['default']
     OverseasAccuracyPanel: typeof import('./src/components/OverseasAccuracyPanel.vue')['default']
     OwnerSessionPanel: typeof import('./src/components/OwnerSessionPanel.vue')['default']
+    OwnerSyncPanel: typeof import('./src/components/OwnerSyncPanel.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     StarRating: typeof import('./src/components/StarRating.vue')['default']

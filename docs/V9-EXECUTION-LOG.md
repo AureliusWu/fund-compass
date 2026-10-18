@@ -829,3 +829,25 @@ UTC `08:29:26.3262808Z` 使用此前明确配置的候选凭据，仅通过既�
 正常四阶段首次运行全部通过：专项collection/run **405/405 passed，85.25s**；全量collection/run **2745/2745 passed，254.45s**。full UTC `2026-10-15T08:28:15.0824265Z→08:32:31.9219262Z`、supervisor256.8360047s、exit0、未触原300s、输出完整、stderr空。正常插件/byte-cache约束保留，实际新db.DB_PATH默认DB未创建；105176条现存Python3.14依赖弃用警告完整保留，不静默。没有真实Owner密码/Token、远端写入或重跑换绿。
 
 241源前后raw-byte聚合 `31fba07da21a5bca7402e108832cb407bba3417745eb9dc17da2314ea66bb9ca`，父代理独立逐文件重算current drift0后才记本段；runner SHA `9c5fc91f9f6d950480fb4f397a94a2d48e7c34aa6dab116e7f9ea32190a71569`，外部seal `94c0cd6085d5b3733a07b58721edab2f3e2e87118a5326f9ce50394569541d23`。full stdout `eea5e9ff3a075341be79a5e4bf03bad11fcb3b8c9c7cc03fe596543d3f98bb80`，manifest `373f308fd46761ee1109af75aa4c483c84b4abddec7ec39f9c11743aeb00ed2b`。本切片不开放Turso Owner写入，不修改应用8.0.0版本、Gist、Holding/Policy/Decision门禁或正式发布资格；页面仍单独接线验收。
+
+### 启动兼容修复与显式同步面板（2026-10-18）
+
+上一切片的 [CI 38707066968](https://github.com/AureliusWu/fund-compass/actions/runs/38707066968) 实际为 **1 failed / 2744 passed**，不是完整成功；前端862、Worker144、构建/PWA通过，三个deploy/smoke job均跳过。唯一失败依赖FastAPI内部`app.routes`平铺表示，新版依赖下得到空集合；改为公开OpenAPI的三条精确method/path合同，保留禁止开库断言。真实同步请求用例通过不能掩盖此CI失败，新提交须另验。
+
+增加真实main lifespan回归后，又发现正常全集导入的`universe_import_state`与正常`PRAGMA optimize`生成的`sqlite_stat1`被Owner严格结构校验拒绝。首轮新专项 **1 failed / 421 passed**，原日志/合成库保留，未执行其后全量或进程测试。随后仅逐表容许这两种已存在、固定DDL的对象，不读其值、不创建或修补、不禁用优化；stat4、其他对象和相似前缀仍拒绝。新增不创建、只读/拒读值、坏DDL、巨大BLOB与真实启动回归；测试catalog腐败仅在新建`:memory:` fixture内注入。修复后正常专项 **426 passed / 91.26s**，真实启动、导入、Owner登录及写/读/回执已在TestClient中通过；全量和独立进程证据另列，不把该上下文当重启证明。
+
+自选页新增默认关闭的“私人自选同步”候选面板，保留现有主题和三项导航。打开/登录不联网；明确本轮同意后手动完整拉取、逐账户预览、准备原包、再独立确认单次发送。发送前两处核对本机副本，unknown只核对回执/导出/关闭，不重发、不清包。撤销、退出、卸载清除私人视图；关闭/重开不删除原outbox。云端独有记录不删除、tombstone不复活、畸形输入整批阻断；不含手工资产或云端合入本机，不清local_pending，不生成持仓决策版本。原包/完整本机副本导出使用固定字段，排除Token、PAT和未知属性。
+
+前端首轮 **1 failed / 236 passed**：新fixture把冲突字段逆序，严格解析器正确拒绝并进入unknown。修正fixture为后端真实排序，保留两字段精确显示断言，新增逆序响应仍unknown/原包保留/不重发的第19项SFC回归；没有放松生产解析器。修复后专项 **238/10文件**、全量 **912/54文件**、类型检查全部通过；三次构建及各PWA **7/7**首次通过。三份产物均143文件/17,127,163字节，完整摘要`8895ed26046aa341f374c4d161dd6db241a4c46f8f6fd2a681b8a9ed883458c6`，225源前后摘要`8969d015085340934930d8ace5c57fdf46e602da3ffee313168a7e4e638a4e62`。父代理逐一核对九manifest及原日志SHA、当前源码0漂移；保留既有renderer组件警告及外部outDir提示。
+
+同机同.NET gzip算法对比已保存旧/新产物：总JS压缩415,717→434,816字节（+4.59%）；自选页单chunk15,082→20,304（+34.62%，局部警告）、其CSS+14.64%。按HTML入口、静态import闭包及该路由精确preload依赖核算，打开自选页的JS/CSS压缩合计165,728→173,717（+4.82%）；五项未启用同步动态模块不计常驻。该静态闭包不含API、字体、SW预缓存或实际调度。三build墙钟29.762/13.600/14.994秒，median14.994/worst29.762；旧样本日期/并行负载不同，不宣称运行时加速或I21-04通过。
+
+前端证据位于仓库外`fc-v9ui-gate-1018-conflict-6ca8d8d2`，full manifest SHA `e2cbd17c1cbf7863249a5bd7ccdfb233634ef089d0dd56f37026be4dc1d155ac`，原失败位于`fc-v9ui-gate-1015-c18f4a72`，不覆盖。测试绑定1a394c9加本轮工作树，不以父HEAD冒充新提交CI。真实浏览器/物理PWA、远端Owner事务和迁移、独立恢复及正式版本门禁仍未通过。
+
+本轮公开部署复核：Pages release.json与API health均报告main `0c0f9ad093da983ab2313a05ce614fde0de28b5f`，应用仍8.0.0/libsql/turso_candidate/durable=false；基金全集28019。health首请求25.005s无字节超时，第二次12.405s返回200，started_at=`2026-10-18T05:14:32.983727+00:00`；与唤醒情形相符，但未用控制面日志独立证明根因。指数源日期仍2026-08-21，年龄58天、usable=false且mapped_usable_indices=0，正确降级不等于源已恢复。Render连接器仍无用户确认的workspace，未绕过选择要求或操作云配置；本轮没有更换凭据、迁移远端、删除Gist或发布v9。
+
+修复后的正常后端全量collection/run **2766/2766 passed**，pytest271.26s、外部监督273.866s，低于原300s；UTC `2026-10-18T05:17:41.4868228Z→05:22:15.3578944Z`、exit0、未超时、完整排空输出、stderr空，保留108728条Python3.14依赖弃用警告。正常插件、真实新默认DB隔离及原测试命令保持；默认DB未创建。243源前后摘要`7aad0de3507a24e8bb2a6a4e1010914376645f465365baeaa6bc6b7695820fdf`，父代理独立逐文件复核0漂移；full manifest=`995013e827ea10178c901a47670c945a0d9187d6e67dc216c2b3b8eac8edaf7a`，stdout=`4de20f6c1448ff6b1df2ce8f154e63c51ba99a5eb56311839f153374a6e97c67`。证据目录`fc-owner-stat1-normal-author-20261018-b3e8158d`；本机FastAPI0.116.0，不能替代新版Linux CI。
+
+随后独立真实进程smoke一次通过，外层7.092s/exit0：正常uvicorn单worker完整启动、导入28019基金；第一次HTTP提交同基金两个不同账户（零份holding与null份watch），读回revision1及匹配原回执；关闭自有进程后，以不同PID/端口启动同一合成库。旧会话在session/sync/receipt三路均401，新登录读回完全相同page与原receipt，**没有第二次同步POST**。两次关闭后只读integrity/schema/导入回执/revision及同库fileID核对通过；记录主文件与WAL/SHM，不把物理文件SHA变化当数据丢失。Windows对自有Popen句柄terminate导致服务进程exit1，外层验证exit0；这不是优雅SIGTERM、Render重启或远端耐久证明。
+
+父代理实际读取supervision、完整result和两份真实启动日志；scope仍`local_synthetic_process_restart_only`，remote/cloud_durability/formal均false。证据目录`fc-owner-stat1-process-author-20261018-b3e8158d/run-2ce4eec8b05a4523abc304853e5dcd8b`，外部source-pins SHA=`d421eb26974d4c9291ce3e76723c684d014c9c35162f094a270fb933131b6e21`。没有触及已有/真实持仓库、云端、Token或测试断言/预算；修复和界面作为候选checkpoint提交，新提交CI及后续Turso真实事务/迁移另行推进。

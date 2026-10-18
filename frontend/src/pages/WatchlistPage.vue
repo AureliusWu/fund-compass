@@ -18,6 +18,7 @@ import { getToken } from '@/utils/gist'
 import Icon from '@/components/Icon.vue'
 import WatchlistDecisionBoard from '@/components/watchlist/WatchlistDecisionBoard.vue'
 import OwnerSessionPanel from '@/components/OwnerSessionPanel.vue'
+import OwnerSyncPanel from '@/components/OwnerSyncPanel.vue'
 import HoldingEditor from '@/components/HoldingEditor.vue'
 import { entryId } from '@/utils/gist'
 import { positionKind, WatchMutationError } from '@/utils/holding-editor'
@@ -334,6 +335,7 @@ onMounted(refresh)
     <van-pull-refresh v-model="refreshing" @refresh="refresh">
       <div class="page-body">
         <OwnerSessionPanel />
+        <OwnerSyncPanel />
         <p class="local-workcopy" role="status">{{ watch.localStatus }}。现有私人决策基于上次确认的云端状态；本地修改不表示旧快照已更新。</p>
         <p v-if="watch.localStorageError" class="local-storage-error" role="alert">本机记录无法安全读取，编辑已暂停。原存储未覆盖，请先检查浏览器存储或恢复备份。</p>
         <div class="sec">{{ WATCH_SECTIONS[0] }}</div>
@@ -378,7 +380,7 @@ onMounted(refresh)
       :style="{ padding: '18px', paddingBottom: 'calc(78px + env(safe-area-inset-bottom))', maxHeight: '80vh', overflowY: 'auto' }"
     >
       <div class="popup-title">同步自选</div>
-      <p class="sync-disclosure">旧版 Gist 会上传全部自选和账户持仓，默认关闭。保存 Token 不等于授权上传；新版私人存储同步尚未开放。</p>
+      <p class="sync-disclosure">旧版 Gist 会上传全部自选和账户持仓，默认关闭。保存 Token 不等于授权上传；新版同步请关闭此弹窗后，在自选页使用“私人自选同步”面板。两种授权互不替代。</p>
       <van-field v-model="token" type="password" label="Token" placeholder="GitHub Gist Token" />
       <van-cell title="明确启用旧版 Gist 同步"><template #right-icon><van-switch :model-value="watch.legacySyncEnabled" aria-label="明确启用旧版 Gist 同步" @update:model-value="changeLegacySync" /></template></van-cell>
       <div class="sync-status">{{ watch.syncing ? '旧版同步中' : watch.lastSync ? '上次旧版备份 ' + new Date(watch.lastSync).toLocaleString() : '尚无旧版同步记录' }}</div>

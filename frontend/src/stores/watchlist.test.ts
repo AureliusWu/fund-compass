@@ -434,4 +434,66 @@ describe('watchlist cross-account model', () => {
     browser.dispatchEvent(Object.assign(new Event('storage'), { key: 'sinan_watchlist_v2', storageArea: localStorage }))
     expect(JSON.stringify(watch.entries)).toBe(rows)
   })
+
+  it('reads a frozen complete Owner input snapshot without writing or dropping account tombstones', () => {
+    const watch = createStore()
+    watch.saveHolding(input({ account: '旧账户', name: '合成基金', shares: 0, cost: 0 }))
+    watch.remove('510300', '旧账户', { confirmed: true })
+    watch.saveHolding(input({ account: '新账户', name: '合成基金', shares: 0, cost: null }))
+    const before = localValue(), write = vi.spyOn(localStorage, 'setItem')
+    const snapshot = watch.readOwnerSyncSnapshot()
+    expect(snapshot.raw).toBe(before)
+    expect(snapshot.memory).toBe(JSON.stringify(watch.entries))
+    expect(snapshot.entries).toHaveLength(2)
+    expect(snapshot.entries.some(row => row.deleted === true)).toBe(true)
+    expect(snapshot.entries.find(row => !row.deleted)).toMatchObject({ position_kind: 'holding', shares: 0, cost: null })
+    expect(Object.isFrozen(snapshot)).toBe(true)
+    expect(Object.isFrozen(snapshot.entries)).toBe(true)
+    expect(snapshot.entries.every(Object.isFrozen)).toBe(true)
+    watch.assertOwnerSyncSnapshot(snapshot)
+    expect(write).not.toHaveBeenCalled()
+    expect(watch.localPending).toBe(true)
+    expect(localValue()).toBe(before)
+  })
+
+  it.each(['local-edit', 'memory-only', 'raw-before-event', 'external-event', 'observed-aba'] as const)(
+    'rejects a stale Owner preview after %s without an echo write', cause => {
+      const browser = new EventTarget()
+      vi.stubGlobal('window', browser)
+      const watch = createStore()
+      watch.saveHolding(input({ name: '合成基金', shares: 0 }))
+      const snapshot = watch.readOwnerSyncSnapshot(), original = localValue()!
+      const external = JSON.stringify(JSON.parse(original).map((row: object) => ({ ...row, shares: 2 })))
+      const event = () => browser.dispatchEvent(Object.assign(new Event('storage'), {
+        key: 'sinan_watchlist_v2', storageArea: localStorage,
+      }))
+      if (cause === 'local-edit') watch.setHolding('510300', 1, null)
+      else if (cause === 'memory-only') watch.entries[0]!.shares = 2
+      else {
+        store.set('sinan_watchlist_v2', external)
+        if (cause !== 'raw-before-event') event()
+        if (cause === 'observed-aba') { store.set('sinan_watchlist_v2', original); event() }
+      }
+      const before = localValue(), write = vi.spyOn(localStorage, 'setItem')
+      expect(() => watch.assertOwnerSyncSnapshot(snapshot)).toThrow(WatchMutationError)
+      expect(write).not.toHaveBeenCalled()
+      expect(localValue()).toBe(before)
+      expect(watch.localPending).toBe(true)
+    },
+  )
+
+  it('keeps Owner snapshot access blocked on malformed/denied storage and never mutates stored records', () => {
+    store.set('sinan_watchlist_v2', '[null]')
+    const malformed = createStore(), before = localValue()
+    expect(() => malformed.readOwnerSyncSnapshot()).toThrow(WatchMutationError)
+    expect(localValue()).toBe(before)
+    setActivePinia(createPinia())
+    store.set('sinan_watchlist_v2', '[]')
+    const watch = createStore(), snapshot = watch.readOwnerSyncSnapshot()
+    vi.spyOn(localStorage, 'getItem').mockImplementation(() => { throw new DOMException('synthetic denied', 'SecurityError') })
+    expect(() => watch.readOwnerSyncSnapshot()).toThrow(WatchMutationError)
+    expect(() => watch.assertOwnerSyncSnapshot(snapshot)).toThrow(WatchMutationError)
+    expect(localValue()).toBe('[]')
+  })
+
 })

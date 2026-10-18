@@ -90,13 +90,13 @@ AI POST 使用共享 deadline，fetch、流式 body 与解析总计 30 秒，流
 
 严格同步入口只接受原始 JSON 文本/字节，最多 128 KiB、8 层、200 项操作，整数限制在 JavaScript 安全范围。账户采用相同的 trim 与 UTF-16 长度规则；稳定 key、字段 allowlist、kind、null/零与有限金额分别校验，不接受解析后模型或任意 dict 绕过。幂等摘要保留原始数值 token（`1` 与 `1.0` 不同请求），业务字段比较则允许有限 `1` 与 `1.0` 相等，避免浏览器 JSON 往返误冲突；布尔、null 与零不混同。
 
-独立 `owner-sync-schema-1` 五张扩展表只允许显式本地 SQLite 候选初始化，不加入应用自动启动，也不接入 Turso。验证固定核心 schema 9、扩展 DDL、内部索引和 sequence，拒绝额外对象/附加库/temp 对象；schema 对象最多 128 个、单项 DDL 最多 16 KiB，超限在 SQL 传输前拒绝。它不是生产初始化或远端迁移证据。
+独立 `owner-sync-schema-1` 五张扩展表只允许显式本地 SQLite 候选初始化，不加入应用自动启动，也不接入 Turso。验证固定核心 schema 9、扩展 DDL、内部索引和 sequence；正常启动已有的 `universe_import_state`、`sqlite_stat1` 只按逐表固定 DDL 兼容，不读取其数据、不自动创建、不禁用 optimize，`sqlite_stat4`、相似名称及其他额外对象/附加库/temp 对象仍拒绝。schema 对象最多 128 个、单项 DDL 最多 16 KiB，超限在 SQL 传输前拒绝。它不是生产初始化或远端迁移证据。
 
 当前状态、字段 revision、生命周期、追加 changes 与幂等 receipt 在同一事务中提交。不同字段可合并，A→B→A 仍依据字段 revision 拒绝旧基线；旧设备不能复活 tombstone。账户更名的旧 key 删除与新 key 创建可同批原子提交，目标碰撞拒绝整批。无变化不递增 revision；确定的 409 与成功响应均精确重放。提交异常视为结果未知，不自动重试或补偿删除，只读查询匹配 receipt；absent/unavailable 不证明回滚。
 
 changes 以固定 upper revision 和 `(revision,key)` 游标读取同一事务快照，分页最多 200 项；并发新写不会混进旧分页。当前记录与最新 change 快照/头部进行完整性核验，但不宣称防止任意直接 SQL 篡改。
 
-HTTP router 已接入 `main.py` 代码，配置工厂只允许普通路径下已有、核心9及Owner扩展完整的本地SQLite；不存在、不兼容或Turso固定拒绝，不自动创建文件/补表。所有file: URI一律在解析前拒绝，不能丢弃mode=ro/immutable等语义后强开rw；内存/UNC亦拒绝，不宣称识别所有网络文件系统。原远端schema8启动拒绝与应用lifespan未变。前端已具备显式HTTP adapter，尚未接入页面；本地请求回归与实际部署另行验收。
+HTTP router 已接入 `main.py` 代码，配置工厂只允许普通路径下已有、核心9及Owner扩展完整的本地SQLite；不存在、不兼容或Turso固定拒绝，不自动创建文件/补表。所有file: URI一律在解析前拒绝，不能丢弃mode=ro/immutable等语义后强开rw；内存/UNC亦拒绝，不宣称识别所有网络文件系统。原远端schema8启动拒绝与应用lifespan未变。前端显式HTTP adapter已接入自选页的候选面板；页面可达不表示当前线上Turso可写，实际部署另行验收。
 
 写入需 Owner/write_holdings 和独立 `X-Owner-Sync-Consent: owner-sync-v1`，读取需 Owner/read_private，机器凭据不能替代；请求体最长 5 秒，鉴权和限频在读 body 前，body 后、事务前、commit 前及私有响应前重新核验摘要会话。撤销阻止尚未提交的写入和迟到私人响应，不能撤销已接受的提交。所有候选响应固定脱敏且 no-store，不保存原始 Bearer。可选核心_schema_version必须先匹配固定DDL，再以SQL类型/值闭集投影读取最多两行；不传任意TEXT/BLOB到Python，不替代完整core/extension校验，也不是SQLite引擎I/O时限。
 
@@ -104,7 +104,11 @@ receipt 核对必须同时提供原始 request_id 和单一 `X-Owner-Sync-Reques
 
 客户端候选模块仅显式构造，默认关闭，没有全局 IndexedDB、fetch、Gist、自选或凭据读取。纯 DTO 核对原文/hash 和封闭响应；注入式 IndexedDB outbox 使用严格 durability 的真实事务 CAS，原请求发出前先保存 attempted，只在事务 complete 后确认本地保存。严格 durability 不支持或降级时拒绝，不回退 localStorage。close/timeout 即使抛错也不证明本地未提交，重开后必须读回真实槽位。
 
-控制器保留原 request_id/raw/hash，unknown 不自动重发或清空；仅显式人工确认可重发相同字节。授权/会话 generation 在实际网络调用前及响应消费前重核验，忽略 AbortSignal 的迟到 transport 也不能发布私人结果。成功/匹配 receipt 必须逐项核对 key/kind/deleted 和所请求字段的实际值，错误值保持 unknown。POST 观察到的 head 不是已完成 pull checkpoint；只有固定 upper 的全部分页完成才更新基线，已有草稿不自动 rebase。显式HTTP adapter已接Owner内存会话，构造仅计算API端点指纹，不请求或开库；仍未接UI，fake IndexedDB测试不是物理浏览器落盘、旧PWA或跨设备验收。
+控制器保留原 request_id/raw/hash，unknown 不重发或清空；仅核对原回执、导出或关闭，回执不存在也不证明可重放。授权/会话 generation 在实际网络调用前及响应消费前重核验，忽略 AbortSignal 的迟到 transport 也不能发布私人结果。成功/匹配 receipt 必须逐项核对 key/kind/deleted 和所请求字段的实际值，错误值保持 unknown。POST 观察到的 head 不是已完成 pull checkpoint；只有固定 upper 的全部分页完成才更新基线，已有草稿不自动 rebase。显式HTTP adapter已接Owner内存会话，构造仅计算API端点指纹，不请求或开库；fake IndexedDB测试不是物理浏览器落盘、旧PWA或跨设备验收。
+
+自选页的“私人自选同步”默认折叠并关闭；登录或打开面板都不构造adapter、打开IndexedDB或联网。Owner相应scope、本轮同意和显式启用后，用户手动完整拉取、逐账户预览、准备原包，再另行确认单次发送。预览/实际发送两处核对本机raw存储、内存副本与generation；它不是跨标签原子锁。更名/删除tombstone保留，云端独有记录不删除，云端已删项不从旧本机副本复活；非法记录阻断整批。撤销、退出、卸载清除私人视图并中止本地等待，保留已准备/attempted/unknown原包。只有匹配回执或确定冲突且用户显式结束，才清已决槽位并重新拉取；重开后没有原预览的prepared包不能直接发送。
+
+本切片不包含手工资产或云端到本机合并，不清除local_pending、不生成Holding/Policy/Decision版本。原包导出保留实际raw/hash/端点指纹/状态；本机导出包含所有账户及tombstone的固定字段，不含Owner Token、Gist PAT、任意未知属性或手工资产。端点指纹不是数据库身份或耐久证明，不能据此开放当前云端迁移/正式发布。
 
 本节仅覆盖本地候选事务/HTTP 故障模型。真实云同步启用、Turso CAS/事务适配、远端独立恢复、多设备 UI、Holding/Policy/Decision 新版本链及正式证据仍未完成，不关闭整个 I19-02 或存储发布出口。
 
