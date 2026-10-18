@@ -316,6 +316,7 @@ const checked = (event: Event) => (event.target as HTMLInputElement | null)?.che
           <button v-else type="button" class="sync-button" :disabled="busy" @click="reconcile">核对原请求回执</button>
           <template v-if="result?.kind === 'success'"><p class="sync-notice">仅这一批原包已由同步账本确认，序号 {{ result.result.revision }}。本机持仓决策版本没有因此更新。</p></template>
           <template v-if="result?.kind === 'conflict'">
+            <p v-if="result.result.conflicts.some(conflict => conflict.fields.includes('expected_revision'))">本批次的账本序号需要重新核对。请明确结束此请求后完整拉取并核对，再准备新批次；不会自动重发。</p>
             <h3>冲突字段摘要</h3><ul class="sync-issues"><li v-for="(conflict, index) in result.result.conflicts" :key="index"><code>{{ conflict.key_digest }}</code> · {{ conflict.fields.map(field => fieldNames[field] || field).join('、') }}</li></ul>
           </template>
           <template v-if="resolved">

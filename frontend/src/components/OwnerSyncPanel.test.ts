@@ -244,6 +244,64 @@ describe('real Owner sync panel journey', () => {
     expect(watchlist.localPending).toBe(true)
   })
 
+  it('recovers a lost global revision conflict receipt through explicit full refresh and prepares a new request without resending', async () => {
+    const root = await prepared(), original = (await slot()).entry!
+    const originalRequest = JSON.parse(original.rawBody) as BuiltOwnerSyncRequest['request']
+    expect(originalRequest.expected_revision).toBe(1)
+    mocks.write.mockRejectedValueOnce(new Error('synthetic lost conflict acknowledgement'))
+    await check(root, 'owner-sync-single-send'); await click(root, '单次发送原包')
+    expect((await slot()).entry).toMatchObject({ rawBody: original.rawBody, requestHash: original.requestHash, state: 'unknown' })
+    expect(mocks.receipt).not.toHaveBeenCalled()
+    expect(mocks.write).toHaveBeenCalledTimes(1)
+    expect(mocks.changes).toHaveBeenCalledTimes(1)
+    expect(buttons(root).some(item => /发送原包|取消尚未发送|结束已决|手动拉取|准备这一批/.test(output(item)))).toBe(false)
+
+    // Another device advanced the ledger; this request has only a stored 409.
+    head = 2
+    cloud.set('000001::支付宝', record('000001::支付宝',
+      { name: '另一设备名称', shares: 12, cost: 2, target_weight: null }, 'holding', 2))
+    mocks.receipt.mockResolvedValueOnce({ status: 200, rawBody: JSON.stringify({ state: 'matched', status: 409, result: {
+      error: { code: 'sync_conflict', message: '同步冲突，请保留本地草稿并重新核对。' },
+      // SHA-256 of the empty global key, first 16 hex characters.
+      conflicts: [{ key_digest: 'e3b0c44298fc1c14', fields: ['expected_revision'] }],
+    } }) })
+    await click(root, '核对原请求回执')
+    expect(mocks.receipt.mock.calls[0].slice(0, 2)).toEqual([originalRequest.request_id, original.requestHash])
+    expect((await slot()).entry).toMatchObject({ rawBody: original.rawBody, requestHash: original.requestHash, state: 'conflict' })
+    expect(output(root)).toContain('e3b0c44298fc1c14')
+    expect(output(root)).toContain('预期账本序号')
+    expect(output(root)).toContain('本批次的账本序号需要重新核对。请明确结束此请求后完整拉取并核对，再准备新批次；不会自动重发。')
+    expect(output(root)).not.toContain('仅这一批原包已由同步账本确认')
+    expect(button(root, '结束已决请求并重新拉取').props.disabled).toBe(true)
+    expect(mocks.receipt).toHaveBeenCalledTimes(1)
+    expect(mocks.write).toHaveBeenCalledTimes(1)
+    expect(mocks.changes).toHaveBeenCalledTimes(1)
+    expect(watchlist.localPending).toBe(true)
+
+    await check(root, 'owner-sync-finish-resolved'); await click(root, '结束已决请求并重新拉取')
+    expect((await slot()).entry).toBeNull()
+    expect(mocks.changes).toHaveBeenCalledTimes(2)
+    expect(mocks.changes.mock.calls[1][0]).toEqual({ sinceRevision: 0, limit: 200 })
+    expect(watchlist.recordsFor('000001').find(item => item.account === '支付宝')?.shares).toBe(0)
+    expect(watchlist.localPending).toBe(true)
+    expect(mocks.write).toHaveBeenCalledTimes(1)
+
+    await click(root, '准备这一批原包')
+    const fresh = (await slot()).entry!
+    const freshRequest = JSON.parse(fresh.rawBody) as BuiltOwnerSyncRequest['request']
+    expect(fresh.state).toBe('prepared')
+    expect(freshRequest.request_id).not.toBe(originalRequest.request_id)
+    expect(freshRequest.expected_revision).toBe(2)
+    expect(fresh.requestHash).not.toBe(original.requestHash)
+    expect(freshRequest.operations.find(item => item.key === '000001::支付宝')?.base_values)
+      .toMatchObject({ name: '另一设备名称', shares: 12 })
+    expect(button(root, '单次发送原包').props.disabled).toBe(true)
+    expect(mocks.receipt).toHaveBeenCalledTimes(1)
+    expect(mocks.write).toHaveBeenCalledTimes(1)
+    expect(mocks.changes).toHaveBeenCalledTimes(2)
+    expect(watchlist.localPending).toBe(true)
+  })
+
   it('conflict retains original packet and field summary until explicit end then complete manual refresh', async () => {
     const root = await prepared(), original = (await slot()).entry!
     mocks.write.mockResolvedValueOnce(conflict())

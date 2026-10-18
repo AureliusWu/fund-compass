@@ -697,7 +697,7 @@ def test_index_valuation_upstream_failure_preserves_existing_file_and_core_gate(
     monkeypatch.setitem(sys.modules, "akshare", FailingAkshare())
     monkeypatch.setattr(index_valuation, "OUT", str(output))
 
-    assert index_valuation.main() == 1
+    assert index_valuation.main(source=FailingAkshare()) == 1
     assert output.read_bytes() == original
     assert len(index_valuation.CORE_INDICES) == 6
     assert len(calls) == sum(len(candidates) for candidates in index_valuation.LG_SYMBOLS.values()) * (

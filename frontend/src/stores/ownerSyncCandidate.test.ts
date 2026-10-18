@@ -49,6 +49,20 @@ async function prepared() {
   return result
 }
 
+async function replacedPreparedSlot() {
+  const factory = new IDBFactory(), first = await fixture(factory)
+  first.candidate.setCloudConsent(true)
+  await first.candidate.pullBaseline()
+  await first.candidate.prepare('synthetic-first-slot', [DRAFT])
+  const second = await fixture(factory)
+  second.candidate.setCloudConsent(true)
+  await second.candidate.hydratePending()
+  await second.candidate.clearResolvedOrUnsent()
+  await second.candidate.pullBaseline()
+  await second.candidate.prepare('synthetic-other-slot', [{ ...DRAFT, changes: { ...DRAFT.changes, name: 'Other tab draft' } }])
+  return { first, second, other: await second.outbox.read() }
+}
+
 describe('explicit owner sync candidate', () => {
   it('imports/constructs disabled without requesting, reading legacy storage or persisting consent', async () => {
     const { candidate, transport, outbox } = await fixture()
@@ -170,9 +184,97 @@ describe('explicit owner sync candidate', () => {
     expect(f.candidate.getLastResult()?.kind).toBe('conflict')
     await f.candidate.clearResolvedOrUnsent()
     expect((await f.outbox.read()).entry).toBeNull()
+    expect(f.candidate.getBaseline()).toBeNull()
+    expect(f.candidate.status()).toMatchObject({ lastCompletePulledRevision: null, latestObservedHead: 0, baselineReady: false })
+    await expect(f.candidate.prepare('synthetic-request-0002', [DRAFT])).rejects.toMatchObject({ code: 'sync_pull_required' })
+    await f.candidate.pullBaseline()
+    expect(f.transport.changes.mock.calls.at(-1)?.[0]).toEqual({ sinceRevision: 0, limit: 200 })
     await f.candidate.prepare('synthetic-request-0002', [DRAFT])
     await f.candidate.clearResolvedOrUnsent()
+    expect(f.candidate.getBaseline()).not.toBeNull()
+    expect(f.candidate.status()).toMatchObject({ lastCompletePulledRevision: 0, latestObservedHead: 0, baselineReady: true })
     expect(f.transport.write).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the observed success head after explicit clear and rejects an older full-pull watermark', async () => {
+    const f = await prepared()
+    f.transport.write.mockImplementation(async original => success(original, 4))
+    await f.candidate.sendPrepared()
+    await f.candidate.clearResolvedOrUnsent()
+    expect(f.candidate.getBaseline()).toBeNull()
+    expect(f.candidate.status()).toMatchObject({ lastCompletePulledRevision: null, latestObservedHead: 4, baselineReady: false })
+    f.transport.changes.mockResolvedValueOnce(page([], 3))
+    await expect(f.candidate.pullBaseline()).rejects.toMatchObject({ code: 'sync_unavailable' })
+    expect(f.transport.changes.mock.calls.at(-1)?.[0]).toEqual({ sinceRevision: 0, limit: 200 })
+    expect(f.candidate.getBaseline()).toBeNull()
+    expect(f.candidate.status().latestObservedHead).toBe(4)
+    expect((await f.outbox.read()).entry).toBeNull()
+    expect(f.transport.write).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['success', 'conflict'] as const)('requires a matched receipt before clearing a rehydrated known %s slot', async outcome => {
+    const f = await prepared()
+    const original = await buildOwnerSyncRequest(JSON.parse((await f.outbox.read()).entry!.rawBody))
+    const stored = outcome === 'success' ? success(original) : conflict()
+    f.transport.write.mockResolvedValueOnce(stored)
+    await f.candidate.sendPrepared()
+    const known = (await f.outbox.read()).entry!
+    const restored = createOwnerSyncCandidate({ outbox: f.outbox, transport: f.transport,
+      session: () => ({ authenticated: true, generation: 2 }) })
+    restored.setCloudConsent(true)
+    await restored.hydratePending()
+    expect(restored.getLastResult()).toBeNull()
+    await expect(restored.clearResolvedOrUnsent()).rejects.toMatchObject({ code: 'sync_invalid_transition' })
+    expect((await f.outbox.read()).entry).toEqual(known)
+    f.transport.receipt.mockResolvedValueOnce({ status: 200, rawBody: JSON.stringify({
+      state: 'matched', status: stored.status, result: JSON.parse(stored.rawBody),
+    }) })
+    await restored.reconcilePending()
+    expect(restored.getLastResult()?.kind).toBe(outcome)
+    await restored.clearResolvedOrUnsent()
+    expect((await f.outbox.read()).entry).toBeNull()
+    expect(restored.getBaseline()).toBeNull()
+    expect(restored.status()).toMatchObject({ lastCompletePulledRevision: null, baselineReady: false })
+    expect(f.transport.receipt).toHaveBeenCalledTimes(1)
+    expect(f.transport.write).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not use an old same-kind result to clear a different cross-tab packet', async () => {
+    const f = await prepared()
+    await f.candidate.sendPrepared()
+    const old = await f.outbox.read()
+    const other = await buildOwnerSyncRequest({ request_id: 'synthetic-other-packet', expected_revision: 0,
+      operations: [{ ...DRAFT, changes: { ...DRAFT.changes, name: 'Other tab packet' } }] })
+    const empty = await f.outbox.compareAndSwap(old.version, null)
+    const preparedOther = await f.outbox.compareAndSwap(empty.version, { schema: old.entry!.schema,
+      state: 'prepared', rawBody: other.rawBody, requestHash: other.requestHash })
+    const attemptedOther = await f.outbox.compareAndSwap(preparedOther.version, { ...preparedOther.entry!, state: 'attempted' })
+    const confirmedOther = await f.outbox.compareAndSwap(attemptedOther.version, { ...attemptedOther.entry!, state: 'confirmed' })
+    expect(f.candidate.getLastResult()?.kind).toBe('success')
+    await expect(f.candidate.clearResolvedOrUnsent()).rejects.toMatchObject({ code: 'sync_invalid_transition' })
+    expect(await f.outbox.read()).toEqual(confirmedOther)
+    expect(f.transport.write).toHaveBeenCalledTimes(1)
+    expect(f.transport.receipt).not.toHaveBeenCalled()
+  })
+
+  it('does not clear another tab prepared packet until explicitly observing that replacement', async () => {
+    const { first, second, other } = await replacedPreparedSlot()
+    await expect(first.candidate.clearResolvedOrUnsent()).rejects.toMatchObject({ code: 'sync_invalid_transition' })
+    expect(await second.outbox.read()).toEqual(other)
+    await first.candidate.hydratePending()
+    await first.candidate.clearResolvedOrUnsent()
+    expect((await second.outbox.read()).entry).toBeNull()
+    expect(first.transport.write).not.toHaveBeenCalled()
+    expect(second.transport.write).not.toHaveBeenCalled()
+  })
+
+  it('does not mark or POST another tab prepared packet using the previous packet binding', async () => {
+    const { first, second, other } = await replacedPreparedSlot()
+    await expect(first.candidate.sendPrepared()).rejects.toMatchObject({ code: 'sync_invalid_transition' })
+    expect(await second.outbox.read()).toEqual(other)
+    expect(other.entry?.state).toBe('prepared')
+    expect(first.transport.write).not.toHaveBeenCalled()
+    expect(second.transport.write).not.toHaveBeenCalled()
   })
 
   it('does not expose late success after logout; persistent request is not discarded', async () => {

@@ -108,9 +108,15 @@ receipt 核对必须同时提供原始 request_id 和单一 `X-Owner-Sync-Reques
 
 自选页的“私人自选同步”默认折叠并关闭；登录或打开面板都不构造adapter、打开IndexedDB或联网。Owner相应scope、本轮同意和显式启用后，用户手动完整拉取、逐账户预览、准备原包，再另行确认单次发送。预览/实际发送两处核对本机raw存储、内存副本与generation；它不是跨标签原子锁。更名/删除tombstone保留，云端独有记录不删除，云端已删项不从旧本机副本复活；非法记录阻断整批。撤销、退出、卸载清除私人视图并中止本地等待，保留已准备/attempted/unknown原包。只有匹配回执或确定冲突且用户显式结束，才清已决槽位并重新拉取；重开后没有原预览的prepared包不能直接发送。
 
+准备、显式观察与响应结果绑定原包hash；另一标签页替换槽位后，旧控制器不得将新prepared包标记attempted、发送或取消，也不得用旧的同kind成功/冲突结果清掉新包。重载已决槽位须当前generation的匹配回执才可结束。结束已决请求清空基线及完整拉取checkpoint，下次从0重拉；仍保留已观察head下限，拒绝服务端回退。取消从未发送的原包不自动重发，保留其已有基线，页面仍显式重新拉取和预览。
+
 本切片不包含手工资产或云端到本机合并，不清除local_pending、不生成Holding/Policy/Decision版本。原包导出保留实际raw/hash/端点指纹/状态；本机导出包含所有账户及tombstone的固定字段，不含Owner Token、Gist PAT、任意未知属性或手工资产。端点指纹不是数据库身份或耐久证明，不能据此开放当前云端迁移/正式发布。
 
-本节仅覆盖本地候选事务/HTTP 故障模型。真实云同步启用、Turso CAS/事务适配、远端独立恢复、多设备 UI、Holding/Policy/Decision 新版本链及正式证据仍未完成，不关闭整个 I19-02 或存储发布出口。
+`service/owner_sync_turso.py` 新增显式URL/Token的真实HTTP候选仓储，构造不联网，不读取环境凭据；main仍不导入或启用。只验证已有core `_schema_version` 表为9及完整Owner扩展，不写PRAGMA版本、不初始化或迁移。一次固定DEFERRED快照读后关闭连接，在锁外复用原Python业务规则；唯一IMMEDIATE写batch在锁内核schema、head/history、完整选中MAX/absence读集及实际容量，原包回执与业务写同事务。严格单调head竞争保存原ID/hash的固定409/expected_revision，供显式核对后结束并重拉；相同ID/hash回放，不同hash只返回固定idempotency_conflict，不泄露旧正文。没有第二写补回执或自动replan/retry。
+
+固定stream-local TEMP仅含两个布尔分支标记，INSERT receipt后紧邻一次changes()捕获决定是否新槽位；业务DML仅在新槽位且实际status200时执行，核实际后像/最新change与原生affected rows，提交前删除TEMP并在同batch读实际回执。结构损坏、容量失败不伪造业务409；提交、后像、关闭或协议矛盾保持unknown，不自动核对或重放。选中结构/JSON-envelope一致性不是任意原始SQL的全库防篡改证明；真实Owner授权和响应前重核仍由未来HTTP调用层负责，远端批次前回调不冒充事务中跨网络授权锁。
+
+操作协作总预算30秒、单次请求/响应16MiB、1024条应用语句、每语句900参数；opt-in HTTP限制拒绝重复JSON键、非法原生typed值、超量正文与矛盾批次确认，legacy默认行为不变。该本地故障模型与loopback实测不证明真实Turso的JSON1/TEMP能力、TLS、云耐久或恢复。真实云同步启用、受控迁移、远端独立恢复、多设备UI、Holding/Policy/Decision新版本链及正式证据仍未完成，不关闭整个I19-02或存储发布出口。
 
 ### 历史捕获的私有 raw schema 合同
 

@@ -11,10 +11,13 @@ interactive transactions.
 from __future__ import annotations
 
 import base64
+from dataclasses import dataclass
+import json
 import math
 import re
 import sqlite3
 import threading
+import time
 from collections.abc import Iterable, Mapping
 from itertools import islice
 from urllib.parse import unquote, urlsplit, urlunsplit
@@ -35,6 +38,93 @@ class TursoHTTPError(sqlite3.OperationalError):
             raise ValueError("Invalid Turso HTTP status")
         self.status_code = status_code
         super().__init__("Turso HTTP request failed; no automatic retry")
+
+
+@dataclass(frozen=True)
+class HttpLimits:
+    """Explicit opt-in only; legacy connections retain their existing behavior.
+
+    This is a cooperative total connection budget, not native DNS preemption.
+    A caller with multiple connections must pass its remaining operation budget.
+    """
+    seconds: float
+    max_response_bytes: int
+    max_request_bytes: int = 16 * 1024 * 1024
+
+    def __post_init__(self):
+        if (type(self.seconds) not in (int, float) or not math.isfinite(self.seconds)
+                or not 0 < self.seconds <= 60 or type(self.max_response_bytes) is not int
+                or not 1 <= self.max_response_bytes <= 64 * 1024 * 1024
+                or type(self.max_request_bytes) is not int
+                or not 1 <= self.max_request_bytes <= 64 * 1024 * 1024):
+            raise ValueError("Invalid explicit Turso HTTP limits")
+
+
+class TursoBatchError(sqlite3.DatabaseError):
+    """Opt-in classified SQL failure with an observed, explicit ROLLBACK ACK.
+
+    This says nothing about another connection or a later retry. No raw SQL,
+    parameters, provider message, or response body is retained in this error.
+    """
+    def __init__(self, statement_index: int):
+        self.statement_index = statement_index
+        self.rollback_acknowledged = True
+        super().__init__("Turso atomic batch rejected and rollback acknowledged")
+
+
+def _empty_control_result(value):
+    return (type(value) is dict and value.get("cols") == [] and value.get("rows") == []
+            and type(value.get("affected_row_count")) is int and value["affected_row_count"] == 0
+            and "last_insert_rowid" in value)
+
+
+def _classified_batch_shape(values, errors, commit_index):
+    """Reject contradictory conditional-batch observations before classification."""
+    for value, error in zip(values, errors):
+        if (value is not None and error is not None
+                or value is not None and type(value) is not dict
+                or error is not None and type(error) is not dict):
+            raise ValueError("contradictory batch result/error")
+    if values[0] is None and errors[0] is None:
+        raise ValueError("missing BEGIN observation")
+    # Each non-rollback step has exactly the preceding step's `ok` condition.
+    # A failed/skipped step cannot have any later body/COMMIT result or error.
+    for index in range(1, commit_index + 1):
+        skipped = values[index] is None and errors[index] is None
+        if skipped != (values[index - 1] is None):
+            raise ValueError("inconsistent conditional batch suffix")
+    if values[commit_index] is not None:
+        if values[-1] is not None or errors[-1] is not None:
+            raise ValueError("ROLLBACK after successful COMMIT")
+    elif values[-1] is not None and not _empty_control_result(values[-1]):
+        raise ValueError("invalid ROLLBACK acknowledgement")
+
+
+def _strict_pairs(items):
+    result = {}
+    for key, value in items:
+        if key in result:
+            raise ValueError("duplicate JSON key")
+        result[key] = value
+    return result
+
+
+def _bounded_json_tree(value, *, depth=0, remaining=None):
+    remaining = [400_000] if remaining is None else remaining
+    remaining[0] -= 1
+    if remaining[0] < 0 or depth > 24:
+        raise ValueError("JSON structure limit")
+    if type(value) is dict:
+        for key, item in value.items():
+            key.encode("utf-8", errors="strict")
+            _bounded_json_tree(item, depth=depth + 1, remaining=remaining)
+    elif type(value) is list:
+        for item in value:
+            _bounded_json_tree(item, depth=depth + 1, remaining=remaining)
+    elif type(value) is str:
+        value.encode("utf-8", errors="strict")
+    elif type(value) is float and not math.isfinite(value):
+        raise ValueError("non-finite JSON number")
 
 
 def _keyword(sql: str) -> str:
@@ -121,6 +211,38 @@ def _decode(value):
     raise ValueError("invalid database value")
 
 
+def _limited_decode(value):
+    """Native Hrana value types for opt-in callers; legacy _decode is unchanged."""
+    if type(value) is not dict:
+        raise ValueError("invalid typed database value")
+    kind = value.get("type")
+    if kind == "null" and set(value) == {"type"}:
+        return None
+    if kind == "blob" and set(value) == {"type", "base64"} and type(value["base64"]) is str:
+        return base64.b64decode(value["base64"], validate=True)
+    if set(value) != {"type", "value"}:
+        raise ValueError("invalid typed database value")
+    raw = value["value"]
+    if kind == "integer":
+        if (type(raw) is not str or len(raw) > 20
+                or re.fullmatch(r"(?:0|-?[1-9][0-9]{0,18})", raw, re.ASCII) is None):
+            raise ValueError("invalid signed database integer")
+        result = int(raw)
+        if -(2**63) <= result < 2**63:
+            return result
+    elif kind == "float" and type(raw) in (int, float):
+        try:
+            result = float(raw)
+        except OverflowError:
+            raise ValueError("invalid finite database float") from None
+        if math.isfinite(result):
+            return result
+    elif kind == "text" and type(raw) is str:
+        raw.encode("utf-8", errors="strict")
+        return raw
+    raise ValueError("invalid typed database value")
+
+
 def _statement(sql, parameters=()):
     _keyword(sql)
     statement = {"sql": sql, "want_rows": True}
@@ -193,8 +315,12 @@ class Cursor:
 
     def _load(self, sql, result):
         try:
+            if getattr(self.connection, "_http_limits", None) is not None and (
+                    type(result) is not dict or type(result.get("affected_row_count")) is not int or result["affected_row_count"] < 0):
+                raise ValueError("invalid opted-in affected row count")
             names = [column["name"] or "" for column in result["cols"]]
-            values = [tuple(_decode(value) for value in row) for row in result["rows"]]
+            decode = _decode if getattr(self.connection, "_http_limits", None) is None else _limited_decode
+            values = [tuple(decode(value) for value in row) for row in result["rows"]]
             if any(len(row) != len(names) for row in values):
                 raise ValueError("column count mismatch")
             self.description = tuple((name, None, None, None, None, None, None) for name in names) or None
@@ -271,7 +397,8 @@ class Cursor:
 class Connection:
     """One serialized remote stream; transport ambiguity makes it unusable."""
 
-    def __init__(self, url: str, token: str, timeout: float = 8.0):
+    def __init__(self, url: str, token: str, timeout: float = 8.0, *,
+                 http_limits: HttpLimits | None = None):
         self._origin = _base_url(url)
         self._stream_base = self._origin
         if not isinstance(token, str) or not token or any(c.isspace() for c in token):
@@ -279,7 +406,16 @@ class Connection:
         if isinstance(timeout, bool) or not math.isfinite(timeout) or not 0 < timeout <= 60:
             raise ValueError("Turso timeout must be positive and at most 60 seconds")
         self._timeout = float(timeout)
+        if http_limits is not None and type(http_limits) is not HttpLimits:
+            raise ValueError("Explicit Turso limits must use HttpLimits")
+        self._http_limits = http_limits
+        self._deadline = None if http_limits is None else time.monotonic() + http_limits.seconds
         self._session = requests.Session()
+        if http_limits is not None:
+            # Opt-in requests use only the explicit task credential, not netrc,
+            # environment proxies, or environment CA overrides.
+            self._session.trust_env = False
+            self._session.headers["Accept-Encoding"] = "identity"
         # requests' default adapter does not retry. Explicitly keep that contract.
         self._session.mount("https://", requests.adapters.HTTPAdapter(max_retries=0))
         self._session.headers.update({"Authorization": f"Bearer {token}"})
@@ -303,17 +439,53 @@ class Connection:
         self._broken = True
         raise sqlite3.OperationalError(message) from None
 
+    def _remaining(self):
+        if self._deadline is None:
+            return self._timeout
+        remaining = self._deadline - time.monotonic()
+        if not math.isfinite(remaining) or remaining <= 0:
+            self._invalidate("Turso operation budget exhausted; outcome unknown")
+        return min(self._timeout, remaining)
+
+    def _limited_payload(self, response):
+        raw = bytearray()
+        for chunk in response.iter_content(chunk_size=64 * 1024):
+            self._remaining()
+            if type(chunk) is not bytes:
+                raise ValueError("invalid response chunk")
+            if len(raw) + len(chunk) > self._http_limits.max_response_bytes:
+                raise ValueError("response byte limit")
+            raw.extend(chunk)
+        self._remaining()
+        payload = json.loads(raw.decode("utf-8", errors="strict"), object_pairs_hook=_strict_pairs,
+                             parse_constant=lambda _: (_ for _ in ()).throw(ValueError("invalid number")))
+        _bounded_json_tree(payload)
+        self._remaining()
+        return payload
+
     def _pipeline(self, operations):
         self._check()
         try:
+            frame = {"baton": self._baton, "requests": operations}
+            if self._http_limits is None:
+                options = {"json": frame}
+            else:
+                body = json.dumps(frame, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
+                if len(body) > self._http_limits.max_request_bytes:
+                    self._invalidate("Turso request exceeds explicit byte limit")
+                options = {"data": body, "headers": {"Content-Type": "application/json"}, "stream": True}
             response = self._session.post(
                 self._stream_base + "/v3/pipeline",
-                json={"baton": self._baton, "requests": operations},
-                timeout=self._timeout,
+                timeout=self._remaining(),
                 allow_redirects=False,
+                **options,
             )
         except requests.RequestException:
             self._invalidate("Turso request failed; outcome unknown, no automatic retry")
+        except (TypeError, ValueError, UnicodeError, OverflowError):
+            if self._http_limits is not None:
+                self._invalidate("Turso explicit request encoding rejected; no automatic retry")
+            raise
         completed = False
         try:
             status = response.status_code
@@ -322,7 +494,7 @@ class Connection:
             if status != 200:
                 self._broken = True
                 raise TursoHTTPError(status) from None
-            payload = response.json()
+            payload = response.json() if self._http_limits is None else self._limited_payload(response)
             if not isinstance(payload, dict):
                 raise ValueError("response is not an object")
             base_url = payload.get("base_url")
@@ -338,7 +510,8 @@ class Connection:
             self._baton = baton
             completed = True
             return results
-        except (KeyError, TypeError, ValueError):
+        except (KeyError, TypeError, ValueError, OverflowError, RecursionError,
+                UnicodeError, requests.RequestException):
             self._invalidate("Turso returned an invalid or unsafe protocol response")
         finally:
             # Cleanup must not erase an earlier HTTP/protocol failure. A lone
@@ -348,6 +521,11 @@ class Connection:
             except Exception:
                 if completed:
                     self._invalidate("Turso response cleanup failed; no automatic retry")
+            if completed and self._http_limits is not None:
+                # A successful payload does not excuse cleanup exceeding the
+                # opted-in total budget. Do not replace an earlier HTTP/parse
+                # failure, or change the default legacy connection behavior.
+                self._remaining()
 
     def _run(self, operation):
         # Server state, not guessed SQL text, decides whether a transaction is
@@ -365,7 +543,11 @@ class Connection:
             if count["type"] != "execute":
                 raise ValueError("missing change count")
             self.in_transaction = not state["is_autocommit"]
-            self.total_changes = int(_decode(count["result"]["rows"][0][0]))
+            wire_count = count["result"]["rows"][0][0]
+            changes = _decode(wire_count) if self._http_limits is None else _limited_decode(wire_count)
+            if self._http_limits is not None and (type(changes) is not int or changes < 0):
+                raise ValueError("invalid typed change count")
+            self.total_changes = int(changes)
             first = results[0]
             if first["type"] == "error":
                 raise _remote_error(first["error"])
@@ -394,14 +576,23 @@ class Connection:
     def executemany(self, sql, parameters):
         return self.cursor().executemany(sql, parameters)
 
-    def execute_batch(self, statements: Iterable[tuple], *, atomic: bool = True):
+    def execute_batch(self, statements: Iterable[tuple], *, atomic: bool = True,
+                      begin_mode: str = "immediate", classify_errors: bool = False):
         """Run a conditional batch in one HTTP call.
 
         atomic=True owns BEGIN IMMEDIATE/COMMIT and rolls back on any error.
         atomic=False requires an existing transaction and leaves its commit or
         rollback to the caller. Neither mode executes a suffix after an error.
+        begin_mode='deferred' explicitly requests BEGIN DEFERRED; it is not a
+        generic read-only SQL validator. classify_errors is opt-in and exposes
+        an index only when this response includes a successful ROLLBACK and no
+        COMMIT result; all ambiguous observations retain their old exceptions.
         """
         self._check()
+        if (type(begin_mode) is not str or begin_mode not in {"immediate", "deferred"}
+                or (not atomic and begin_mode != "immediate") or type(classify_errors) is not bool
+                or (classify_errors and (not atomic or self._http_limits is None))):
+            raise sqlite3.ProgrammingError("Invalid explicit batch options")
         statements = list(statements)
         if not statements:
             return []
@@ -412,7 +603,7 @@ class Connection:
             if _keyword(sql) in _CONTROL:
                 raise sqlite3.ProgrammingError("Transaction control is not allowed inside a batch")
             prepared.append(_statement(sql, parameters))
-        steps = [{"stmt": _statement("BEGIN IMMEDIATE")}] if atomic else []
+        steps = [{"stmt": _statement("BEGIN IMMEDIATE" if begin_mode == "immediate" else "BEGIN DEFERRED")}] if atomic else []
         offset = len(steps)
         for statement in prepared:
             step = {"stmt": statement}
@@ -437,10 +628,16 @@ class Connection:
             values, errors = result["step_results"], result["step_errors"]
             if len(values) != len(steps) or len(errors) != len(steps):
                 raise ValueError("batch result count mismatch")
+            if classify_errors:
+                _classified_batch_shape(values, errors, commit_index)
             if atomic and self.in_transaction:
                 self._invalidate("Turso batch did not finish its transaction")
-            for error in errors:
+            for index, error in enumerate(errors):
                 if error is not None:
+                    if (classify_errors and values[commit_index] is None
+                            and _empty_control_result(values[-1]) and errors[-1] is None
+                            and 0 < index < commit_index and not self.in_transaction):
+                        raise TursoBatchError(index - offset)
                     raise _remote_error(error)
             if atomic and values[commit_index] is None:
                 raise ValueError("batch did not commit")
@@ -502,5 +699,6 @@ class Connection:
                 raise
 
 
-def connect(url: str, token: str, timeout: float = 8.0) -> Connection:
-    return Connection(url, token, timeout)
+def connect(url: str, token: str, timeout: float = 8.0, *,
+            http_limits: HttpLimits | None = None) -> Connection:
+    return Connection(url, token, timeout, http_limits=http_limits)

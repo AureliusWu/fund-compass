@@ -67,6 +67,7 @@ export function createOwnerSyncCandidate(options: {
   let baselineReady = false
   let lastResult: WriteOutcome | null = null
   let lastResultGeneration: number | null = null
+  let lastBoundRequestHash: string | null = null
 
   function context(): SessionContext {
     const current = options.session()
@@ -85,6 +86,7 @@ export function createOwnerSyncCandidate(options: {
     baselineReady = false
     lastResult = null
     lastResultGeneration = null
+    lastBoundRequestHash = null
   }
 
   function invalidate(): void {
@@ -166,6 +168,7 @@ export function createOwnerSyncCandidate(options: {
   async function markUnknown(snapshot: OwnerSyncOutboxSnapshot): Promise<void> {
     lastResult = null
     lastResultGeneration = null
+    lastBoundRequestHash = null
     if (snapshot.entry?.state === 'confirmed' || snapshot.entry?.state === 'conflict') {
       state = snapshot.entry.state
       return
@@ -221,6 +224,7 @@ export function createOwnerSyncCandidate(options: {
     state = nextState
     lastResult = result
     lastResultGeneration = captured.generation
+    lastBoundRequestHash = original.requestHash
     if (result.kind === 'success') {
       latestObservedHead = Math.max(latestObservedHead ?? 0, result.result.revision)
       // A global head observed in POST is NOT a completed pull checkpoint.
@@ -249,6 +253,7 @@ export function createOwnerSyncCandidate(options: {
         state = !snapshot.entry ? 'idle' : snapshot.entry.state === 'attempted' ? 'unknown' : snapshot.entry.state
         lastResult = null
         lastResultGeneration = null
+        lastBoundRequestHash = snapshot.entry?.requestHash ?? null
         return status()
       })
     },
@@ -326,6 +331,9 @@ export function createOwnerSyncCandidate(options: {
         }
         await options.outbox.compareAndSwap(current.version, entry)
         assertActive(captured)
+        lastResult = null
+        lastResultGeneration = null
+        lastBoundRequestHash = original.requestHash
         state = 'prepared'
         return status()
       })
@@ -334,7 +342,9 @@ export function createOwnerSyncCandidate(options: {
       return exclusively(async captured => {
         let pending = await options.outbox.read()
         assertActive(captured)
-        if (pending.entry?.state !== 'prepared') throw new OwnerSyncCandidateError('sync_invalid_transition')
+        if (pending.entry?.state !== 'prepared' || pending.entry.requestHash !== lastBoundRequestHash) {
+          throw new OwnerSyncCandidateError('sync_invalid_transition')
+        }
         const original = await packet(pending)
         assertActive(captured)
         pending = await options.outbox.compareAndSwap(pending.version, { ...pending.entry!, state: 'attempted' })
@@ -414,11 +424,25 @@ export function createOwnerSyncCandidate(options: {
         if (!pending.entry || !['prepared', 'confirmed', 'conflict'].includes(pending.entry.state)) {
           throw new OwnerSyncCandidateError('sync_invalid_transition')
         }
+        if (pending.entry.requestHash !== lastBoundRequestHash || pending.entry.state !== 'prepared'
+          && (lastResultGeneration !== captured.generation
+            || (pending.entry.state === 'confirmed' ? lastResult?.kind !== 'success' : lastResult?.kind !== 'conflict'))) {
+          throw new OwnerSyncCandidateError('sync_invalid_transition')
+        }
         await options.outbox.compareAndSwap(pending.version, null)
         assertActive(captured)
+        if (pending.entry.state !== 'prepared') {
+          // Explicitly ending a known result requires a complete fresh pull.
+          // Keep latestObservedHead so that an older server snapshot is rejected.
+          baseline.clear()
+          baselineReady = false
+          baselineGeneration = null
+          lastCompletePulledRevision = null
+        }
         state = 'idle'
         lastResult = null
         lastResultGeneration = null
+        lastBoundRequestHash = null
         return status()
       })
     },
