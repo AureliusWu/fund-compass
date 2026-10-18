@@ -300,25 +300,37 @@ def save_holding(version: HoldingVersion, *, scope=scopes.PRODUCTION) -> Holding
     semantic_sha = payload_sha256(identity)
     payload = _model_payload(version)
     with db.transaction(immediate=True) as conn:
-        _acceptance_guard(conn, "holding", version, scope=scope)
-        existing = _existing_model(conn, "holding_versions", "holding_version", version.holding_version, HoldingVersion, scope=scope)
-        if existing is not None:
-            if payload_sha256(_holding_identity(existing)) != semantic_sha:
-                raise SnapshotConflictError("stored holding id has different content")
-            return existing
-        conn.execute(
-            """INSERT INTO holding_versions(
-               holding_version,fund_code,user_state,shares,cost,market_value,account,
-               current_weight,target_weight,updated_at,source,created_at,payload_json,payload_sha256
-             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (
-                version.holding_version, version.fund_code, version.user_state, version.shares,
-                version.cost, version.market_value, version.account, version.current_weight,
-                version.target_weight, version.updated_at.isoformat() if version.updated_at else None,
-                version.source, version.created_at.isoformat(), _json(payload), semantic_sha,
-            ),
-        )
-        scopes.register_record(conn, "holding", version.holding_version, scope)
+        return _save_holding_in_transaction(conn, version, scope=scope)
+
+
+def _save_holding_in_transaction(conn, version: HoldingVersion, *, scope=scopes.PRODUCTION) -> HoldingVersion:
+    """Write through the caller-owned transaction; never commit or close it."""
+    if getattr(conn, "in_transaction", False) is not True:
+        raise ValueError("active_transaction_required")
+    _acceptance_preflight(version, scope)
+    identity = _holding_identity(version)
+    _assert_id(version.holding_version, stable_id("hold", identity), "holding")
+    semantic_sha = payload_sha256(identity)
+    payload = _model_payload(version)
+    _acceptance_guard(conn, "holding", version, scope=scope)
+    existing = _existing_model(conn, "holding_versions", "holding_version", version.holding_version, HoldingVersion, scope=scope)
+    if existing is not None:
+        if payload_sha256(_holding_identity(existing)) != semantic_sha:
+            raise SnapshotConflictError("stored holding id has different content")
+        return existing
+    conn.execute(
+        """INSERT INTO holding_versions(
+           holding_version,fund_code,user_state,shares,cost,market_value,account,
+           current_weight,target_weight,updated_at,source,created_at,payload_json,payload_sha256
+         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            version.holding_version, version.fund_code, version.user_state, version.shares,
+            version.cost, version.market_value, version.account, version.current_weight,
+            version.target_weight, version.updated_at.isoformat() if version.updated_at else None,
+            version.source, version.created_at.isoformat(), _json(payload), semantic_sha,
+        ),
+    )
+    scopes.register_record(conn, "holding", version.holding_version, scope)
     return version
 
 
@@ -454,63 +466,97 @@ def save_decision(snapshot: DecisionSnapshot, *, scope=scopes.PRODUCTION) -> Dec
     semantic = _without(payload, "created_at")
     semantic_sha = payload_sha256(semantic)
     with db.transaction(immediate=True) as conn:
-        evidence = _write_reference(
-            conn, "evidence_snapshots", "evidence_id", snapshot.evidence_id, EvidenceSnapshot,
-        )
-        holding = _write_reference(
-            conn, "holding_versions", "holding_version", snapshot.holding_version, HoldingVersion,
-        )
-        policy = _write_reference(
-            conn, "portfolio_policy_versions", "policy_version", snapshot.policy_version, PortfolioPolicy,
-        )
-        if evidence is None:
-            raise LookupError("decision evidence does not exist")
-        if holding is None:
-            raise LookupError("decision holding version does not exist")
-        if policy is None:
-            raise LookupError("decision policy version does not exist")
-        _acceptance_guard(conn, "decision", snapshot, evidence, holding, policy, scope=scope)
-        if evidence.fund_code != snapshot.fund_code or holding.fund_code != snapshot.fund_code:
-            raise ValueError("decision, evidence, and holding fund codes must match")
-        if holding.user_state != snapshot.user_state:
-            raise ValueError("decision user_state must match its holding version")
-        if evidence.created_at > snapshot.created_at:
-            raise ValueError("decision cannot reference future evidence")
-        if evidence.market_time is not None and evidence.market_time > snapshot.created_at:
-            raise ValueError("decision cannot reference a future market timestamp")
-        if holding.created_at > snapshot.created_at or (
-            holding.updated_at is not None and holding.updated_at > snapshot.created_at
-        ):
-            raise ValueError("decision cannot reference a future holding state")
-        if policy.created_at > snapshot.created_at or policy.effective_at > snapshot.created_at:
-            raise ValueError("decision cannot reference a future policy")
-        existing = _existing_model(conn, "decision_snapshots", "decision_id", snapshot.decision_id, DecisionSnapshot, scope=scope)
-        if existing is not None:
-            if payload_sha256(_without(_model_payload(existing), "created_at")) != semantic_sha:
-                raise SnapshotConflictError("stored decision id has different output")
-            return existing
-        conn.execute(
-            """INSERT INTO decision_snapshots(
-               decision_id,evidence_id,fund_code,holding_version,policy_version,
-               strategy_version,user_state,action,strength,confidence,summary,
-               reason_codes_json,reasons_json,risks_json,invalidation_codes_json,
-               invalidation_json,position_guidance_json,evidence_nodes_json,
-               created_at,payload_json,payload_sha256
-             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (
-                snapshot.decision_id, snapshot.evidence_id, snapshot.fund_code,
-                snapshot.holding_version, snapshot.policy_version, snapshot.strategy_version,
-                snapshot.user_state, snapshot.action, snapshot.strength, snapshot.confidence,
-                snapshot.summary, _json(snapshot.reason_codes), _json(snapshot.reasons),
-                _json(snapshot.risks), _json(snapshot.invalidation_codes),
-                _json(snapshot.invalidation_conditions),
-                _json(snapshot.position_guidance) if snapshot.position_guidance else None,
-                _json(snapshot.evidence_nodes), snapshot.created_at.isoformat(),
-                _json(payload), semantic_sha,
-            ),
-        )
-        scopes.register_record(conn, "decision", snapshot.decision_id, scope)
+        return _save_decision_in_transaction(conn, snapshot, scope=scope)
+
+
+def _save_decision_in_transaction(conn, snapshot: DecisionSnapshot, *, scope=scopes.PRODUCTION) -> DecisionSnapshot:
+    """Write through the caller-owned transaction; never commit or close it."""
+    if getattr(conn, "in_transaction", False) is not True:
+        raise ValueError("active_transaction_required")
+    _acceptance_preflight(snapshot, scope)
+    _assert_id(snapshot.decision_id, stable_id("dec", _decision_identity(snapshot)), "decision")
+    payload = _model_payload(snapshot)
+    semantic = _without(payload, "created_at")
+    semantic_sha = payload_sha256(semantic)
+    evidence = _write_reference(
+        conn, "evidence_snapshots", "evidence_id", snapshot.evidence_id, EvidenceSnapshot,
+    )
+    holding = _write_reference(
+        conn, "holding_versions", "holding_version", snapshot.holding_version, HoldingVersion,
+    )
+    policy = _write_reference(
+        conn, "portfolio_policy_versions", "policy_version", snapshot.policy_version, PortfolioPolicy,
+    )
+    if evidence is None:
+        raise LookupError("decision evidence does not exist")
+    if holding is None:
+        raise LookupError("decision holding version does not exist")
+    if policy is None:
+        raise LookupError("decision policy version does not exist")
+    _acceptance_guard(conn, "decision", snapshot, evidence, holding, policy, scope=scope)
+    if evidence.fund_code != snapshot.fund_code or holding.fund_code != snapshot.fund_code:
+        raise ValueError("decision, evidence, and holding fund codes must match")
+    if holding.user_state != snapshot.user_state:
+        raise ValueError("decision user_state must match its holding version")
+    if evidence.created_at > snapshot.created_at:
+        raise ValueError("decision cannot reference future evidence")
+    if evidence.market_time is not None and evidence.market_time > snapshot.created_at:
+        raise ValueError("decision cannot reference a future market timestamp")
+    if holding.created_at > snapshot.created_at or (
+        holding.updated_at is not None and holding.updated_at > snapshot.created_at
+    ):
+        raise ValueError("decision cannot reference a future holding state")
+    if policy.created_at > snapshot.created_at or policy.effective_at > snapshot.created_at:
+        raise ValueError("decision cannot reference a future policy")
+    existing = _existing_model(conn, "decision_snapshots", "decision_id", snapshot.decision_id, DecisionSnapshot, scope=scope)
+    if existing is not None:
+        if payload_sha256(_without(_model_payload(existing), "created_at")) != semantic_sha:
+            raise SnapshotConflictError("stored decision id has different output")
+        return existing
+    conn.execute(
+        """INSERT INTO decision_snapshots(
+           decision_id,evidence_id,fund_code,holding_version,policy_version,
+           strategy_version,user_state,action,strength,confidence,summary,
+           reason_codes_json,reasons_json,risks_json,invalidation_codes_json,
+           invalidation_json,position_guidance_json,evidence_nodes_json,
+           created_at,payload_json,payload_sha256
+         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            snapshot.decision_id, snapshot.evidence_id, snapshot.fund_code,
+            snapshot.holding_version, snapshot.policy_version, snapshot.strategy_version,
+            snapshot.user_state, snapshot.action, snapshot.strength, snapshot.confidence,
+            snapshot.summary, _json(snapshot.reason_codes), _json(snapshot.reasons),
+            _json(snapshot.risks), _json(snapshot.invalidation_codes),
+            _json(snapshot.invalidation_conditions),
+            _json(snapshot.position_guidance) if snapshot.position_guidance else None,
+            _json(snapshot.evidence_nodes), snapshot.created_at.isoformat(),
+            _json(payload), semantic_sha,
+        ),
+    )
+    scopes.register_record(conn, "decision", snapshot.decision_id, scope)
     return snapshot
+
+
+def save_holding_and_decision(
+    version: HoldingVersion, snapshot: DecisionSnapshot, *, scope=scopes.PRODUCTION,
+) -> tuple[HoldingVersion, DecisionSnapshot]:
+    """Atomically append the pair and its scopes, not the earlier Evidence write."""
+    # Keep both original connection-free preflights before obtaining a writer.
+    _acceptance_preflight(version, scope)
+    identity = _holding_identity(version)
+    _assert_id(version.holding_version, stable_id("hold", identity), "holding")
+    holding_sha = payload_sha256(identity)
+    holding_payload = _model_payload(version)
+    _acceptance_preflight(snapshot, scope)
+    _assert_id(snapshot.decision_id, stable_id("dec", _decision_identity(snapshot)), "decision")
+    decision_payload = _model_payload(snapshot)
+    decision_sha = payload_sha256(_without(decision_payload, "created_at"))
+    if snapshot.holding_version != version.holding_version or snapshot.fund_code != version.fund_code:
+        raise ValueError("holding and decision pair references must match")
+    with db.transaction(immediate=True) as conn:
+        stored_holding = _save_holding_in_transaction(conn, version, scope=scope)
+        stored_decision = _save_decision_in_transaction(conn, snapshot, scope=scope)
+        return stored_holding, stored_decision
 
 
 def get_decision(decision_id: str, *, scope=scopes.PRODUCTION) -> DecisionSnapshot | None:

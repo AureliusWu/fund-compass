@@ -869,3 +869,45 @@ Owner前端补hash绑定：发送/取消/结束不能误操作另一标签页替
 接入固定公开乐咕client：requests+stdlib、单匿名bootstrap、每支持指标一次、15秒最小间隔、240秒源读取协作预算；401/403/429整实例永久停止，失败不读body/不重试，标准requests代理解析保留NO_PROXY。只接受加权addTtmPe/addPb及真实非重复源日期，拒绝坏JSON/重复键/非有限值/超限/close失败，错误不含原body或自由异常文本。保留六核心6/6、同日PE/PB、30样本、7天及未来日拒绝；不支持候选显式missing/unsupported而不缩requested。它不是整main写盘硬期限、原生DNS抢占、上游配额承诺或恢复证明。本轮没有运行真实producer、覆写公开估值产物、dispatch工作流或修改云端。
 
 为使公开定时修复不被Owner云迁移阻塞，已从main `0c0f9ad`建立独立CLI worktree，精确回补两个producer文件及三个纯指数测试文件；不含Owner/schema9、工作流、依赖、版本、数据库或秘密。App managed worktree因会话cwd为父目录返回Not a git repository，改用普通git worktree add --detach，原仓库HEAD/index不动；该临时checkout不是已注册App附件。独立静态复审通过，专属正常门禁/发布状态另记，尚不把它当main已更新。应用仍8.0.0；实际Turso JSON1/TEMP/TLS、受控迁移/停写/备份、远端耐久与独立恢复、真实浏览器和自然任务仍未验收，整个I18/I19/I20及v9正式发布继续不勾选。
+
+### 10-18 候选 CI 与独立公开回补终态
+
+本切片已正常提交并推送`2609e1f5d0145f115ebb09e4cc57abb07bd57f3e`，父cea4a7f。[CI 39103798112](https://github.com/AureliusWu/fund-compass/actions/runs/39103798112) attempt1于`2026-10-18T06:25:05Z`实际completed/success；四job原日志核checkout精确`a9880c9db8e06cc22699c00014b4a85376f78a2b`，Git API父为main0c0f9ad与2609e1f，整tree=`9e9e47a5349e623f4b16ac3d4f3ab897c00f161b`与目标相同。Linux Python3.12.15/FastAPI0.143.3/pytest9.1.1后端**2885 passed/1 warning/141.74s**、pip check通过；前端**919/54文件**、类型/build7.58s/PWA7/7；Worker**144/3文件**、类型/dry-run114.28KiB/gzip26.58KiB，两端npm0 vulnerabilities。deploy/candidate_smoke/formal_smoke实际skipped、steps为空；PR4仍OPEN/DRAFT/未merge，不是部署或正式发布。
+
+根与独立代理分别读取实际run/jobs、source/merge元数据及日志，17份公开证据重新哈希漂移0。目录`fc-ci-39103798112-readonly-20261018-82f63c11`，EVIDENCE_PINS SHA=`ff9a12a6fdfddea51e41703fdd6d759478a8da05421a3c64b4a24cbf1cfecaa6`、VERIFICATION=`c1862ada9fd789b745f5ab22c4cf6e0a84b7c53358e22b7aeae1127ff524cb7c`。保留CLI不支持startedTime的初次只读字段错误，改读本机明确支持的startedAt；未派发重跑或改认证/远端元数据。
+
+独立main回补在固定0c0f9ad加五代码/测试文件上，正常专项**143 passed/1.13s**、全量**721 passed/28.58s**，full外层30.447s；原300秒、正常插件、实际新默认DB/byte-cache隔离保持，四阶段各一次exit0/未超时/排空/默认DB未创建/stderr空。192源raw摘要`aeb0cfb313cb8aa3672084a3c8d76b427e87933d96c43a8b8edd23c7e325bb53`，根独立逐文件漂移0；full manifest=`6e986efbc158e115b3c0169a0cb94043555564886df7f9d0a19e80552feca1a7`，stdout=`c03f2597f6387b056f9fdfdd7748eb7ed07c8086f25a681bb7d5e692ccc8a8b6`，目录`fc-index-main-normal-author-20261018-9c64bd12`。之后只新增公开说明并提交`7999db1c753966ccd94a8e7ad0844c18e706e2f9`，已普通推送`fix/index-source-hardening-20261018`，远端main仍0c0f9ad。该分支没有单独Python3.12 CI或上线证明；没有为绕过已遇PR元数据403而直推main，也未用特性PR的整树测试冒充不同main回补树的CI。
+
+本次按computer-use技能检查Chrome原生窗口：初始化/list_apps成功，确有一个Chrome窗口；首次只读get_window_state被平台安全终止，提示无法可靠识别当前浏览器URL并要求停止当前回合，已立即结束，没有继续输入/绕过。不是用户未登录的证明；没有使用Tabbit、Cookie/CDP、密钥枚举或云配置。此路径保持停止，不要求用户重复刷新。
+
+### Holding/Decision 原子保存基础与缺失估值崩溃修复（2026-10-18）
+
+将原`save_holding`、`save_decision`事务主体抽成调用者同连接内核，原public入口连接前纯校验顺序保留，内核再次核ID/hash、scope/引用、未来时间及幂等；只接受已有原生bool事务，不开连接、不commit/rollback/close，也不以sqlite3类型断言排除现Turso协议。新增`save_holding_and_decision`单BEGIN IMMEDIATE保存两root及scope，真实`create_decision`已改为消费此pair，返回实际首存模型。Decision失败不再遗留新Holding；Evidence仍先独立保存，失败可能留下Evidence/source事件，不称整个链原子、Owner已接通、远端事务已验证或I19-04整体完成。
+
+新增24个参数化原生SQLite故障/幂等/外层事务回归（最终计数以collection为准），原测试断言未改。首轮正常专项collection276，实际**2 failed/274 passed/40.32s**、外层42.350s；立即停止，collection-full/full未启动。两个真实service用例都在进入pair前暴露旧`_reason_text`对未选择估值文案也急切格式化`valuation_percentile=None`的TypeError，不是原子事务失败。修复只把三个估值文案移至选中分支求值；缺失保留“估值证据不足”，不补零、不修改动作阈值/策略版本或原service fixture。新增9项回归覆盖持有/未持有×fresh/unavailable缺失，以及五个正常分位含真实0的原文案；原457行atomic测试raw SHA仍`c96d032e4a11cc78b31d684367db603ed69f4b8b745170fb6d0e8b7bde409db3`。
+
+首轮证据目录`fc-v8-atomic-normal-author-20261018-5ce91f42`完整保留，focused manifest=`62ccedc88994977176b290ec137cad328035bafe758c018a8c447143cbe5ed2a`、stdout=`c44a0fb4fd25f48aa7547492f7a7f04a78d3cdee68a989827e4df5bf814c5275`。exit1/未超时/输出排空/stderr空/实际新默认DB未创建，249源前后无漂移；不把原失败改写成PASS，也不提高原300秒或禁用插件。准备阶段给出的不存在`test_persistence_verification.py`已在任何执行前改为实际两份persistence candidate测试，最终10项focused；此为路径核对纠正，不冒称一次pytest失败或成功。修复轮另行冻结、执行及记录，未以静态复审代替。
+
+修复轮正常专项**285 collected / 285 passed**（pytest42.63s、外层44.652s），全量collection **2918 collected**；实际full于`2026-10-18T06:49:48.5302311Z→06:54:48.6319754Z`达到原300秒上限，**TIMEOUT、exit -1、未完成**，不得称全量通过。输出排空、stderr为空、监督无异常、实际新默认DB未创建；日志结束于旧`turso_scope_upgrade`区约90%，尚未运行到新增V8测试，因此不能据此归因新pair开销。前一轮2885全量原本仅约9秒裕度，也不能用该历史PASS替代当前2918结果。
+
+本轮目录`fc-v8-atomic-normal-repair-author-20261018-63f8a4d2`，full manifest=`427acf57522e4b2a8333e2cd0b646262050cfe0734efb5461fb43ca03139539d`、stdout=`a0ef9c4544509d13bee7ce85869e341ea153168365dc5343c45efb95c4bb7ebf`；runner仍`43b23da1557dd4cf1ad72774b266807dac976716f9cb0cd1afa05320a2902bfb`。249源摘要`b54c5e0fa4972d1f76886496ed4fb9c37bec79bae5715c3426babc413d382a71`，根独立逐文件重算漂移0，原两项失败日志仍原样保留。超时后未盲目重跑、增加预算、禁用插件/警告或减少测试；先作独立耗时诊断，版本、部署与发布门禁继续不放行。
+
+随后在同一冻结源码/3.14旧环境上，仅对固定8个operational-profile用例作三次隔离cProfile诊断，各60秒独立上限；全部8 passed，外层5.830/5.457/4.614秒（median5.457、worst5.830），不是重跑全量或提高门禁预算。根读取第二份原生pstats：8次fixture1.298秒、16次rehearse1.080秒、scope schema_errors0.110秒、8次Holding内核0.012秒/Decision内核0.026秒、48次preflight0.001秒；小样本主要self time在SQLite与文件I/O，不能据此解释全套约31秒累计差异或宣称生产性能通过。未为赶时限删除任何守卫、完整性核对或独立恢复。目录`fc-v8-atomic-profile-author-20261018-a1d47b8e`保留三份原始pstats/日志，输入仍249源，三次均exit0/无超时/排空/默认DB未创建/0漂移。
+
+本机原全局环境实际Python3.14.4/pytest8.4.1，额外自动加载pytest-asyncio0.24/cov7.1；旧完整日志有112972条来自该asyncio插件的弃用警告，并非项目声明的Python3.12环境。另在仓库外新建隔离Python3.12.13环境，按两份现requirements从PyPI安装31项（FastAPI0.143.3/Starlette1.8.0/pytest9.1.1/Pydantic2.14.1），pip check通过；原默认Python/包和注册表未改。uv内置目录没有CI用的3.12.15，初次明确返回No download后按其可提供目录选3.12.13，不冒充精确同patch。3.12正常四阶段仍使用原300秒、同249源码和原10份专项/全testpaths，runner只换解释器路径；插件保持该干净requirements环境的正常自动加载，不能将跨解释器/依赖/插件的结果当作同环境代码加速，也不抹去3.14超时。新环境门禁终态另记。
+
+新3.12环境四阶段均首次exit0：专项collection/run **285/285 passed**（pytest48.12s、外层50.224s），全量collection/run **2918/2918 passed**（pytest278.09s、外层279.839s）；full实际UTC `2026-10-18T07:07:48.3270861Z→07:12:28.1694047Z`，仍低于原300秒。正常autoload实际仅anyio4.15.1；两个警告分别为Starlette/httpx弃用及坏confidence=inf故障注入的Pydantic提示，未过滤。四次均无超时/完整排空/stderr空/实际新默认DB未创建；根独立核全部manifest/实际尾部汇总及249源漂移0，先前两项失败与3.14超时文件仍原摘要。
+
+证据目录`fc-v8-atomic-python312-normal-author-20261018-91a3d5c8`，full manifest=`a366f2a4d154e735307b197a04059e5a39cb54809d5b054d25dabc9d571faf47`、stdout=`8be83d7fd43c5c03eed497e567a6b5fb0175bb70b525cf7868e4914229cdcf3b`；runner=`3165fd2a6c4c4217b901baefb5f965a8a7c041dfcab7eaf02f18f2e47ca7fd7c`、freeze=`e87e307c9a36208231261554625e84ad2d27963d3824fbc483655a81269dca47`，源码摘要仍`b54c5e0fa4972d1f76886496ed4fb9c37bec79bae5715c3426babc413d382a71`。这只关闭本切片的本地3.12代码门禁，不称3.14已修、生产性能优化、Owner业务链完成或部署/发布。
+
+### 无浏览器的候选数据库真实只读能力复核（2026-10-18）
+
+只使用此前用户明确指定的候选配置文件，通过既有普通数据库凭据完成一次真实直连检查，没有登录自动化、Cookie/CDP、Token枚举、换身份/网络或新管理权限。复用现有driver/inspect，精确只读SQL闭集后执行固定`sqlite_version/json_valid/json_extract`，禁DDL/TEMP/PRAGMA赋值/私有账本/迁移/写probe/重试；5秒socket、20秒协作总预算、1MiB请求/响应、外部30秒监督，子进程清环境/-B/-I，不导入db/main或初始化。敏感配置只在进程内存，不进参数、日志、artifact或仓库。
+
+实际结果：**exit0/3526ms/无超时/输出排空/stderr空**，schema来源`schema_table`且仍为**8**，普通表20、公开funds计数28019，SQLite **3.47.0**，`json_valid`及固定`json_extract`均返回原生整数1；关闭成功后才输出闭集结果，5份代码输入前后摘要一致。该观察证明本次已配置路径可读、这两个JSON函数可用，不证明TEMP/JSON写用法、schema9迁移、Owner事务、凭据轮换、耐久、独立恢复、线上部署或正式资格。
+
+证据目录`fc-turso-readonly-repair-20261018-83a04d57/run-20261018T065123833Z-10c404a9867047ee85e32f0403926c54`，manifest SHA=`57c603cf7fbc4f9b76ee10150a2f271aa671ebe7e32e4252707a7b4099fa7119`、stdout=`6f60db77d1abace917c3b0ef0715c493994695e7d841ffa107736179bbead00c`，根实际读完整结果/manifest并重算日志。外部输入seal=`8ca749202c2c7b4dfda4bb661f3d3b62f5833b90fc69404317f3b574cab3f7f6`。首份author外层存在行首-or导致的19个级联解析错误，根在任何调用前用静态Parser阻止，无凭据读取/child/HTTP；独立修订只移动8个运算符换行及固定目录/pins，静态解析0错误后才单次执行，旧稿保留。没有把这一准备错误当作Turso鉴权/服务失败，也未要求用户重复登录。
+
+随后单次metadata-only核验**exit0/2429ms/无超时/排空/关闭成功**：schema-table8、SQLite header0、21表（含内部表）/86个结构对象，完整四列结构在私有内存逐一符合仓库固定schema8合同。可选对象明确为`turso_candidate_probe_v1`和`universe_import_state`，没有sqlite_stat1；stat4、未知对象或坏DDL仍拒绝。普通表20与含内部表21不是矛盾，不从计数推断具体profile。三个只读metadata语句分别至多一次，未读业务行；原始DDL未落盘/输出，三次观察**不是同事务一致快照**，不能用它代替后续capture、停写、新备份、业务行引用核验、远端恢复或发布资格。
+
+两代理与根全文审阅新helper/outer及完整diff，根独立核15输入、PowerShell Parser0/Python AST0后才执行，前后pins不变。目录`fc-turso-inventory-author-20261018-a62f3c91/run-20261018T070721729Z-f2ca3a637d63437fbba95fa98853d52f`，manifest=`45293400ae53a8cb11704393e3166e8f008cdbbc9fd09115c2635116caaf32e8`、stdout=`49e337b28ad56f9c07f1191d958c18ab338fccc6c082d86f16a283f4903fd5f4`；输入seal=`762beee52c1588d3da757237fe0e923d74a42e1255592f5fde660ca37d8e7513`。不自动串行启动capture，不改变云端schema/Token/配置或计费。

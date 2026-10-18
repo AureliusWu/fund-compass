@@ -362,3 +362,34 @@ def test_diff_marks_non_action_snapshot_changes():
 def test_policy_rejects_invalid_consumed_rule_values(rules):
     with pytest.raises(ValueError):
         build_portfolio_policy(name="invalid", effective_at=T0, **rules)
+
+
+@pytest.mark.parametrize("held", [False, True])
+@pytest.mark.parametrize("status", ["fresh", "unavailable"])
+def test_missing_valuation_renders_missing_evidence_without_fabricating_a_value(held, status):
+    evidence = make_evidence(
+        valuation=None, score=None, score_coverage=0, timing_coverage=0,
+        trend=None, signal="观察", status=status,
+    )
+    decision = build_decision_snapshot(
+        evidence, holding(held=held), default_portfolio_policy(T0), created_at=T0,
+    )
+    assert evidence.valuation_percentile is None
+    assert "valuation_percentile" in evidence.missing_fields
+    assert "VALUATION_MISSING" in decision.reason_codes
+    assert "SCORE_INSUFFICIENT" in decision.reason_codes
+    assert "估值证据不足" in decision.reasons
+    assert decision.action == ("hold" if held else "watch")
+    assert all("0% 分位" not in reason and "None" not in reason for reason in decision.reasons)
+
+
+@pytest.mark.parametrize("value,label", [
+    (0, "相对低位"), (20, "相对低位"), (50, "中位区域"), (80, "相对高位"), (100, "相对高位"),
+])
+def test_present_valuation_reason_preserves_original_text_including_real_zero(value, label):
+    from strategy.decision_v2 import _reason_text
+
+    evidence = make_evidence(valuation=value)
+    code = "VALUATION_LOW" if value <= 35 else "VALUATION_HIGH" if value >= 70 else "VALUATION_MID"
+    assert _reason_text(code, evidence) == f"估值处于{label}（约 {value:.0f}% 分位）"
+    assert evidence.valuation_percentile == value

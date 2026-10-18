@@ -29,6 +29,8 @@
 
 本地待同步修改不是已确认 holding_version。只有云端 revision 确认后才生成追加式 Holding/Policy/Decision；旧证据不就地更新。真实持仓上传和迁移等待存储阶段出口及用户明确启用云同步。
 
+I19-04 的下一受限生成入口必须从服务端完整已提交组合重建 `fund_only` 分母和跨账户聚合，不接受浏览器自报金额/权重/估值上下文；同步 revision 不是时间或业务版本。Holding/Decision 同连接内核与应用原子 pair 是连接这一链的基础：调用者控制事务，原 ID/hash、引用/scope、时间和幂等守卫不变，不能从内核本身推导 Owner 授权。现有应用的 Evidence 仍先独立保存，只有 Holding/Decision 及两条 scope 原子；不是整条 Evidence/Policy/同步链已原子发布，也未接入 Owner 生成任务。现 Policy 为每 scope 单链 tip，Owner 不得借分析入口推进 Admin 护栏或 active 策略；目标超护栏、主题/定价/份额不完整须显式拒绝或降级，不静默裁剪/均分/补零。新版本、任务回执与完整来源绑定的受限任务仍待后续实现。
+
 ## 机器任务与迁移
 
 机器消费者只读已确认 revision，经受限接口形成 `revision → holding_version → decision → notification` 链。浏览器内存中的未同步状态不成为推送输入。
