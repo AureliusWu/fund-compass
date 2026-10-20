@@ -10,6 +10,8 @@ import {
 } from './ownerSyncOutbox'
 import { buildOwnerSyncRequest } from '@/utils/ownerSyncContract'
 import type { OwnerCloudImportPlan, OwnerWorkspaceEntry, OwnerWorkspaceSnapshot } from '@/utils/owner-cloud-import'
+import { buildCloudImportPreview } from '@/utils/owner-cloud-import'
+import { buildOwnerBusinessExport, decodeOwnerLegacySeed, restoreOwnerBusinessExport } from '@/utils/owner-legacy-seed'
 
 const TARGET = 'a'.repeat(64)
 const handles: (OwnerWorkspace | OwnerSyncOutbox)[] = []
@@ -73,6 +75,40 @@ async function prepared(): Promise<OwnerSyncOutboxEntry> {
 }
 
 describe('explicit shared Owner workspace IDB foundation', () => {
+  it('roundtrips the business export before adopting a strict legacy seed, then imports and rolls back cloud-only additions', async () => {
+    const factory = new IDBFactory(), workspace = await open(factory), guard = context().guard
+    const source = { sourceKey: 'sinan_watchlist_v2' as const, raw: ' \n' + JSON.stringify([
+      { code: '000001', name: '合成零份', account: '账户一', position_kind: 'holding', shares: 0,
+        cost: null, target_weight: 0, updated_at: '2026-10-20T00:00:00.000Z', local_pending: true },
+      { code: '000002', name: '合成删除', account: '旧账户', position_kind: 'watch', shares: null,
+        deleted: true, updated_at: '2026-10-19T00:00:00Z' },
+    ], null, 2) + '\r\n' }
+    const seed = decodeOwnerLegacySeed(source), backup = await buildOwnerBusinessExport(seed.entries)
+    expect((await restoreOwnerBusinessExport(backup.raw, backup.sha256)).entries).toEqual(seed.entries)
+    const adopted = await workspace.adoptLegacy(seed, 0, 0, guard)
+    expect(adopted).toEqual({ localVersion: 1, entries: seed.entries, legacy: source })
+    expect(await (await outbox(factory)).read()).toEqual({ version: 1, entry: null })
+    const baseline = { pulledRevision: 1, records: [{ key: '000003::云账户', kind: 'holding', deleted: false,
+      values: { name: '合成云记录', shares: 5, cost: 0, target_weight: null },
+      record_revision: 1, lifecycle_revision: 1, field_revisions: { name: 1, shares: 1, cost: 1, target_weight: 1 } }] }
+    const preview = buildCloudImportPreview(baseline, adopted, TARGET)
+    expect(preview.issues).toEqual([])
+    const request = await buildOwnerWorkspaceImportRequest(TARGET, { id: 'synthetic-codec-import-0001',
+      plan: preview.plan!, expectedLocalVersion: 1, expectedOutboxVersion: 1 })
+    const receipt = await workspace.importCloud(request, guard), imported = await workspace.read(guard)
+    expect(imported.entries.slice(0, 2)).toEqual(seed.entries)
+    expect(imported.entries[2]).toMatchObject({ key: '000003::云账户', local_pending: true, values: { shares: 5, cost: 0 } })
+    expect(imported.legacy).toEqual(source)
+    const rollback = await buildOwnerWorkspaceRollbackRequest(TARGET, { id: 'synthetic-codec-rollback-0001',
+      importId: receipt.id, importHash: receipt.hash, expectedSnapshot: imported, expectedOutboxVersion: 2 })
+    await workspace.rollbackImport(rollback, guard)
+    const restored = await workspace.read(guard)
+    expect(restored).toEqual({ ...adopted, localVersion: 3 })
+    expect((await restoreOwnerBusinessExport(backup.raw, backup.sha256)).entries).toEqual(restored.entries)
+    expect(await workspace.receipt(request.id, request.hash, guard)).toEqual({ state: 'matched', receipt })
+    // Injected fake-indexeddb integration is not a browser download or physical recovery proof.
+  })
+
   it('uses only injected IDB, never browser globals, LS, Gist timers or network', async () => {
     const forbidden = vi.fn(() => { throw new Error('ambient IO forbidden') })
     vi.stubGlobal('indexedDB', { open: forbidden }); vi.stubGlobal('fetch', forbidden)

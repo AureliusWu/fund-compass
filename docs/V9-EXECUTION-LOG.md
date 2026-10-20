@@ -965,3 +965,33 @@ Owner前端补hash绑定：发送/取消/结束不能误操作另一标签页替
 作者专项 **155/155**，根随后实际全量 **1026 passed/56文件/5.21s**、type-check exit0、build **10.37s/PWA7/7** exit0；独立最终源码审查未发现剩余P0/P1。现outbox懒加载chunk观察5.99→6.49kB、gzip2.31→2.51kB，PWA仍67项；旧数来自CI、现数本机，非同宿主性能基线，不把构建耗时差异当运行时回归证明。新基础尚未接UI，因此不将新增模块称用户旅程已完成。
 
 明确剩余：存储测试使用fake-indexeddb，不是真实Chrome崩溃/跨设备证据；versionchange与strict新数据初始化是两次提交，中断后缺current的v2固定拒绝、不自动重建。adoptLegacy是trusted-caller种子保存原语，不证明raw→entries业务allowlist转换或实际LS source/generation绑定；完整导出、codec、全部真实watchlist编辑权威切换、导入/回滚UI仍待实现，当前没有触发Gist或Owner云端写入。应用仍8.0.0，不勾选整个I18/I19、不推main/建v9 tag/release，也未执行Token轮换、云迁移、远端恢复、旧Gist删除或任何付费变更。
+
+### 精确原生浮点读回与 ae150 CI（2026-10-20）
+
+本地事务基础已正常提交/推送为 `ae150a20f73fa0402be8c67542c16f356eba9999`。[CI 39393911410](https://github.com/AureliusWu/fund-compass/actions/runs/39393911410) attempt1 于 `08:32:39Z` completed/success；四个实际 checkout 均 `eb7a0ddc52bcdfa7417f422b60050378b4e7262c`，父为 ba674+ae150，tested merge/source API/本地 tree 均 `977df679bc70dcb39ea53219e29fe88137aa8267`。后端 **2918 passed/2 warnings/95.60s**，前端 **1026/56文件**、类型/构建7.54s/PWA7/7，Worker **144/3文件**及check/dry-run通过，两个npm audit为0。部署和两类smoke均skipped/steps=[]，不是新源码上线。证据目录 `fc-ci-39393911410-readonly-20261020-38e4c29a`，verification=`f3f5c78f2871301d569e71db73072d602cfc33e8592d79143e7896941d309c98`、pins=`ac189c863b7fd4b5bfb79dc7f38720aa6e8e51d8acfb6bba8debcad20e92ca85`；根独立重哈希25文件漂移0。一次普通source API EOF保留，同身份一次补读成功；无rerun/dispatch/更换认证。
+
+为排除 printf 文本算法的不确定性，新增仅固定只读查询的 exact-REAL oracle：通过整数mantissa与公开2的幂在服务端构造期望REAL，浮点数不经过JSON参数；34个原ID/hash完整唯一绑定，逐项核typeof及服务端数值IS结果，不输出私有值。作者纯合成 **9 passed/2.69s**，含1000个公开有限binary64逐位本机对照；外部父层首次因AGENTS合法新增规则使旧seal失配而在任何子进程/凭据/HTTP前停止，原seal保留。根比较31项仅AGENTS变化，另建新seal `df2235e7a6a856af9c4f7eec957b56b67b1e5b17000b5328ae131c8007d500a1` 并独立重核0漂移，不修改旧证据。
+
+真实诊断一次 **exit0/1746ms/2POST/关闭**：34行完整，两个字段各29NULL/5float；estimate等32/差2，coverage等29/差5，合计5行有原生不等。目录 `20261020-remote-exact-real-d3f6a218`，manifest=`0de03cbb46d7204e80d49c8a30627d9be4d7c9e2cbd5157db1ca87dd597435d4`、stdout=`bb8f2c59e571d16fd3a48b2297adfdcb8479430fb0587a7884fcae19a3048ac8`，helper=`3ac03d242ba107d0b1a4979c1e9448a9a0d4f5e0db29a787fa6c44da6767acf0`。因此当前云端冗余标量与有效payload确有差异，不只是capture读取/printf展示；仍未证明历史插入成因、物理二进制转储或来源认证。查询绑定的是旧快照34行，不是新停写或全库当前population证明；无DML/DDL/远端修复/迁移，全部正式资格继续false。
+
+### 明示投影修复与真实关闭快照的本地独立恢复（2026-10-20）
+
+新增 `database/turso_projection_repair.py` 与显式CLI，不修改旧offline升级、packet、strict backfill或不可变trigger。仅固定Evidence两列、原生有限float、恰1ULP可列入私有delta；类型/null/负零/更大差距、其它列/根/衍生链损坏整批拒绝，零delta不是修复。先核原始模型/ID/hash/完整前像，再重建固定DDL内存副本，不UPDATE原表或删除trigger；原完整严格迁移与仓储读回仍为最终权威。plan绑定source文件/原serialize/完整typed前像/代码（含新CLI）/profile/有序delta/修后8像/目标9像，rehearse必须匹配同plan且从原始8像重新推导，不从已修副本冒称恢复。公开摘要无业务值/ID，明确 `legacy_rows_unchanged=false`，不可变payload/ID/hash未变，远端/apply/restore/formal均false。
+
+独立复审发现P1：路径若先lstat再判断local，UNC可触发SMB；随后发现Windows无盘符rooted设备别名。均在首次Path.absolute/lstat/SQLite前按平台词法关闭，并加23+3无文件系统调用回归；没有实际访问UNC或读取系统凭据。作者最终新module84+CLI13+旧upgrade109为 **206 passed/40.96s**；根独立新版module+CLI+exact **139 passed/14.87s**。最终module=`0e9380960b9370faeae842fedd791fb290250ebc734a20fd369a0ce74231ea31`、tests=`3753e42dd8aee0a01fa60186a71c36a687f79833c652af9062fe2720fe503df9`、CLI=`4e3e7046d8112b0d15a7c99e59a68338e673189efdbb162909d9ac6e1708edb6`；独立最终复审0未解决P0/P1，但源码审不代替真实副本或云恢复证据。
+
+新外部parent=`e93b9419df3b007c705f43027e133c278227f1145862ca7974ae1a96c57bbab0`，原parent/失败证据未覆盖。静态Parser0和独立保护函数复核通过，执行前后核31旧代码pin+新module/CLI及原六文件；私有目录仅current-user/SYSTEM两条受保护ACL、无reparse、CreateNew/fsync/只读，cleanenv无凭据、30秒加共享5秒监督不变。对原e88ae570…关闭备份实际plan **exit0/3673ms**，目录 `20261020-local-projection-plan-97ad2e60`，manifest=`50c166a2162854eebd8f1c63304078cc640ea14a8e5e876c4d427dc3a11b6823`、stdout=`87ce0e0bcb03c2c8e40787d54ef73638ab9796f38c5696a4aa082d7769336289`。绑定repair=`494f04b7febd94be61de1c8fe32a1707d85a096368ab9039ba63f5be7dc7e022`、delta=`dfe881af6a8410b43df139dbf2d795f001bd88ce5a53cdefc73c0a0e08f52e6d`。
+
+随后按上述原repair SHA实际rehearse **exit0/6536ms**，目录 `20261020-local-projection-rehearse-97ad2e60`，manifest=`43d7924613177df019a53e4a5a785c0e03f18b044ef9404fea3d4da4424277e9`、stdout=`11b389f9eb3970a652f3222533f6e2a6cf5f67f7d17451447a545a9467b84a6a`。两次均无超时、排空、stderr为空；恰7cells/5rows，2estimate/5coverage，21表/34,709行保持。原始schema8独立恢复重导delta及再次严格迁移得到同target rows SHA=`067192cc5860f5df8162a8a7de39e67b724d0e31ba08040a6e59505dbc872c91`；修后8rows=`64934378cdab418fcf2a3e2de09c572587b2fda35731e01421dac6ff8e2d9620`。根另重哈希四新证据及原source，并核两新目录ACL/普通只读文件，全部一致；原source SHA仍 `e88ae570aa50969f2fdf57776cbc1161dad744760e5a245587b122457c866494`。这是本地原始恢复子门禁，不是真实云库修复、旁路云恢复或正式发布放行。
+
+新增 `database/exact_real.py` 的opt-in固定值槽primitive，finite float分解为整数mantissa和公开2的幂，只向JSON传integer参数，unary+移除CAST expression affinity；42项含1000公开binary64逐位、本机真实CAST/TEXT差异、NULL及固定INSERT/UPDATE回归。负零/非有限/其它DBAPI类型明确拒绝。尚未接默认driver、V8 writer或迁移packet；不能称所有后续写入已修好。后续需在固定INSERT逐REAL槽接线、保留原事务/幂等/scope/引用门禁并核真实provider，未知通用SQL不得全文rewrite。
+
+### I19 旧存储业务codec、受控导出与本地事务联测（2026-10-20）
+
+新增 `utils/owner-legacy-seed.ts`：只接受调用者明确提供的实际v1/v2 sourceKey/raw，严格JSON（重复key/Unicode/容量/数值）及业务闭集，原raw保持不改；按真实code/trim(account)规则生成key，明确kind或历史positive shares才能分类，不造缺失name/时间。保留0/null/-0、多账户、tombstone及pending，歧义/坏行/重复key整批拒绝。实际旧watchlist公开fixture有缺name形态，当前workspace需要name因此明确拒绝并保留raw，不称全旧版本无损兼容；declared holding/null可存本机，但现upload preview仍missing_value，不冒充已确认持仓。
+
+business export仅固定format、allowlist entries、分类counts与内部entries SHA，外部完整bytes另有SHA；复导同时核两层SHA/闭集/计数/canonical spelling。hash只证明内容一致，不认证来源、同意、实际下载或恢复完成。作者新增102项实际旧fixture/与现preview对照/篡改/roundtrip/-0通过；根新增codec→导出复核→adoptLegacy→cloud-only import→原回执rollback的fake-indexeddb联测，raw/0/null/tombstone/独立版本保持。根专项 **258/4文件/694ms**、前端全量 **1129/57文件/4.57s**、独立type-check exit0、build **6.79s/PWA7/7**通过。未接实际LS source/generation读守卫、全编辑权威切换、UI/真实浏览器或云端业务写，整项I19及v9继续未完成，无付费/Token/Gist/云配置变化。
+
+正常Python3.12.13/pytest9.1.1/anyio4.15.1的本机后端串行全量采集 **3057** 项，但原 **300秒** 硬上限到达时仅约91%，treeKill后exit-1、双流排空，**全量未通过**，不提高阈值或套用历史PASS。完整stdout/stderr保存在仓库外 `fc-projection-full-pytest-20261020-fe0d7b9ba1ba472da5922ef06db91e57`；最后在旧 `test_turso_scope_upgrade.py` 未完成，无最终summary、stderr为空。全backend/tools源码pin不变，真实默认DB仅metadata不变，隔离fallback未创建。尚无足够逐测试耗时证据认定性能根因；下一步可按相同总deadline做两个独立正常插件分片并核全集覆盖，同时核自然GitHub串行CI，不能把分片通过称原串行Windows通过。
+
+Worker本机 **144/3文件/2.02s**、type-check通过。首次误以为deploy wrapper接受`--dry-run`参数，被其固定pass-through拒绝，未部署；读wrapper与CI后改用既有CI同款 `npx --no-install wrangler deploy --dry-run`，**exit0/114.28KiB/gzip26.58KiB**，仅本地构建，未调用正式deploy wrapper或绕过其身份门禁执行实际发布。
