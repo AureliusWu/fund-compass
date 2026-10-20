@@ -93,6 +93,18 @@ function sameRow(first: Row, second: Row): boolean {
     && first.entry?.requestHash === second.entry?.requestHash
 }
 
+/** Shared by the explicitly constructed workspace; never exposes an IDB global. */
+export const ownerSyncOutboxStorage = Object.freeze({
+  storeName: STORE, key: KEY, rowShape, validateEntry, sameRow,
+})
+
+export function isOwnerSyncOutboxDatabase(db: IDBDatabase): boolean {
+  const stores = db.version === 1 ? [STORE] : db.version === 2
+    ? [STORE, 'working_copy', 'import_receipts'] : []
+  return stores.length > 0 && db.objectStoreNames.length === stores.length
+    && stores.every(name => db.objectStoreNames.contains(name))
+}
+
 function makeHandle(db: IDBDatabase, target: string): OwnerSyncOutbox {
   let closed = false
   const inFlight = new Set<(code: OwnerSyncOutboxErrorCode) => void>()
@@ -226,26 +238,37 @@ function makeHandle(db: IDBDatabase, target: string): OwnerSyncOutbox {
   })
 }
 
-export function openOwnerSyncOutbox(factory: IDBFactory, targetFingerprint: string): Promise<OwnerSyncOutbox> {
+export function openOwnerSyncOutbox(factory: IDBFactory, targetFingerprint: string, signal?: AbortSignal): Promise<OwnerSyncOutbox> {
   return new Promise((resolve, reject) => {
     let settled = false
     let handle: OwnerSyncOutbox | undefined
     let opened: IDBDatabase | undefined
+    let openingRequest: IDBOpenDBRequest | undefined
     let timer: ReturnType<typeof setTimeout> | undefined
     const finish = (code?: OwnerSyncOutboxErrorCode) => {
       if (settled) return
       settled = true
       clearTimeout(timer)
+      signal?.removeEventListener('abort', aborted)
       if (code) {
+        // An upgrade may have enqueued slot.put before its success/commit.
+        // close() is not an abort and onsuccess has not supplied opened yet.
+        try { openingRequest?.transaction?.abort() } catch { /* no live upgrade */ }
         handle?.close()
         try { opened?.close() } catch { /* fixed rejection still wins */ }
         reject(new OwnerSyncOutboxError(code))
       } else resolve(handle!)
     }
+    const aborted = () => finish('outbox_closed')
     try {
       if (typeof targetFingerprint !== 'string' || !HEX.test(targetFingerprint)) fail('outbox_invalid_target')
       if (!factory || typeof factory.open !== 'function') fail('outbox_unavailable')
-      const request = factory.open(OWNER_SYNC_OUTBOX_DB_PREFIX + targetFingerprint, 1)
+      if (signal?.aborted) { finish('outbox_closed'); return }
+      signal?.addEventListener('abort', aborted, { once: true })
+      // No downgrade request: an explicitly upgraded workspace shares this
+      // database. New outbox-only databases still start at physical version 1.
+      const request = factory.open(OWNER_SYNC_OUTBOX_DB_PREFIX + targetFingerprint)
+      openingRequest = request
       timer = setTimeout(() => finish('outbox_timeout'), OWNER_SYNC_OUTBOX_TIMEOUT_MS)
       request.onblocked = () => finish('outbox_blocked')
       request.onerror = () => finish(storageCode(request.error, 'outbox_invalid_database'))
@@ -268,7 +291,7 @@ export function openOwnerSyncOutbox(factory: IDBFactory, targetFingerprint: stri
         const db = request.result
         if (settled) { try { db.close() } catch { /* late connection stays unusable */ }; return }
         opened = db
-        if (db.version !== 1 || db.objectStoreNames.length !== 1 || !db.objectStoreNames.contains(STORE)) {
+        if (!isOwnerSyncOutboxDatabase(db)) {
           finish('outbox_invalid_database')
           return
         }

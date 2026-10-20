@@ -939,3 +939,29 @@ Owner前端补hash绑定：发送/取消/结束不能误操作另一标签页替
 另以普通`git fetch origin main`取得当前`ba67409584fa9deabeb1c4b9e68e3f78757c85ae`对象，不checkout/改index/推main。一次实际字节审计exit0/6.25s/stderr0，核52 Git blob身份及raw SHA：全集gzip解压3,047,005字节/28,104条并匹配meta digest，经理当前9片4,359条与legacy逐值一致、上一代9片4,358条仍保留、淘汰9旧孤儿名称摘要/行schema亦核实。33个当前JSON/解压文档隐私marker为0，但不称语义来源认证；上游独立核对、整合tree CI及生产CDN/API未验收。海外仍0有效预测/74h/models空，active/governance未变，富集只刷新fetched_at，金融归属日不变，不能包装为业务恢复。
 
 公开字节审计目录`fc-main-byte-audit-20261020-f4a21c38`，原生stdout SHA=`e41176d82b5c38686e82eeef97ece8e2200e9ec9590cab225e62cc662483b2b9`。该原生文件实际为CP936而非UTF-8，严格解码/JSON及反编码逐字SHA通过；保留原始文件，另存保持整个原始JSON文本的UTF-8机械投影`audit.utf8-raw-text-projection.json`，SHA=`67ad26c96e2ad4879ca063361879488e1e4565e11d61e5a7dd11c2b4d9dd221f`，不是新的审计运行或原生stdout。较早的重新序列化投影会使PowerShell自动转换日期表示，原样留存但不作为精确字符串证据。源码、数据完整性、业务产出与发布继续分轴；不先更改应用版本。
+
+### 整合 tree CI、Render 工作区与真实可用性复核（2026-10-20）
+
+普通 merge 已将已审 main `ba67409584fa9deabeb1c4b9e68e3f78757c85ae` 的 33 产物路径整合到 feature，head 为 `e1c6520b7026bc84b9b921008c31862a64cd88d1`；逐路径与 main tree 相同。移除的 9 旧孤儿经理分片可从 Git 恢复，当前及上一代 18 分片保留。[CI 39387942990](https://github.com/AureliusWu/fund-compass/actions/runs/39387942990) attempt1 于 `2026-10-20T07:42:15Z` completed/success：四 job 实际 checkout 均 `7c6558c3fe55e8ac18c71d39395f782d0064dcab`，父为 ba674+e1c；tested merge/source API/本地目标 tree 同为 `b9d62d8d584f6a5b5e6cdd822fe5341eba0a3b4d`。后端 **2918 passed/2 warnings/141.96s**、前端 **919/54文件**、type/build7.17s/PWA7/7、Worker **144/3文件**及check/dry-run通过，两端npm0 vulnerabilities。deploy/formal_smoke/candidate_smoke仍 skipped/steps=[]。证据 `fc-ci-39387942990-readonly-20261020-a2e84d16` 的20文件根独立重哈希漂移0；pins=`64723b4617e52412290fc17a7e5ebcb3d442ed8ac34c3d7457cba8ea83af3cf0`、verification=`734b363c0af9d04a854224dbc61e50c7d3957a44253105926d7ff430c91e8761`。没有 rerun/dispatch、修改受403阻止的PR或直推main。
+
+用户已明确选择 **My Workspace**，后续 Render MCP 调用均显式使用所确认 workspace，不再要求重新登录或发送密钥。两服务均观察为 Free/main/autoDeploy/1实例，最近 live deploy 均 ba674：候选 `srv-dab7g0n40ujc73a2ma50 / dep-dbb21mrm8hqs73buppr0`，旧主 `srv-d8v0t26rnols73fq6beg / dep-dbb21n3m8hqs73bupq2g`。服务 start command 没有显式 `--workers 1`，未将其推断为多进程或完整运行时 worker 数证明。未读取 env secret、改配置/计划、部署/重启或创建付费资源；脱敏元数据记录 SHA=`78724f3beb861347ae3839bc0cbcf16fdbbfe2a2e3232424dc12c4d1e4b41446` 不是来源签名或操作授权替代物。
+
+`08:09:25Z` 两 API 的 health/funds 四个真实公开 GET 均在约15.625秒超时，未取得HTTP状态，原失败保留；随后同一工作区 app logs 显示旧主在 `08:10:05Z`、候选在 `08:10:14Z` 完成启动，各自后续health连续200，所读07:45起日志未匹配异常。该时序支持免费实例唤醒慢，不单靠live标记判断可用。`08:11:15Z` 明确的暖态复核四GET均200/JSON：候选health1859ms/funds2125ms，旧主1312/1297ms；两者版本8.0.0、commit ba674、目录28104、index usable=false、durable=false。候选为libsql/turso_candidate；`08:15:42Z` 再读取旧主公开database投影确认为sqlite/ephemeral。未读取私人业务。这个小样本不是五样本性能验收、前端浏览器旅程、跨重启业务读回或完整production smoke。
+
+### JSON 浮点参数链复现；备选传输失败仍保留（2026-10-20）
+
+对同一关闭快照绑定的34 Evidence做固定只读SQL文本表示诊断，每列29 NULL/5 float，`printf('%!.26g', ...)`再解析与capture的全部5 float位相同，但相对payload仍为estimate2项/coverage5项1ULP。单次exit0/1885ms/2POST含关闭、source/code pins未变，目录`20261020-remote-float-b07e3a42`，manifest=`333ae24ab4a1650dc940ffc7a6daa4d88548f7dc48c50d025afd9b16b0a56df2`。printf并非所有double的精确十进制展开，保留文本算法不确定性，不据此宣称实际原始二进制位或历史写入成因。
+
+另用完全公开的128个有理数样本（63正/63负/2正零），原512参数、20秒协作/5秒socket/外部30秒监督不变。原69764字节 UNION 查询被拒；同输入单次脱敏分类只得到 native code=other/reason=unclassified，失败目录 `20261020-remote-binding-7091cd53` 与 `20261020-remote-binding-error-1fa5b208` 保留，不能猜测权限、SQL长度或拒绝原因。新 CTE VALUES 仅改查询形态至2287字节：本机真实内存SQLite对旧/新10列×128行逐值相同、5关系全部128真。云端新形态单次 **exit0/1773ms/2POST/关闭成功**，128行/全部类型完整，但float原生绑定对有理数计算及repr文本CAST有 **10 false/118 true**，repr CAST对有理数计算为 **128 true**；这复现当前JSON浮点参数路径的精度差异，不是已修复、不代表旧行成因或通用CAST方案可用。目录 `20261020-remote-binding-cte-0c739ca1`，manifest=`cf93f9fe69eae6d0329128421baff640c57879ea85df0fa77c0ae98aae2ab925`、stdout=`7d3fc9c3fd13329565a9e07552b0ebee4adecf56426a35e70ae189457b5ceb7c`；没有用户表读取、数据修复、DML/DDL或放宽旧链校验。
+
+按 [Hrana 3 官方协议](https://github.com/tursodatabase/libsql/blob/main/docs/HRANA_3_SPEC.md)另作者了最小固定查询 Protobuf Execute+Close 候选，不是通用DBAPI实现；原10列外加公开bound echo核double位，仍128/512。离线黄金向量、边界/协议闭合/错误清理/本机SQL等价等 **15 tests passed/3.16s**。一次实际云POST **exit1/1026ms/error=remote_failed/0行**，HTTP response/session已关闭，但没有SQL Close ACK，不授予远端关闭或binary链路资格，也尚无具体HTTP状态/拒绝原因。目录 `20261020-remote-binding-protobuf-a9d427c8`，manifest=`f58449061221bde3a960da9cfd78584ce137be3eb0371fd2caebdca5c9ec0d70`、stdout=`e8fcfd4b96c5bb5942eb4e417d36861ccf2dc2aa789250f1ca355c6b93a367bb`；原helper SHA=`9b679cfb87fde10941149ab6ad22fb62c773fde106b6ba37e2c89e2bf459a4fe`未改，不重试该SELECT。官方协议能力不等于当前托管入口实际可用。
+
+### I19 本地事务 workspace 与保守导入预览基础（2026-10-20）
+
+新增 `utils/owner-cloud-import.ts` 的严格cloud-only基金账户预览：完整DTO/基线head、闭集与容量校验，相等noop，任意同key差异整批拒绝；云缺失不删除，tombstone/多账户/未知holding/真实0/null与已有pending原样保留。manual仅验证并明确计排除数，不假称全scope已迁移；完整baseline来源和当前generation仍由调用者controller/guard证明，不以对象形状认证。纯计划提供完整有序前后像及SHA，不带伪造updated_at/holding版本；71项专项根重跑通过。
+
+新增显式构造 `stores/owner-workspace.ts`，同现outbox数据库的物理v1→v2只增working_copy/import_receipts，原slot/raw/hash/version/target不改；open取消共用总deadline，active upgrade中已成功put而未complete时仍abort，迟到upgrade不得初始化。业务写在三个store的同一实际strict事务中核完整前像与两版本，空槽协调epoch仅作CAS串行化，不是业务revision；非空任何state原样保护。回执与工作副本原子提交，按原id/hash核对和幂等重放，unknown不自动重跑；回滚须精确当前postimage且版本继续单调，不覆盖后续编辑。实际put后abort、commit后close/撤权、两handle竞争、prepare竞争、坏schema/slot、blocked、配额/容量、hash迟到超时均有回归。首轮一项abort分类失败后修复真实tx.onerror先于onabort的映射，未删断言；独立审查发现的初始open取消空窗及legacy Unicode合同漂移均修复并补测试。
+
+作者专项 **155/155**，根随后实际全量 **1026 passed/56文件/5.21s**、type-check exit0、build **10.37s/PWA7/7** exit0；独立最终源码审查未发现剩余P0/P1。现outbox懒加载chunk观察5.99→6.49kB、gzip2.31→2.51kB，PWA仍67项；旧数来自CI、现数本机，非同宿主性能基线，不把构建耗时差异当运行时回归证明。新基础尚未接UI，因此不将新增模块称用户旅程已完成。
+
+明确剩余：存储测试使用fake-indexeddb，不是真实Chrome崩溃/跨设备证据；versionchange与strict新数据初始化是两次提交，中断后缺current的v2固定拒绝、不自动重建。adoptLegacy是trusted-caller种子保存原语，不证明raw→entries业务allowlist转换或实际LS source/generation绑定；完整导出、codec、全部真实watchlist编辑权威切换、导入/回滚UI仍待实现，当前没有触发Gist或Owner云端写入。应用仍8.0.0，不勾选整个I18/I19、不推main/建v9 tag/release，也未执行Token轮换、云迁移、远端恢复、旧Gist删除或任何付费变更。
