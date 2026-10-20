@@ -911,3 +911,31 @@ Owner前端补hash绑定：发送/取消/结束不能误操作另一标签页替
 随后单次metadata-only核验**exit0/2429ms/无超时/排空/关闭成功**：schema-table8、SQLite header0、21表（含内部表）/86个结构对象，完整四列结构在私有内存逐一符合仓库固定schema8合同。可选对象明确为`turso_candidate_probe_v1`和`universe_import_state`，没有sqlite_stat1；stat4、未知对象或坏DDL仍拒绝。普通表20与含内部表21不是矛盾，不从计数推断具体profile。三个只读metadata语句分别至多一次，未读业务行；原始DDL未落盘/输出，三次观察**不是同事务一致快照**，不能用它代替后续capture、停写、新备份、业务行引用核验、远端恢复或发布资格。
 
 两代理与根全文审阅新helper/outer及完整diff，根独立核15输入、PowerShell Parser0/Python AST0后才执行，前后pins不变。目录`fc-turso-inventory-author-20261018-a62f3c91/run-20261018T070721729Z-f2ca3a637d63437fbba95fa98853d52f`，manifest=`45293400ae53a8cb11704393e3166e8f008cdbbc9fd09115c2635116caaf32e8`、stdout=`49e337b28ad56f9c07f1191d958c18ab338fccc6c082d86f16a283f4903fd5f4`；输入seal=`762beee52c1588d3da757237fe0e923d74a42e1255592f5fde660ca37d8e7513`。不自动串行启动capture，不改变云端schema/Token/配置或计费。
+
+### 5049 候选 CI 终态与当前 main 分离（2026-10-20）
+
+原子pair及null修复已提交并普通推送`5049d322ce34d21d2b80ead973217d348af7d275`，父2609e1f。[CI 39106884147](https://github.com/AureliusWu/fund-compass/actions/runs/39106884147) attempt1于`2026-10-18T07:16:43Z`实际completed/success。10-20重新读取实际run/jobs与四个job日志：checkout均为`7caf81234677521679e0b932049264305f473b78`，父精确旧main0c0f9ad与5049，tree=`8bab06ead8c0b048b2669f10c770efaa2d4b1c89`与5049完全相同。后端Python3.12.15 **2918 passed/2 warnings/142.75s**、pip check；前端 **919/54文件**、类型/build4.86s/PWA7/7；Worker **144/3文件**、类型/Wrangler dry-run114.28KiB/gzip26.58KiB，两端npm0 vulnerabilities。deploy/candidate_smoke/formal_smoke均skipped且steps为空；不是已部署或正式发布。
+
+公开证据目录`fc-ci-39106884147-readonly-20261020-6b273a4f`，VERIFICATION.retry1 SHA=`c42301f41483d6bbd711e12b05b5921860b2adc3f2bff5287ebf0c3a24332ec3`、EVIDENCE_PINS_FINAL=`9196fe71fb4d8717c30a80f008473f2ff4a3302385b3049e142132f963b6e9cd`；根实际读取API投影/真实日志并独立重算23文件漂移0。普通gh读取曾网络EOF，原零长文件保留，同配置有限重取；日志字面转义导致的首次证据解析失败与pins自身占用初稿亦保留，不伪称第一次全部成功。没有rerun/dispatch或更换认证。
+
+本次外部核验时间`2026-10-20T07:00:47Z`：feature仍5049，PR4仍OPEN/DRAFT/未合并；远端main已到`ba67409584fa9deabeb1c4b9e68e3f78757c85ae`，比tested base前进5个bot数据提交/33产物文件。PR API的base仍旧0c，不将其当前merge_commit_sha冒充实际tested merge。已保存compare显示这些路径与5049改动无交集，但其中海外新预测缺项、季报仅fetched_at刷新、模型candidate仍rejected/collecting都须保留真实降级；不能用feature旧产物覆盖或包装为任务恢复。20项缺patch的gzip/经理payload尚未实际取字节核验，后续正常整合仍需产物/隐私校验和新tree CI。未直推main、edit被403阻止的PR、修改云库或发布版本。
+
+### 新受保护一致快照与迁移预检拦截（2026-10-20）
+
+继续使用已授权配置直连，不再依赖浏览器登录；没有读取浏览器凭据、枚举密钥或更换身份。外部备份工具经全文复审和独立检查后，补齐30秒观察时点边界与发布后原始哈希复核。四个正常离线阶段首次通过：Python **36 passed**、PowerShell闭集合同 **59项**、真实Windows文件/ACL **15项**；1项符号链接因宿主不能创建而明确skip。正常插件、源码31项前后pin、原默认数据库仅元数据不变/隔离库未创建均核实；没有把未执行的进程故障注入场景称为通过。工具与测试目录`fc-turso-protected-capture-author-20261020-4b8e70a1`在仓库外，validation seal=`1066eeda491d930c4e8493f8c8f879c897a085e0e74a074c8c9bd7f2873d64f8`，capture输入seal=`3f41f2c486c48fd3d762493e4779e8211a0898afe86a23d456d9173c5210a8fb`。
+
+真实只读capture只执行一次，**exit0、子进程19681ms、未超时、stdout/stderr排空、关闭成功**；取得同事务 **schema8 / 21表 / 34,709行 / 86结构对象**，已知两辅助表profile不扩展，query_only观察为0且不称服务端写保护。新备份为仓库外受保护父目录的直接子目录`20261020-schema8-7d26e934`；source.sqlite3 **4,915,200字节**，SHA=`e88ae570aa50969f2fdf57776cbc1161dad744760e5a245587b122457c866494`。原始结构sidecar=`cea71612e0f7a441176c4eceeef332b6aad424e397947cdbb21e570b7fbc2dd1`、capture.safe=`e19e1e9e6e88a8e401df9caeef8e2a2802b47dc7b426e8ad2b4c171f84f092f2`、manifest.safe=`1f389baa1aff898814c54debc16bd9208449f85a603957af23337dd3867a9d0b`、COMPLETE=`fbed9a69c02e0033bfd4d38d5e36777980c0fc973a43e256fd34b02ce78df76c`；根另行重算六文件及全部绑定，检查只读/普通文件、current-user与SYSTEM两条ACL及owner/inheritance，无旧文件覆盖/删除。私人镜像和原始DDL不入Git/CI。
+
+随后只对这份关闭快照执行本地`plan`，cleanenv无云凭据/网络调用、同30秒及共享5秒清理预算；实际 **exit1、1758ms、未超时/排空**，固定错误为`legacy_chain_validation_failed`，源文件与31源码pin未变。失败目录`20261020-local-plan-53c0a8d6`完整保留，manifest=`f3d79eb0bd87ddb4d7c7e622a408d38f731937bf92395ac07c9bc08de67c777b`、stderr=`5b28db46f419aeeaceaaa98ac62695498ef4eaff2beb5714ef7bac9f3fdf59cd`。没有盲目重跑、跳过旧链校验、修改私人数据或继续rehearse/apply，下一步在同一备份上做脱敏离线定位。该失败不否定一致捕获，但明确阻断这份源的迁移计划；10-03的历史恢复通过不能替代当前源。
+
+本次只关闭“新受保护一致只读备份”子门禁；不是当前停写、凭据轮换、免费配额/Overages设置、schema9迁移、Owner云业务写入、远端恢复/重启或正式发布证明。没有新建云服务、启用付费或改云配置；应用仍8.0.0，I18/I19及v9整体不勾选。
+
+### 旧账本精度冲突定位与 main 产物字节补验（2026-10-20）
+
+仅在新关闭快照上做一次原校验脱敏trace、一次四root完整聚合和一次两字段ULP诊断，均cleanenv/只读/原预算，不修改源、验证器或旧失败证据。trace定位`repository_scopes.backfill_legacy_production`第411行的冗余投影比较；**76根（Evidence34/Holding7/Policy1/Decision34）全部模型、canonical payload、ID/hash及reserved前置通过**，持仓/策略/决策投影均无冲突。仅5份Evidence的`estimate`（2项）及`estimate_coverage`（5项）出现float/float差异，7项均为恰好 **1 ULP**，无更大差距、null/type/零符号混淆；其余字段不匹配0。不是已证明数据被篡改，也尚不能归因Turso/JSON或自动允许容差；继续区分存储与读取链路。原始数值、基金/账户/ID/业务摘要未输出。诊断成功只表示收集完成，`rehearsal_ok=false`，迁移仍拒绝。
+
+三份受保护诊断目录分别`20261020-local-diagnose-6571be20`、`20261020-local-projection-9185c6af`、`20261020-local-float-6a9d2f30`，实际子进程7258/729/673ms，exit0/无超时/排空；manifest SHA依次=`8573873235d1c93ea44e170aef383f97dbc4a0ad27cd16bb2beaa045a8e0ddac`、`ec2b4bfc0462e7d017a57740dec34359cde83ea23ceb642782f2da3271490c3b`、`f041aebadc42e4ffa02a2f344752351d014f0f20e14cc769efbabef277356953`。projection子进程原始stdout完整且SHA=`c9421bcfa8c04f586be3cb43c9eb033e9982219b41186cf621576dc126c6a2b5`；父外层展示JSON的depth6警告导致一次展示解析失败，根没有重跑诊断，直接重哈希原生stdout后解析完整聚合；后续新float runner使用depth12。全部资格继续false，源仍e88ae570…。
+
+另以普通`git fetch origin main`取得当前`ba67409584fa9deabeb1c4b9e68e3f78757c85ae`对象，不checkout/改index/推main。一次实际字节审计exit0/6.25s/stderr0，核52 Git blob身份及raw SHA：全集gzip解压3,047,005字节/28,104条并匹配meta digest，经理当前9片4,359条与legacy逐值一致、上一代9片4,358条仍保留、淘汰9旧孤儿名称摘要/行schema亦核实。33个当前JSON/解压文档隐私marker为0，但不称语义来源认证；上游独立核对、整合tree CI及生产CDN/API未验收。海外仍0有效预测/74h/models空，active/governance未变，富集只刷新fetched_at，金融归属日不变，不能包装为业务恢复。
+
+公开字节审计目录`fc-main-byte-audit-20261020-f4a21c38`，原生stdout SHA=`e41176d82b5c38686e82eeef97ece8e2200e9ec9590cab225e62cc662483b2b9`。该原生文件实际为CP936而非UTF-8，严格解码/JSON及反编码逐字SHA通过；保留原始文件，另存保持整个原始JSON文本的UTF-8机械投影`audit.utf8-raw-text-projection.json`，SHA=`67ad26c96e2ad4879ca063361879488e1e4565e11d61e5a7dd11c2b4d9dd221f`，不是新的审计运行或原生stdout。较早的重新序列化投影会使PowerShell自动转换日期表示，原样留存但不作为精确字符串证据。源码、数据完整性、业务产出与发布继续分轴；不先更改应用版本。
