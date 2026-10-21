@@ -4,23 +4,23 @@
     "012920": {
       "accuracy_status": "collecting",
       "alignment_version": "observation-target-v2",
-      "base_nav": 3.3356,
-      "base_nav_date": "2026-10-16",
+      "base_nav": 3.349,
+      "base_nav_date": "2026-10-19",
       "code": "012920",
       "coverage": 33.98,
-      "direction_accuracy": 66.7,
-      "error_p80": 2.736,
-      "mae": 1.477,
-      "market_time": "2026-10-19T16:04:51+08:00",
+      "direction_accuracy": 68.8,
+      "error_p80": 2.669,
+      "mae": 1.527,
+      "market_time": "2026-10-20T16:04:54+08:00",
       "model_version": "v1-2026q1-style",
       "name": "易方达全球成长精选混合(QDII)人民币A",
-      "observed_at": "2026-10-20T20:03:16+08:00",
-      "predicted_change": 2.6684,
-      "predicted_nav": 3.4246,
-      "prediction_date": "2026-10-20",
-      "sample_count": 15,
+      "observed_at": "2026-10-21T20:18:08+08:00",
+      "predicted_change": -1.0562,
+      "predicted_nav": 3.3136,
+      "prediction_date": "2026-10-21",
+      "sample_count": 16,
       "status": "pending",
-      "target_nav_date": "2026-10-19"
+      "target_nav_date": "2026-10-20"
     },
     "018147": {
       "accuracy_status": "healthy",
@@ -67,5 +67,5 @@
   },
   "schema": 1,
   "source_schema": 2,
-  "source_updated_at": "2026-10-20T20:03:16+08:00"
+  "source_updated_at": "2026-10-21T20:18:08+08:00"
 }
