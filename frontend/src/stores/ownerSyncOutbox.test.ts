@@ -3,6 +3,7 @@ import { IDBFactory, IDBObjectStore, IDBOpenDBRequest, IDBDatabase, IDBTransacti
 import * as contract from '@/utils/ownerSyncContract'
 import {
   openOwnerSyncOutbox, OWNER_SYNC_OUTBOX_DB_PREFIX, OWNER_SYNC_OUTBOX_SCHEMA, OWNER_SYNC_OUTBOX_TIMEOUT_MS,
+  ownerSyncOutboxStorage,
   type OwnerSyncOutbox, type OwnerSyncOutboxEntry,
 } from './ownerSyncOutbox'
 
@@ -47,6 +48,104 @@ async function rawWrite(factory: IDBFactory, row: unknown, key = 'current') {
     })
   } finally { db.close() }
 }
+
+describe('closed native outbox storage boundaries', () => {
+  it.each(['version', 'entry', 'resourceFingerprint'] as const)('rejects a row %s getter without invoking it', key => {
+    const value = { version: 0, entry: null, resourceFingerprint: TARGET }
+    const getter = vi.fn(() => value[key])
+    const candidate = { ...value }
+    Object.defineProperty(candidate, key, { get: getter, enumerable: true })
+    let problem: unknown
+    try { ownerSyncOutboxStorage.rowShape(candidate, TARGET) } catch (error) { problem = error }
+    expect(getter).not.toHaveBeenCalled()
+    expect(problem).toMatchObject({ code: 'outbox_invalid_database' })
+  })
+
+  it.each(['schema', 'state', 'rawBody', 'requestHash'] as const)('rejects an entry %s getter before hash validation or CAS', async key => {
+    const handle = await open(), prepared = await entry(), getter = vi.fn(() => prepared[key])
+    const candidate = { ...prepared }
+    Object.defineProperty(candidate, key, { get: getter, enumerable: true })
+    let problem: unknown
+    try { await handle.compareAndSwap(0, candidate) } catch (error) { problem = error }
+    expect(getter).not.toHaveBeenCalled()
+    expect(problem).toMatchObject({ code: 'outbox_invalid_entry' })
+    expect(await handle.read()).toEqual({ version: 0, entry: null })
+  })
+
+  it.each(['row', 'entry'] as const)('rejects hidden, symbol and custom prototype on the shared %s validator', async level => {
+    const prepared = await entry()
+    for (const attack of ['hidden', 'symbol', 'prototype']) {
+      const candidate: any = { version: 1, entry: { ...prepared }, resourceFingerprint: TARGET }
+      const target = level === 'row' ? candidate : candidate.entry
+      if (attack === 'hidden') Object.defineProperty(target, 'syntheticHidden', { value: true, enumerable: false })
+      else if (attack === 'symbol') target[Symbol('syntheticSymbol')] = true
+      else Object.setPrototypeOf(target, { syntheticInherited: true })
+      expect(() => ownerSyncOutboxStorage.rowShape(candidate, TARGET)).toThrow(expect.objectContaining({ code: 'outbox_invalid_database' }))
+    }
+  })
+
+  it.each(['hidden', 'symbol', 'prototype'])('rejects %s candidate entries before a write and retains the empty slot', async attack => {
+    const handle = await open(), prepared: any = await entry()
+    if (attack === 'hidden') Object.defineProperty(prepared, 'syntheticHidden', { value: true, enumerable: false })
+    else if (attack === 'symbol') prepared[Symbol('syntheticSymbol')] = true
+    else Object.setPrototypeOf(prepared, { syntheticInherited: true })
+    await expect(handle.compareAndSwap(0, prepared)).rejects.toMatchObject({ code: 'outbox_invalid_entry' })
+    expect(await handle.read()).toEqual({ version: 0, entry: null })
+  })
+
+  it('accepts null-prototype native data but returns independent frozen ordinary DTOs', async () => {
+    const prepared = await entry()
+    const candidate = Object.assign(Object.create(null), { version: 1,
+      entry: Object.assign(Object.create(null), prepared), resourceFingerprint: TARGET })
+    const row = ownerSyncOutboxStorage.rowShape(candidate, TARGET)
+    expect(row).toEqual({ version: 1, entry: prepared, resourceFingerprint: TARGET })
+    expect(row).not.toBe(candidate)
+    expect(row.entry).not.toBe(candidate.entry)
+    expect(Object.getPrototypeOf(row)).toBe(Object.prototype)
+    expect(Object.isFrozen(row)).toBe(true)
+    expect(Object.isFrozen(row.entry)).toBe(true)
+    expect(Object.isFrozen(candidate)).toBe(false)
+  })
+
+  it('rejects a native negative-zero shared row version instead of treating it as zero', () => {
+    expect(() => ownerSyncOutboxStorage.rowShape({ version: -0, entry: null, resourceFingerprint: TARGET }, TARGET))
+      .toThrow(expect.objectContaining({ code: 'outbox_invalid_database' }))
+  })
+
+  it('rejects a persisted negative-zero row without resetting or repairing it', async () => {
+    const factory = new IDBFactory(), handle = await open(factory)
+    await rawWrite(factory, { version: -0, entry: null, resourceFingerprint: TARGET })
+    await expect(handle.read()).rejects.toMatchObject({ code: 'outbox_invalid_database' })
+    handle.close()
+    await expect(openOwnerSyncOutbox(factory, TARGET)).rejects.toMatchObject({ code: 'outbox_invalid_database' })
+  })
+
+  it('rejects negative-zero CAS expectedVersion before hashing or opening a transaction', async () => {
+    const handle = await open(), prepared = await entry()
+    const restore = vi.spyOn(contract, 'restoreOwnerSyncRequest')
+    const transaction = vi.spyOn(IDBDatabase.prototype, 'transaction')
+    let problem: unknown
+    try { await handle.compareAndSwap(-0, prepared) } catch (error) { problem = error }
+    expect(restore).not.toHaveBeenCalled()
+    expect(transaction).not.toHaveBeenCalled()
+    expect(problem).toMatchObject({ code: 'outbox_conflict' })
+    vi.restoreAllMocks()
+    expect(await handle.read()).toEqual({ version: 0, entry: null })
+  })
+
+  it.each(['\n', '\r\n'])('keeps the closed target grammar against the terminal line ending %#', async ending => {
+    const factory = new IDBFactory(), opening = vi.spyOn(factory, 'open')
+    await expect(openOwnerSyncOutbox(factory, TARGET + ending)).rejects.toMatchObject({ code: 'outbox_invalid_target' })
+    expect(opening).not.toHaveBeenCalled()
+  })
+
+  it.each(['\n', '\r\n'])('keeps the closed entry SHA grammar against the terminal line ending %#', async ending => {
+    const prepared = await entry(), malformed = { ...prepared, requestHash: prepared.requestHash + ending }
+    expect(() => ownerSyncOutboxStorage.rowShape({ version: 1, entry: malformed, resourceFingerprint: TARGET }, TARGET))
+      .toThrow(expect.objectContaining({ code: 'outbox_invalid_database' }))
+    await expect(ownerSyncOutboxStorage.validateEntry(malformed, 'outbox_invalid_entry')).rejects.toMatchObject({ code: 'outbox_invalid_entry' })
+  })
+})
 
 describe('injected transactional Owner outbox', () => {
   it('only initializes a new synthetic injected database and never accesses browser globals or network', async () => {

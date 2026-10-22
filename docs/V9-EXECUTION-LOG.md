@@ -1149,3 +1149,38 @@ raw DDL 从不执行；目标仅对实际移除/重建的该 trigger 采用规�
 无旧版本同功能基线，原30秒/64MiB/100000行/16384steps界限不改；只说明该窄合成样本在组件预算内，不判回归PASS。原始metrics仅工具stdout、无封存报告，不是HTTP/TLS或约34k行真实业务容量、网络吞吐、冷热浏览器/用户交互或I21性能出口。完整核对构建+核验约4秒，是维护工具计算而非现有用户API热延迟；主要成本是重复完整重建/typed行摘要/源码graph与JSON检查，后续不能靠省略这些合同或提高上限换性能。
 
 下一道云门禁仍需实际writer库存/停写排空、Free配额/Overages与新保护备份、真实provider数学/pragma/TEMP/事务容量、受控原包应用、同应用写入→Render重启读回及独立远端恢复。未收到新平台输入已保存的确认，不重试被阻断的OAuth/浏览器路线、不读取其输入文件，不改套餐/秘密/部署/重启、不推main或删除Gist。I19同工作区原子制包/ack与业务链、手工资产/历史/机器消费者迁移，I20自然窗口、I21实机/PWA/回退预算继续未完成；应用仍8.0.0，不将本轮局部闭环或旧CI记作v9发布。
+
+### a51940d 自然 CI 与 I19 共同基线/同库制包（2026-10-22）
+
+上述新 profile 已正常提交/推送 `a51940d5a29d08aac1589b782bedab5b296f40d4`，tree=`5619c21facf83767fb9989398e632755070e50f0`。[CI 39729754055](https://github.com/AureliusWu/fund-compass/actions/runs/39729754055) attempt1 completed/success，updated_at=`2026-10-22T05:48:15Z`；实际测试 merge=`4c75f3cb33d0fc454858a8ba10508743bd040632`，父为 f8d519a+a51940d，GitHub commit API 独立核 tree 与 feature 完全一致。正常串行读取真实日志：后端 **3689 passed/2 warnings/200.16s**、pip check clean；前端 **1325 passed**、type/build7.39s/PWA7/7；Worker **148 passed**、check/dry-run114.28KiB/gzip26.58，两端 install 与独立 audit 均成功。deploy/candidate_smoke/formal_smoke 全 skipped/step_count0，main/线上均未变，不把这个真实全量 CI 扩大为部署或新工作树通过。
+
+当前新 I19 片段先修共同云基线缺口，而非解除 IDB 上传守卫：保存已实际应用的 B，严格从 B→L 推本机意图；新观察 C 不能改写 B 或把所有旧本机字段变成覆盖意图。完整基线保留 manual_asset、墓碑、field/lifecycle/record revision；max=head/闭集/2MiB 只拒明显不完整 DTO，不认证分页来源、服务身份或云耐久。普通更新只携带实际变化字段旧值及 kind/deleted 守卫，删除/类型变更携带完整旧像；缺已链接基金行全批拒绝、不制造 delete，墓碑不自动复活，0/null 与原本机值保留，200 条/128KiB 最终原包限制不变。初次关联仅接同 key 业务全等或云端独有基金，差异拒绝整批；manual 留完整 B、不冒称已导入旧手工资产。
+
+物理 v4 是独立显式调用入口，仅升级原 target 已采用且空槽的完整 v3，保留原四 store 并加 sync_metadata/current。默认启动仍 v3；完整已有 v4 可 existingOnly 重开，丢库/缺 current/坏结构不修复或回退。versionchange 与 strict 初始化仍两次提交，故障回归实际留下 v4/空 metadata 时固定拒绝，不把升级称跨提交原子。所有实际本机编辑/复导的完整 local state 新含 sync 元数据；独立 epoch 与 full base/archives/adoption/slot/receipt-count 均入最终前像，旧 local 请求不能跨新基线或换包继续写。
+
+prepare 在事务外重推真实 B→L、严格构造/恢复原包和摘要；最终同库 strict 事务核完整前像/当前 guard 后一起写 prepared 原字节与绑定。v4 旧 outbox 全部 CAS 拒绝，不能用 legacy prepare/clear/resendUnknown 旁路；所有 pending 阻实际本机 writer。cancel 只允许原 id/hash、prepared 尚未发送槽，同事务清包/绑定并保存本机回执；本机丢响应只显式核原请求，不重做或把缺回执当回滚。重载由原 epoch/slot 还原完整制包前 envelope 并核原 preparationHash、requestHash/expected_revision 和完整 preimageHash，不重新制包/换原字节；这些 SHA 仍不是认证或防任意 raw-JS 全重封。发送/完整拉取后 ack 尚未实现，不接新 UI、会话控制器、main Turso 或云写。
+
+独立审查实际发现并关闭：初次 context 把含 resourceFingerprint 的三字段 SlotRow 交给严格两字段 codec，23 个新 IDB 用例失败，改显式投影后通过；只核本机像会遗漏 slot+pending 同时替换原包，现完整 envelope 复核拒绝；packet.request 的 JS -0 与原 JSON 恢复的 +0 会造成原 hash 自不一致，制包先恢复为 wire DTO 再哈希，B/L 不归一化，实际 legacy '-0'→编辑 null 及新 -0 值的 IDB 重开/原回执通过。首次 npm 误在仓库根执行而 ENOENT，未运行测试，随后在 frontend 正常执行；不把错误调用记成 PASS。
+
+合成 IDB 测试覆盖实际升级缺项窗口、两 handle 制包/关联竞争、同 epoch 异基线的陈旧实际编辑、真实 put 后 abort、提交后 close/丢响应、原包双槽替换及负零。另以真实 Pinia/watchlist/locator/backup 流程预置显式 v4 后做四条旅程：dispose/reload 原 target、真实 saveHolding/remove/备份复导保留 B/epoch/null 时间，prepared 阻实际 writer，缺 sync metadata 时 blocked 且不读取 LS 业务/不重建。业务 writer 未 mock、fetch 禁止；这不是 Chrome DOM/真实下载、已装旧 PWA、多设备或远端持久性证明。
+
+共同 storage codec 的独立红测确实复现 **15 失败/5 通过**（只选新增组，48 原测试未选）：旧 Object.keys 闭集会接纳 getter、隐藏/symbol/特殊 prototype 字段，计数也接纳 -0。现拒非原生闭合 data object/descriptor、计数拒 -0；root 在 localState 进入 rowShape 前也先核 entry 闭集，不先执行 getter 再规范化。null-prototype 合法合同保留；尾换行原本实际已拒绝，仅统一正则与补负测，不称其为旧漏洞。红/绿原生 JSON SHA 分别 `545857aa4fd7d6bf612fc5c0a090ce2a6f042055a4613f865ff91262733a2126` / `78888ed0e50b43b73f808190114c23a354bd36f825d0dbf8120ed8e9e6100864`。最终 codec/outbox/workspace 四文件 **316 passed**；pure planner55、v4实际库42、真实Store4专项亦通过。root 对最终源码再直接 `npm test` 全量 **1596 passed/69文件/6.52s**，`npm run type-check` exit0。前端官方 `npm audit --include=dev --audit-level=moderate --registry=https://registry.npmjs.org --fetch-retries=0 --fetch-timeout=20000` 实际0漏洞/exit0，依赖未改；不扩大为 Wrangler 内嵌风险已关闭。
+
+#### 当前片段同机五样本构建与包体对照
+
+普通 `git archive HEAD frontend` 将 a51940d 保存为唯一 Temp ZIP，再正常 Expand-Archive；只建立 junction 共用同一 node_modules。package/lock 的 normalized-LF 字节和 JSON 语义同时一致，保留原 raw EOL 差异。首轮诊断 build（当前10.26s/基线9.75s）在最后修补前，不混入新冻结样本。全部 source/生成声明稳定后冻结，再按 A/B/B/A/A/B/B/A/A/B 做十次独立直接 `npm run build`；无 npm launcher/supervisor/kill/自动重试，每次 exit0/PWA7/7。计量 helper 仅核文件/生成新报告，不启动子进程；是前次统计 helper 的机械副本，更新基线、样本序列及冻结文件，不是换 npm 路线。
+
+| 本地构建/制品指标 | A：a51940d | B：当前片段 | 结论 |
+| --- | ---: | ---: | --- |
+| Vite 内部秒，p50/p95（nearest-rank，n=5/侧） | 7.86 / 8.26 | 7.72 / 8.18 | median -1.78%，不是用户冷热延迟 |
+| 工具等待全命令秒，p50/p95 | 12.807 / 12.868 | 11.669 / 12.217 | 包含 npm/PWA/进程等待，不认证真实墙钟或网络 |
+| JS+CSS raw 字节，含SW/不含data/map | 1,489,486 | 1,510,734 | +1.43% |
+| 同制品 gzip9 字节（非实际传输） | 524,443 | 529,617 | +0.99% |
+| owner-workspace 自身 JS raw/gzip9 | 27,552 / 7,787 | 48,346 / 12,785 | gzip **+64.18%，局部20%回退线 FAIL** |
+| WatchlistPage 自身 JS raw/gzip9 | 72,809 / 25,869 | 72,809 / 25,863 | 本片段 raw 不增，不抹掉前次对52c3013的局部回退 |
+
+每侧五次 JS/CSS/HTML 和 PWA 引用/MD5 制品均逐字稳定，source 前后无漂移、无 map；ECharts532397B仍低于既有600kB线，ownerSession静态/动态重复提示保留。新增共同基线验证/制包逻辑进入已按操作加载的 workspace 块，造成该块明显增长；应后续将受控云操作/codec继续按功能懒载并复测，不能靠移除完整校验换PASS。整体小增长和构建中位数不退化不能掩盖该局部FAIL；不同目录/checkout EOL、宿主缓存/背景负载仍非完全控制，没有真实浏览器 warm/cold/API/5次用户交互或 I21 出口证明。
+
+证据目录 `fc-i19-v4-build-20261022-cbbbaa07fe5b4ec889062d1c206bb60a`，helper SHA=`1563d3b27b9e194023c0e2cd496aaadb70876911ff1cd85aff678fdd3fa29528`；完整 frozen-file=`79c2e96e1242599c4d5b2b66779233c9ae14b6864ce88c59ea68f3cacb4a1cd2`，当前 frontend source aggregate=`b648db73f70c5d40a91e276db2ca4904846acdfd2da504dbf7a732fb8da14cac`；artifact-summary=`b5b29d8f1b64d46094892449ea473b277f40311a46a6e413b2823f9db3f42dcb`。根独立重哈希十份机械报告及 frozen pin 一致；原始 npm stdout/耗时来自直接工具记录，不伪造为封存原件或把报告 SHA 称来源认证。
+
+本片段仍只闭合本机共同基线/原子 prepare/cancel，不是整个 I19 出口。下一步是受控原包状态迁移/单次发送、当前会话核原回执、完整固定 upper 拉取与三方合入/ack 同库提交、真实 UI/同意接线；成功 POST 只有批次记录，不得拼接旧 B 冒充完整新基线。所有 IDB 当前仍云端未确认；I18 实际迁移/轮换/停写/耐久/恢复、I19业务版本/手工资产/历史/机器消费者、I20自然窗口和I21实机/PWA/性能尚未关闭。未读凭据输入、不绕 OAuth/浏览器限制、不改云套餐/秘密/部署/重启、main 或 Gist；应用保持8.0.0。

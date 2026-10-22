@@ -1,4 +1,4 @@
-/** Explicit candidate IDB authority only. No app, LS, Gist, session or network wiring. */
+/** Local IDB authority. Cloud preparation is explicit; no implicit HTTP or credential IO. */
 import {
   canonicalOwnerCloudImportPlan, canonicalOwnerWorkspaceEntries,
   validateOwnerCloudImportPlan, validateOwnerWorkspaceEntries, validateOwnerWorkspaceLegacy, validateOwnerWorkspaceSnapshot,
@@ -17,10 +17,15 @@ import {
   previewOwnerWorkspaceRestore, canonicalOwnerLocal, OWNER_WORKSPACE_MAX_ARCHIVES, OwnerWorkspaceBackupError,
   type OwnerWorkspaceLocalMetadata, type OwnerWorkspaceSourceArchive, type OwnerWorkspaceBackup,
 } from '@/utils/owner-workspace-backup'
+import { buildOwnerSyncRequest, restoreOwnerSyncRequest, type BuiltOwnerSyncRequest } from '@/utils/ownerSyncContract'
+import { buildOwnerWorkspaceCloudLinkPreview, planOwnerWorkspaceCloudIntent, OwnerWorkspaceSyncError } from '@/utils/owner-workspace-sync'
+import { emptyOwnerWorkspaceSyncMetadata, validateOwnerWorkspaceSyncMetadata,
+  OwnerWorkspaceSyncMetadataError, type OwnerWorkspaceSyncMetadata } from '@/utils/owner-workspace-sync-metadata'
 
 export type { OwnerWorkspaceEntry, OwnerWorkspaceLegacy, OwnerWorkspaceSnapshot } from '@/utils/owner-cloud-import'
 const WORKING = 'working_copy', RECEIPTS = 'import_receipts', METADATA = 'local_metadata', CURRENT = 'current'
 const STORES = ['slot', WORKING, RECEIPTS, METADATA]
+const SYNC = 'sync_metadata'
 const SCHEMA = 'owner-workspace-1'
 const RECEIPT_SCHEMA = 'owner-workspace-receipt-1'
 const HASH = /^[0-9a-f]{64}(?![\s\S])/
@@ -74,6 +79,8 @@ export interface OwnerWorkspaceLocalState {
   readonly outbox: Readonly<{ version: number; entry: SlotRow['entry'] }>
   readonly metadata: OwnerWorkspaceLocalMetadata
   readonly receiptCount: number
+  /** Present only in physical v4, including the entire common base and epoch. */
+  readonly sync?: OwnerWorkspaceSyncMetadata
 }
 export type OwnerWorkspaceLocalCommand = Readonly<{ type: 'save'; input: HoldingInput; expectedEntry: OwnerWorkspaceEntry | null; confirmed: boolean }>
   | Readonly<{ type: 'remove'; keys: readonly string[]; expectedEntries: readonly OwnerWorkspaceEntry[]; confirmed: boolean }>
@@ -87,6 +94,22 @@ export interface OwnerWorkspaceEditLocalRequest {
 export interface OwnerWorkspaceRestoreLocalRequest {
   readonly id: string; readonly hash: string; readonly expected: OwnerWorkspaceLocalState; readonly backup: OwnerWorkspaceBackup
 }
+export interface OwnerWorkspaceSyncState {
+  readonly local: OwnerWorkspaceLocalState
+  readonly sync: OwnerWorkspaceSyncMetadata
+}
+export interface OwnerWorkspaceLinkCloudRequest {
+  readonly id: string; readonly hash: string; readonly expected: OwnerWorkspaceSyncState
+  readonly base: OwnerWorkspaceSyncMetadata['base']
+}
+export interface OwnerWorkspacePrepareCloudRequest {
+  readonly id: string; readonly hash: string; readonly expected: OwnerWorkspaceSyncState
+  readonly packet: BuiltOwnerSyncRequest
+}
+export interface OwnerWorkspaceCancelCloudRequest {
+  readonly id: string; readonly hash: string; readonly expected: OwnerWorkspaceSyncState
+  readonly requestId: string; readonly requestHash: string
+}
 export interface OwnerWorkspace {
   readonly targetFingerprint: string
   read(guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceSnapshot>
@@ -94,6 +117,13 @@ export interface OwnerWorkspace {
   adoptLocal(request: OwnerWorkspaceAdoptLocalRequest, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceLocalState>
   editLocal(request: OwnerWorkspaceEditLocalRequest, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceLocalState>
   restoreLocal(request: OwnerWorkspaceRestoreLocalRequest, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceLocalState>
+  /** Explicit physical-v4 primitives only. No HTTP, implicit upgrade, or cloud confirmation. */
+  readSyncState(guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceSyncState>
+  linkCloudBase(request: OwnerWorkspaceLinkCloudRequest, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceSyncState>
+  prepareCloud(request: OwnerWorkspacePrepareCloudRequest, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceSyncState>
+  cancelPreparedCloud(request: OwnerWorkspaceCancelCloudRequest, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceSyncState>
+  syncReceipt(id: string, hash: string, guard: OwnerWorkspaceGuard): Promise<Readonly<{ state: 'unknown' }>
+    | Readonly<{ state: 'matched'; value: OwnerWorkspaceSyncState }>>
   /** Only the latest local mutation receipt is retained. Unknown never permits automatic replay. */
   localReceipt(id: string, hash: string, guard: OwnerWorkspaceGuard): Promise<Readonly<{ state: 'unknown' }>
     | Readonly<{ state: 'matched'; value: OwnerWorkspaceLocalState }>>
@@ -116,12 +146,15 @@ interface StoredReceipt {
   after: OwnerWorkspaceSnapshot
 }
 type SlotRow = ReturnType<typeof ownerSyncOutboxStorage.rowShape>
-interface Image { slot: SlotRow; working: WorkingRow; metadata: OwnerWorkspaceLocalMetadata; receipt: StoredReceipt | null; original: StoredReceipt | null; receiptCount: number }
+interface Image { slot: SlotRow; working: WorkingRow; metadata: OwnerWorkspaceLocalMetadata; sync: OwnerWorkspaceSyncMetadata | null;
+  receipt: StoredReceipt | null; original: StoredReceipt | null; receiptCount: number }
 function fail(code: OwnerWorkspaceErrorCode): never { throw new OwnerWorkspaceError(code) }
 function code(error: unknown, fallback: OwnerWorkspaceErrorCode = 'workspace_unavailable'): OwnerWorkspaceErrorCode {
   if (error instanceof OwnerWorkspaceError) return error.code
   if (error instanceof OwnerCloudImportError) return error.code === 'capacity_exceeded' ? 'workspace_capacity' : 'workspace_invalid_input'
   if (error instanceof OwnerWorkspaceBackupError) return error.code === 'capacity_exceeded' ? 'workspace_capacity' : 'workspace_invalid_input'
+  if (error instanceof OwnerWorkspaceSyncMetadataError) return error.code === 'capacity_exceeded' ? 'workspace_capacity' : 'workspace_invalid_input'
+  if (error instanceof OwnerWorkspaceSyncError) return error.code === 'capacity_exceeded' ? 'workspace_capacity' : 'workspace_invalid_input'
   if (error instanceof OwnerSyncOutboxError) return error.code === 'outbox_blocked' ? 'workspace_blocked'
     : error.code === 'outbox_invalid_target' ? 'workspace_invalid_target' : 'workspace_invalid_database'
   try { if ((error as { name?: string } | null)?.name === 'QuotaExceededError') return 'workspace_quota' } catch { /* fixed code */ }
@@ -240,16 +273,22 @@ export async function buildOwnerWorkspaceRollbackRequest(target: string, input: 
 }
 
 function localState(value: unknown, target: string): OwnerWorkspaceLocalState {
-  if (!closed(value, ['snapshot', 'outbox', 'metadata', 'receiptCount']) || !closed(value.outbox, ['version', 'entry'])) fail('workspace_invalid_input')
+  const hasSync = !!value && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, 'sync')
+  if (!closed(value, ['snapshot', 'outbox', 'metadata', 'receiptCount', ...(hasSync ? ['sync'] : [])])
+    || !closed(value.outbox, ['version', 'entry'])) fail('workspace_invalid_input')
+  if (value.outbox.entry !== null && !closed(value.outbox.entry, ['schema', 'state', 'rawBody', 'requestHash'])) fail('workspace_invalid_input')
   const copy = snapshot(value.snapshot), slot = ownerSyncOutboxStorage.rowShape({ ...value.outbox, resourceFingerprint: target }, target)
   const receiptCount = counter(value.receiptCount)
   if (receiptCount > MAX_RECEIPTS) fail('workspace_invalid_input')
+  const metadata = validateOwnerWorkspaceLocalMetadata(value.metadata, copy)
+  const sync = hasSync ? validateOwnerWorkspaceSyncMetadata(value.sync, target, { snapshot: copy, metadata,
+    outbox: { version: slot.version, entry: slot.entry } }) : null
   return Object.freeze({ snapshot: copy, outbox: Object.freeze({ version: slot.version, entry: slot.entry }),
-    metadata: validateOwnerWorkspaceLocalMetadata(value.metadata, copy), receiptCount })
+    metadata, receiptCount, ...(sync ? { sync } : {}) })
 }
 function stateOf(image: Image): OwnerWorkspaceLocalState {
   return Object.freeze({ snapshot: image.working.snapshot, outbox: Object.freeze({ version: image.slot.version, entry: image.slot.entry }),
-    metadata: image.metadata, receiptCount: image.receiptCount })
+    metadata: image.metadata, receiptCount: image.receiptCount, ...(image.sync ? { sync: image.sync } : {}) })
 }
 function command(input: unknown): OwnerWorkspaceLocalCommand {
   if (closed(input, ['type', 'input', 'expectedEntry', 'confirmed']) && input.type === 'save' && typeof input.confirmed === 'boolean') {
@@ -295,16 +334,82 @@ export async function buildOwnerWorkspaceRestoreLocalRequest(target: string, inp
   return Object.freeze({ ...copy, hash: await digest(canonical({ operation: 'local-restore-1', target, ...copy })) })
 }
 
+function syncState(input: unknown, target: string): OwnerWorkspaceSyncState {
+  if (!closed(input, ['local', 'sync'])) fail('workspace_invalid_input')
+  const local = localState(input.local, target)
+  const sync = validateOwnerWorkspaceSyncMetadata(input.sync, target, {
+    snapshot: local.snapshot, metadata: local.metadata, outbox: local.outbox,
+  })
+  if (!local.sync || canonical(local.sync) !== canonical(sync)) fail('workspace_invalid_input')
+  return Object.freeze({ local, sync })
+}
+function syncStateOf(image: Image): OwnerWorkspaceSyncState {
+  if (!image.sync) fail('workspace_invalid_database')
+  return Object.freeze({ local: stateOf(image), sync: image.sync })
+}
+export async function buildOwnerWorkspaceLinkCloudRequest(target: string,
+  input: Omit<OwnerWorkspaceLinkCloudRequest, 'hash'>): Promise<OwnerWorkspaceLinkCloudRequest> {
+  if (!closed(input, ['id', 'expected', 'base'])) fail('workspace_invalid_input')
+  localId(target, input.id)
+  const expected = syncState(input.expected, target)
+  if (expected.sync.base !== null || expected.sync.pending || expected.local.outbox.entry || !expected.local.metadata.adoption) fail('workspace_conflict')
+  const preview = buildOwnerWorkspaceCloudLinkPreview(input.base, expected.local.snapshot)
+  if (preview.issues.length) fail('workspace_conflict')
+  const copy = { id: input.id, expected, base: preview.base }
+  return Object.freeze({ ...copy, hash: await digest(canonical({ operation: 'cloud-link-1', target, ...copy })) })
+}
+export async function buildOwnerWorkspacePrepareCloudRequest(target: string,
+  input: Pick<OwnerWorkspacePrepareCloudRequest, 'id' | 'expected'>): Promise<OwnerWorkspacePrepareCloudRequest> {
+  if (!closed(input, ['id', 'expected'])) fail('workspace_invalid_input')
+  localId(target, input.id)
+  const expected = syncState(input.expected, target)
+  if (!expected.sync.base || expected.sync.pending || expected.local.outbox.entry || !expected.local.metadata.adoption) fail('workspace_conflict')
+  const intent = planOwnerWorkspaceCloudIntent(expected.sync.base, expected.local.snapshot)
+  if (intent.issues.length) fail('workspace_conflict')
+  if (!intent.operations.length) fail('workspace_noop')
+  let packet: BuiltOwnerSyncRequest
+  try {
+    const built = await buildOwnerSyncRequest({ request_id: input.id, expected_revision: expected.sync.base.pulledRevision,
+      operations: intent.operations })
+    // Bind the original wire DTO, not an in-memory duplicate whose signed
+    // numeric zero can differ after JSON restoration. B and L stay unchanged.
+    packet = await restoreOwnerSyncRequest(built.rawBody, built.requestHash)
+  } catch { return fail('workspace_invalid_input') }
+  const copy = { id: input.id, expected, packet }
+  return Object.freeze({ ...copy, hash: await digest(canonical({ operation: 'cloud-prepare-1', target, ...copy })) })
+}
+export async function buildOwnerWorkspaceCancelCloudRequest(target: string,
+  input: Omit<OwnerWorkspaceCancelCloudRequest, 'hash'>): Promise<OwnerWorkspaceCancelCloudRequest> {
+  if (!closed(input, ['id', 'expected', 'requestId', 'requestHash'])) fail('workspace_invalid_input')
+  localId(target, input.id); localId(target, input.requestId)
+  if (typeof input.requestHash !== 'string' || !HASH.test(input.requestHash) || input.id === input.requestId) fail('workspace_invalid_input')
+  const expected = syncState(input.expected, target)
+  const pending = expected.sync.pending
+  if (expected.local.outbox.entry?.state !== 'prepared' || !pending
+    || pending.requestId !== input.requestId || pending.requestHash !== input.requestHash) fail('workspace_pending')
+  const copy = { id: input.id, expected, requestId: input.requestId, requestHash: input.requestHash }
+  return Object.freeze({ ...copy, hash: await digest(canonical({ operation: 'cloud-cancel-1', target, ...copy })) })
+}
+
+// Excludes mutable delivery state, but binds every local row/archive/receipt
+// count and the exact complete common base. Hashes are not source authentication.
+function pendingPreimage(image: Image, epoch: number, preparedOutboxVersion: number): string {
+  return canonical({ target: image.sync?.targetFingerprint, snapshot: image.working.snapshot, metadata: image.metadata,
+    receiptCount: image.receiptCount, base: image.sync?.base, epoch, preparedOutboxVersion })
+}
+
 function makeWorkspace(db: IDBDatabase, target: string): OwnerWorkspace {
+  const storesForVersion = db.version === 4 ? [...STORES, SYNC] : STORES
   let closedHandle = false
   const inFlight = new Set<(value: OwnerWorkspaceErrorCode) => void>()
   let observedLocal: OwnerWorkspaceSnapshot | null = null, observedSlot: SlotRow | null = null
   let observedMetadata: OwnerWorkspaceLocalMetadata | null = null
+  let observedSync: OwnerWorkspaceSyncMetadata | null = null
   const ensureOpen = () => { if (closedHandle) fail('workspace_closed') }
   const close = () => {
     if (closedHandle) return
     closedHandle = true
-    observedLocal = null; observedSlot = null; observedMetadata = null
+    observedLocal = null; observedSlot = null; observedMetadata = null; observedSync = null
     for (const cancel of [...inFlight]) cancel('workspace_closed')
     try { db.close() } catch { /* disposal has no driver details */ }
   }
@@ -317,7 +422,9 @@ function makeWorkspace(db: IDBDatabase, target: string): OwnerWorkspace {
           || canonical(image.metadata) !== canonical(observedMetadata))))) fail('workspace_invalid_database')
     if (observedSlot && (image.slot.version < observedSlot.version
         || (image.slot.version === observedSlot.version && !ownerSyncOutboxStorage.sameRow(image.slot, observedSlot)))) fail('workspace_invalid_database')
-    observedLocal = next; observedSlot = image.slot; observedMetadata = image.metadata
+    if (observedSync && (!image.sync || image.sync.epoch < observedSync.epoch
+        || image.sync.epoch === observedSync.epoch && canonical(image.sync) !== canonical(observedSync))) fail('workspace_invalid_database')
+    observedLocal = next; observedSlot = image.slot; observedMetadata = image.metadata; observedSync = image.sync
   }
   function bounded<T>(guard: OwnerWorkspaceGuard, work: () => Promise<T>): Promise<T> {
     return new Promise((resolve, reject) => {
@@ -360,9 +467,9 @@ function makeWorkspace(db: IDBDatabase, target: string): OwnerWorkspace {
       const revoked = () => cancel('workspace_context_changed')
       try {
         ensureOpen(); assertGuard(guard)
-        tx = db.transaction(STORES, mode, mode === 'readwrite' ? { durability: 'strict' } : undefined)
+        tx = db.transaction(storesForVersion, mode, mode === 'readwrite' ? { durability: 'strict' } : undefined)
         if (mode === 'readwrite' && tx.durability !== 'strict') fail('workspace_unavailable')
-        const stores = Object.fromEntries(STORES.map(name => {
+        const stores = Object.fromEntries(storesForVersion.map(name => {
           const store = tx!.objectStore(name)
           if (store.keyPath !== null || store.autoIncrement || store.indexNames.length !== 0) fail('workspace_invalid_database')
           return [name, store]
@@ -388,6 +495,7 @@ function makeWorkspace(db: IDBDatabase, target: string): OwnerWorkspace {
         slot: stores.slot.get(CURRENT), slots: stores.slot.count(), working: stores[WORKING].get(CURRENT),
         workings: stores[WORKING].count(), receipts: stores[RECEIPTS].count(),
         metadata: stores[METADATA].get(CURRENT), metadatas: stores[METADATA].count(),
+        ...(db.version === 4 ? { sync: stores[SYNC].get(CURRENT), syncs: stores[SYNC].count() } : {}),
         ...(id ? { receipt: stores[RECEIPTS].get(id) } : {}),
         ...(originalId ? { original: stores[RECEIPTS].get(originalId) } : {}),
       }
@@ -400,8 +508,17 @@ function makeWorkspace(db: IDBDatabase, target: string): OwnerWorkspace {
               || typeof requests.receipts.result !== 'number' || !Number.isSafeInteger(requests.receipts.result)
               || requests.receipts.result < 0 || requests.receipts.result > MAX_RECEIPTS) fail('workspace_invalid_database')
           const currentWorking = working(requests.working.result, target)
-          let current: Image = { slot: ownerSyncOutboxStorage.rowShape(requests.slot.result, target), working: currentWorking,
-            metadata: checkedMetadata(requests.metadata.result, currentWorking.snapshot),
+          const slot = ownerSyncOutboxStorage.rowShape(requests.slot.result, target)
+          const metadata = checkedMetadata(requests.metadata.result, currentWorking.snapshot)
+          if (db.version === 4 && requests.syncs.result !== 1) fail('workspace_invalid_database')
+          let sync: OwnerWorkspaceSyncMetadata | null = null
+          if (db.version === 4) {
+            try { sync = validateOwnerWorkspaceSyncMetadata(requests.sync.result, target, { snapshot: currentWorking.snapshot, metadata,
+              outbox: { version: slot.version, entry: slot.entry } }) }
+            catch { fail('workspace_invalid_database') }
+          }
+          let current: Image = { slot, working: currentWorking, sync,
+            metadata,
             receipt: id && requests.receipt.result !== undefined ? storedReceipt(requests.receipt.result, target) : null,
             original: originalId && requests.original.result !== undefined ? storedReceipt(requests.original.result, target) : null,
             receiptCount: requests.receipts.result }
@@ -418,6 +535,21 @@ function makeWorkspace(db: IDBDatabase, target: string): OwnerWorkspace {
   async function readImage(guard: OwnerWorkspaceGuard, id?: string, originalId?: string): Promise<Image> {
     const result = await image('readonly', guard, id, originalId)
     await ownerSyncOutboxStorage.validateEntry(result.slot.entry, 'outbox_invalid_database')
+    if (result.sync?.pending) {
+      try {
+        const pending = result.sync.pending
+        const packet = await restoreOwnerSyncRequest(pending.rawBody, pending.requestHash)
+        // Delivery-state transitions may advance the slot, not the preparation
+        // epoch. Recover the exact pre-prepare local envelope to verify the
+        // independently retained preparation hash as well as its data image.
+        const beforeSync = { ...result.sync, epoch: result.sync.epoch - 1, pending: null }
+        const beforeLocal = { ...stateOf(result), outbox: { version: pending.preparedOutboxVersion - 1, entry: null }, sync: beforeSync }
+        const expected = syncState({ local: beforeLocal, sync: beforeSync }, target)
+        if (packet.request.request_id !== pending.requestId || packet.request.expected_revision !== pending.baseRevision
+          || await digest(canonical({ operation: 'cloud-prepare-1', target, id: pending.requestId, expected, packet })) !== pending.preparationHash
+          || await digest(pendingPreimage(result, result.sync.epoch, pending.preparedOutboxVersion)) !== pending.preimageHash) fail('workspace_invalid_database')
+      } catch { fail('workspace_invalid_database') }
+    }
     for (const receipt of [result.receipt, result.original]) if (receipt) await verifyReceipt(receipt)
     ensureOpen(); assertGuard(guard)
     return result
@@ -426,7 +558,8 @@ function makeWorkspace(db: IDBDatabase, target: string): OwnerWorkspace {
     if (current.slot.entry !== null) fail('workspace_pending')
     if (current.slot.version !== expectedOutbox || current.working.snapshot.localVersion !== expectedLocal) fail('workspace_conflict')
     if (!ownerSyncOutboxStorage.sameRow(current.slot, baseline.slot) || canonical(current.working) !== canonical(baseline.working)
-      || canonical(current.metadata) !== canonical(baseline.metadata) || current.receiptCount !== baseline.receiptCount) fail('workspace_conflict')
+      || canonical(current.metadata) !== canonical(baseline.metadata) || canonical(current.sync) !== canonical(baseline.sync)
+      || current.receiptCount !== baseline.receiptCount) fail('workspace_conflict')
   }
   function advanceEmptySlot(current: Image, stores: Record<string, IDBObjectStore>): SlotRow {
     // Coordinate an older tab's prepare CAS. This empty-slot epoch is neither
@@ -480,6 +613,9 @@ function makeWorkspace(db: IDBDatabase, target: string): OwnerWorkspace {
   }
   function expectedImage(current: Image, expected: OwnerWorkspaceLocalState): void {
     if (canonical(stateOf(current)) !== canonical(expected)) fail('workspace_conflict')
+  }
+  function expectedSyncImage(current: Image, expected: OwnerWorkspaceSyncState): void {
+    if (canonical(syncStateOf(current)) !== canonical(expected)) fail('workspace_conflict')
   }
   function matchingLocal(image: Image, id: string, hash: string): boolean {
     const receipt = image.metadata.recentEdit
@@ -539,6 +675,107 @@ function makeWorkspace(db: IDBDatabase, target: string): OwnerWorkspace {
     targetFingerprint: target,
     read(guard: OwnerWorkspaceGuard) { return bounded(guard, async () => (await readImage(guard)).working.snapshot) },
     readLocalState(guard) { return bounded(guard, async () => stateOf(await readImage(guard))) },
+    readSyncState(guard) { return bounded(guard, async () => syncStateOf(await readImage(guard))) },
+    linkCloudBase(input, guard) { return bounded(guard, async () => {
+      if (!closed(input, ['id', 'hash', 'expected', 'base'])) fail('workspace_invalid_input')
+      const request = await buildOwnerWorkspaceLinkCloudRequest(target, { id: input.id, expected: input.expected, base: input.base })
+      if (request.hash !== input.hash) fail('workspace_invalid_input')
+      const baseline = await readImage(guard)
+      expectedSyncImage(baseline, request.expected)
+      const preview = buildOwnerWorkspaceCloudLinkPreview(request.base, baseline.working.snapshot)
+      if (preview.issues.length) fail('workspace_conflict')
+      const next = snapshot({ ...preview.snapshot, localVersion: increment(baseline.working.snapshot.localVersion) })
+      const outboxVersion = increment(baseline.slot.version), epoch = increment(baseline.sync!.epoch)
+      const metadata = validateOwnerWorkspaceLocalMetadata({ ...baseline.metadata,
+        displayTimes: [...baseline.metadata.displayTimes, ...preview.addedKeys.map(key => ({ key, updated_at: null }))],
+        recentEdit: { id: request.id, hash: request.hash, beforeLocalVersion: baseline.working.snapshot.localVersion,
+          localVersion: next.localVersion, outboxVersion } }, next)
+      // The unchanged watch/holding backup remains exportable; it deliberately
+      // excludes sync metadata, credentials, manual assets and pending packets.
+      await buildOwnerWorkspaceBackup({ snapshot: next, metadata })
+      const sync = validateOwnerWorkspaceSyncMetadata({ ...baseline.sync, epoch, base: preview.base,
+        recentReceipt: { id: request.id, hash: request.hash, operation: 'link', syncEpoch: epoch, outboxVersion,
+          localVersion: next.localVersion } }, target, { snapshot: next, metadata, outbox: { version: outboxVersion, entry: null } })
+      const committed = await image('readwrite', guard, undefined, undefined, (current, stores) => {
+        expectedSyncImage(current, request.expected)
+        writable(current, baseline, request.expected.local.snapshot.localVersion, request.expected.local.outbox.version)
+        const slot = advanceEmptySlot(current, stores), nextWorking = working({ schema: SCHEMA, targetFingerprint: target, snapshot: next }, target)
+        stores[WORKING].put(nextWorking, CURRENT); stores[METADATA].put(metadata, CURRENT); stores[SYNC].put(sync, CURRENT)
+        return { ...current, slot, working: nextWorking, metadata, sync }
+      })
+      ensureOpen(); assertGuard(guard); observe(committed)
+      return syncStateOf(committed)
+    }) },
+    prepareCloud(input, guard) { return bounded(guard, async () => {
+      if (!closed(input, ['id', 'hash', 'expected', 'packet'])
+        || !closed(input.packet, ['request', 'rawBody', 'requestHash', 'byteLength'])) fail('workspace_invalid_input')
+      const request = await buildOwnerWorkspacePrepareCloudRequest(target, { id: input.id, expected: input.expected })
+      let supplied: BuiltOwnerSyncRequest
+      try { supplied = await buildOwnerSyncRequest(input.packet.request) } catch { return fail('workspace_invalid_input') }
+      // Re-derive B->L, then bind original bytes. Never let the old candidate
+      // rebase an operation against a newer GET or repack this stored request.
+      if (request.hash !== input.hash || request.packet.rawBody !== input.packet.rawBody
+        || request.packet.requestHash !== input.packet.requestHash || request.packet.byteLength !== input.packet.byteLength
+        || supplied.rawBody !== request.packet.rawBody || supplied.requestHash !== request.packet.requestHash) fail('workspace_invalid_input')
+      const baseline = await readImage(guard)
+      expectedSyncImage(baseline, request.expected)
+      const adoption = baseline.metadata.adoption!
+      if (request.id === adoption.id) fail('workspace_idempotency_conflict')
+      const version = increment(baseline.slot.version), epoch = increment(baseline.sync!.epoch)
+      const slot: SlotRow = { resourceFingerprint: target, version,
+        entry: { schema: 'owner-sync-outbox-1', state: 'prepared', rawBody: request.packet.rawBody, requestHash: request.packet.requestHash } }
+      const sync = validateOwnerWorkspaceSyncMetadata({ ...baseline.sync, epoch,
+        pending: { requestId: request.id, requestHash: request.packet.requestHash, rawBody: request.packet.rawBody,
+          preparationHash: request.hash, preimageHash: await digest(pendingPreimage(baseline, epoch, version)),
+          adoptionId: adoption.id, adoptionHash: adoption.hash, localVersion: baseline.working.snapshot.localVersion,
+          preparedOutboxVersion: version, baseRevision: baseline.sync!.base!.pulledRevision } }, target,
+      { snapshot: baseline.working.snapshot, metadata: baseline.metadata, outbox: { version, entry: slot.entry } })
+      const committed = await image('readwrite', guard, undefined, undefined, (current, stores) => {
+        expectedSyncImage(current, request.expected)
+        writable(current, baseline, request.expected.local.snapshot.localVersion, request.expected.local.outbox.version)
+        stores.slot.put(slot, CURRENT); stores[SYNC].put(sync, CURRENT)
+        return { ...current, slot, sync }
+      })
+      ensureOpen(); assertGuard(guard); observe(committed)
+      return syncStateOf(committed)
+    }) },
+    cancelPreparedCloud(input, guard) { return bounded(guard, async () => {
+      if (!closed(input, ['id', 'hash', 'expected', 'requestId', 'requestHash'])) fail('workspace_invalid_input')
+      const request = await buildOwnerWorkspaceCancelCloudRequest(target, { id: input.id, expected: input.expected,
+        requestId: input.requestId, requestHash: input.requestHash })
+      if (request.hash !== input.hash) fail('workspace_invalid_input')
+      const baseline = await readImage(guard)
+      expectedSyncImage(baseline, request.expected)
+      const version = increment(baseline.slot.version), epoch = increment(baseline.sync!.epoch)
+      const slot: SlotRow = { resourceFingerprint: target, version, entry: null }
+      const sync = validateOwnerWorkspaceSyncMetadata({ ...baseline.sync, epoch, pending: null,
+        recentReceipt: { id: request.id, hash: request.hash, operation: 'cancel', syncEpoch: epoch,
+          outboxVersion: version, localVersion: baseline.working.snapshot.localVersion } }, target,
+      { snapshot: baseline.working.snapshot, metadata: baseline.metadata, outbox: { version, entry: slot.entry } })
+      const committed = await image('readwrite', guard, undefined, undefined, (current, stores) => {
+        expectedSyncImage(current, request.expected)
+        if (canonical(current) !== canonical(baseline)) fail('workspace_conflict')
+        stores.slot.put(slot, CURRENT); stores[SYNC].put(sync, CURRENT)
+        return { ...current, slot, sync }
+      })
+      ensureOpen(); assertGuard(guard); observe(committed)
+      return syncStateOf(committed)
+    }) },
+    syncReceipt(id, hash, guard) { return bounded(guard, async () => {
+      localId(target, id)
+      if (typeof hash !== 'string' || !HASH.test(hash)) fail('workspace_invalid_input')
+      const current = await readImage(guard), state = syncStateOf(current)
+      const pending = state.sync.pending, receipt = state.sync.recentReceipt
+      if (pending?.requestId === id) {
+        if (pending.preparationHash !== hash) fail('workspace_idempotency_conflict')
+        return Object.freeze({ state: 'matched' as const, value: state })
+      }
+      if (receipt?.id !== id) return Object.freeze({ state: 'unknown' as const })
+      if (receipt.hash !== hash) fail('workspace_idempotency_conflict')
+      if (receipt.syncEpoch !== state.sync.epoch || receipt.outboxVersion !== state.local.outbox.version
+        || receipt.localVersion !== state.local.snapshot.localVersion) return Object.freeze({ state: 'unknown' as const })
+      return Object.freeze({ state: 'matched' as const, value: state })
+    }) },
     adoptLocal(input, guard) { return bounded(guard, async () => {
       if (!closed(input, ['id', 'hash', 'expected', 'sourceArchive', 'backupSha256'])) fail('workspace_invalid_input')
       const request = await buildOwnerWorkspaceAdoptLocalRequest(target, { id: input.id, expected: input.expected,
@@ -665,15 +902,16 @@ function makeWorkspace(db: IDBDatabase, target: string): OwnerWorkspace {
   return Object.freeze(api)
 }
 
-function strictProbe(factory: IDBFactory, target: string, baseline: SlotRow, signal: AbortSignal): Promise<void> {
+function strictProbe(factory: IDBFactory, target: string, baseline: SlotRow, signal: AbortSignal): Promise<number> {
   return new Promise((resolve, reject) => {
     let settled = false, db: IDBDatabase | undefined, tx: IDBTransaction | undefined
     const finish = (problem?: OwnerWorkspaceErrorCode) => {
       if (settled) return
       settled = true; signal.removeEventListener('abort', abort)
       if (problem) { try { tx?.abort() } catch { /* no writes exist in this probe */ } }
+      const version = db?.version
       db?.close()
-      if (problem) reject(new OwnerWorkspaceError(problem)); else resolve()
+      if (problem) reject(new OwnerWorkspaceError(problem)); else resolve(version!)
     }
     const abort = () => finish('workspace_timeout')
     signal.addEventListener('abort', abort, { once: true })
@@ -724,8 +962,9 @@ async function openWorkspace(factory: IDBFactory, target: string, signal: AbortS
     } finally { signal.removeEventListener('abort', cancel); outbox.close() }
   } catch (error) { throw new OwnerWorkspaceError(code(error)) }
   if (signal.aborted) fail('workspace_timeout')
-  await strictProbe(factory, target, baseline, signal)
+  const physicalVersion = await strictProbe(factory, target, baseline, signal)
   if (signal.aborted) fail('workspace_timeout')
+  if (physicalVersion === 4) return openExistingWorkspace(factory, target, signal)
   return new Promise((resolve, reject) => {
     let settled = false, upgraded = false, fromVersion = 0
     let db: IDBDatabase | undefined, handle: OwnerWorkspace | undefined
@@ -782,7 +1021,7 @@ async function openWorkspace(factory: IDBFactory, target: string, signal: AbortS
       request.onsuccess = () => {
         db = request.result
         if (settled) { db.close(); return }
-        if (db.version !== 3 || !isOwnerSyncOutboxDatabase(db)) { finish('workspace_invalid_database'); return }
+        if (![3, 4].includes(db.version) || !isOwnerSyncOutboxDatabase(db)) { finish('workspace_invalid_database'); return }
         db.onversionchange = () => { handle?.close(); db?.close(); finish('workspace_closed') }
         try {
           // Versionchange exposes no strict durability option. All new data
@@ -847,13 +1086,126 @@ function openExistingWorkspace(factory: IDBFactory, target: string, signal: Abor
       request.onsuccess = () => {
         db = request.result
         if (settled) { db.close(); return }
-        if (db.version !== 3 || !isOwnerSyncOutboxDatabase(db)) { finish('workspace_invalid_database'); return }
+        if (![3, 4].includes(db.version) || !isOwnerSyncOutboxDatabase(db)) { finish('workspace_invalid_database'); return }
         handle = makeWorkspace(db, target)
         handle.readLocalState({ signal, assertActive() { if (signal.aborted) fail('workspace_timeout') } })
           .then(() => finish(), error => finish(code(error)))
       }
     } catch (error) { finish(code(error)) }
   })
+}
+
+/** Explicit upgrade of the original adopted v3 target only. Versionchange and
+ * strict initialization are separate commits: an interrupted v4 with no current
+ * metadata fails closed on every normal open. There is no automatic repair. */
+export async function upgradeOwnerWorkspaceSync(factory: IDBFactory, target: string,
+  expectedInput: OwnerWorkspaceLocalState, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspace> {
+  localId(target, 'workspace-sync-upgrade')
+  const expected = localState(expectedInput, target)
+  if (!expected.metadata.adoption || expected.outbox.entry !== null) fail('workspace_pending')
+  assertGuard(guard)
+  const controller = new AbortController()
+  let timedOut = false
+  const revoked = () => controller.abort()
+  guard.signal.addEventListener('abort', revoked, { once: true })
+  const timer = setTimeout(() => { timedOut = true; controller.abort() }, OWNER_SYNC_OUTBOX_TIMEOUT_MS)
+  const activeGuard: OwnerWorkspaceGuard = { signal: controller.signal, assertActive() {
+    if (timedOut) fail('workspace_timeout')
+    assertGuard(guard)
+  } }
+  try {
+    const existing = await openExistingWorkspace(factory, target, controller.signal)
+    try {
+      const current = await existing.readLocalState(activeGuard)
+      if (canonical(current) !== canonical(expected)) fail('workspace_conflict')
+    } finally { existing.close() }
+    const version = await strictProbe(factory, target, { ...expected.outbox, resourceFingerprint: target }, controller.signal)
+    if (version !== 3) fail('workspace_invalid_database')
+    assertGuard(activeGuard)
+    return await new Promise<OwnerWorkspace>((resolve, reject) => {
+      let db: IDBDatabase | undefined, tx: IDBTransaction | undefined, handle: OwnerWorkspace | undefined, settled = false
+      const finish = (problem?: OwnerWorkspaceErrorCode) => {
+        if (settled) return
+        if (!problem) { try { assertGuard(activeGuard) } catch (error) { problem = code(error) } }
+        settled = true; controller.signal.removeEventListener('abort', abort)
+        if (problem) {
+          try { tx?.abort() } catch { /* a completed versionchange remains visible */ }
+          handle?.close(); db?.close(); reject(new OwnerWorkspaceError(problem))
+        } else resolve(handle!)
+      }
+      const abort = () => finish(timedOut ? 'workspace_timeout' : 'workspace_context_changed')
+      controller.signal.addEventListener('abort', abort, { once: true })
+      if (controller.signal.aborted) { abort(); return }
+      const readExpected = (transaction: IDBTransaction, accept: () => void) => {
+        try {
+          assertGuard(activeGuard)
+          for (const name of STORES) {
+            const store = transaction.objectStore(name)
+            if (store.keyPath !== null || store.autoIncrement || store.indexNames.length) fail('workspace_invalid_database')
+          }
+          const stores = Object.fromEntries(STORES.map(name => [name, transaction.objectStore(name)]))
+          const reads = [stores.slot.get(CURRENT), stores.slot.count(), stores[WORKING].get(CURRENT), stores[WORKING].count(),
+            stores[METADATA].get(CURRENT), stores[METADATA].count(), stores[RECEIPTS].count()]
+          let remaining = reads.length
+          for (const read of reads) read.onsuccess = () => {
+            if (--remaining !== 0 || settled) return
+            try {
+              assertGuard(activeGuard)
+              if (reads[1].result !== 1 || reads[3].result !== 1 || reads[5].result !== 1) fail('workspace_invalid_database')
+              const state = working(reads[2].result, target).snapshot
+              const current = localState({ snapshot: state, metadata: checkedMetadata(reads[4].result, state),
+                outbox: (() => { const slot = ownerSyncOutboxStorage.rowShape(reads[0].result, target)
+                  return { version: slot.version, entry: slot.entry } })(), receiptCount: reads[6].result }, target)
+              if (canonical(current) !== canonical(expected)) fail('workspace_conflict')
+              accept()
+            } catch (error) { finish(code(error)) }
+          }
+        } catch (error) { finish(code(error)) }
+      }
+      try {
+        assertGuard(activeGuard)
+        const request = factory.open(OWNER_SYNC_OUTBOX_DB_PREFIX + target, 4)
+        request.onblocked = () => finish('workspace_blocked')
+        request.onerror = () => finish('workspace_invalid_database')
+        request.onupgradeneeded = event => {
+          db = request.result; tx = request.transaction!
+          if (settled || event.oldVersion !== 3 || db.objectStoreNames.length !== STORES.length
+            || !STORES.every(name => db!.objectStoreNames.contains(name))) {
+            try { tx.abort() } catch { /* rejection remains fixed */ }; finish('workspace_invalid_database'); return
+          }
+          readExpected(tx, () => { db!.createObjectStore(SYNC) })
+        }
+        request.onsuccess = () => {
+          db = request.result
+          if (settled) { db.close(); return }
+          db.onversionchange = () => finish('workspace_closed')
+          try {
+            assertGuard(activeGuard)
+            if (db.version !== 4 || !isOwnerSyncOutboxDatabase(db)) fail('workspace_invalid_database')
+            tx = db.transaction([...STORES, SYNC], 'readwrite', { durability: 'strict' })
+            if (tx.durability !== 'strict') fail('workspace_unavailable')
+            const store = tx.objectStore(SYNC)
+            if (store.keyPath !== null || store.autoIncrement || store.indexNames.length) fail('workspace_invalid_database')
+            // Do not repair another tab's already initialized/incomplete state.
+            const count = store.count()
+            count.onsuccess = () => {
+              if (settled) return
+              if (count.result !== 0) { finish('workspace_invalid_database'); return }
+              readExpected(tx!, () => store.add(emptyOwnerWorkspaceSyncMetadata(target), CURRENT))
+            }
+            tx.onerror = () => finish(code(tx?.error, 'workspace_aborted'))
+            tx.onabort = () => finish(code(tx?.error, 'workspace_aborted'))
+            tx.oncomplete = () => {
+              if (settled) { db?.close(); return }
+              handle = makeWorkspace(db!, target)
+              handle.readSyncState(activeGuard).then(() => finish(), error => finish(code(error)))
+            }
+          } catch (error) { finish(code(error)) }
+        }
+      } catch (error) { finish(code(error)) }
+    })
+  } catch (error) { throw new OwnerWorkspaceError(timedOut ? 'workspace_timeout' : code(error)) }
+  finally { clearTimeout(timer); guard.signal.removeEventListener('abort', revoked) }
 }
 
 /** v1/v2->v3 adds only stores/independent metadata; one budget covers every phase. */

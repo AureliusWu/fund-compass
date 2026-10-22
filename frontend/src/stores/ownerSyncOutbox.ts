@@ -6,7 +6,7 @@ export const OWNER_SYNC_OUTBOX_TIMEOUT_MS = 12_000
 export const OWNER_SYNC_OUTBOX_DB_PREFIX = 'fund-compass-owner-sync-outbox-1:'
 const STORE = 'slot'
 const KEY = 'current'
-const HEX = /^[0-9a-f]{64}$/
+const HEX = /^[0-9a-f]{64}(?![\s\S])/
 const STATES = new Set(['prepared', 'attempted', 'unknown', 'confirmed', 'conflict'])
 
 export type OwnerSyncOutboxState = 'prepared' | 'attempted' | 'unknown' | 'confirmed' | 'conflict'
@@ -40,8 +40,15 @@ interface Row extends OwnerSyncOutboxSnapshot { readonly resourceFingerprint: st
 function fail(code: OwnerSyncOutboxErrorCode): never { throw new OwnerSyncOutboxError(code) }
 function exact(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
-  const actual = Object.keys(value)
-  return actual.length === keys.length && keys.every(key => Object.prototype.hasOwnProperty.call(value, key))
+  try {
+    const prototype = Object.getPrototypeOf(value)
+    if (prototype !== Object.prototype && prototype !== null) return false
+    const actual = Reflect.ownKeys(value)
+    if (actual.length !== keys.length || actual.some(key => typeof key !== 'string' || !keys.includes(key))) return false
+    const descriptors = Object.getOwnPropertyDescriptors(value)
+    return keys.every(key => Object.prototype.hasOwnProperty.call(descriptors, key))
+      && Object.values(descriptors).every(item => item.enumerable && 'value' in item)
+  } catch { return false }
 }
 function entryShape(value: unknown, code: OwnerSyncOutboxErrorCode): OwnerSyncOutboxEntry | null {
   if (value === null) return null
@@ -53,7 +60,8 @@ function entryShape(value: unknown, code: OwnerSyncOutboxErrorCode): OwnerSyncOu
 }
 function rowShape(value: unknown, target: string): Row {
   if (!exact(value, ['version', 'entry', 'resourceFingerprint']) || typeof value.version !== 'number'
-      || !Number.isSafeInteger(value.version) || value.version < 0 || value.resourceFingerprint !== target) fail('outbox_invalid_database')
+      || !Number.isSafeInteger(value.version) || value.version < 0 || Object.is(value.version, -0)
+      || value.resourceFingerprint !== target) fail('outbox_invalid_database')
   return Object.freeze({ version: value.version, entry: entryShape(value.entry, 'outbox_invalid_database'), resourceFingerprint: target })
 }
 function snapshot(row: Row): OwnerSyncOutboxSnapshot { return Object.freeze({ version: row.version, entry: row.entry }) }
@@ -101,7 +109,8 @@ export const ownerSyncOutboxStorage = Object.freeze({
 export function isOwnerSyncOutboxDatabase(db: IDBDatabase): boolean {
   const stores = db.version === 1 ? [STORE] : db.version === 2
     ? [STORE, 'working_copy', 'import_receipts'] : db.version === 3
-      ? [STORE, 'working_copy', 'import_receipts', 'local_metadata'] : []
+      ? [STORE, 'working_copy', 'import_receipts', 'local_metadata'] : db.version === 4
+        ? [STORE, 'working_copy', 'import_receipts', 'local_metadata', 'sync_metadata'] : []
   return stores.length > 0 && db.objectStoreNames.length === stores.length
     && stores.every(name => db.objectStoreNames.contains(name))
 }
@@ -205,7 +214,7 @@ function makeHandle(db: IDBDatabase, target: string): OwnerSyncOutbox {
           // Physical v3 establishes a local-authority boundary. Preparing a
           // packet from unrelated legacy LS must not race an adopted ledger.
           // Existing packets retain their exact transition/receipt workflow.
-          if (db.version === 3 && row.entry === null && write.next !== null) fail('outbox_invalid_transition')
+          if (db.version === 4 || db.version >= 3 && row.entry === null && write.next !== null) fail('outbox_invalid_transition')
           transition(row.entry, write.next)
           const next = Object.freeze({ version: row.version + 1, entry: write.next, resourceFingerprint: target })
           const put = store.put(next, KEY)
@@ -227,7 +236,8 @@ function makeHandle(db: IDBDatabase, target: string): OwnerSyncOutbox {
     }) },
     compareAndSwap(expectedVersion: number, nextEntry: OwnerSyncOutboxEntry | null) { return bounded(async () => {
       ensureOpen()
-      if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 0) fail('outbox_conflict')
+      if (typeof expectedVersion !== 'number' || !Number.isSafeInteger(expectedVersion)
+        || expectedVersion < 0 || Object.is(expectedVersion, -0)) fail('outbox_conflict')
       const next = await validateEntry(nextEntry, 'outbox_invalid_entry')
       ensureOpen()
       const row = await storedRow('readonly')
