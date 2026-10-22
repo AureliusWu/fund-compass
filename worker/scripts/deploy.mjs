@@ -35,6 +35,18 @@ export function buildWranglerArgs(sha) {
   ]
 }
 
+export function assertDeploymentToolchainSecurity() {
+  // npm overrides only replace Miniflare's external Undici. Wrangler 4.149.0
+  // also bundles 7.29.1 for its own HTTP requests; npm audit cannot see that
+  // copy. Reopen deployment only after reviewing a fixed upstream artifact
+  // and its compatibility evidence. There is deliberately no bypass flag.
+  throw new Error(
+    'Worker deployment blocked: Wrangler bundles unpatched Undici 7.29.1 '
+    + '(GHSA-xjj6-f33q-929c, GHSA-2m5v-pch6-74hx). '
+    + 'A reviewed fixed upstream artifact is required; npm audit 0 is insufficient.',
+  )
+}
+
 export function deploymentIdentity() {
   const dirty = git(['status', '--porcelain=v1', '--untracked-files=all'])
   if (dirty) {
@@ -47,6 +59,7 @@ function main() {
   if (process.argv.length > 2) {
     throw new Error('Worker deploy wrapper does not accept pass-through arguments')
   }
+  assertDeploymentToolchainSecurity()
   const sha = deploymentIdentity()
   const wranglerBin = fileURLToPath(new URL('../node_modules/wrangler/bin/wrangler.js', import.meta.url))
   const result = spawnSync(process.execPath, [wranglerBin, ...buildWranglerArgs(sha)], {

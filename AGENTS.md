@@ -78,6 +78,8 @@ uvicorn main:app --reload --port 8000
 - 主导航保持“首页 / 选基 / 自选”三项；资产、对比、回测和组合实验室能力保留路由，不因入口隐藏而删除。
 - 中文界面优先使用系统宋体与系统无衬线字体，不依赖 Google Fonts 等国内不稳定的线上字体服务。
 - 不在代码、日志、文档示例中写真实密钥或 Token。
+- npm ci 的漏洞告警不等于安全门禁通过。CI 的前端/Worker安装与审计须显式包含dev依赖；审计是有界、无容错/条件绕过的独立步骤，中危及以上或网络/超时错误阻断受控CI发布链，不用force或省略开发工具换PASS。公共registry审计失败保持未知，镜像NOT_IMPLEMENTED不能记零漏洞；npm JSON不是通用脱敏器。平台自身自动部署设置须另行验收，不能由CI YAML推断已受门禁保护。
+- Worker 的 Miniflare 外部 Undici scoped override 不会替换 Wrangler 自身 bundle；npm audit 0 也不认证内嵌代码。当前正式 deploy 入口在 Git/CLI 启动前固定阻断已知内嵌风险，无环境或参数绕过；关闭须审查已修可信上游制品、锁与兼容证据后显式改源码，不能扫描版本注释自动放行。dry-run/loopback只作功能证据，不运行带认证的 Wrangler 网络操作，不宣称已修已部署 Worker runtime。
 
 ## 项目边界
 

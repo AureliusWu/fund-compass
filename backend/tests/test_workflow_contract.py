@@ -240,6 +240,33 @@ def test_ci_runs_dependency_and_runtime_contract_gates() -> None:
     assert "npx wrangler deploy --dry-run" in ci
 
 
+def test_ci_audits_the_complete_toolchain_and_blocks_release_on_failure() -> None:
+    jobs = yaml.safe_load(workflow("ci.yml"))["jobs"]
+    for name, final_check in (("frontend", "npm run build"), ("worker", "npx wrangler deploy --dry-run")):
+        job = jobs[name]
+        assert job.get("continue-on-error", False) is False, name
+        assert job.get("if") is None, name
+        audits = [(index, step) for index, step in enumerate(job["steps"])
+                  if step.get("name") == "Audit dependency advisories"]
+        assert len(audits) == 1, name
+        index, audit = audits[0]
+        assert audit.get("if") is None, name
+        assert audit.get("continue-on-error", False) is False, name
+        assert audit["timeout-minutes"] == 2, name
+        # A standalone command must propagate npm's advisory/network exit code.
+        # Explicit dev inclusion keeps Vite/Vitest/Wrangler in the audited tree.
+        assert audit["run"] == (
+            "npm audit --json --include=dev --audit-level=moderate "
+            "--registry=https://registry.npmjs.org --fetch-retries=0 --fetch-timeout=20000"
+        ), name
+        for prerequisite in ("npm ci --include=dev", final_check):
+            checks = [position for position, step in enumerate(job["steps"]) if step.get("run") == prerequisite]
+            assert len(checks) == 1 and checks[0] < index, (name, prerequisite)
+    # Both regular deployment and formal validation depend on these jobs.
+    for release in ("deploy", "formal_smoke"):
+        assert {"frontend", "worker"} <= set(jobs[release]["needs"]), release
+
+
 def test_frontend_deploy_requires_an_explicit_public_api_endpoint() -> None:
     deploy = workflow("deploy.yml")
     index = (ROOT / "frontend" / "index.html").read_text(encoding="utf-8")

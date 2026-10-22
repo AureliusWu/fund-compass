@@ -1029,3 +1029,33 @@ Worker本机 **144/3文件/2.02s**、type-check通过。首次误以为deploy wr
 独立审查又发现OutcomesPage实际精度卡绕开attach函数，故同时修`OverseasAccuracyPanel.vue`，与附件共用accuracyFreshness：显示各基金自身结算/预测时间和模型，缺失明确未知，过期/未知保留指标但标“历史指标，仅供回看”，不继续无提示显示高置信。30秒时钟与visibility恢复重核，卸载abort请求/清interval/移除监听，迟到响应不回填。真实SFC自定义renderer执行13项，utility52项；这是挂载组件证据，不是真实Chrome DOM/布局/旧PWA或物理设备证明。无modelVersion的动态/风格fallback不再借active样本；旧持久估值缓存精度刷新仍属后续I21边界，不以人工重复attach测试虚构生产调用。
 
 作者前端全量1205/58文件、type-check/build/PWA通过；根对冻结源码独立串行执行同样 **1205 passed/58文件/3.51s**、type-check exit0、build **7.30s/PWA7/7** exit0，未改版本或发布。冻结utility=`e91ec317368ccd65d203bf4dee15d661a9fc6480a54787df8da72658de36186c`、utility test=`de8e4f4ed5b2822bf6c33dea80ad61718d16a2a654f59693f0b74f10ea108ed2`、panel=`9fdbac37c333217d31edab150d575ef05788fd963ab4347d757085f4f26bf620`、panel test=`ae14b67d760bd8de18454fa002869e4cc03704bb5542b8ffca968c72d35d1aa5`。数据可靠性审查推动了实际卡片接线，不只是新增未使用helper；整体I20/I21、真实云迁移/Owner闭环/耐久/恢复与正式v9仍未完成。
+
+### 991d9ec 的自然 CI 与安全依赖阻断（2026-10-22）
+
+上述十二文件已正常提交并推送`991d9ecd5045af2b25c63a836a088b54db013d1c`，tree=`3f98889d5f2255a6421e66a8fefbce61936a574a`。[CI 39713953842](https://github.com/AureliusWu/fund-compass/actions/runs/39713953842) attempt1 completed/success，updated_at=`2026-10-22T02:59:59Z`；四job实际checkout均`fc064695a4bc9f5d40813ae9495b46c0b86406b2`，父为f8d519a+991d9ec，tested/source/本地tree一致。后端3165/2warnings/153.56s，前端1205/58文件、类型/build7.48s/PWA7/7，Worker144/3文件/check/dry-run114.28KiB/gzip26.58KiB。deploy与两smoke均skipped/steps=[]，不代表上线。
+
+原CI安装日志同时明确：frontend 2moderate+1high、Worker 2moderate；npm ci不因告警退出，故功能CI成功但安全审计非clean。终态后日志取证为独立有界阶段，不延长原测试预算；首次取证超时及同身份一次EOF补读均保留。两阶段51份原件seal独立重哈希无漂移，二级报告`fc-ci-39713953842-review-20261022-1c843feb/VERIFICATION_WITH_FINDINGS.ascii.json` SHA=`1a6990602a25afb243553199f3e9e91d2d29f25dc0639b370deaf09095bbab1b`。原件明确functional_verified=true、dependency_audit_clean=false、strict_release_gate=false，不把失败改成PASS。本轮只读ls-remote再次确认feature仍991d9ec/main仍f8d519a。
+
+只读官方安全诊断核定前端Vite6.4.3须到6.4.5，不能停在有回植遗漏的6.4.4（[官方公告](https://github.com/vitejs/vite/security/advisories/GHSA-8g5g-mxqh-grgj)）；两端Vitest及mocker最低4.1.12（[mock注入](https://github.com/vitest-dev/vitest/security/advisories/GHSA-qxg6-89mg-rqv8)、[Windows路径穿越](https://github.com/vitest-dev/vitest/security/advisories/GHSA-xp26-3454-mjgp)）。默认镜像audit返回404 NOT_IMPLEMENTED，官方一次audit超时不作0漏洞；Worker正式audit原JSON准确返回两个moderate，原件SHA=`ee1bab81cdf97fb6fc4f4fa40c75116f6f2f5745b63e5bfaca2ace2b1f842a61`。另Miniflare精确pin的Undici7.29.1有官方已披露风险（[content-encoding DoS](https://github.com/nodejs/undici/security/advisories/GHSA-xjj6-f33q-929c)），npm尚未列不代表安全；它属于CLI/dev链，不等同于生产Worker npm runtime可利用，未经兼容验收不盲改override。
+
+前端依赖最小补丁已在工作树：manifest下限Vite^6.4.5/Vitest^4.1.12；一次官方无脚本/无audit锁生成exit0/10.707s，只有Vite、Vitest及七个同系列包九entry变动，无增删/批量换registry。原授权npm ci实际exit0/22.753s，当前安装/正式及隐藏lock元数据一致；manifest=`0e2b54905692e56b38361cc752a9699bfaa7393865e58fa7307311274b1f344a`、lock=`7326739968484411a7c99c5a1c99e62864c0572355d17d5a543a9636626fd50d`。这些不认证tarball来源/完整包内容，补丁后的1205/type/build/audit尚未执行，不能沿用旧依赖的PASS。新包engine本身兼容CI Node20/22；完整既有图实际至少需frontend20.19/worker22.12，仍须实际CI精确运行时证明。
+
+Worker仅manifest下限改为^4.1.12；锁生成监督脚本在CreateProcess前遭执行策略拒绝，npm未运行、lock/node_modules仍4.1.11。没有重试被拦截脚本、替代launcher或改权限/认证。已向用户请求是否允许受支持的直接npm方式，尚无确认；自动goal继续不是该确认。保留这个partial但不得提交/推送或宣称升级完成，无云修改、主分支推送或Gist删除。
+
+在不触及该限制的源码工作中，补CI的显式dev安装与独立官方audit gate：中危以上、网络或2分钟step超时使受控仓库发布链失败，原type/test/build/dry-run不移除；不证明Render自动部署配置已改变。新增合约先实测1项失败（缺include=dev），修后工作流24项全部通过（1.02s，随后安装也显式include后的最终0.80s），独立只读审查无当前P0/P1。新gate/回归/依赖及本记录均仍未提交，不以静态合约测试冒充真实registry、完整新源码CI或正式v9发布；全部原v9范围继续保留。
+
+### 用户授权直接 npm 后的补丁与真实验证（2026-10-22）
+
+用户随后明确授权“允许使用直接 npm 方式继续，已给你完全访问权限”。本轮只用直接 npm/正常 session 继续，未重跑被拒的监督脚本、修改权限/认证或换凭据。Worker官方lock-only exit0/10s，首次ci exit0/7s；Vitest4.1.12重解算Vite8.3.5及其兼容Rolldown/PostCSS链，非安全必需升级的版本不冒称修复特定公告。独立审查确认最终159个lock entries无增删，根加28包变化，包含Vitest家族8包、Vite/Rolldown/oxc/PostCSS及15平台bindings、外部Undici；全部变包仍dev、平台约束/engine未提高，无批量registry替换。前端仍是此前九包最小补丁。正常插件工作流合约24项再次通过。
+
+Miniflare的外部Undici限定父版本override至7.30.1；正式lock、隐藏lock与实际Miniflare入口解析一致，Wrangler4.149.0/Miniflare5.20261006.1-alpha本身未变。父包原来精确7.29.1，故不声称仅原声明范围内升级。先新增版本守卫实际红测1失败；尝试额外Wrangler精确祖先key时npm实际EOVERRIDE（直接依赖范围为^4.149.0），后续ci亦失败，均保留原工具输出，未视为PASS；撤回该祖先key而不改Wrangler范围后，直接lock-only/ci分别exit0/891ms和6s。仅保留精确Miniflare父级规则，并用测试固定实际两级父版本，后续父升级须重新审查。
+
+新增真实本机Miniflare/workerd兼容测试：inline合成脚本、127.0.0.1随机端口、cf:false、无项目绑定/密钥，outbound handler拒绝外发。覆盖GET/POST与body/Response clone、单块stream、204、manual302及请求前已abort，finally等待dispose；不外推为在途取消、背压、任意Miniflare功能、全网络观测或云部署。首次按旧constructor形式执行确实失败（v5需workers/config），改用该包真实导出的convertV4MiniflareOptions后两项通过，未mock成PASS。随后Worker全量146通过，正式发布入口安全测试加入后最终 **148 passed/4文件/1.12s**；check exit0，dry-run仍 **114.28KiB/gzip26.58KiB**，未实际部署。worker manifest=`1ecbf6bb0b6d4679a7d8512454000137b66d26f421fed299872034bfe2baf981`、lock=`300a343eca15767eb0181dbfa43eefca8addf6b76777f0de25e9b3a291279f4e`。
+
+官方registry audit两端实际exit0、vulnerabilities={}：frontend469依赖、Worker158依赖，均显式include=dev、moderate门槛、fetch-retries=0/fetch-timeout=20000。**安全门禁仍未关闭**：Wrangler自己bundle了Undici7.29.1，Cloudflare API及更新fetch实际使用该内嵌副本；Miniflare override不改bundle，audit0也不覆盖它。官方[7.30.1发行说明](https://github.com/nodejs/undici/releases/tag/v7.30.1)、[DoS公告](https://github.com/nodejs/undici/security/advisories/GHSA-xjj6-f33q-929c)与[TLS公告](https://github.com/nodejs/undici/security/advisories/GHSA-2m5v-pch6-74hx)仍作为未关闭风险依据。当前latest4.151.3/Cloudflare源码仍声明旧版，不能盲升或文本替换bundle冒充修复。受支持npm run deploy入口现于Git/Wrangler启动前固定BLOCKED，无环境/参数绕过；真实入口子进程测试exit1且固定安全错误，关闭须经审查已修可信上游制品和兼容证据后显式改源码。它不是所有CLI的系统封锁；README同时暂停带认证的secret put等网络操作示例。现有线上Worker未改，不能声称其业务runtime已运行npm Undici。
+
+前端作者直接重跑新版依赖：**1205/58文件/5.06s**、type-check exit0，三次build均exit0/PWA7/7；根另独立重跑全量 **1205/58文件/5.38s**。Vite内部build耗时9.69/7.58/9.50s，median9.50/worst9.69，不含npm/PWA全程；对旧单样本7.30s方向增长30.14%超过20%回退线，未建立受控重复旧基线/未排除宿主并发，不能定因或报性能PASS。三次JS/CSS产物61文件完全一致，raw1,371,314/gzip488,548B、无map；与构建前遗留产物逐路径摘要相同，但该旧产物来源未独立绑定，不冒充严格AB。ECharts532,397B仍低于既有600kB告警线。原前端证据在工具stdout，未手排落盘或捏造独立原文件；不代表真实浏览器/PWA/线上性能通过。
+
+根沿原已审查正常插件双分片方案、原300秒绝对预算实跑当前后端：**3166=1583+1583全部通过**，validation234960ms/total235405ms；完整collection、互斥并集、setup/call/teardown和JUnit逐项核对，source pins与默认DB metadata前后一致，两fallback均未创建。保留3个warning（两分片Starlette弃用与既有confidence=inf负例序列化），不改成零告警。证据`fc-backend-two-shard-run-20261022-4f65a2b57563487c8f2f5ce1bb79a9d8/summary.json` SHA=`c3755888a8ff2eab066e05bb3d268d8b602a387ff2ae1fd289275c7106380203`；不是Windows串行或云业务持久化证明。
+
+上述是依赖安全局部修复与发布入口防误放行，不是完整v9。应用保持8.0.0；未push main、改云schema/Secret/套餐、重启服务或删Gist。I18迁移/凭据/耐久/独立恢复、完整I19业务闭环、自然任务与真实设备/性能出口继续未完成，不以本地测试或registry0替代正式发布资格。
