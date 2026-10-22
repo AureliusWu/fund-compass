@@ -1120,3 +1120,32 @@ raw DDL 从不执行；目标仅对实际移除/重建的该 trigger 采用规�
 正常插件两分片后端全量 **3279=1640+1639 passed**，原300秒绝对预算不变，validation210300ms/总210698ms，collection/完整全集分区/三阶段/JUnit均通过，源码pins与默认DB metadata前后相同、fallback未创建。根独立再核 Ordinal 全集无重叠/遗漏、9837个setup/call/teardown全部passed及无skip/xfail/deselected。输出目录 `fc-backend-two-shard-run-20261022-e02d93263e82459a9103f10948303b8c`，summary SHA=`588e5439a98f2353d7c6862b02729d7f06312326f4813b7eebb7d02944a8cd18`。这是正常插件合成全量，不是Windows串行、云业务或新CI证明。前端/Worker另以普通 `npm audit --include=dev --audit-level=moderate --registry=https://registry.npmjs.org` 各实际返回0漏洞/exit0；仍不认证 Wrangler 内嵌代码。
 
 下一道实际门禁仍包括新 profile 的响应与未知提交完整对账、受控 sender 接线；优先复用已有固定私有 parser/FSM/完整image核而不放宽旧 public packet 类型/profile，完整读回必须同时核原 header、修复Evidence、全部旧表、scope、Owner与十列回执。实际所有 writer 停写/排空、Free配额/Overages、新保护备份、实际 provider 精度/能力/容量、迁移、应用写入→Render重启读回及独立远端恢复仍缺。I19 同工作区原子制包/ack、完整业务链与迁移、I20 自然窗口、I21 实机/PWA/性能亦未完成。不能将本地包或旧 transport 的通过记成云 apply、正式迁移或 v9 发布。
+
+### 新升级 profile 的响应、完整对账与单次 HTTP 接线（2026-10-22）
+
+前一切片已正常提交/推送 `518c576ac6a672954c33387387ea2019300a3d4a`，tree=`d9ead13449dd4229624d1ecb2381af64c46aa8c7`。[CI39727018903](https://github.com/AureliusWu/fund-compass/actions/runs/39727018903) attempt1 success、05:19:01Z完成；此前正常日志已核 backend3279/2warnings/161.64s、frontend1325/65文件/type/build6.57s/PWA7/7、Worker148/4文件/check/dry-run114.28KiB/gzip26.58，两个独立audit步骤成功。实际checkout merge=`a2f191a67689334fad8fc5e195c86c4593ab74e2`，parents=f8d519a+518c576，GitHub commit API核tree与feature一致。deploy/candidate_smoke/formal_smoke均skipped/steps=[]，不是发布。一次并行读取backend日志的CLI缓存EOF，经同接入普通串行读取成功；本轮再次只读metadata也遇EOF，不将该取证失败记成新失败或新成功，不重跑工作流、不换认证。原始日志只通过工具读取，未封存独立原件。
+
+新增三个独立模块和对应测试，旧 public packet 类型/profile 与源码 pin 不变，不把新包伪装成 scope-only：
+
+- `turso_owner_upgrade_response.py` 仅由新 compiler 原始三 SHA 重建准入，复用原固定私有 JSON/FSM；独立闭集 DTO 公开自己的 parser/compiler/sourcegraph SHA。完整状态机才允许 commit/not-started/rollback acknowledged，所有 remote/apply/restore/formal/retry 仍false，ack不是云提交或耐久证明。
+- `turso_owner_upgrade_reconcile.py` 从同一个原始 schema8 捕获重新推导完整目标。schema8分支只有全原像+空槽才missing；schema9分支完整核修复Evidence、所有旧表/typed值、scope、Owner五表初始revision0、原header0或8和十列回执。额外空的固定schema仅用于发现SQLite INTEGER PRIMARY KEY alias的真实列名，不执行输入DDL。所有SELECT在一个固定BEGIN/COMMIT读计划，不自动切schema/发送/回放。此为停写迁移窗口对账，不代替恢复业务写入后的独立持久性验收。
+- `turso_owner_upgrade_transport.py` 提供显式单次真实HTTP能力，复用原TLS/禁环境凭据/禁redirect/retry/有界stream/cleanup物理核，外层绑定新compiler/response/reconcile及共享核的源码图和原总预算。构造、源码检查不枚举或读取凭据。401/403/429、断流、清理失败等均unknown/STOP；无自动读回或第二POST。流中源码变化在返回前拒绝，但不能撤回已发出的第一请求；每调用once不是永久去重。没有CLI或应用默认路由，不代表本轮调用了云库。
+
+独立审查实际复现并关闭四个边界：DTO在values之后才起timer导致31秒前段可返回成功；unknown权限DTO未核source；一次已绑定compiler_code_drift被后来健康读取洗成generic verification_failed并保留identity；权限错误后时钟NaN引起二次DTO构造异常。现在所有DTO校验前起timer，constructor/getter核源码；已观察identity/origin/code失败永久撤销输入资格，不凭后来的健康读取恢复。有限外层超时仍保留已绑定permission_stop；时钟本身不可信只能读出无身份/session/permission资格的unknown/time_limit，仍不可重试；source漂移只允许无资格code_drift诊断可读。原30秒为全流程协作预算，不是硬进程/云寿命保证。
+
+本地正常插件专项最终：response **128 passed/130.71s**，包含每个真实SQL故障前缀和每次原包重编译（该单循环48.90s，不是stub准入）；transport最终source新进程重跑 **68 passed/33.50s**。reconcile修补前176通过/225.18s、补丁后40个定向passed/4.11s与174deselected如实分开；根随后对最终文件直接全量 **214 passed/202.48s**，无deselected，JUnit=`fc-owner-upgrade-reconcile-final-20261022-root.xml` SHA=`6731b2edb540942039398646f0674af659fce65e5151643997346a1747cb5839`。新增合计410项；当前完整收集 **3689**，不是新全量执行PASS。本轮没有重跑或放宽原300秒本机两分片parent；全项目将由正常CI验证，不以拆分专题替代总量。源/测试6文件hash在根测试及容量采样前后完全一致，默认DB元数据仍4149248B/2026-08-28T07:00:02.5969445Z/Archive。
+
+最终模块SHA：response=`39ad7b0847b20630254b1d4f0d9440e55cabceebbeba739969bc72af09a82777`、reconcile=`b4c8c978173269c0eabce5d87b3764ef96f56b9a28a70a928d8062e717dd9420`、transport=`8e8fbc3b669091c6274a83c0e27569334e29c7dda6d5dc5b5c7dfab0ba5cf2c9`。对应测试SHA分别`7e9302c9c1b9841bdaf3ea04bf4baac1ca83fd6cb2471ad81d64c1e02a5e51b1`、`398743342e562b0f84b906606aceea287d6937efcb9d587773aa6f6f2e2d3803`、`e869c99b1398d7e07f94b342da8ebd94170717987a0dfdb7151258a46ef61b8d`。所有数据均合成；无私有备份/凭据文件读取或实际云访问。
+
+按性能检查做3次独立5000总行合成内存样本（4995窄funds、2修复格）；普通Python-B，不用自制npm launcher。每次固定读请求9406B、提供的完整读回819981B；编译包在本机SQLite真实执行后才生成读回，并另用真实本机执行生成ACK输入。结果均matched/commit_acknowledged且远端/重试旗标false，原source/capture镜像未变。
+
+| 本机组件秒，n=3 | 样本1 / 2 / 3 | median / worst |
+| --- | --- | --- |
+| 完整读计划构建（含重建/目标推导） | 1.810792 / 1.870864 / 1.866754 | 1.866754 / 1.870864 |
+| 本机SQLite读与JSON编码 | 0.023306 / 0.031711 / 0.035242 | 0.031711 / 0.035242 |
+| 完整读回核验含公开getter | 2.131159 / 2.101555 / 2.117306 | 2.117306 / 2.131159 |
+| ACK响应核验含公开getter | 1.389023 / 1.412035 / 1.430776 | 1.412035 / 1.430776 |
+
+无旧版本同功能基线，原30秒/64MiB/100000行/16384steps界限不改；只说明该窄合成样本在组件预算内，不判回归PASS。原始metrics仅工具stdout、无封存报告，不是HTTP/TLS或约34k行真实业务容量、网络吞吐、冷热浏览器/用户交互或I21性能出口。完整核对构建+核验约4秒，是维护工具计算而非现有用户API热延迟；主要成本是重复完整重建/typed行摘要/源码graph与JSON检查，后续不能靠省略这些合同或提高上限换性能。
+
+下一道云门禁仍需实际writer库存/停写排空、Free配额/Overages与新保护备份、真实provider数学/pragma/TEMP/事务容量、受控原包应用、同应用写入→Render重启读回及独立远端恢复。未收到新平台输入已保存的确认，不重试被阻断的OAuth/浏览器路线、不读取其输入文件，不改套餐/秘密/部署/重启、不推main或删除Gist。I19同工作区原子制包/ack与业务链、手工资产/历史/机器消费者迁移，I20自然窗口、I21实机/PWA/回退预算继续未完成；应用仍8.0.0，不将本轮局部闭环或旧CI记作v9发布。
