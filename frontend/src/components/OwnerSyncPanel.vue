@@ -38,6 +38,9 @@ const authenticated = computed(() => Boolean(ownerSession.value)
 const privateVisible = computed(() => enabled.value && consent.value && authenticated.value)
 const state = computed(() => status.value?.state ?? 'disabled')
 const unresolved = computed(() => pending.value?.state === 'unknown' || pending.value?.state === 'attempted')
+// The workspace and cloud outbox are not yet atomically prepared together.
+// Receipt reconciliation remains available for the original durable packet.
+const localPackageEnabled = computed(() => watchlist.authorityState === 'legacy' && !watchlist.localStorageError)
 const resolved = computed(() => (pending.value?.state === 'confirmed' && result.value?.kind === 'success')
   || (pending.value?.state === 'conflict' && result.value?.kind === 'conflict'))
 const stateLabel = computed(() => busy.value ? '操作进行中，请勿重复提交'
@@ -47,9 +50,9 @@ const stateLabel = computed(() => busy.value ? '操作进行中，请勿重复�
   : state.value === 'conflict' ? '存在冲突 · 原包保留'
   : preview.value ? '已核对 · 等待你检查完整变更'
   : '已启用本轮操作 · 尚未拉取')
-const canPrepare = computed(() => !busy.value && !pending.value && Boolean(preview.value?.operations.length)
+const canPrepare = computed(() => localPackageEnabled.value && !busy.value && !pending.value && Boolean(preview.value?.operations.length)
   && preview.value?.issues.length === 0 && Boolean(localSnapshot.value))
-const canSend = computed(() => !busy.value && pending.value?.state === 'prepared'
+const canSend = computed(() => localPackageEnabled.value && !busy.value && pending.value?.state === 'prepared'
   && Boolean(preparedSnapshot.value) && singleSendConsent.value)
 
 function assertContext(context: Context): void {
@@ -75,6 +78,10 @@ function dispose(closePanel = false): void {
 }
 watch(consent, value => { if (!value) dispose() }, { flush: 'sync' })
 watch(ownerSessionGeneration, () => dispose(), { flush: 'sync' })
+watch(() => watchlist.authorityState, () => {
+  preview.value = null; localSnapshot.value = null; preparedSnapshot.value = null
+  singleSendConsent.value = false
+}, { flush: 'sync' })
 onBeforeUnmount(() => { mounted = false; dispose(true) })
 
 async function refreshView(context: Context): Promise<void> {
@@ -131,7 +138,7 @@ async function enable(): Promise<void> {
       targetFingerprint: transport.targetFingerprint,
       write(packet, signal) {
         assertContext(context)
-        if (!writeSnapshot) throw new Error('owner_sync_preview_required')
+        if (!localPackageEnabled.value || !writeSnapshot) throw new Error('owner_sync_preview_required')
         watchlist.assertOwnerSyncSnapshot(writeSnapshot)
         return transport.write(packet, signal)
       },
@@ -160,6 +167,11 @@ async function enable(): Promise<void> {
   } finally { if (context.epoch === epoch) busy.value = false }
 }
 async function pullAndPreview(context: Context): Promise<void> {
+  if (!localPackageEnabled.value) {
+    preview.value = null; localSnapshot.value = null; preparedSnapshot.value = null
+    message.value = '本机工作区暂不制包或发送。仍可手动核对已知原请求回执；本机备份请使用上方工作区面板。'
+    return
+  }
   await candidate!.pullBaseline()
   assertContext(context)
   const baseline: OwnerSyncBaseline | null = candidate!.getBaseline()
@@ -172,7 +184,7 @@ async function pullAndPreview(context: Context): Promise<void> {
   localSnapshot.value = snapshot; preview.value = next; preparedSnapshot.value = null
 }
 async function pull(): Promise<void> {
-  if (pending.value) return
+  if (pending.value || !localPackageEnabled.value) return
   await operate(pullAndPreview)
 }
 async function prepare(): Promise<void> {
@@ -246,6 +258,7 @@ function exportOriginal(): void {
 function exportLocal(): void {
   try {
     currentContext()
+    if (!localPackageEnabled.value) throw new Error('owner_workspace_export_required')
     const snapshot = watchlist.readOwnerSyncSnapshot()
     // Deliberately export only the complete watch-record field set, not Gist
     // configuration, Owner metadata, unrelated storage or arbitrary extra keys.
@@ -276,6 +289,7 @@ const checked = (event: Event) => (event.target as HTMLInputElement | null)?.che
       <p class="sync-boundary">不含手工资产。只核对当前本机完整自选和账户记录；不读取旧版 Gist，不把云端记录合并到本机。</p>
       <p class="sync-boundary">同步账本确认不等于持仓决策版本。这里不会清除本地待确认状态，也不会解除当前行动门禁。</p>
       <p class="sync-boundary">服务端须先完成兼容配置。本面板不自动迁移数据库，也不证明云端耐久或恢复能力。</p>
+      <p v-if="!localPackageEnabled" class="sync-notice" role="status">当前本机权威不能用于此处制包或发送，不会从旧版归档恢复上传。已知原请求仍可手动核对回执或导出；本机完整备份请使用“本机工作区”。</p>
       <p v-if="!authenticated" class="sync-notice" role="status">请先在上方登录私人会话。登录本身不授权同步。</p>
       <label class="sync-check"><input :checked="consent" type="checkbox" name="owner-sync-consent" :disabled="!authenticated" @change="consent = checked($event)" /><span>我同意仅在本轮打开私人同步，并在单独确认后发送已展示的自选及账户变更。</span></label>
       <button v-if="!enabled" type="button" class="sync-button sync-primary" :disabled="!authenticated || !consent || busy" @click="enable">启用本轮核对</button>
@@ -284,7 +298,7 @@ const checked = (event: Event) => (event.target as HTMLInputElement | null)?.che
         <p class="sync-state" role="status" aria-live="polite">{{ stateLabel }}</p>
         <p v-if="status?.lastCompletePulledRevision !== null && status?.lastCompletePulledRevision !== undefined" class="sync-meta">完整拉取截止账本序号 {{ status.lastCompletePulledRevision }}；不是持仓版本。</p>
         <div v-if="!pending" class="sync-actions">
-          <button type="button" class="sync-button" :disabled="busy" @click="pull">手动拉取并预览</button>
+          <button type="button" class="sync-button" :disabled="busy || !localPackageEnabled" @click="pull">手动拉取并预览</button>
           <button type="button" class="sync-button sync-primary" :disabled="!canPrepare" @click="prepare">准备这一批原包</button>
         </div>
         <div v-if="preview && !unresolved" class="sync-preview" aria-label="完整账户变更预览">
@@ -325,7 +339,7 @@ const checked = (event: Event) => (event.target as HTMLInputElement | null)?.che
           </template>
           <button type="button" class="sync-button" :disabled="busy" @click="exportOriginal">导出原包、哈希与状态</button>
         </div>
-        <button type="button" class="sync-button sync-export" :disabled="busy" @click="exportLocal">导出本机完整副本（含删除记录）</button>
+        <button type="button" class="sync-button sync-export" :disabled="busy || !localPackageEnabled" @click="exportLocal">导出本机完整副本（含删除记录）</button>
       </div>
     </div>
   </section>

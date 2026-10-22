@@ -31,6 +31,9 @@ const meta = reactive<Record<string, {
 }>>({})
 const est = reactive<Record<string, Estimate | null>>({})
 const loading = ref(true)
+const localReadError = ref(false)
+const localAuthorityKnown = ref(false)
+const localAuthorityReady = computed(() => ['legacy', 'idb'].includes(watch.authorityState) && !watch.localStorageError)
 const dim = ref<'account' | 'type'>('account')
 const manualAssets = ref<ManualAsset[]>(loadManualAssets())
 const manualShow = ref(false)
@@ -70,26 +73,30 @@ const positiveHoldings = computed(() => {
 
 async function refresh() {
   loading.value = true
-  await watch.load(true)
-  // V3-12: 使用 activeHoldings（复合键，支持跨账户同一基金多笔持仓）
-  const held = positiveHoldings.value
-  const codes = [...new Set(held.map((e) => e.code))]
-  fetchEstimates(codes).then((m) => m.forEach((v, k) => { est[k] = v }))
-  await Promise.all(codes.map(async (code) => {
-    try {
-      const d = await funds.detail(code)
-      meta[code] = {
-        nav: d.latest_nav,
-        type: d.type || '其他',
-        navMove: latestNavMove(d.nav_history),
-        navHistory: d.nav_history || [],
-      }
-    } catch { meta[code] = { nav: null, type: '其他', navMove: null, navHistory: [] } }
-  }))
-  if (portfolioReady.value && total.value.value != null && total.value.cost != null) {
-    snaps.value = takeDailySnapshot(total.value.value, total.value.cost, new Date(), snapshotHoldings.value)
-  }
-  loading.value = false
+  localReadError.value = false; localAuthorityKnown.value = false
+  try {
+    await watch.load(true)
+    if (disposed) return
+    if (!localAuthorityReady.value) throw new Error('local_authority_unavailable')
+    localAuthorityKnown.value = true
+    // V3-12: 使用 activeHoldings（复合键，支持跨账户同一基金多笔持仓）
+    const held = positiveHoldings.value
+    const codes = [...new Set(held.map((e) => e.code))]
+    void fetchEstimates(codes).then((m) => { if (!disposed && localAuthorityReady.value) m.forEach((v, k) => { est[k] = v }) }).catch(() => {})
+    await Promise.all(codes.map(async (code) => {
+      try {
+        const d = await funds.detail(code)
+        if (disposed || !localAuthorityReady.value) return
+        meta[code] = { nav: d.latest_nav, type: d.type || '其他', navMove: latestNavMove(d.nav_history), navHistory: d.nav_history || [] }
+      } catch { if (!disposed && localAuthorityReady.value) meta[code] = { nav: null, type: '其他', navMove: null, navHistory: [] } }
+    }))
+    if (!disposed && !localAuthorityReady.value) throw new Error('local_authority_unavailable')
+    if (!disposed && localAuthorityReady.value && portfolioReady.value && total.value.value != null && total.value.cost != null) {
+      snaps.value = takeDailySnapshot(total.value.value, total.value.cost, new Date(), snapshotHoldings.value)
+    }
+  } catch {
+    if (!disposed) { localReadError.value = true; localAuthorityKnown.value = false }
+  } finally { if (!disposed) loading.value = false }
 }
 
 // 单只持仓的派生指标
@@ -129,7 +136,7 @@ const costs = computed(() => costBasisCoverage(holdings.value.map((holding) => (
   name: holding.name,
   basis: holding.costBasis,
 }))))
-const portfolioReady = computed(() => holdingInput.value.complete && valuation.value.complete && costs.value.complete && total.value.value != null && total.value.cost != null)
+const portfolioReady = computed(() => localAuthorityReady.value && localAuthorityKnown.value && !localReadError.value && holdingInput.value.complete && valuation.value.complete && costs.value.complete && total.value.value != null && total.value.cost != null)
 const unpricedNames = computed(() => [...new Set(valuation.value.missing.map((holding) => holding.name))])
 const missingCostNames = computed(() => [...new Set(costs.value.missing.map((holding) => holding.name))])
 const todayCoverage = computed(() => {
@@ -461,6 +468,7 @@ onMounted(refresh)
         <div class="class-ref" v-if="!manualAssets.length">可把现金、股票、黄金等非基金资产手工纳入总览；金额 0 是有效输入。</div>
       </section>
       <van-loading v-if="loading" style="text-align:center;padding:40px" />
+      <section v-else-if="localReadError || !localAuthorityReady" class="coverage-warning" role="alert"><p>本机持仓权威无法安全读取，资产总览已暂停；未知记录不会按 0 或空组合处理。请到自选页核对本机工作区，未回退旧存储。</p><p v-if="holdings.length">保留 {{ holdings.length }} 条先前已知账户持仓，未当作本次完整组合展示。</p><p v-if="snaps.length">已保留 {{ snaps.length }} 个历史快照；本次没有生成新的组合快照。</p></section>
       <van-empty v-else-if="holdingInput.complete && holdings.length === 0 && manualAssets.length === 0"
         description="还没有持仓。去自选页给基金填上份额/成本/账户" />
       <template v-else>

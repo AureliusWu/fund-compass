@@ -22,6 +22,8 @@ const route = useRoute()
 const router = useRouter()
 const funds = useFundsStore()
 const watch = useWatchlistStore()
+const watchWriting = ref(false)
+const watchDisabled = computed(() => watchWriting.value || !['legacy', 'idb'].includes(watch.authorityState) || watch.localStorageError)
 const code = route.params.code as string
 
 const detail = ref<FundDetail | null>(null)
@@ -179,12 +181,15 @@ const showModelLine = computed(() =>
 )
 
 async function toggleWatch() {
+  if (watchDisabled.value) return
+  watchWriting.value = true
   try {
     await watch.toggle(code, detail.value?.name)
-    showToast(watch.has(code) ? '已加入自选' : '已移出自选')
+    if (!disposed) showToast(watch.has(code) ? '已加入自选' : '已移出自选')
   } catch (cause) {
+    if (disposed) return
     if (!(cause && typeof cause === 'object' && 'code' in cause && cause.code === 'requires-confirmation')) {
-      showToast('操作失败，本地记录未修改'); return
+      showToast('本机写入结果尚未核定；请在本机工作区核对，勿自动重试'); return
     }
     const records = watch.recordsFor(code)
     const expected = records.map(row => ({ id: row.id || entryId(row.code, row.account), snapshot: watch.entrySnapshot(row.id || entryId(row.code, row.account)) || '' }))
@@ -192,12 +197,12 @@ async function toggleWatch() {
       await showConfirmDialog({ title: '确认移出本地记录', message: `将移出该基金的 ${records.length} 条本地记录（含持仓/多账户）；不会发起交易。` })
       if (disposed) return
       await watch.remove(code, undefined, { confirmed: true, expected })
-      showToast('已移出本地记录')
+      if (!disposed) showToast('已移出本地记录')
     } catch (error) {
-      if (error && typeof error === 'object' && 'code' in error) showToast('记录已变化或保存失败，请重新确认')
+      if (!disposed && error && typeof error === 'object' && 'code' in error) showToast('记录已变化或保存失败，请重新确认')
       // Dialog cancellation preserves the exact local records.
     }
-  }
+  } finally { if (!disposed) watchWriting.value = false }
 }
 </script>
 
@@ -205,8 +210,7 @@ async function toggleWatch() {
   <div class="page">
     <van-nav-bar :title="detail?.name || '基金详情'" left-arrow @click-left="router.back()">
       <template #right>
-        <van-icon :name="watch.has(code) ? 'star' : 'star-o'"
-          :color="watch.has(code) ? '#C8A75B' : ''" size="20" @click="toggleWatch" />
+        <button type="button" class="watch-toggle" :disabled="watchDisabled" :aria-label="watch.has(code) ? '移出自选' : '加入自选'" @click="toggleWatch"><van-icon :name="watch.has(code) ? 'star' : 'star-o'" :color="watch.has(code) ? '#C8A75B' : ''" size="20" /></button>
       </template>
     </van-nav-bar>
     <van-pull-refresh v-model="refreshing" @refresh="refreshData">
@@ -423,6 +427,8 @@ async function toggleWatch() {
 </template>
 
 <style scoped>
+.watch-toggle { display: inline-grid; place-items: center; min-width: 40px; min-height: 40px; padding: 8px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--ink); cursor: pointer; }
+.watch-toggle:disabled { opacity: .45; cursor: not-allowed; }.watch-toggle:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
 .sec { font-size: 13px; color: var(--text-muted); margin: 18px 4px 8px; }
 .card { background: var(--card-bg); border-radius: var(--radius-lg); padding: 12px; border: 1px solid var(--border); box-shadow: var(--shadow-sm); }
 .est { margin: 0 0 4px; }

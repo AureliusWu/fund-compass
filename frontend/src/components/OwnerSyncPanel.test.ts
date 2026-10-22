@@ -133,8 +133,8 @@ async function slot() {
   const handle = await actual.openOwnerSyncOutbox(globalThis.indexedDB, TARGET)
   try { return await handle.read() } finally { handle.close() }
 }
-function editLocal() { watchlist.setHolding('000001', 7, null, '本机已编辑', '支付宝', 0) }
-beforeEach(() => {
+async function editLocal() { await watchlist.setHolding('000001', 7, null, '本机已编辑', '支付宝', 0) }
+beforeEach(async () => {
   storage.clear(); blobs.length = 0
   storage.set('sinan_watchlist_v2', JSON.stringify([
     { code: '000001', account: '支付宝', id: '000001::支付宝', name: '本机零份', position_kind: 'holding', shares: 0, cost: null, target_weight: 0, deleted: false, local_pending: true, updated_at: '2026-10-01T00:00:00Z' },
@@ -162,6 +162,7 @@ beforeEach(() => {
   mocks.receipt.mockResolvedValue({ status: 404, rawBody: '{"state":"unknown","error":"sync_result_unknown"}' })
   mocks.factory.mockResolvedValue({ targetFingerprint: TARGET, changes: mocks.changes, write: mocks.write, receipt: mocks.receipt })
   setActivePinia(createPinia()); watchlist = useWatchlistStore(); stores.push(watchlist)
+  await watchlist.initialize()
 })
 afterEach(() => {
   apps.splice(0).forEach(unmount => unmount())
@@ -171,6 +172,30 @@ afterEach(() => {
 })
 
 describe('real Owner sync panel journey', () => {
+  it('does not prepare or send archived legacy rows when the current authority is IDB', async () => {
+    const root = await prepared()
+    watchlist.authorityState = 'idb'; await nextTick()
+    expect(button(root, '单次发送原包').props.disabled).toBe(true)
+    expect(output(root)).toContain('不会从旧版归档恢复上传')
+    expect(button(root, '导出本机完整副本（含删除记录）').props.disabled).toBe(true)
+    expect(mocks.write).not.toHaveBeenCalled()
+    expect((await slot()).entry?.state).toBe('prepared')
+  })
+
+  it('retains manual original unknown receipt reconciliation in IDB authority without preparing or resending', async () => {
+    const root = await prepared()
+    mocks.write.mockRejectedValueOnce(new Error('synthetic connection lost'))
+    await check(root, 'owner-sync-single-send'); await click(root, '单次发送原包')
+    const original = (await slot()).entry!
+    expect(original.state).toBe('unknown')
+    watchlist.authorityState = 'idb'; await nextTick()
+    await click(root, '核对原请求回执')
+    expect(mocks.receipt).toHaveBeenCalledTimes(1)
+    expect(mocks.write).toHaveBeenCalledTimes(1)
+    expect((await slot()).entry).toMatchObject({ rawBody: original.rawBody, requestHash: original.requestHash })
+    expect(output(root)).toContain('结果未知')
+  })
+
   it('is discoverable in the real Watchlist page and stays dormant on mount/open/login without round consent', async () => {
     const root = await mount(true)
     expect(output(root)).toContain('私人自选同步')
@@ -208,7 +233,7 @@ describe('real Owner sync panel journey', () => {
 
   it('rejects stale prepared local input before POST and can explicitly cancel unsent to preview current edits', async () => {
     const root = await prepared(), before = (await slot()).entry!
-    editLocal(); await check(root, 'owner-sync-single-send'); await click(root, '单次发送原包')
+    await editLocal(); await check(root, 'owner-sync-single-send'); await click(root, '单次发送原包')
     expect(mocks.write).not.toHaveBeenCalled()
     expect((await slot()).entry).toEqual(before)
     await check(root, 'owner-sync-cancel-unsent'); await click(root, '取消尚未发送的提交并重新预览')
@@ -225,7 +250,7 @@ describe('real Owner sync panel journey', () => {
     const original = (await slot()).entry!
     expect(original.state).toBe('unknown')
     expect(buttons(root).some(item => /发送原包|取消尚未发送|结束已决|手动拉取|准备这一批/.test(output(item)))).toBe(false)
-    editLocal()
+    await editLocal()
     await click(root, '核对原请求回执')
     expect(mocks.receipt).toHaveBeenCalledTimes(1); expect(mocks.write).toHaveBeenCalledTimes(1)
     expect((await slot()).entry).toEqual(original)
@@ -379,7 +404,7 @@ describe('real Owner sync panel journey', () => {
     await click(root, '查看私人同步'); await check(root, 'owner-sync-consent'); await click(root, '启用本轮核对')
     expect(button(root, '单次发送原包').props.disabled).toBe(true)
     expect(output(root)).toContain('本轮没有原包对应的本机预览')
-    editLocal()
+    await editLocal()
     await check(root, 'owner-sync-cancel-unsent'); await click(root, '取消尚未发送的提交并重新预览')
     expect((await slot()).entry).toBeNull()
     expect(output(root)).toContain('本机已编辑')

@@ -1,4 +1,5 @@
 import type { WatchEntry } from './gist'
+type HoldingBusinessEntry = Omit<WatchEntry, 'updated_at'>
 
 /** Fund-only positions. Cash/manual assets are deliberately not an input. */
 export interface AggregatedFundHolding {
@@ -40,10 +41,10 @@ function finiteSum(values: number[]): number | null {
  * positions. Legacy absent fields remain unknown and are never filled with 0.
  * Consumers must reject `complete=false` before deriving portfolio weights.
  */
-export function aggregateFundHoldings(entries: readonly WatchEntry[]): FundHoldingAggregation {
+export function aggregateFundHoldings(entries: readonly HoldingBusinessEntry[]): FundHoldingAggregation {
   const errors = new Set<string>()
   const identities = new Set<string>()
-  const groups = new Map<string, WatchEntry[]>()
+  const groups = new Map<string, HoldingBusinessEntry[]>()
   for (const entry of entries) {
     if (entry.deleted === true) continue
     if (entry.deleted != null && typeof entry.deleted !== 'boolean') errors.add('invalid_deleted_flag')

@@ -100,7 +100,8 @@ export const ownerSyncOutboxStorage = Object.freeze({
 
 export function isOwnerSyncOutboxDatabase(db: IDBDatabase): boolean {
   const stores = db.version === 1 ? [STORE] : db.version === 2
-    ? [STORE, 'working_copy', 'import_receipts'] : []
+    ? [STORE, 'working_copy', 'import_receipts'] : db.version === 3
+      ? [STORE, 'working_copy', 'import_receipts', 'local_metadata'] : []
   return stores.length > 0 && db.objectStoreNames.length === stores.length
     && stores.every(name => db.objectStoreNames.contains(name))
 }
@@ -201,6 +202,10 @@ function makeHandle(db: IDBDatabase, target: string): OwnerSyncOutbox {
           if (row.version !== write.expected) fail('outbox_conflict')
           if (!sameRow(row, write.baseline)) fail('outbox_invalid_database')
           if (row.version === Number.MAX_SAFE_INTEGER) fail('outbox_version_exhausted')
+          // Physical v3 establishes a local-authority boundary. Preparing a
+          // packet from unrelated legacy LS must not race an adopted ledger.
+          // Existing packets retain their exact transition/receipt workflow.
+          if (db.version === 3 && row.entry === null && write.next !== null) fail('outbox_invalid_transition')
           transition(row.entry, write.next)
           const next = Object.freeze({ version: row.version + 1, entry: write.next, resourceFingerprint: target })
           const put = store.put(next, KEY)

@@ -1059,3 +1059,42 @@ Miniflare的外部Undici限定父版本override至7.30.1；正式lock、隐藏lo
 根沿原已审查正常插件双分片方案、原300秒绝对预算实跑当前后端：**3166=1583+1583全部通过**，validation234960ms/total235405ms；完整collection、互斥并集、setup/call/teardown和JUnit逐项核对，source pins与默认DB metadata前后一致，两fallback均未创建。保留3个warning（两分片Starlette弃用与既有confidence=inf负例序列化），不改成零告警。证据`fc-backend-two-shard-run-20261022-4f65a2b57563487c8f2f5ce1bb79a9d8/summary.json` SHA=`c3755888a8ff2eab066e05bb3d268d8b602a387ff2ae1fd289275c7106380203`；不是Windows串行或云业务持久化证明。
 
 上述是依赖安全局部修复与发布入口防误放行，不是完整v9。应用保持8.0.0；未push main、改云schema/Secret/套餐、重启服务或删Gist。I18迁移/凭据/耐久/独立恢复、完整I19业务闭环、自然任务与真实设备/性能出口继续未完成，不以本地测试或registry0替代正式发布资格。
+
+### 52c3013 的自然 CI 终态（2026-10-22）
+
+前述依赖补丁正常提交/推送为 `52c30139737841a55d069f0ccc4ed3b480b25417`，tree=`7ef690f776fb9974600e151e24cdcc372fe250cc`。[CI 39718529158](https://github.com/AureliusWu/fund-compass/actions/runs/39718529158) attempt1 completed/success，`2026-10-22T03:47:00Z` 更新。此前同身份正常读取的日志已核实际 checkout merge=`7e241c480daee74e28e435e192fcdbe8625ec57d`，parents=f8d519a+52c3013，tree 与源一致；backend **3166 passed/2 warnings/105.93s**（Python3.12.15/pip clean）、frontend **1205/58文件**/type/build7.70s/PWA7/7（Node20.20.2/npm10.8.2）、Worker **148/4文件**/check/dry-run114.28KiB/gzip26.58（Node22.23.3/npm10.9.9）。两端独立官方 audit0。原日志通过工具输出读取，未保存独立 seal 原件；一次 EOF、gh 缓存 zip 竞争和直接日志 GET EOF 保留为取证失败，不改称网络始终无错。本轮只读 metadata 再核四 job 成功、两端 install/audit 步骤成功及三发布 job skipped/steps=[]，不以 headSha 替代 tested merge。ls-remote 仍 feature=52c3013/main=f8d519a。没有部署、main 推送、PR403旁路或 Gist 删除。
+
+### I19 真实本机权威编辑、备份复导与异常恢复切片（2026-10-22）
+
+这次不再停留在候选存储 helper：真实自选页挂载本机工作区，实际 HoldingEditor、自选添加/删除、选基与详情关注均等待异步 writer 成功后再提示或关闭。固定 `owner-authority-1` 定位先于 LS/Gist 加载；本轮下载、重新选择同一完整 SHA 文件、全账户及删除项预览、明确确认后才显式启用。`adoptLocal` 自行解码两槽原文并校验备份 SHA，配合实际 source/memory/generation 守卫，不只信 UI seed。物理 v3 与原 outbox 共库，保留已有 slot/working/receipt，strict 事务核完整前像并一起更新业务、时间、最近本机回执和空槽 epoch；v3 新版存储路径禁止新 null→prepared，既有原包核回执/结束仍保留。后续云制包须另做同工作区原子设计，不能撤守卫换通过。
+
+指针与工作区是两库提交，不声称跨库原子。active 按 locator 原 target existingOnly 打开；丢库/坏结构/端点变化不建新库、不回退归档。activating 只凭原文件/ID/target/adoption 核已保存结果，包含指针已 committed 但响应 unknown 的分支；不二次 adopt。真正关闭的 workspace handle 在手工核对时 existingOnly 重开，核原 adoption 与最近同版本 id/hash，只查询不重放；同 store 在途写互斥，不允许第二次写覆盖原标识。最近回执被后续写覆盖则 unknown，原标识仅本轮内存，刷新只读当前完整 active 状态，不冒称核定刷新前未知请求。seen hint 不是权威/数据库认证，不能证明全部站点数据清除后的身份。可选 BroadcastChannel 构造被拒不阻断 store，实际每操作仍核定位；迟到 Gist 响应在应用/本地 ack 前重核持久 authority，即使未送提示事件也拒绝，但不能撤回已经发出的远端 PATCH/helper 旧元数据。
+
+备份只覆盖自选/账户持仓、实际 0/null、tombstone、pending 历史 flags、原时间或 null、两槽原文及复导档案；手工资产/组合历史未纳入，不是全应用备份。内部摘要覆盖全部业务/时间/档案，外部摘要绑定原始完整 UTF-8；不认证来源、不通用脱敏，原文可能包含任意私人内容，不公开上传。不读凭据键、认证元数据或 outbox，不等于保证档案任意字节无秘密。新封闭格式总上限24 MiB、最多8个复导档案，单 raw/entries 仍受原2 MiB限制；超限整批拒绝，不丢旧档案。相同 key 的业务或时间任一差异均 conflict；空/重复 no-op，不覆盖或复活。显式重新关注只能创建全金融字段 null 的 watch，不恢复旧 holding。IDB 整体始终云端未确认，保留的历史 pending=false 不释放 Home/Watch/Detail 行动门禁。
+
+交叉审查修复了三个直接路由回归：Backtest 现在显式初始化，不再永远空快捷列表；Assets/Lookthrough 消费 load 拒绝并结束加载，未知不画作0或空组合。响应式当前权威还进入资产完整性/最终快照及穿透迟到结果检查，等待 detail/compute 时变 blocked 不产生新快照或新正常结果，保留已有 refs 并显示暂停。所有写失败 UI/通用错误不再保证“原记录未修改”，改为结果未核定/勿自动重试。沿用青绿/旧金/账本视觉，不新增主导航、外部字体或依赖。
+
+根独立 compiled-SFC + 真 Pinia/store/codec/locator/fake-IDB 四条 journey 覆盖实际面板下载 Blob→真实 File 复选→启用、真实表单0份/0成本/null权重→dispose/reload仍用 IDB、旧备份与 tombstone 冲突且直接 store 同样拒绝、缺 active workspace 不重建、捕获编辑后下载再复导至全新合成 factory/空LS及重复幂等。适配 host renderer/download、合成本地端点指纹及 Vant 确认；无 business writer mock，fetch 全禁。它不是 Chrome DOM/真实磁盘保存/设备重启/旧 PWA/云端耐久或多设备证明，也不从这四条推导 unknown 已验收。另有真实关闭 handle/已提交指针丢响应、跨 store 陈旧前像、quota/abort/档案容量及 v2 保留、原包与生命周期回归。
+
+保留诊断失败：初次整体1283项中2项旧 InputPrivacy 点击测试仍点 icon（非可访问按钮），修选择器后原隐私/0值断言保留；后续1323项中5项仍断言旧 storage 文案，改相应文案断言而保留全部数据不变检查。最终原生 JSON **1325 passed/65文件/0失败/0pending**，report跨度5194.917ms，正常 npm 命令7.039s exit0；`fc-i19-frontend-final4-20261022-96bc2e10.json` SHA=`7d2f0b79484825661a5b596a11ccaa09887a71af86b03903e8f2bc5c73fa7989`。生成组件声明后完整 type-check 再次 exit0。不是后端或生产验证的替代；本次未改 backend/worker/依赖。
+
+#### 同机冻结源构建对照（不是浏览器性能验收）
+
+基线为正常 `git archive 52c3013 frontend` 到唯一 Temp，未建 managed worktree/改现 checkout；正常 tar 解包并仅以 junction 共用当前相同依赖图。manifest/lock 的归档 LF 与工作文件 CRLF raw SHA 差异如实保留，normalized-LF SHA 与 JSON semantic SHA 同时一致才允许共享，不改源码换相同。首轮成功诊断构建触发生成的 components.d.ts：基线 CRLF→LF、当前多一个 OwnerWorkspacePanel 声明，初始 source pin 拒绝测量；一次错误 EOL 假设也拒绝，均保留原失败及原冻结文件，没有放宽任意源码漂移。逐字验证仅这两项生成变化后新冻结，再做下面六次独立直接 `npm run build`（无自建 npm launcher/supervisor、timeout/kill）。原3次诊断8.50/6.43/6.61s不混作新冻结样本，也不隐去。
+
+顺序 A/B/B/A/A/B，A=52c3013归档、B=当前；每侧3样本、每次exit0/PWA7/7，source前后固定，各侧全部 JS/CSS/HTML 字节和摘要3次一致，无map。Vite内部 A=6.71/6.56/6.53s，B=6.90/6.71/6.54s；直接单次完结命令的工具观察全程（含PWA/进程开销）A=10.7318403/10.4912049/10.2827603s，B=10.6571363/10.7210168/10.3259439s。不是用户页面延迟；两源码位于不同本机目录，文本checkout EOL及宿主缓存/背景负载并非完全控制，小样本仅方向性。
+
+| 指标/方法 | 基线 | 当前 | 变化 | 预算与结论 |
+| --- | ---: | ---: | ---: | --- |
+| Vite内部秒，median / worst，n=3/侧 | 6.56 / 6.71 | 6.71 / 6.90 | median +2.29% | 20%线内；仅构建指标 |
+| 工具观察整条build秒，median / worst | 10.491 / 10.732 | 10.657 / 10.721 | median +1.58% | 20%线内；非浏览器 |
+| 全JS+CSS产物raw字节，含SW/registrar、不含data/map | 1,401,273 | 1,489,486 | +6.30% | 20%线内 |
+| 同产物gzip9字节（非实际传输） | 498,292 | 524,433 | +5.25% | 20%线内 |
+| 自选页自身JS gzip9（非完整路由依赖闭包） | 20,277 | 25,865 | +27.56% | **局部20%回退线 FAIL** |
+| 自选页自身JS+CSS gzip9 | 24,688 | 30,971 | +25.45% | **局部回退，不能报全绿** |
+
+主要增长来源：自选页新增完整工作区 UI/预览；共享 watchlist/固定定位校验进入主 chunk；新增工作区事务与备份 codec 动态块。ECharts仍532397B，低于600kB告警线；ownerSession已有静态消费，新增动态 import不能另拆chunk，Vite提示保留。最小后续优化方向为把展开后的重UI/codec继续按操作懒加载、精简共享定位依赖但保留每操作持久校验、再以实际浏览器冷热及操作五样本核完整路由/请求/主线程。不能用全产物+5.25%掩盖局部回退，也不能靠移除校验换性能成功，I21继续开放。
+
+纯统计 helper 不启动子进程/联网/安装/构建，只有 setup 校验与本地junction、冻结、产物统计及新文件机械报告。它核HTML本地链接、manifest icons、每个precache URL/非null MD5和Workbox引用，非全部JS动态导入AST闭包；三次各侧PWA制品独立7/7。证据目录 `fc-i19-build-perf-20261022-7ef0beba85ad4cf8be4069df8e3165a8`；helper SHA=`bf844ac9278b6c691001b192a1edffe133843b1a0b15adf4afc5672648291c18`，机械 artifact-summary=`96c79bcf1412a0f539de9da551cf3617584345fbd60fff53c0e983e5e7c5e2f4`，其中六份样本根另重哈希无漂移；冻结当前frontend输入 pin=`ab9ef10420c15e18ac548af1c7c85e6b53b52bbcdaf6233cdf905250992d7408`。原build stdout/时长在工具结果，未手工伪造为原始落盘日志。
+
+以上推进 I19-01/03 局部真实接线，不关闭整个 I18/I19/I21：未做真实云 repair/migration/credential rotation/Owner事务、Holding/Policy/Decision新链、手工资产/历史同步、机器消费者迁移、真实浏览器旧PWA/跨设备、重启读回/独立远端恢复或正式发布。Wrangler内嵌安全阻断仍在。应用保持8.0.0，未推main、改云配置/套餐/秘密、重启或删除Gist；完整v9目标继续。

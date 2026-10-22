@@ -2,7 +2,9 @@ import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createRenderer, defineComponent, h, nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
+import { IDBFactory } from 'fake-indexeddb'
 import { useWatchlistStore } from '@/stores/watchlist'
+import { getFunds, type FundListItem } from '@/api/client'
 import * as gist from '@/utils/gist'
 import { setLegacySyncConsent } from '@/utils/cloud-consent'
 import WatchlistPage from './WatchlistPage.vue'
@@ -89,7 +91,7 @@ const renderer = createRenderer<Node, Node>({
 })
 const output = (item: Node): string => (item.tag === '#comment' ? '' : item.text) + item.children.map(output).join(' ')
 const all = (item: Node): Node[] => [item, ...item.children.flatMap(all)]
-async function settle() { for (let index = 0; index < 30; index++) await Promise.resolve(); await nextTick() }
+async function settle() { for (let index = 0; index < 5; index++) { await new Promise<void>(done => setImmediate(done)); await nextTick() } }
 const storage = new Map<string, string>(), mounted: Array<() => void> = [], stores: ReturnType<typeof useWatchlistStore>[] = []
 let watch: ReturnType<typeof useWatchlistStore>
 async function mount() {
@@ -111,17 +113,50 @@ function snapshot(code: string) {
     evidence: { evidence_id: 'evi_' + code, fund_code: code, stale_fields: [], missing_fields: [], estimate_status: 'fresh', source_states: [] }, holding: { holding_version: 'hold_1' }, policy: { policy_version: 'policy_1' }, diff: {},
   }
 }
-beforeEach(() => {
+beforeEach(async () => {
   storage.clear()
   storage.set('sinan_watchlist_v2', JSON.stringify(['000001', '000002'].map(code => ({ code, id: code + '::', updated_at: '2026-10-01T00:00:00Z' }))))
   vi.stubGlobal('localStorage', { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => { storage.set(key, value) }, removeItem: (key: string) => storage.delete(key) })
+  vi.stubGlobal('indexedDB', new IDBFactory())
   setActivePinia(createPinia()); watch = useWatchlistStore(); stores.push(watch)
+  await watch.initialize()
   mocks.confirm.mockReset().mockResolvedValue(undefined); mocks.toast.mockReset()
+  vi.mocked(getFunds).mockReset()
   mocks.decision.mockReset().mockImplementation(async (code: string) => snapshot(code)); mocks.diff.mockReset().mockResolvedValue({ previous_decision_id: null, current_decision_id: 'dec_000001', current_action: 'buy', changed: false, unchanged: [], drivers: [] })
 })
 afterEach(() => { mounted.splice(0).forEach(unmount => unmount()); stores.splice(0).forEach(item => item.$dispose()); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('real Watchlist holding journey', () => {
+  it('does not remove presentation rows or report success before the async removal commits', async () => {
+    let reject!: (cause: Error) => void
+    vi.spyOn(watch, 'remove').mockImplementationOnce(() => new Promise<void>((_done, fail) => { reject = fail }))
+    const root = await mount()
+    await click(all(root).find(item => item.tag === 'button' && output(item).includes('移除'))!)
+    expect(watch.items.map(row => row.code)).toContain('000001')
+    expect(mocks.toast).not.toHaveBeenCalled()
+    reject(new Error('synthetic deletion failed')); await settle()
+    expect(watch.items.map(row => row.code)).toContain('000001')
+    expect(mocks.toast).toHaveBeenCalledWith('本机写入结果尚未核定；请在本机工作区核对，勿自动重试')
+    expect(mocks.toast).not.toHaveBeenCalledWith('已移除')
+  })
+
+  it('waits for add commit and keeps an async rejection distinct from added success', async () => {
+    const fund = { code: '000003', name: '新合成基金', type: '混合型' } as FundListItem
+    vi.mocked(getFunds).mockResolvedValue({ items: [fund], total: 1, page: 1, page_size: 20 })
+    let reject!: (cause: Error) => void
+    vi.spyOn(watch, 'add').mockImplementationOnce(() => new Promise<void>((_done, fail) => { reject = fail }))
+    const root = await mount()
+    await click(all(root).find(item => item.props['aria-label'] === '添加基金')!)
+    ;(all(root).find(item => item.tag === 'field')!.props.onInput as (value: string) => void)('新合成'); await settle()
+    await vi.waitFor(() => expect(all(root).some(item => item.props.title === '新合成基金')).toBe(true))
+    await click(all(root).find(item => item.props.title === '新合成基金')!)
+    expect(watch.has('000003')).toBe(false); expect(mocks.toast).not.toHaveBeenCalled()
+    reject(new Error('synthetic addition failed')); await settle()
+    expect(watch.has('000003')).toBe(false)
+    expect(mocks.toast).toHaveBeenCalledWith('本机写入结果尚未核定；请在本机工作区核对，勿自动重试')
+    expect(mocks.toast).not.toHaveBeenCalledWith('已添加')
+  })
+
   it('a real form save immediately gates old strong actions for the whole portfolio and persists on refresh', async () => {
     const root = await mount()
     expect(strongActions(root).some(text => text.includes('买入'))).toBe(true)
@@ -140,8 +175,8 @@ describe('real Watchlist holding journey', () => {
   })
 
   it('canceling the all-account delete confirmation leaves holdings unchanged', async () => {
-    watch.setHolding('000001', 100, 1, undefined, '支付宝')
-    watch.setHolding('000001', 0, null, undefined, '券商')
+    await watch.setHolding('000001', 100, 1, undefined, '支付宝')
+    await watch.setHolding('000001', 0, null, undefined, '券商')
     const before = storage.get('sinan_watchlist_v2'), root = await mount()
     mocks.confirm.mockRejectedValueOnce('cancel')
     await click(all(root).find(item => item.tag === 'button' && output(item).includes('移除'))!)

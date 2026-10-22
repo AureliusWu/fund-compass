@@ -14,6 +14,10 @@ import { exportRankCSV } from '@/utils/export'
 const router = useRouter()
 const route = useRoute()
 const watch = useWatchlistStore()
+const watchWriting = ref(false)
+const watchDisabled = computed(() => watchWriting.value || !['legacy', 'idb'].includes(watch.authorityState) || watch.localStorageError)
+let pageMounted = true
+onBeforeUnmount(() => { pageMounted = false })
 const mode = ref<'rank' | 'basic' | 'manager' | 'nl'>('rank') // 默认排行（自带数据、不依赖后端）
 const q = ref('')
 const type = ref('')
@@ -263,10 +267,13 @@ function pick(t: string) {
   if (mode.value === 'basic') resetBasic()
 }
 async function toggleWatch(code: string, name: string) {
+  if (watchDisabled.value) return
+  watchWriting.value = true
   try {
     await watch.toggle(code, name)
-    showToast(watch.has(code) ? '已加入自选' : '已移出自选')
-  } catch { showToast('操作失败') }
+    if (pageMounted) showToast(watch.has(code) ? '已加入自选' : '已移出自选')
+  } catch { if (pageMounted) showToast('本机写入结果尚未核定；请在本机工作区核对，勿自动重试') }
+  finally { if (pageMounted) watchWriting.value = false }
 }
 
 onMounted(() => {
@@ -326,8 +333,7 @@ onMounted(() => {
               </div>
             </template>
             <template #right-icon>
-              <van-icon :name="watch.has(f.c) ? 'star' : 'star-o'" :color="watch.has(f.c) ? '#C8A75B' : '#A8B2A8'"
-                size="20" style="margin-left:8px" @click.stop="toggleWatch(f.c, f.n)" />
+              <button type="button" class="watch-toggle" :disabled="watchDisabled" :aria-label="(watch.has(f.c) ? '移出自选 ' : '加入自选 ') + f.c" @click.stop="toggleWatch(f.c, f.n)"><van-icon :name="watch.has(f.c) ? 'star' : 'star-o'" :color="watch.has(f.c) ? '#C8A75B' : '#A8B2A8'" size="20" /></button>
             </template>
           </van-cell>
         </template>
@@ -400,8 +406,7 @@ onMounted(() => {
                 </div>
               </template>
               <template #right-icon>
-                <van-icon :name="watch.has(f.c) ? 'star' : 'star-o'" :color="watch.has(f.c) ? '#C8A75B' : '#A8B2A8'"
-                  size="20" style="margin-left:8px" @click.stop="toggleWatch(f.c, f.n)" />
+                <button type="button" class="watch-toggle" :disabled="watchDisabled" :aria-label="(watch.has(f.c) ? '移出自选 ' : '加入自选 ') + f.c" @click.stop="toggleWatch(f.c, f.n)"><van-icon :name="watch.has(f.c) ? 'star' : 'star-o'" :color="watch.has(f.c) ? '#C8A75B' : '#A8B2A8'" size="20" /></button>
               </template>
             </van-cell>
           </template>
@@ -418,8 +423,7 @@ onMounted(() => {
         <van-cell v-for="it in items" :key="it.code" :title="it.name" :label="it.code + ' · ' + it.type"
           @click="router.push('/fund/' + it.code)">
           <template #right-icon>
-            <van-icon :name="watch.has(it.code) ? 'star' : 'star-o'" :color="watch.has(it.code) ? '#C8A75B' : '#A8B2A8'"
-              size="20" @click.stop="toggleWatch(it.code, it.name)" />
+            <button type="button" class="watch-toggle" :disabled="watchDisabled" :aria-label="(watch.has(it.code) ? '移出自选 ' : '加入自选 ') + it.code" @click.stop="toggleWatch(it.code, it.name)"><van-icon :name="watch.has(it.code) ? 'star' : 'star-o'" :color="watch.has(it.code) ? '#C8A75B' : '#A8B2A8'" size="20" /></button>
           </template>
         </van-cell>
       </van-list>
@@ -428,6 +432,8 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.watch-toggle { display: inline-grid; place-items: center; padding: 8px; margin-left: 4px; min-width: 40px; min-height: 40px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--ink); cursor: pointer; }
+.watch-toggle:disabled { opacity: .45; cursor: not-allowed; }.watch-toggle:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
 .modebar { display: flex; background: var(--card-bg); padding: 8px 16px 0; gap: 18px; }
 .modebar span { font-size: 14px; color: var(--text-muted); padding-bottom: 8px; border-bottom: 2px solid transparent; }
 .modebar span.on { color: var(--teal); font-weight: 600; border-bottom-color: var(--teal); }

@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('vue-router', () => ({ useRoute: () => ({ params: { code: '000001' } }), useRouter: () => ({ push: vi.fn(), back: vi.fn() }) }))
 vi.mock('vant', () => ({ showToast: mocks.toast, showConfirmDialog: mocks.confirm }))
 vi.mock('@/stores/watchlist', () => ({ useWatchlistStore: () => ({
+  authorityState: 'legacy', localStorageError: false,
   get activeHoldings() { return mocks.entries }, hasToken: true, load: mocks.load,
   hasLocalChanges: () => false,
   has: () => mocks.entries.length > 0, toggle: mocks.toggle, remove: mocks.remove,
@@ -124,7 +125,9 @@ describe('real Detail local-input privacy', () => {
     mocks.toggle.mockRejectedValue({ code: 'requires-confirmation' })
     mocks.confirm.mockRejectedValue('cancel')
     const root = await mount(FundDetailPage)
-    click(all(root).find(item => item.tag === 'test-icon' && item.props.name === 'star')!); await settle()
+    const remove = all(root).find(item => item.tag === 'button' && item.props['aria-label'] === '移出自选')!
+    expect(remove.props.disabled).toBe(false)
+    click(remove); await settle()
     expect(mocks.confirm).toHaveBeenCalledOnce()
     expect(mocks.remove).not.toHaveBeenCalled()
     expect(mocks.entries[0].shares).toBe(0)
@@ -134,7 +137,9 @@ describe('real Detail local-input privacy', () => {
     mocks.entries = [entry('A', 50), entry('B', 50)]
     mocks.toggle.mockRejectedValue({ code: 'requires-confirmation' })
     const root = await mount(FundDetailPage)
-    click(all(root).find(item => item.tag === 'test-icon' && item.props.name === 'star')!); await settle()
+    const remove = all(root).find(item => item.tag === 'button' && item.props['aria-label'] === '移出自选')!
+    expect(remove.props.disabled).toBe(false)
+    click(remove); await settle()
     expect(mocks.remove).toHaveBeenCalledWith('000001', undefined, { confirmed: true, expected: mocks.entries.map(row => ({ id: row.id, snapshot: JSON.stringify(row) })) })
   })
 })

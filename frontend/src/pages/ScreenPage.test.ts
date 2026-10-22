@@ -4,10 +4,16 @@ import ScreenPage from './ScreenPage.vue'
 import { loadScreener } from '@/utils/screener'
 import { parseQuery } from '@/utils/nlselect'
 import { loadManagerDataset, type ManagerDataset } from '@/utils/managers'
+import { useWatchlistStore } from '@/stores/watchlist'
+import { showToast } from 'vant'
 
 vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }), useRouter: () => ({ push: vi.fn() }) }))
 vi.mock('vant', () => ({ showToast: vi.fn() }))
-vi.mock('@/stores/watchlist', () => ({ useWatchlistStore: () => ({ load: async () => {}, has: () => false, toggle: vi.fn() }) }))
+vi.mock('@/stores/watchlist', async () => {
+  const { reactive } = await import('vue')
+  const store = reactive({ authorityState: 'legacy', localStorageError: false, load: async () => {}, has: () => false, toggle: vi.fn() })
+  return { useWatchlistStore: () => store }
+})
 vi.mock('@/api/client', () => ({ getFunds: vi.fn() }))
 vi.mock('@/utils/managers', async original => ({ ...await original<typeof import('@/utils/managers')>(), loadManagerDataset: vi.fn() }))
 vi.mock('@/utils/export', () => ({ exportRankCSV: vi.fn() }))
@@ -56,7 +62,7 @@ async function mount(modeLabel = 'AI 选基') {
   for (const name of ['nav-bar', 'search', 'button', 'loading', 'cell', 'icon', 'empty', 'list', 'cell-group']) {
     app.component(`van-${name}`, defineComponent({
       props: ['description', 'title', 'label'],
-      setup(props, { attrs, slots }) { return () => h(`test-${name}`, attrs, [props.description, props.title, props.label, slots.default?.()]) },
+      setup(props, { attrs, slots }) { return () => h(`test-${name}`, attrs, [props.description, props.title, props.label, slots.default?.(), slots['right-icon']?.()]) },
     }))
   }
   app.mount(root); mounted.push(() => app.unmount())
@@ -77,6 +83,8 @@ async function click(root: Node, label: string) {
   ;(button.props.onClick as () => void)(); await settle()
 }
 beforeEach(() => {
+  const store = useWatchlistStore(); store.authorityState = 'legacy'; store.localStorageError = false
+  vi.mocked(store.toggle).mockReset().mockResolvedValue(undefined); vi.mocked(showToast).mockClear()
   vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-01T13:00:00Z'))
   vi.stubGlobal('Document', class SyntheticDocument {})
   vi.stubGlobal('ShadowRoot', class SyntheticShadowRoot {})
@@ -124,6 +132,42 @@ describe('real Screen manager SFC collection provenance', () => {
     expect(signal?.aborted).toBe(true)
     finish(managerDataset()); await settle()
     expect(text(root)).not.toContain('采集日 2026-09-24')
+  })
+})
+
+describe('real Screen local writer waiting', () => {
+  it('waits for a writer success and prevents repeated edits during the same write', async () => {
+    const store = useWatchlistStore()
+    let resolve!: () => void
+    vi.mocked(store.toggle).mockImplementationOnce(() => new Promise<void>(done => { resolve = done }))
+    const root = await mount('排行筛选')
+    const button = find(root, item => item.props['aria-label'] === '加入自选 000001')!
+    expect(button).toBeDefined(); expect(button.props.disabled).toBe(false)
+    const click = button.props.onClick as (event: object) => unknown
+    click({ stopPropagation() {} }); await settle()
+    expect(button.props.disabled).toBe(true); expect(showToast).not.toHaveBeenCalled()
+    click({ stopPropagation() {} }); expect(store.toggle).toHaveBeenCalledTimes(1)
+    resolve(); await settle(); expect(showToast).toHaveBeenCalledTimes(1)
+  })
+
+  it('suppresses a late success toast after leaving the screen', async () => {
+    const store = useWatchlistStore()
+    let resolve!: () => void
+    vi.mocked(store.toggle).mockImplementationOnce(() => new Promise<void>(done => { resolve = done }))
+    const root = await mount('排行筛选')
+    const button = find(root, item => item.props['aria-label'] === '加入自选 000001')!
+    ;(button.props.onClick as (event: object) => unknown)({ stopPropagation() {} }); await settle()
+    mounted.pop()!(); resolve(); await settle()
+    expect(showToast).not.toHaveBeenCalled()
+  })
+
+  it.each(['unresolved', 'activating', 'blocked'] as const)('blocks star editing for %s authority', async state => {
+    const store = useWatchlistStore(); store.authorityState = state
+    const root = await mount('排行筛选')
+    const button = find(root, item => item.props['aria-label'] === '加入自选 000001')!
+    expect(button.props.disabled).toBe(true)
+    ;(button.props.onClick as (event: object) => unknown)({ stopPropagation() {} }); await settle()
+    expect(store.toggle).not.toHaveBeenCalled()
   })
 })
 

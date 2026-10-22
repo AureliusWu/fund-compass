@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createRenderer, defineComponent, h, nextTick, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
+import { IDBFactory } from 'fake-indexeddb'
 import { useWatchlistStore } from '@/stores/watchlist'
 import HoldingEditor from './HoldingEditor.vue'
 
@@ -27,15 +28,16 @@ function find(root: Node, predicate: (item: Node) => boolean): Node | undefined 
   if (predicate(root)) return root
   for (const child of root.children) { const found = find(child, predicate); if (found) return found }
 }
-async function settle() { for (let index = 0; index < 20; index++) await Promise.resolve(); await nextTick() }
+async function settle() { for (let index = 0; index < 5; index++) { await new Promise<void>(done => setImmediate(done)); await nextTick() } }
 const storage = new Map<string, string>()
 const stored = () => storage.get('sinan_watchlist_v2')
 const mounted: Array<() => void> = []
+const saved = vi.fn()
 const stores: ReturnType<typeof useWatchlistStore>[] = []
 let watch: ReturnType<typeof useWatchlistStore>
 async function mount(code = '510300') {
   const root = node(), visible = ref(true)
-  const app = renderer.createApp({ setup: () => () => visible.value ? h(HoldingEditor, { code, name: '合成基金', onClose: () => { visible.value = false } }) : null })
+  const app = renderer.createApp({ setup: () => () => visible.value ? h(HoldingEditor, { code, name: '合成基金', onSaved: saved, onClose: () => { visible.value = false } }) : null })
   app.component('VanPopup', defineComponent({ setup: (_props, { slots }) => () => h('popup', slots.default?.()) }))
   app.component('VanButton', defineComponent({ setup: (_props, { attrs, slots }) => () => h('button', attrs, slots.default?.()) }))
   app.component('VanField', defineComponent({
@@ -63,16 +65,78 @@ async function click(root: Node, attribute: string, value: string) {
   expect(button).toBeDefined(); (button.props.onClick as () => void)(); await settle()
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   storage.clear()
   vi.stubGlobal('localStorage', { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => { storage.set(key, value) }, removeItem: (key: string) => storage.delete(key) })
+  vi.stubGlobal('indexedDB', new IDBFactory())
   setActivePinia(createPinia())
   watch = useWatchlistStore(); stores.push(watch)
+  await watch.initialize()
   dialogs.confirm.mockReset().mockResolvedValue(undefined)
+  saved.mockReset()
 })
 afterEach(() => { mounted.splice(0).forEach(unmount => unmount()); stores.splice(0).forEach(item => item.$dispose()); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('real HoldingEditor SFC local interactions', () => {
+  it('does not claim an unknown IDB write left the original unchanged when the store blocks further editing', async () => {
+    vi.spyOn(watch, 'saveHolding').mockImplementationOnce(async () => {
+      watch.authorityState = 'blocked'
+      throw new Error('synthetic unknown commit')
+    })
+    const root = await mount(); await holding(root); await edit(root, 'shares', '0'); await submit(root)
+    expect(text(root)).toContain('本机写入结果尚未核定')
+    expect(text(root)).toContain('勿自动重试')
+    expect(text(root)).not.toContain('原记录未修改')
+    expect(text(root)).not.toContain('本地记录未修改')
+    expect(find(root, item => item.props['data-action'] === 'save')?.props.disabled).toBe(true)
+    expect(saved).not.toHaveBeenCalled()
+  })
+  it('does not close or emit saved before the async writer commits; a rejection keeps the draft open', async () => {
+    let reject!: (cause: Error) => void
+    vi.spyOn(watch, 'saveHolding').mockImplementationOnce(() => new Promise<void>((_done, fail) => { reject = fail }))
+    const root = await mount(); await holding(root); await edit(root, 'shares', '0')
+    await submit(root)
+    expect(find(root, item => item.tag === 'popup')).toBeDefined()
+    expect(find(root, item => item.props['data-action'] === 'save')?.props.disabled).toBe(true)
+    expect(watch.entries).toEqual([])
+    expect(saved).not.toHaveBeenCalled()
+    reject(new Error('synthetic commit failed')); await settle()
+    expect(text(root)).toContain('本机写入结果尚未核定')
+    expect(find(root, item => item.tag === 'popup')).toBeDefined()
+    expect(saved).not.toHaveBeenCalled()
+  })
+
+  it('suppresses late save success after the editor is closed', async () => {
+    let resolve!: () => void
+    vi.spyOn(watch, 'saveHolding').mockImplementationOnce(() => new Promise<void>(done => { resolve = done }))
+    const root = await mount(); await holding(root); await edit(root, 'shares', '0'); await submit(root)
+    await click(root, 'data-action', 'cancel'); resolve(); await settle()
+    expect(find(root, item => item.tag === 'popup')).toBeUndefined()
+    expect(watch.entries).toEqual([])
+    expect(saved).not.toHaveBeenCalled()
+  })
+
+  it('does not emit removal success before the async transaction finishes, including rejection', async () => {
+    await watch.setHolding('510300', 0, null)
+    let reject!: (cause: Error) => void
+    vi.spyOn(watch, 'remove').mockImplementationOnce(() => new Promise<void>((_done, fail) => { reject = fail }))
+    const before = stored(), root = await mount()
+    await click(root, 'data-remove', '510300::')
+    expect(saved).not.toHaveBeenCalled(); expect(stored()).toBe(before)
+    reject(new Error('synthetic removal failed')); await settle()
+    expect(saved).not.toHaveBeenCalled(); expect(stored()).toBe(before)
+    expect(text(root)).toContain('本机写入结果尚未核定')
+  })
+
+  it.each(['unresolved', 'activating', 'blocked'] as const)('disables editing when local authority is %s', async state => {
+    watch.authorityState = state
+    const save = vi.spyOn(watch, 'saveHolding'), root = await mount()
+    expect(find(root, item => item.props['data-action'] === 'save')?.props.disabled).toBe(true)
+    await submit(root)
+    expect(save).not.toHaveBeenCalled()
+    expect(text(root)).toContain('本机权威尚未核定')
+  })
+
   it('saves an explicit zero-share holding with true zero cost and target', async () => {
     const root = await mount(); await holding(root)
     await edit(root, 'shares', '0'); await edit(root, 'cost', '0'); await edit(root, 'target', '0')
@@ -90,7 +154,7 @@ describe('real HoldingEditor SFC local interactions', () => {
   })
 
   it('cancel discards a draft without writing or changing the original record', async () => {
-    watch.setHolding('510300', 100, 1)
+    await watch.setHolding('510300', 100, 1)
     const before = stored(), rows = JSON.stringify(watch.entries)
     const root = await mount(); await edit(root, 'shares', '200'); await edit(root, 'account', '银行')
     await click(root, 'data-action', 'cancel')
@@ -99,7 +163,7 @@ describe('real HoldingEditor SFC local interactions', () => {
   })
 
   it.each(['', '-1', 'NaN', 'Infinity', '1e3'])('rejects invalid shares %s and leaves the original unchanged', async (value) => {
-    watch.setHolding('510300', 100, 1)
+    await watch.setHolding('510300', 100, 1)
     const before = stored(), root = await mount()
     await edit(root, 'shares', value); await submit(root)
     expect(text(root)).toContain('请检查基金代码')
@@ -108,8 +172,8 @@ describe('real HoldingEditor SFC local interactions', () => {
   })
 
   it('rejects a rename collision and does not silently overwrite the destination', async () => {
-    watch.setHolding('510300', 100, 1, undefined, '支付宝')
-    watch.setHolding('510300', 50, 2, undefined, '券商')
+    await watch.setHolding('510300', 100, 1, undefined, '支付宝')
+    await watch.setHolding('510300', 50, 2, undefined, '券商')
     const before = stored(), root = await mount()
     await edit(root, 'account', ' 券商 '); await submit(root)
     expect(text(root)).toContain('目标账户已有记录')
@@ -118,27 +182,27 @@ describe('real HoldingEditor SFC local interactions', () => {
   })
 
   it('renames one account and leaves exactly one live holding plus a tombstone', async () => {
-    watch.setHolding('510300', 100, 1, undefined, '支付宝')
+    await watch.setHolding('510300', 100, 1, undefined, '支付宝')
     const root = await mount(); await edit(root, 'account', ' 券商 '); await submit(root)
     expect(watch.activeHoldings.map(row => row.id)).toEqual(['510300::券商'])
     expect(watch.entries.find(row => row.id === '510300::支付宝')?.deleted).toBe(true)
   })
 
   it('reports local storage failure without publishing a partially edited holding', async () => {
-    watch.setHolding('510300', 100, 1)
+    await watch.setHolding('510300', 100, 1)
     const before = stored(), root = await mount()
     await edit(root, 'cost', '')
     vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new DOMException('quota', 'QuotaExceededError') })
     await submit(root)
-    expect(text(root)).toContain('原记录未修改')
+    expect(text(root)).toContain('请保留原数据并在自选页核对存储及写入结果，勿自动重试')
     expect(stored()).toBe(before)
     expect(watch.entries[0].cost).toBe(1)
   })
 
   it('rejects a draft whose original record changed while the form was open', async () => {
-    watch.setHolding('510300', 100, 1)
+    await watch.setHolding('510300', 100, 1)
     const root = await mount(); await edit(root, 'shares', '200')
-    watch.setHolding('510300', 101, 1)
+    await watch.setHolding('510300', 101, 1)
     const before = stored(); await submit(root)
     expect(text(root)).toContain('记录已变化')
     expect(stored()).toBe(before)
@@ -146,8 +210,8 @@ describe('real HoldingEditor SFC local interactions', () => {
   })
 
   it('canceling the actual delete confirmation preserves all account rows', async () => {
-    watch.setHolding('510300', 0, null)
-    watch.setHolding('510300', 10, 1, undefined, '支付宝')
+    await watch.setHolding('510300', 0, null)
+    await watch.setHolding('510300', 10, 1, undefined, '支付宝')
     dialogs.confirm.mockRejectedValueOnce('cancel')
     const before = stored(), root = await mount()
     await click(root, 'data-remove', '510300::')
@@ -157,15 +221,15 @@ describe('real HoldingEditor SFC local interactions', () => {
   })
 
   it('confirmed ungrouped deletion affects only that row, not every account', async () => {
-    watch.setHolding('510300', 0, null)
-    watch.setHolding('510300', 10, 1, undefined, '支付宝')
+    await watch.setHolding('510300', 0, null)
+    await watch.setHolding('510300', 10, 1, undefined, '支付宝')
     const root = await mount(); await click(root, 'data-remove', '510300::')
     expect(dialogs.confirm.mock.calls[0][0].message).toContain('未分组')
     expect(watch.recordsFor('510300').map(row => row.account)).toEqual(['支付宝'])
   })
 
   it('an unmounted editor cannot apply a delayed confirmation', async () => {
-    watch.setHolding('510300', 0, null)
+    await watch.setHolding('510300', 0, null)
     let resolve!: () => void
     dialogs.confirm.mockReturnValueOnce(new Promise<void>(done => { resolve = done }))
     const before = stored(), root = await mount()

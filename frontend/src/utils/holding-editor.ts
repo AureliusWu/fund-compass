@@ -14,7 +14,7 @@ export interface EntrySnapshot { id: string; snapshot: string }
 const messages = {
   invalid: '请检查基金代码、账户、份额、成本净值和目标权重',
   conflict: '记录已变化或目标账户已有记录，请重新打开后编辑',
-  storage: '本机保存失败，原记录未修改；请检查浏览器存储空间或权限',
+  storage: '本机操作未能安全完成；请保留原数据并在自选页核对存储及写入结果，勿自动重试',
   'requires-confirmation': '此操作会移除持仓记录或多个账户，请明确确认后重试',
 } as const
 export class WatchMutationError extends Error {

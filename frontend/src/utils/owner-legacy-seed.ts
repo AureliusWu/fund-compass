@@ -79,7 +79,7 @@ function canonical(value: unknown): string {
   return Object.is(value, -0) ? '-0' : JSON.stringify(value)
 }
 /** Bounded JSON grammar: reject duplicate/escaped duplicate keys, unsafe integers and lone surrogates. */
-function parse(raw: string, maximum: number, code: ShapeError): unknown {
+function parse(raw: string, maximum: number, code: ShapeError, maximumDepth = 6): unknown {
   bytes(raw, maximum, code)
   let index = 0, nodes = 0
   const number = /-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/y
@@ -105,7 +105,7 @@ function parse(raw: string, maximum: number, code: ShapeError): unknown {
     return fail(code)
   }
   function value(depth: number): unknown {
-    if (depth > 6 || ++nodes > OWNER_WORKSPACE_MAX_ENTRIES * 16 + 16) fail('capacity_exceeded')
+    if (depth > maximumDepth || ++nodes > OWNER_WORKSPACE_MAX_ENTRIES * (maximumDepth > 6 ? 32 : 16) + (maximumDepth > 6 ? 128 : 16)) fail('capacity_exceeded')
     whitespace()
     const char = raw[index]
     if (char === '"') return string()
@@ -153,6 +153,12 @@ function parse(raw: string, maximum: number, code: ShapeError): unknown {
   const result = value(1)
   whitespace(); if (index !== raw.length) fail(code)
   return result
+}
+/** Shared closed backup grammar; caller still validates its own complete schema. */
+export function parseOwnerBusinessJson(raw: string, maximum: number, maximumDepth = 6): unknown {
+  if (!Number.isSafeInteger(maximum) || maximum < 0 || !Number.isSafeInteger(maximumDepth)
+    || maximumDepth < 1 || maximumDepth > 12) fail('invalid_export')
+  return parse(raw, maximum, 'invalid_export', maximumDepth)
 }
 function entries(input: unknown, code: ShapeError): readonly OwnerWorkspaceEntry[] {
   try { return validateOwnerWorkspaceEntries(input) }
