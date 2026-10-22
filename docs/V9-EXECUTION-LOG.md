@@ -1098,3 +1098,25 @@ Miniflare的外部Undici限定父版本override至7.30.1；正式lock、隐藏lo
 纯统计 helper 不启动子进程/联网/安装/构建，只有 setup 校验与本地junction、冻结、产物统计及新文件机械报告。它核HTML本地链接、manifest icons、每个precache URL/非null MD5和Workbox引用，非全部JS动态导入AST闭包；三次各侧PWA制品独立7/7。证据目录 `fc-i19-build-perf-20261022-7ef0beba85ad4cf8be4069df8e3165a8`；helper SHA=`bf844ac9278b6c691001b192a1edffe133843b1a0b15adf4afc5672648291c18`，机械 artifact-summary=`96c79bcf1412a0f539de9da551cf3617584345fbd60fff53c0e983e5e7c5e2f4`，其中六份样本根另重哈希无漂移；冻结当前frontend输入 pin=`ab9ef10420c15e18ac548af1c7c85e6b53b52bbcdaf6233cdf905250992d7408`。原build stdout/时长在工具结果，未手工伪造为原始落盘日志。
 
 以上推进 I19-01/03 局部真实接线，不关闭整个 I18/I19/I21：未做真实云 repair/migration/credential rotation/Owner事务、Holding/Policy/Decision新链、手工资产/历史同步、机器消费者迁移、真实浏览器旧PWA/跨设备、重启读回/独立远端恢复或正式发布。Wrangler内嵌安全阻断仍在。应用保持8.0.0，未推main、改云配置/套餐/秘密、重启或删除Gist；完整v9目标继续。
+
+### 精确迁移前后像与独立 repair+scope+Owner 包（2026-10-22）
+
+用户允许后继续使用直接普通 npm；没有启用旧 npm supervisor、绕过 OAuth 来源校验或重试被阻断的浏览器路线。本轮没有收到平台凭据已保存的确认，不读取凭据输入文件、不调用实际云库。只完成下一段迁移代码及本地验证，不升级应用版本或放行云应用。
+
+旧 scope packet 的 `_row_guards` 发现与 writer 相同的 JSON REAL 传参精度风险。现仅在固定 VALUES 值槽使用整数 mantissa/二次幂表达式，NULL/int/text/blob 类型与 NUL 后字节保持；负零比较使用固定 `(-0.0)` literal，generic exact_real helper 仍拒负零，不声称 REAL 落盘保留其符号。`exact_real.py` 纳入 compiler 源码指纹，原 `_wire`、严格 v1 admission/profile 和 sender 权限均未放宽。旧 v1 capability 仍需 provider 保留 JSON ±0 参数并支持 atan2，不以比较修复冒称能力通过。
+
+新 `database/turso_owner_upgrade_packet.py` 是独立、显式 repair profile，不复用旧 scope-only 回执槽或 `synthetic_candidate=True`。先从原始私有捕获独立 plan repair SHA，编译时必须给出原 SHA 并重新推导；只承认 Evidence estimate/estimate_coverage 恰1 ULP 的有限 REAL 差异，至少一格需修复，NULL/类型/负零/更大偏差仍拒绝。原 payload/ID/hash 不改。固定 BEGIN IMMEDIATE 内先核 raw schema/完整 typed 原像/header 0或8/槽位为空，再暂移唯一固定 Evidence UPDATE trigger、精确修复并核 changes=1、立即用仓库固定 DDL 恢复，随后 scope 回填、Owner 五表与 revision0、schema-table8→9、完整后像和十列回执同事务提交；任一失败前缀回滚 DDL/业务/回执。远端 PRAGMA header 不改，源与后像均以固定只读 `pragma_user_version` 核验；该 table-valued PRAGMA 的实际 provider 能力尚未验收，失败即停止，不降级省略。
+
+raw DDL 从不执行；目标仅对实际移除/重建的该 trigger 采用规范拼写，其余已有 raw 对象逐字保留并显式绑定目标摘要。完整原始行、修复差异、修复行、目标 raw schema/回执插入前全行、资源/源码、外部 repair/plan/packet SHA 均绑定。独立复审先真实复现4项可被重新构造的摘要事实和 header 漂移问题，后关闭：公开 counts/raw schema/trigger flag 与真实 specs、repair frame、plan frame、十列 receipt 交叉核对，constructor/getter/plan/compile/rehydrate 成功前再次核源码指纹。重建有跨验证/重编译的30秒协作总预算，不能每阶段续期；不是硬实时终止。所有远端/正式旗标仍 false。
+
+新测试最终 **67 passed/19.56s/exit0**（正常 pytest 插件，显式清空项目静默 addopts 只为打印汇总，不改测试选择）。覆盖所有实际 statement index 故障前缀（包括重复 label 的后像）、修复/Owner/回执/commit 回滚、晚期业务/回执/Owner/scope/Evidence/Header 漂移、0/null/typed 行、完整捕获不变、独立 repair pin、原包重建、篡改摘要/原包、源码末尾漂移、总预算超时；fake monotonic 无 sleep、不绕过原验证。测试 SHA=`1536de19caf65e0606d23bff1feecf9ac4186d1cd2e1cb1966f575ea0c6eec69`，compiler=`69d00c01e4afab85f90d6f5ee4163f98ebd7875c6fa9367f0fc228417caf1195`。
+
+精确 guard 新测试46项，连旧 packet/exact-real首轮 **286 passed/10.53s**。扩展链首两轮分别315 passed/333 setup errors、467 passed/181 setup errors，均为三个已有 fixture 的旧 compiler 固定源码 pin；只在审查允许后同步实际 LF 源码 SHA，不删业务断言、不改历史日志。最终 packet/exact-real/response/reconcile/transport 六文件 **648 passed/137.27s/exit0**。旧 compiler 新 SHA=`5d37c2df98a73ec4fdda654adffb876b14bedd1e67a800cad4a95d886fa73fae`，精确 guard 测试=`e677308d59bc516865a91539a49c2eeda578574d22d503d159b63d02cce6ce43`。
+
+直接 `npm run test -- --run` 前端 **1325 passed/65文件/9.09s**；`npm run type-check` exit0；`npm run build` exit0/Vite13.21s/PWA7/7。ownerSession 静态/动态重复导入提示仍保留，单次有其它测试负载的构建不作性能对照，不关闭此前局部 chunk 回退。Worker直接 test **148 passed/4文件/6.12s**，check exit0；本轮未改前端/Worker/依赖、不运行带认证的 Wrangler 操作。
+
+新编译链无旧版本同功能基线，另以同 Windows/Python3.12.13 正常 `python -c` 做3次独立合成内存样本：每次5000总行，其中4995条窄 funds 行、2修复格。plan 秒为0.543692/0.498443/0.578492（median0.543692、worst0.578492），compile0.921182/1.067130/0.930973（median0.930973、worst1.067130）。每包2,063,514字节/165steps/maxargs900，固定64MiB/16384steps/30秒/900args不变；额外 safe_metadata median0.251421/worst0.264468秒。原始 metrics 仅工具 stdout，未封存报告；进程通常导入缓存未禁写，不能宣称全进程零文件写入。没有执行这些样本包，不代表约34k行实际业务、远端事务容量/时长、网络或回归 PASS；宿主背景负载未完全控制。
+
+正常插件两分片后端全量 **3279=1640+1639 passed**，原300秒绝对预算不变，validation210300ms/总210698ms，collection/完整全集分区/三阶段/JUnit均通过，源码pins与默认DB metadata前后相同、fallback未创建。根独立再核 Ordinal 全集无重叠/遗漏、9837个setup/call/teardown全部passed及无skip/xfail/deselected。输出目录 `fc-backend-two-shard-run-20261022-e02d93263e82459a9103f10948303b8c`，summary SHA=`588e5439a98f2353d7c6862b02729d7f06312326f4813b7eebb7d02944a8cd18`。这是正常插件合成全量，不是Windows串行、云业务或新CI证明。前端/Worker另以普通 `npm audit --include=dev --audit-level=moderate --registry=https://registry.npmjs.org` 各实际返回0漏洞/exit0；仍不认证 Wrangler 内嵌代码。
+
+下一道实际门禁仍包括新 profile 的响应与未知提交完整对账、受控 sender 接线；优先复用已有固定私有 parser/FSM/完整image核而不放宽旧 public packet 类型/profile，完整读回必须同时核原 header、修复Evidence、全部旧表、scope、Owner与十列回执。实际所有 writer 停写/排空、Free配额/Overages、新保护备份、实际 provider 精度/能力/容量、迁移、应用写入→Render重启读回及独立远端恢复仍缺。I19 同工作区原子制包/ack、完整业务链与迁移、I20 自然窗口、I21 实机/PWA/性能亦未完成。不能将本地包或旧 transport 的通过记成云 apply、正式迁移或 v9 发布。

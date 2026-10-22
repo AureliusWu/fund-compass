@@ -22,7 +22,7 @@ import turso_scope_packet_fixtures as s
 ORIGIN = 'libsql://synthetic-candidate.turso.io'
 PRIVATE = 'synthetic-private-marker-never-real'
 PINS = {
-    'turso_scope_packet.py': 'ee01ad893e1db5c8cac4fdc082f2f0c00e2df3568b4d80a6c557f6d6eb0263e0',
+    'turso_scope_packet.py': '5d37c2df98a73ec4fdda654adffb876b14bedd1e67a800cad4a95d886fa73fae',
     'turso_scope_response.py': '313078fceff4c093cdc92181d5d888278d3c815bfeb818fe464ea56e533de7de',
     'turso_scope_snapshot.py': '78d0801fba7e78bd8b72a909c8bdb2acee5e8f4a7d63e038f543ed02df4faa0d',
     'turso_scope_upgrade.py': '08d7d530f188f7764f3cc6959d1d77ad054adaa57a6d317277f9d49e2cfd8a1c',

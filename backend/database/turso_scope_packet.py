@@ -17,7 +17,7 @@ import re
 import sqlite3
 import time
 
-from database import db, turso_schema, turso_scope_snapshot as capture, turso_scope_upgrade as offline
+from database import db, exact_real, turso_schema, turso_scope_snapshot as capture, turso_scope_upgrade as offline
 from models import v8 as v8_models
 from service import repository_scopes as scopes
 
@@ -55,7 +55,7 @@ _PACKET_METADATA_KEYS = frozenset({'ok', 'profile', 'evidence_scope', 'from_sche
 _CODE_FILES = (('compiler', Path(__file__).resolve()), ('capture', Path(capture.__file__).resolve()),
     ('offline', Path(offline.__file__).resolve()), ('schema', Path(turso_schema.__file__).resolve()),
     ('db', Path(db.__file__).resolve()), ('scopes', Path(scopes.__file__).resolve()),
-    ('models', Path(v8_models.__file__).resolve()))
+    ('models', Path(v8_models.__file__).resolve()), ('exact_real', Path(exact_real.__file__).resolve()))
 
 
 class CompilerError(Exception):
@@ -253,11 +253,33 @@ def _row_guards(table, columns, rows, budget, *, include_count=True):
     for offset in range(0, len(rows), chunk_size):
         budget.check()
         chunk = rows[offset:offset + chunk_size]
-        slots = ','.join('(' + ','.join('?' for _ in aliases) + ')' for _ in chunk)
+        slots, args = [], []
+        for row in chunk:
+            values = []
+            for value in row:
+                _value(value)
+                if type(value) is float:
+                    # These are trusted fixed VALUES slots, not an arbitrary
+                    # SQL rewrite or driver default. JSON float parameters can
+                    # lose a ULP before SQLite binds them, including in a
+                    # preimage guard. Integer mantissas keep the original REAL.
+                    # Unlike the generic helper, a comparison can explicitly
+                    # represent negative zero with one fixed SQL literal. Do
+                    # not normalize its sign or claim REAL storage retains it.
+                    if value == 0.0 and math.copysign(1.0, value) < 0:
+                        fragment, parameters = '(-0.0)', ()
+                    else:
+                        fragment, parameters = exact_real.exact_real_binding(value)
+                    values.append(fragment)
+                    args.extend(parameters)
+                else:
+                    values.append('?')
+                    args.append(value)
+            slots.append('(' + ','.join(values) + ')')
         predicate = (f'NOT EXISTS (SELECT 1 FROM expected e LEFT JOIN main."{table}" a ON a.rowid=e.e0 '
                      f'WHERE a.rowid IS NULL OR NOT ({checks}))')
-        yield _guard(f'rows:{table}:{offset}', predicate, tuple(v for row in chunk for v in row),
-                     f'WITH expected({",".join(aliases)}) AS (VALUES {slots}) ')
+        yield _guard(f'rows:{table}:{offset}', predicate, tuple(args),
+                     f'WITH expected({",".join(aliases)}) AS (VALUES {",".join(slots)}) ')
 
 
 def _metadata(meta):

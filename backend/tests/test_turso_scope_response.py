@@ -20,7 +20,7 @@ from database import turso_scope_response as v
 
 PRIVATE = 'synthetic-private-sql-token-url-marker-not-real'
 ORIGIN = 'libsql://synthetic-candidate.turso.io'
-REPO_PACKET_SHA = 'ee01ad893e1db5c8cac4fdc082f2f0c00e2df3568b4d80a6c557f6d6eb0263e0'
+REPO_PACKET_SHA = '5d37c2df98a73ec4fdda654adffb876b14bedd1e67a800cad4a95d886fa73fae'
 
 
 def forbidden(*_args, **_kwargs):
