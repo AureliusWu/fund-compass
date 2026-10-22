@@ -12,6 +12,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Iterable
 
 from database import db
+from database.v8_insert import prepare_v8_insert
 from models.v8 import (
     DecisionDiff,
     DecisionSnapshot,
@@ -208,18 +209,10 @@ def save_evidence(snapshot: EvidenceSnapshot, *, scope=scopes.PRODUCTION) -> Evi
             if payload_sha256(_evidence_identity(existing)) != semantic_sha:
                 raise SnapshotConflictError("stored evidence id has different content")
             return existing
-        conn.execute(
-            """INSERT INTO evidence_snapshots(
-               evidence_id,fund_code,fund_name,fund_type,created_at,market_time,
-               official_nav,official_nav_date,target_nav_date,benchmark_id,
-               valuation_percentile,trend_state,momentum_state,drawdown,volatility,
-               market_temperature,score,score_version,score_coverage,timing_signal,
-               timing_coverage,estimate,estimate_status,estimate_coverage,
-               estimate_model_version,estimate_error_p80,estimate_sample_count,
-               estimate_mae,estimate_direction_accuracy,evidence_strength,
-               source_states_json,evidence_nodes_json,missing_fields_json,
-               stale_fields_json,risk_flags_json,payload_json,payload_sha256
-             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        # Precompile the whole append before its first INSERT. In particular,
+        # a bad remote health REAL must not leave a partially written Evidence.
+        inserts = [prepare_v8_insert(
+            conn, "evidence_snapshots",
             (
                 snapshot.evidence_id, snapshot.fund_code, snapshot.fund_name, snapshot.fund_type,
                 snapshot.created_at.isoformat(), snapshot.market_time.isoformat() if snapshot.market_time else None,
@@ -236,7 +229,7 @@ def save_evidence(snapshot: EvidenceSnapshot, *, scope=scopes.PRODUCTION) -> Evi
                 _json(snapshot.missing_fields), _json(snapshot.stale_fields), _json(snapshot.risk_flags),
                 _json(payload), semantic_sha,
             ),
-        )
+        )]
         for state in snapshot.source_states:
             state_payload = state.model_dump(mode="python")
             event_identity = {
@@ -244,11 +237,8 @@ def save_evidence(snapshot: EvidenceSnapshot, *, scope=scopes.PRODUCTION) -> Evi
                 "source_id": state.source_id,
                 "state": state_payload,
             }
-            conn.execute(
-                """INSERT INTO source_health_events(
-                   event_id,evidence_id,source_id,state,last_success,last_failure,
-                   latency_ms,data_age_seconds,stale,error_class,observed_at,payload_json
-                 ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            inserts.append(prepare_v8_insert(
+                conn, "source_health_events",
                 (
                     stable_id("src", event_identity), snapshot.evidence_id, state.source_id, state.state,
                     state.last_success.isoformat() if state.last_success else None,
@@ -256,7 +246,9 @@ def save_evidence(snapshot: EvidenceSnapshot, *, scope=scopes.PRODUCTION) -> Evi
                     state.latency_ms, state.data_age_seconds, int(state.stale), state.error_class,
                     snapshot.created_at.isoformat(), _json(state_payload),
                 ),
-            )
+            ))
+        for statement in inserts:
+            conn.execute(*statement)
         scopes.register_record(conn, "evidence", snapshot.evidence_id, scope)
     return snapshot
 
@@ -318,18 +310,15 @@ def _save_holding_in_transaction(conn, version: HoldingVersion, *, scope=scopes.
         if payload_sha256(_holding_identity(existing)) != semantic_sha:
             raise SnapshotConflictError("stored holding id has different content")
         return existing
-    conn.execute(
-        """INSERT INTO holding_versions(
-           holding_version,fund_code,user_state,shares,cost,market_value,account,
-           current_weight,target_weight,updated_at,source,created_at,payload_json,payload_sha256
-         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+    conn.execute(*prepare_v8_insert(
+        conn, "holding_versions",
         (
             version.holding_version, version.fund_code, version.user_state, version.shares,
             version.cost, version.market_value, version.account, version.current_weight,
             version.target_weight, version.updated_at.isoformat() if version.updated_at else None,
             version.source, version.created_at.isoformat(), _json(payload), semantic_sha,
         ),
-    )
+    ))
     scopes.register_record(conn, "holding", version.holding_version, scope)
     return version
 
@@ -377,13 +366,8 @@ def save_policy(policy: PortfolioPolicy, *, scope=scopes.PRODUCTION) -> Portfoli
                 raise ValueError("new policy effective_at must be after the superseded policy")
             if policy.created_at < tip.created_at:
                 raise ValueError("new policy cannot be backfilled before its predecessor")
-        conn.execute(
-            """INSERT INTO portfolio_policy_versions(
-               policy_version,name,target_allocations_json,target_ranges_json,
-               max_single_fund_weight,max_theme_weight,rebalance_band,dca_rules_json,
-               reduce_rules_json,sell_rules_json,effective_at,created_at,source,
-               supersedes,payload_json,payload_sha256
-             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        conn.execute(*prepare_v8_insert(
+            conn, "portfolio_policy_versions",
             (
                 policy.policy_version, policy.name, _json(policy.target_allocations), _json(policy.target_ranges),
                 policy.max_single_fund_weight, policy.max_theme_weight, policy.rebalance_band,
@@ -391,7 +375,7 @@ def save_policy(policy: PortfolioPolicy, *, scope=scopes.PRODUCTION) -> Portfoli
                 policy.effective_at.isoformat(), policy.created_at.isoformat(), policy.source,
                 policy.supersedes, _json(payload), semantic_sha,
             ),
-        )
+        ))
         scopes.register_record(conn, "policy", policy.policy_version, scope)
     return policy
 
@@ -513,14 +497,8 @@ def _save_decision_in_transaction(conn, snapshot: DecisionSnapshot, *, scope=sco
         if payload_sha256(_without(_model_payload(existing), "created_at")) != semantic_sha:
             raise SnapshotConflictError("stored decision id has different output")
         return existing
-    conn.execute(
-        """INSERT INTO decision_snapshots(
-           decision_id,evidence_id,fund_code,holding_version,policy_version,
-           strategy_version,user_state,action,strength,confidence,summary,
-           reason_codes_json,reasons_json,risks_json,invalidation_codes_json,
-           invalidation_json,position_guidance_json,evidence_nodes_json,
-           created_at,payload_json,payload_sha256
-         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+    conn.execute(*prepare_v8_insert(
+        conn, "decision_snapshots",
         (
             snapshot.decision_id, snapshot.evidence_id, snapshot.fund_code,
             snapshot.holding_version, snapshot.policy_version, snapshot.strategy_version,
@@ -532,7 +510,7 @@ def _save_decision_in_transaction(conn, snapshot: DecisionSnapshot, *, scope=sco
             _json(snapshot.evidence_nodes), snapshot.created_at.isoformat(),
             _json(payload), semantic_sha,
         ),
-    )
+    ))
     scopes.register_record(conn, "decision", snapshot.decision_id, scope)
     return snapshot
 
@@ -841,12 +819,8 @@ def save_portfolio_decision(
             if payload_sha256(_portfolio_decision_identity(existing)) != semantic_sha:
                 raise SnapshotConflictError("stored portfolio decision id has different content")
             return existing
-        conn.execute(
-            """INSERT INTO portfolio_decision_snapshots(
-               portfolio_decision_id,decision_date,policy_version,strategy_version,
-               component_count,current_cash_weight,target_cash_weight,portfolio_value,
-               components_json,source,created_at,payload_json,payload_sha256
-             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        conn.execute(*prepare_v8_insert(
+            conn, "portfolio_decision_snapshots",
             (
                 snapshot.portfolio_decision_id,
                 snapshot.decision_date.isoformat(),
@@ -862,7 +836,7 @@ def save_portfolio_decision(
                 _json(payload),
                 semantic_sha,
             ),
-        )
+        ))
     return snapshot
 
 
@@ -967,13 +941,10 @@ def claim_idempotency(
                 return {"state": "in_progress"}
             reclaimed = True
         else:
-            conn.execute(
-                """INSERT INTO idempotency_responses(
-                   request_id,endpoint,request_sha256,state,response_json,
-                   owner_token,lease_expires_at,created_at,completed_at
-                 ) VALUES (?,?,?,'in_progress',NULL,?,?,?,NULL)""",
+            conn.execute(*prepare_v8_insert(
+                conn, "idempotency_responses",
                 (request_id, endpoint, request_sha, owner_token, lease_expires_at, now),
-            )
+            ))
     _remember_idempotency_owner(request_id, endpoint, owner_token)
     return {
         "state": "claimed",
@@ -1249,13 +1220,8 @@ def save_outcome(outcome: OutcomeEvaluation) -> OutcomeEvaluation:
             if existing.outcome_id != outcome.outcome_id:
                 raise SnapshotConflictError("decision horizon is already settled differently")
             return existing
-        conn.execute(
-            """INSERT INTO outcome_evaluations(
-               outcome_id,decision_id,evaluation_kind,horizon,base_nav_date,
-               evaluation_date,target_nav_date,base_nav,evaluated_nav,absolute_return,
-               benchmark_return,peer_excess,max_drawdown,hit,benchmark_samples,
-               predicted_change,prediction_error,created_at,payload_json,payload_sha256
-             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        conn.execute(*prepare_v8_insert(
+            conn, "outcome_evaluations",
             (
                 outcome.outcome_id, outcome.decision_id, outcome.evaluation_kind, outcome.horizon,
                 outcome.base_nav_date.isoformat(), outcome.evaluation_date.isoformat(),
@@ -1265,7 +1231,7 @@ def save_outcome(outcome: OutcomeEvaluation) -> OutcomeEvaluation:
                 int(outcome.hit), outcome.benchmark_samples, outcome.predicted_change,
                 outcome.prediction_error, outcome.created_at.isoformat(), _json(payload), semantic_sha,
             ),
-        )
+        ))
     return outcome
 
 
@@ -1641,12 +1607,8 @@ def save_portfolio_outcome(
             if stored.outcome_id != outcome.outcome_id:
                 raise SnapshotConflictError("portfolio horizon is already settled differently")
             return stored
-        conn.execute(
-            """INSERT INTO portfolio_outcome_evaluations(
-               outcome_id,portfolio_decision_id,horizon,base_nav_date,evaluation_date,
-               absolute_return,max_drawdown,current_cash_weight,cash_return,
-               cash_contribution,components_json,method,created_at,payload_json,payload_sha256
-             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        conn.execute(*prepare_v8_insert(
+            conn, "portfolio_outcome_evaluations",
             (
                 outcome.outcome_id,
                 outcome.portfolio_decision_id,
@@ -1664,7 +1626,7 @@ def save_portfolio_outcome(
                 _json(payload),
                 semantic_sha,
             ),
-        )
+        ))
     return outcome
 
 
@@ -2267,18 +2229,15 @@ def record_notification_events_batch(
                     raise SnapshotConflictError("notification completion has no matching attempted claim")
 
             payload = event.model_dump(mode="python")
-            conn.execute(
-                """INSERT INTO notification_events(
-                   event_log_id,notification_event_id,decision_id,scheduled_window,status,
-                   attempt_no,natural_schedule,occurred_at,error_class,detail_json
-                 ) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            conn.execute(*prepare_v8_insert(
+                conn, "notification_events",
                 (
                     event.event_log_id, event.notification_event_id, event.decision_id,
                     event.scheduled_window, event.status, event.attempt_no,
                     int(event.natural_schedule), event.occurred_at.isoformat(), event.error_class,
                     _json(payload),
                 ),
-            )
+            ))
             results.append(NotificationRecordResult(
                 event=event,
                 claimed=status == "attempted",

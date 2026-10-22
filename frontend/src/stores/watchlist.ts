@@ -7,12 +7,20 @@ import { getLegacySyncConsent, setLegacySyncConsent, getLegacySyncGeneration, su
 import { positionKind, validateHolding, WatchMutationError, type HoldingInput, type EntrySnapshot } from '@/utils/holding-editor'
 
 const LS = 'sinan_watchlist_v2'
+const LEGACY_LS = 'sinan_watchlist_v1'
 const PUSH_DELAY = 4000
 const nowISO = () => new Date().toISOString()
 type LocalWatchEntry = WatchEntry & { local_pending?: true }
+export interface OwnerSyncWatchSource {
+  readonly sourceKey: typeof LS | typeof LEGACY_LS | null
+  readonly v1Raw: string | null
+  readonly v2Raw: string | null
+}
 export interface OwnerSyncWatchSnapshot {
   readonly entries: readonly Readonly<WatchEntry & { local_pending?: true }>[]
+  /** Compatibility field: original v2 slot only; the selected source is explicit below. */
   readonly raw: string | null
+  readonly source: OwnerSyncWatchSource
   readonly memory: string
   readonly generation: number
 }
@@ -39,14 +47,24 @@ function parseStored(raw: string): { rows: LocalWatchEntry[]; error: boolean } {
   } catch { return { rows: [], error: true } }
 }
 
-function loadLS(): { rows: LocalWatchEntry[]; error: boolean; raw: string | null } {
-  let raw: string | null = null
+function readSources(): OwnerSyncWatchSource {
+  // Read both original slots even when v2 is authoritative. An inaccessible or
+  // changed legacy source must not silently become an empty/stable archive.
+  const v2Raw = localStorage.getItem(LS), v1Raw = localStorage.getItem(LEGACY_LS)
+  return { sourceKey: v2Raw !== null ? LS : v1Raw !== null ? LEGACY_LS : null, v1Raw, v2Raw }
+}
+function sameSource(first: OwnerSyncWatchSource | null, second: OwnerSyncWatchSource | null): boolean {
+  return Boolean(first && second && first.sourceKey === second.sourceKey
+    && first.v1Raw === second.v1Raw && first.v2Raw === second.v2Raw)
+}
+function selectedRaw(source: OwnerSyncWatchSource): string {
+  return (source.sourceKey === LS ? source.v2Raw : source.v1Raw) ?? '[]'
+}
+function loadLS(): { rows: LocalWatchEntry[]; error: boolean; source: OwnerSyncWatchSource | null } {
   try {
-    // The baseline is the original v2 value, not the v1 fallback or normalized
-    // rows. A first successful v1 migration therefore compares against null.
-    raw = localStorage.getItem(LS)
-    return { ...parseStored(raw ?? localStorage.getItem('sinan_watchlist_v1') ?? '[]'), raw }
-  } catch { return { rows: [], error: true, raw } }
+    const source = readSources()
+    return { ...parseStored(selectedRaw(source)), source }
+  } catch { return { rows: [], error: true, source: null } }
 }
 
 export const useWatchlistStore = defineStore('watchlist', () => {
@@ -54,7 +72,10 @@ export const useWatchlistStore = defineStore('watchlist', () => {
   const entries = ref<LocalWatchEntry[]>(initial.rows)
   const localStorageError = ref(initial.error)
   const externalUnconfirmed = ref(false)
-  let storageBaseline = initial.raw
+  let sourceBaseline = initial.source
+  // Startup v1 fallback is compatible only before this store has observed v2.
+  // Once v2 exists, deleting it cannot revive an older archived v1 ledger.
+  let observedV2 = initial.source?.sourceKey === LS
   const loaded = ref(false)
   const syncing = ref(false)
   const lastSync = ref(gist.getSyncTime())
@@ -84,40 +105,54 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     syncing.value = false
   }
   function assertStorageBaseline() {
-    let current: string | null
-    try { current = localStorage.getItem(LS) }
+    let current: OwnerSyncWatchSource
+    try { current = readSources() }
     catch {
       localStorageError.value = true
       invalidateExternalState()
       throw new WatchMutationError('storage')
     }
-    if (current !== storageBaseline) {
+    if (current.v2Raw !== null) observedV2 = true
+    if (observedV2 && current.v2Raw === null) {
+      localStorageError.value = true
+      invalidateExternalState()
+      throw new WatchMutationError('storage')
+    }
+    if (!sameSource(current, sourceBaseline)) {
       invalidateExternalState()
       throw new WatchMutationError('conflict')
     }
+    return current
   }
   function storageChanged(event: StorageEvent) {
-    if (event.key !== LS && event.key !== null) return
-    let raw: string | null
+    if (event.key !== LS && event.key !== LEGACY_LS && event.key !== null) return
+    let source: OwnerSyncWatchSource
     try {
       if (event.storageArea && event.storageArea !== localStorage) return
-      // Read the currently observed disk value, not a possibly queued old event.
-      raw = localStorage.getItem(LS)
+      // Read both current slots, not a possibly queued old event's payload.
+      source = readSources()
     } catch {
       localStorageError.value = true
       invalidateExternalState()
       return
     }
-    if (raw === storageBaseline && !localStorageError.value) return
+    // Every observed relevant event invalidates old previews and responses,
+    // even when queued ABA has returned the raw bytes to their previous value.
+    // This cannot discover unobserved ABA or provide cross-tab atomic CAS.
     invalidateExternalState()
-    const parsed = parseStored(raw ?? '[]')
+    if (source.v2Raw !== null) observedV2 = true
+    if (observedV2 && source.v2Raw === null) {
+      localStorageError.value = true
+      return // Keep the last accepted source and working copy; never revive v1.
+    }
+    const parsed = parseStored(selectedRaw(source))
     if (parsed.error) {
       // Keep both the malformed disk data and the previous working copy.
       localStorageError.value = true
       return
     }
     entries.value = parsed.rows
-    storageBaseline = raw
+    sourceBaseline = source
     localStorageError.value = false
   }
   const storageWindow = typeof window === 'undefined' ? null : window
@@ -136,7 +171,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
 
   function commit(next: LocalWatchEntry[]) {
     if (localStorageError.value) throw new WatchMutationError('storage')
-    assertStorageBaseline()
+    const source = assertStorageBaseline()
     const serialized = JSON.stringify(next)
     // This observed-raw guard is not an atomic cross-tab transaction or Owner
     // revision. Native getItem + setItem cannot provide that stronger guarantee.
@@ -146,7 +181,8 @@ export const useWatchlistStore = defineStore('watchlist', () => {
       invalidateExternalState()
       throw new WatchMutationError('storage')
     }
-    storageBaseline = serialized
+    sourceBaseline = { ...source, sourceKey: LS, v2Raw: serialized }
+    observedV2 = true
     entries.value = next
     mutationGeneration++
   }
@@ -156,10 +192,10 @@ export const useWatchlistStore = defineStore('watchlist', () => {
   }
   function readOwnerSyncSnapshot(): OwnerSyncWatchSnapshot {
     if (localStorageError.value) throw new WatchMutationError('storage')
-    assertStorageBaseline()
+    const source = assertStorageBaseline()
     try {
       const memory = JSON.stringify(entries.value)
-      return Object.freeze({ raw: storageBaseline, memory, generation: mutationGeneration,
+      return Object.freeze({ raw: source.v2Raw, source: Object.freeze({ ...source }), memory, generation: mutationGeneration,
         entries: Object.freeze(clone(entries.value).map(entry => Object.freeze(entry))) })
     } catch { throw new WatchMutationError('invalid') }
   }
@@ -167,7 +203,8 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     if (localStorageError.value) throw new WatchMutationError('storage')
     assertStorageBaseline()
     try {
-      if (!snapshot || snapshot.raw !== storageBaseline || snapshot.generation !== mutationGeneration
+      if (!snapshot || snapshot.raw !== sourceBaseline?.v2Raw || !sameSource(snapshot.source, sourceBaseline)
+        || snapshot.generation !== mutationGeneration
         || snapshot.memory !== JSON.stringify(entries.value)
         || JSON.stringify(snapshot.entries) !== snapshot.memory) throw new WatchMutationError('conflict')
     } catch { throw new WatchMutationError('conflict') }
@@ -213,6 +250,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
       const success = await gist.pushEntries(snapshot)
       if (!success || !canSync() || consent !== getLegacySyncGeneration() || credential !== credentialGeneration
         || request !== requestGeneration || mutation !== mutationGeneration) return false
+      assertStorageBaseline()
       lastSync.value = gist.getSyncTime()
       return true
     } catch { return false }

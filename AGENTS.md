@@ -42,6 +42,7 @@ uvicorn main:app --reload --port 8000
 - 修改估值、回测、评分、收益口径时，必须补/改测试。
 - QDII/海外基金要区分「最新公布净值涨跌」和「下一净值估算」。
 - 海外估值必须先保存当时预测，再按同一 `target_nav_date` 的官方净值结算；禁止拿下一条净值顺延配对，样本不足 20 条不得自动晋级。
+- 海外精度新鲜度须绑定同code/model_version的有效账本记录；有样本用自身settled_at，零样本仅用自身observed_at，不借pipeline全局时钟、另基金/版本、registry候选训练时间或updated_at续期。缺失/无区/坏日期保持未知，96小时与5分钟未来偏差门槛不变。历史精度卡与估值附件复用同一判定，过期/未知指标必须明示历史用途；页面停留与visibility恢复须重核并清理时钟/请求。现仅observation-target-v2三轴账本，不把该合同泛化到其它同日估值；旧持久估值缓存/旧PWA仍需独立验收。
 - 数据新鲜度属于估值口径的一部分：严重过期时隐藏精确涨跌值并明确显示“数据过期”。
 - 温度统一表示拥挤与短期回撤风险，数值越高越热；分析术语统一使用估值分位、趋势状态、动量状态、数据覆盖率和证据强度。
 - 新计划遵循 `docs/NAMING-CONVENTIONS.md`：SemVer 用于发布、`Iteration N` 用于周期、`I{N}-{NN}` 用于工作项、`P0-P3` 只表示优先级；历史编号不重写。
@@ -57,7 +58,9 @@ uvicorn main:app --reload --port 8000
 - `stores/owner-workspace.ts` 是显式构造的本地候选事务基础，未接入真实 watchlist/UI。它与 outbox 共用 IDB，v1→v2 保留原 slot；业务写仅在空槽时同 strict 事务推进独立 localVersion、空槽协调 epoch 和回执，epoch/revision 均不是 HoldingVersion。非空槽不修改，unknown 只显式查原回执；回滚须当前完整 postimage/版本匹配。versionchange 与新 working_copy 的 strict 初始化是两次提交，中断后的坏 v2 固定拒绝、不自动重建。adoptLegacy 仅接受可信调用者提供的 seed 并保存 sourceKey/raw，不证明实际 LS 来源或 raw→entries 业务转换；启用前仍须导出、严格 legacy codec、实际 source/generation guard 及全部真实编辑的 IDB 权威切换，不能以这些存储测试称完整导入或云端闭环。
 - V8 Holding/Decision 同连接内核只接受调用者已开启的事务，不开连接、不提交/回滚/关闭；全部 ID/hash、引用、scope、未来时间与幂等守卫必须保留。应用生成使用同一事务保存 Holding、Decision 及其 scope；Evidence 仍先独立保存，不声称全链原子。该内部基础不是 Owner 权限或已确认 revision 证明；后续 Owner 任务仍须在同一事务核完整服务端组合来源与预期 revision，禁止把本机输入或 revision 冒充业务版本。
 - `tools/turso_scope_upgrade.py` 仅对显式、关闭的本地 SQLite 快照做有界 plan/rehearse；不连接 Turso、不读取凭据、不执行输入 DDL、不应用远端迁移。内存逻辑恢复不是远端恢复或正式发布资格，额外 operational 表须逐表固定合同审查，不以前缀豁免。
-- `tools/turso_projection_repair.py` 是独立、显式 SHA 绑定的本地修复演练，不放宽上述原迁移校验；文件访问前拒绝 UNC/device/相对路径，仅在固定 DDL 内存副本恢复 Evidence 两列恰 1 ULP 的有限 REAL 差异。完整 typed 差异、原 payload/ID/hash 和原始 schema8 独立恢复必须通过；原文件不写，摘要须承认 legacy rows 改变，所有远端/正式资格 false。`exact_real_binding` 仅供可信固定 SQL 值槽显式使用，只接受原生float/None并拒负零/非有限，不是默认 driver 修复或已接入运行时 writer；不得全文替换任意 SQL。
+- `tools/turso_projection_repair.py` 是独立、显式 SHA 绑定的本地修复演练，不放宽上述原迁移校验；文件访问前拒绝 UNC/device/相对路径，仅在固定 DDL 内存副本恢复 Evidence 两列恰 1 ULP 的有限 REAL 差异。完整 typed 差异、原 payload/ID/hash 和原始 schema8 独立恢复必须通过；原文件不写，摘要须承认 legacy rows 改变，所有远端/正式资格 false。`exact_real_binding` 仅供可信固定 SQL 值槽显式使用，只接受原生float/None并拒负零/非有限，不是默认 driver 修复；不得全文替换任意 SQL。
+- `database/v8_insert.py` 仅编译 `v8_repo.py` 的十个固定 INSERT，表/列/REAL 槽及 claim 六参数 literals 为闭集。原生 sqlite3.Connection 保留原参数对象，其余已有 SQLite 协议连接只在固定 REAL 槽使用整数精确表达式；不猜传输身份、不授予云能力。固定 V8 投影遵循既有 canonical_json 的数值零合同，仅原生 float 零投影为 +0.0，不改输入模型/payload/ID/hash；generic primitive 仍拒负零，非有限和其它类型仍拒绝。Evidence 与全部 health 在第一条 INSERT 前编译，原事务/幂等/引用/scope 守卫不变；FakeSession 测试不证明实际 Turso 写入或耐久。
+- watchlist 的 Owner snapshot 须绑定深冻结 sourceKey/v1Raw/v2Raw、当前内存及 generation；原 raw 仍仅指 v2。相关 storage event 即使原文已回到相同值也失效旧上下文，不宣称发现未观察 ABA 或实现原子 CAS。当前 store 曾观察/创建 v2 后，v2 删除须保留最后工作副本并 failclosed，不能复活旧 v1；首次启动未观察 v2 的历史 fallback 仍保留，因此不是跨重启防复活。Gist 后置来源校验不能撤回已发送 PATCH 或 helper 已写的旧同步元数据，更不能解除 local_pending。
 - `backend/database/turso_scope_packet.py` 仅将已验证的私有内存捕获编译为有界、不可变的迁移包，不提供 transport/apply。原始 DDL 只作前后像数据，执行 DDL 必须来自仓库固定模板；公开摘要保持闭集且六项远端/正式资格为 false。包体、语句参数与 artifact 含私人数据，不得日志化或上传 CI。摘要/seal 不是来源认证或写入授权；未来发送前须以外部原始 resource/plan/packet SHA 重编译核验，未知提交不得自动重试或回收回执。
 - `backend/database/turso_scope_response.py` 仅核验提供的响应字节与外部原始 SHA 重编译包的本地合同；acknowledged/session_closed 不是真实传输、提交或关闭证明。构造/getter 均须闭合身份/状态/权限关系，前后核对自身及 compiler 源码并保持总预算；未知或权限错误不重试，所有 remote/apply/restore/formal/retry 旗标均为 false。不得作为 sender、未知提交对账读回器或发布放行来源。
 - `backend/database/turso_scope_reconcile.py` 仅构建固定只读计划并核验提供的读回字节；matched 须完整后像和十列回执一致，missing 须完整原前像且保留槽位为空。二者均不认证来源，missing 不证明仍未提交/可回放；未知或已绑定权限错误停止，不换凭据、不重试。原 schema-8 捕获及外部 resource/plan/packet SHA 必须独立保留，remote/apply/restore/formal/retry 均 false；不得把纯本地合同核当真实 transport、远端对账或发布资格。
