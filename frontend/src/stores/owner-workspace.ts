@@ -1,190 +1,86 @@
-/** Local IDB authority. Cloud preparation is explicit; no implicit HTTP or credential IO. */
+/** Local IDB authority; v4 code loads explicitly before transactions. No implicit HTTP/credential IO. */
 import {
   canonicalOwnerCloudImportPlan, canonicalOwnerWorkspaceEntries,
   validateOwnerCloudImportPlan, validateOwnerWorkspaceEntries, validateOwnerWorkspaceLegacy, validateOwnerWorkspaceSnapshot,
-  OwnerCloudImportError,
-  type OwnerCloudImportPlan, type OwnerWorkspaceEntry, type OwnerWorkspaceLegacy, type OwnerWorkspaceSnapshot,
+  type OwnerWorkspaceEntry, type OwnerWorkspaceLegacy, type OwnerWorkspaceSnapshot,
 } from '@/utils/owner-cloud-import'
-import {
-  openOwnerSyncOutbox, ownerSyncOutboxStorage, isOwnerSyncOutboxDatabase,
-  OWNER_SYNC_OUTBOX_DB_PREFIX, OWNER_SYNC_OUTBOX_TIMEOUT_MS, OwnerSyncOutboxError,
-} from './ownerSyncOutbox'
+import { openOwnerSyncOutbox, ownerSyncOutboxStorage, isOwnerSyncOutboxDatabase,
+  OWNER_SYNC_OUTBOX_DB_PREFIX, OWNER_SYNC_OUTBOX_TIMEOUT_MS } from './ownerSyncOutbox'
 import { validateHolding, type HoldingInput } from '@/utils/holding-editor'
 import { normalizeOwnerSyncKey } from '@/utils/ownerSyncContract'
 import {
   validateOwnerWorkspaceLocalMetadata, emptyOwnerWorkspaceLocalMetadata, validateOwnerWorkspaceSourceArchive,
   decodeOwnerWorkspaceSourceArchive, buildOwnerLegacyWorkspaceBackup, buildOwnerWorkspaceBackup, validateOwnerWorkspaceBackup,
-  previewOwnerWorkspaceRestore, canonicalOwnerLocal, OWNER_WORKSPACE_MAX_ARCHIVES, OwnerWorkspaceBackupError,
-  type OwnerWorkspaceLocalMetadata, type OwnerWorkspaceSourceArchive, type OwnerWorkspaceBackup,
+  previewOwnerWorkspaceRestore, canonicalOwnerLocal, OWNER_WORKSPACE_MAX_ARCHIVES,
+  type OwnerWorkspaceLocalMetadata,
 } from '@/utils/owner-workspace-backup'
-import { buildOwnerSyncRequest, restoreOwnerSyncRequest, type BuiltOwnerSyncRequest } from '@/utils/ownerSyncContract'
-import { buildOwnerWorkspaceCloudLinkPreview, planOwnerWorkspaceCloudIntent, OwnerWorkspaceSyncError } from '@/utils/owner-workspace-sync'
-import { emptyOwnerWorkspaceSyncMetadata, validateOwnerWorkspaceSyncMetadata,
-  OwnerWorkspaceSyncMetadataError, type OwnerWorkspaceSyncMetadata } from '@/utils/owner-workspace-sync-metadata'
+import type { OwnerWorkspaceSyncMetadata } from '@/utils/owner-workspace-sync-metadata'
+import {
+  WORKING, RECEIPTS, METADATA, CURRENT, STORES, SYNC, SCHEMA, RECEIPT_SCHEMA, HASH, ID, MAX_RECEIPTS,
+  OwnerWorkspaceError, fail, code, closed, counter, increment, canonical, digest, assertGuard, localId,
+} from './owner-workspace-shared'
+import type {
+  OwnerWorkspaceGuard, OwnerWorkspaceErrorCode, OwnerWorkspaceImportRequest, OwnerWorkspaceRollbackRequest,
+  OwnerWorkspaceReceipt, OwnerWorkspaceLocalState, OwnerWorkspaceLocalCommand, OwnerWorkspaceAdoptLocalRequest,
+  OwnerWorkspaceEditLocalRequest, OwnerWorkspaceRestoreLocalRequest, OwnerWorkspaceSyncState,
+  OwnerWorkspaceLinkCloudRequest, OwnerWorkspacePrepareCloudRequest, OwnerWorkspaceCancelCloudRequest,
+  OwnerWorkspace, WorkingRow, StoredReceipt, SlotRow, Image, CloudWorkspaceHost,
+} from './owner-workspace-types'
+export type * from './owner-workspace-types'
+export { OwnerWorkspaceError } from './owner-workspace-shared'
+type SyncCodec = typeof import('@/utils/owner-workspace-sync-codec')
+type CloudCommands = typeof import('./owner-workspace-cloud')
+let syncCodecPromise: Promise<SyncCodec> | null = null, cloudCommandsPromise: Promise<CloudCommands> | null = null
+function loadSyncCodec(): Promise<SyncCodec> {
+  return syncCodecPromise ??= import('@/utils/owner-workspace-sync-codec').catch(() => fail('workspace_unavailable'))
+}
+function loadCloudCommands(): Promise<CloudCommands> {
+  return cloudCommandsPromise ??= import('./owner-workspace-cloud').catch(() => fail('workspace_unavailable'))
+}
+function waitForImport<T>(pending: Promise<T>, signal: AbortSignal, problem: () => OwnerWorkspaceErrorCode): Promise<T> {
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const finish = (value?: T, error?: unknown) => {
+      if (settled) return
+      settled = true; signal.removeEventListener('abort', abort)
+      if (error !== undefined) reject(error); else resolve(value!)
+    }
+    const abort = () => finish(undefined, new OwnerWorkspaceError(problem()))
+    signal.addEventListener('abort', abort, { once: true })
+    if (signal.aborted) { abort(); return }
+    pending.then(value => finish(value), error => finish(undefined, error))
+  })
+}
+/** No business state/cache is held here, only a fixed code-module promise. */
+function timedImport<T>(pending: Promise<T>): Promise<T> {
+  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), OWNER_SYNC_OUTBOX_TIMEOUT_MS)
+  return waitForImport(pending, controller.signal, () => 'workspace_timeout').finally(() => clearTimeout(timer))
+}
+async function stateCodec(value: unknown): Promise<SyncCodec | null> {
+  return value && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, 'sync')
+    ? timedImport(loadSyncCodec()) : null
+}
+type CloudBuilderName = 'buildOwnerWorkspaceLinkCloudRequest' | 'buildOwnerWorkspacePrepareCloudRequest' | 'buildOwnerWorkspaceCancelCloudRequest'
+function lazyBuild<T>(name: CloudBuilderName, target: string, input: unknown): Promise<T> {
+  return timedImport((async () => {
+    const [commands, codec] = await Promise.all([loadCloudCommands(), loadSyncCodec()])
+    const build = commands[name] as (target: string, input: unknown, validate: (value: unknown) => OwnerWorkspaceLocalState) => Promise<T>
+    return build(target, input, value => localState(value, target, codec))
+  })())
+}
+export async function buildOwnerWorkspaceLinkCloudRequest(target: string,
+  input: Omit<OwnerWorkspaceLinkCloudRequest, 'hash'>): Promise<OwnerWorkspaceLinkCloudRequest> {
+  return lazyBuild('buildOwnerWorkspaceLinkCloudRequest', target, input)
+}
+export async function buildOwnerWorkspacePrepareCloudRequest(target: string,
+  input: Pick<OwnerWorkspacePrepareCloudRequest, 'id' | 'expected'>): Promise<OwnerWorkspacePrepareCloudRequest> {
+  return lazyBuild('buildOwnerWorkspacePrepareCloudRequest', target, input)
+}
+export async function buildOwnerWorkspaceCancelCloudRequest(target: string,
+  input: Omit<OwnerWorkspaceCancelCloudRequest, 'hash'>): Promise<OwnerWorkspaceCancelCloudRequest> {
+  return lazyBuild('buildOwnerWorkspaceCancelCloudRequest', target, input)
+}
 
-export type { OwnerWorkspaceEntry, OwnerWorkspaceLegacy, OwnerWorkspaceSnapshot } from '@/utils/owner-cloud-import'
-const WORKING = 'working_copy', RECEIPTS = 'import_receipts', METADATA = 'local_metadata', CURRENT = 'current'
-const STORES = ['slot', WORKING, RECEIPTS, METADATA]
-const SYNC = 'sync_metadata'
-const SCHEMA = 'owner-workspace-1'
-const RECEIPT_SCHEMA = 'owner-workspace-receipt-1'
-const HASH = /^[0-9a-f]{64}(?![\s\S])/
-const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}(?![\s\S])/
-const MAX_RECEIPTS = 200
-
-export interface OwnerWorkspaceGuard {
-  readonly signal: AbortSignal
-  /** Must bind current consent, generation, full baseline and legacy raw source, as applicable. */
-  assertActive(): void
-}
-export type OwnerWorkspaceErrorCode = 'workspace_invalid_target' | 'workspace_invalid_database' | 'workspace_invalid_input'
-  | 'workspace_conflict' | 'workspace_pending' | 'workspace_idempotency_conflict' | 'workspace_capacity'
-  | 'workspace_version_exhausted' | 'workspace_blocked' | 'workspace_timeout' | 'workspace_unavailable'
-  | 'workspace_quota' | 'workspace_aborted' | 'workspace_closed' | 'workspace_context_changed' | 'workspace_noop'
-export class OwnerWorkspaceError extends Error {
-  constructor(readonly code: OwnerWorkspaceErrorCode) {
-    super('Owner workspace operation rejected')
-    this.name = 'OwnerWorkspaceError'
-  }
-}
-export interface OwnerWorkspaceImportRequest {
-  readonly id: string
-  readonly hash: string
-  readonly plan: OwnerCloudImportPlan
-  readonly expectedLocalVersion: number
-  readonly expectedOutboxVersion: number
-}
-export interface OwnerWorkspaceRollbackRequest {
-  readonly id: string
-  readonly hash: string
-  readonly importId: string
-  readonly importHash: string
-  readonly expectedSnapshot: OwnerWorkspaceSnapshot
-  readonly expectedOutboxVersion: number
-}
-export interface OwnerWorkspaceReceipt {
-  readonly id: string
-  readonly hash: string
-  readonly operation: 'import' | 'rollback'
-  readonly beforeLocalVersion: number
-  readonly localVersion: number
-  readonly outboxVersion: number
-  readonly preimageHash: string
-  readonly postimageHash: string
-  readonly rollbackOf: string | null
-  readonly rawReceipt: string
-}
-export interface OwnerWorkspaceLocalState {
-  readonly snapshot: OwnerWorkspaceSnapshot
-  readonly outbox: Readonly<{ version: number; entry: SlotRow['entry'] }>
-  readonly metadata: OwnerWorkspaceLocalMetadata
-  readonly receiptCount: number
-  /** Present only in physical v4, including the entire common base and epoch. */
-  readonly sync?: OwnerWorkspaceSyncMetadata
-}
-export type OwnerWorkspaceLocalCommand = Readonly<{ type: 'save'; input: HoldingInput; expectedEntry: OwnerWorkspaceEntry | null; confirmed: boolean }>
-  | Readonly<{ type: 'remove'; keys: readonly string[]; expectedEntries: readonly OwnerWorkspaceEntry[]; confirmed: boolean }>
-export interface OwnerWorkspaceAdoptLocalRequest {
-  readonly id: string; readonly hash: string; readonly expected: OwnerWorkspaceLocalState
-  readonly sourceArchive: OwnerWorkspaceSourceArchive; readonly backupSha256: string
-}
-export interface OwnerWorkspaceEditLocalRequest {
-  readonly id: string; readonly hash: string; readonly expected: OwnerWorkspaceLocalState; readonly command: OwnerWorkspaceLocalCommand
-}
-export interface OwnerWorkspaceRestoreLocalRequest {
-  readonly id: string; readonly hash: string; readonly expected: OwnerWorkspaceLocalState; readonly backup: OwnerWorkspaceBackup
-}
-export interface OwnerWorkspaceSyncState {
-  readonly local: OwnerWorkspaceLocalState
-  readonly sync: OwnerWorkspaceSyncMetadata
-}
-export interface OwnerWorkspaceLinkCloudRequest {
-  readonly id: string; readonly hash: string; readonly expected: OwnerWorkspaceSyncState
-  readonly base: OwnerWorkspaceSyncMetadata['base']
-}
-export interface OwnerWorkspacePrepareCloudRequest {
-  readonly id: string; readonly hash: string; readonly expected: OwnerWorkspaceSyncState
-  readonly packet: BuiltOwnerSyncRequest
-}
-export interface OwnerWorkspaceCancelCloudRequest {
-  readonly id: string; readonly hash: string; readonly expected: OwnerWorkspaceSyncState
-  readonly requestId: string; readonly requestHash: string
-}
-export interface OwnerWorkspace {
-  readonly targetFingerprint: string
-  read(guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceSnapshot>
-  readLocalState(guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceLocalState>
-  adoptLocal(request: OwnerWorkspaceAdoptLocalRequest, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceLocalState>
-  editLocal(request: OwnerWorkspaceEditLocalRequest, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceLocalState>
-  restoreLocal(request: OwnerWorkspaceRestoreLocalRequest, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceLocalState>
-  /** Explicit physical-v4 primitives only. No HTTP, implicit upgrade, or cloud confirmation. */
-  readSyncState(guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceSyncState>
-  linkCloudBase(request: OwnerWorkspaceLinkCloudRequest, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceSyncState>
-  prepareCloud(request: OwnerWorkspacePrepareCloudRequest, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceSyncState>
-  cancelPreparedCloud(request: OwnerWorkspaceCancelCloudRequest, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceSyncState>
-  syncReceipt(id: string, hash: string, guard: OwnerWorkspaceGuard): Promise<Readonly<{ state: 'unknown' }>
-    | Readonly<{ state: 'matched'; value: OwnerWorkspaceSyncState }>>
-  /** Only the latest local mutation receipt is retained. Unknown never permits automatic replay. */
-  localReceipt(id: string, hash: string, guard: OwnerWorkspaceGuard): Promise<Readonly<{ state: 'unknown' }>
-    | Readonly<{ state: 'matched'; value: OwnerWorkspaceLocalState }>>
-  /** Trusted-caller seed only: this primitive neither reads LS nor proves raw->entries business mapping. */
-  adoptLegacy(seed: { sourceKey: OwnerWorkspaceLegacy['sourceKey']; raw: string | null; entries: readonly OwnerWorkspaceEntry[] },
-    expectedLocalVersion: number, expectedOutboxVersion: number, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceSnapshot>
-  importCloud(request: OwnerWorkspaceImportRequest, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceReceipt>
-  rollbackImport(request: OwnerWorkspaceRollbackRequest, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceReceipt>
-  /** Missing receipt is unknown, never automatic retry, compensation or proof of rollback. */
-  receipt(id: string, hash: string, guard: OwnerWorkspaceGuard): Promise<Readonly<{ state: 'unknown' }>
-    | Readonly<{ state: 'matched'; receipt: OwnerWorkspaceReceipt }>>
-  close(): void
-}
-interface WorkingRow { schema: typeof SCHEMA; targetFingerprint: string; snapshot: OwnerWorkspaceSnapshot }
-interface StoredReceipt {
-  schema: typeof RECEIPT_SCHEMA
-  targetFingerprint: string
-  receipt: OwnerWorkspaceReceipt
-  before: OwnerWorkspaceSnapshot
-  after: OwnerWorkspaceSnapshot
-}
-type SlotRow = ReturnType<typeof ownerSyncOutboxStorage.rowShape>
-interface Image { slot: SlotRow; working: WorkingRow; metadata: OwnerWorkspaceLocalMetadata; sync: OwnerWorkspaceSyncMetadata | null;
-  receipt: StoredReceipt | null; original: StoredReceipt | null; receiptCount: number }
-function fail(code: OwnerWorkspaceErrorCode): never { throw new OwnerWorkspaceError(code) }
-function code(error: unknown, fallback: OwnerWorkspaceErrorCode = 'workspace_unavailable'): OwnerWorkspaceErrorCode {
-  if (error instanceof OwnerWorkspaceError) return error.code
-  if (error instanceof OwnerCloudImportError) return error.code === 'capacity_exceeded' ? 'workspace_capacity' : 'workspace_invalid_input'
-  if (error instanceof OwnerWorkspaceBackupError) return error.code === 'capacity_exceeded' ? 'workspace_capacity' : 'workspace_invalid_input'
-  if (error instanceof OwnerWorkspaceSyncMetadataError) return error.code === 'capacity_exceeded' ? 'workspace_capacity' : 'workspace_invalid_input'
-  if (error instanceof OwnerWorkspaceSyncError) return error.code === 'capacity_exceeded' ? 'workspace_capacity' : 'workspace_invalid_input'
-  if (error instanceof OwnerSyncOutboxError) return error.code === 'outbox_blocked' ? 'workspace_blocked'
-    : error.code === 'outbox_invalid_target' ? 'workspace_invalid_target' : 'workspace_invalid_database'
-  try { if ((error as { name?: string } | null)?.name === 'QuotaExceededError') return 'workspace_quota' } catch { /* fixed code */ }
-  return fallback
-}
-function closed(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
-  const prototype = Object.getPrototypeOf(value)
-  if (prototype !== Object.prototype && prototype !== null) return false
-  const descriptors = Object.getOwnPropertyDescriptors(value)
-  return Reflect.ownKeys(value).length === keys.length && keys.every(key => Object.prototype.hasOwnProperty.call(descriptors, key))
-    && Object.values(descriptors).every(item => item.enumerable && 'value' in item)
-}
-function counter(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0 || Object.is(value, -0)) fail('workspace_invalid_input')
-  return value
-}
-function increment(value: number): number {
-  if (value === Number.MAX_SAFE_INTEGER) fail('workspace_version_exhausted')
-  return value + 1
-}
-function canonical(value: unknown): string {
-  if (typeof value === 'number' && Object.is(value, -0)) return '-0'
-  if (Array.isArray(value)) return '[' + value.map(canonical).join(',') + ']'
-  if (value !== null && typeof value === 'object') {
-    const row = value as Record<string, unknown>
-    return '{' + Object.keys(row).sort().map(key => JSON.stringify(key) + ':' + canonical(row[key])).join(',') + '}'
-  }
-  return JSON.stringify(value)
-}
 function legacy(value: unknown): OwnerWorkspaceLegacy | null {
   try { return validateOwnerWorkspaceLegacy(value) } catch (error) { fail(code(error)) }
 }
@@ -224,24 +120,9 @@ function storedReceipt(value: unknown, target: string): StoredReceipt {
       receipt: Object.freeze({ ...body, rawReceipt: row.rawReceipt }), before, after })
   } catch { fail('workspace_invalid_database') }
 }
-async function digest(raw: string): Promise<string> {
-  try {
-    const result = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw))
-    return [...new Uint8Array(result)].map(item => item.toString(16).padStart(2, '0')).join('')
-  } catch { fail('workspace_unavailable') }
-}
 async function verifyReceipt(value: StoredReceipt): Promise<void> {
   if (await digest(canonical(value.before)) !== value.receipt.preimageHash
       || await digest(canonical(value.after)) !== value.receipt.postimageHash) fail('workspace_invalid_database')
-}
-function assertGuard(guard: OwnerWorkspaceGuard): void {
-  try {
-    if (!guard || !guard.signal || typeof guard.signal.aborted !== 'boolean' || guard.signal.aborted
-        || typeof guard.signal.addEventListener !== 'function' || typeof guard.signal.removeEventListener !== 'function'
-        || typeof guard.assertActive !== 'function') fail('workspace_context_changed')
-    guard.assertActive()
-    if (guard.signal.aborted) fail('workspace_context_changed')
-  } catch { fail('workspace_context_changed') }
 }
 function importEnvelope(target: string, request: Omit<OwnerWorkspaceImportRequest, 'hash'>): string {
   if (typeof request.id !== 'string' || !ID.test(request.id)) fail('workspace_invalid_input')
@@ -272,7 +153,7 @@ export async function buildOwnerWorkspaceRollbackRequest(target: string, input: 
   return Object.freeze({ ...copy, hash: await digest(rollbackEnvelope(target, copy)) })
 }
 
-function localState(value: unknown, target: string): OwnerWorkspaceLocalState {
+function localState(value: unknown, target: string, codec: SyncCodec | null = null): OwnerWorkspaceLocalState {
   const hasSync = !!value && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, 'sync')
   if (!closed(value, ['snapshot', 'outbox', 'metadata', 'receiptCount', ...(hasSync ? ['sync'] : [])])
     || !closed(value.outbox, ['version', 'entry'])) fail('workspace_invalid_input')
@@ -281,7 +162,8 @@ function localState(value: unknown, target: string): OwnerWorkspaceLocalState {
   const receiptCount = counter(value.receiptCount)
   if (receiptCount > MAX_RECEIPTS) fail('workspace_invalid_input')
   const metadata = validateOwnerWorkspaceLocalMetadata(value.metadata, copy)
-  const sync = hasSync ? validateOwnerWorkspaceSyncMetadata(value.sync, target, { snapshot: copy, metadata,
+  if (hasSync && !codec) fail('workspace_invalid_input')
+  const sync = hasSync ? codec!.validateOwnerWorkspaceSyncMetadata(value.sync, target, { snapshot: copy, metadata,
     outbox: { version: slot.version, entry: slot.entry } }) : null
   return Object.freeze({ snapshot: copy, outbox: Object.freeze({ version: slot.version, entry: slot.entry }),
     metadata, receiptCount, ...(sync ? { sync } : {}) })
@@ -310,95 +192,37 @@ function command(input: unknown): OwnerWorkspaceLocalCommand {
   }
   return fail('workspace_invalid_input')
 }
-function localId(target: string, id: string): void {
-  if (typeof target !== 'string' || !HASH.test(target)) fail('workspace_invalid_target')
-  if (typeof id !== 'string' || !ID.test(id)) fail('workspace_invalid_input')
-}
 export async function buildOwnerWorkspaceAdoptLocalRequest(target: string, input: Omit<OwnerWorkspaceAdoptLocalRequest, 'hash'>): Promise<OwnerWorkspaceAdoptLocalRequest> {
   if (!closed(input, ['id', 'expected', 'sourceArchive', 'backupSha256'])) fail('workspace_invalid_input')
   localId(target, input.id)
+  const codec = await stateCodec(input.expected)
   if (typeof input.backupSha256 !== 'string' || !HASH.test(input.backupSha256)) fail('workspace_invalid_input')
-  const copy = { id: input.id, expected: localState(input.expected, target), sourceArchive: validateOwnerWorkspaceSourceArchive(input.sourceArchive), backupSha256: input.backupSha256 }
+  const copy = { id: input.id, expected: localState(input.expected, target, codec), sourceArchive: validateOwnerWorkspaceSourceArchive(input.sourceArchive), backupSha256: input.backupSha256 }
   return Object.freeze({ ...copy, hash: await digest(canonical({ operation: 'local-adopt-1', target, ...copy })) })
 }
 export async function buildOwnerWorkspaceEditLocalRequest(target: string, input: Omit<OwnerWorkspaceEditLocalRequest, 'hash'>): Promise<OwnerWorkspaceEditLocalRequest> {
   if (!closed(input, ['id', 'expected', 'command'])) fail('workspace_invalid_input')
   localId(target, input.id)
-  const copy = { id: input.id, expected: localState(input.expected, target), command: command(input.command) }
+  const codec = await stateCodec(input.expected)
+  const copy = { id: input.id, expected: localState(input.expected, target, codec), command: command(input.command) }
   return Object.freeze({ ...copy, hash: await digest(canonical({ operation: 'local-edit-1', target, ...copy })) })
 }
 export async function buildOwnerWorkspaceRestoreLocalRequest(target: string, input: Omit<OwnerWorkspaceRestoreLocalRequest, 'hash'>): Promise<OwnerWorkspaceRestoreLocalRequest> {
   if (!closed(input, ['id', 'expected', 'backup'])) fail('workspace_invalid_input')
   localId(target, input.id)
-  const copy = { id: input.id, expected: localState(input.expected, target), backup: await validateOwnerWorkspaceBackup(input.backup) }
+  const codec = await stateCodec(input.expected)
+  const copy = { id: input.id, expected: localState(input.expected, target, codec), backup: await validateOwnerWorkspaceBackup(input.backup) }
   return Object.freeze({ ...copy, hash: await digest(canonical({ operation: 'local-restore-1', target, ...copy })) })
 }
 
-function syncState(input: unknown, target: string): OwnerWorkspaceSyncState {
-  if (!closed(input, ['local', 'sync'])) fail('workspace_invalid_input')
-  const local = localState(input.local, target)
-  const sync = validateOwnerWorkspaceSyncMetadata(input.sync, target, {
-    snapshot: local.snapshot, metadata: local.metadata, outbox: local.outbox,
-  })
-  if (!local.sync || canonical(local.sync) !== canonical(sync)) fail('workspace_invalid_input')
-  return Object.freeze({ local, sync })
-}
 function syncStateOf(image: Image): OwnerWorkspaceSyncState {
   if (!image.sync) fail('workspace_invalid_database')
   return Object.freeze({ local: stateOf(image), sync: image.sync })
 }
-export async function buildOwnerWorkspaceLinkCloudRequest(target: string,
-  input: Omit<OwnerWorkspaceLinkCloudRequest, 'hash'>): Promise<OwnerWorkspaceLinkCloudRequest> {
-  if (!closed(input, ['id', 'expected', 'base'])) fail('workspace_invalid_input')
-  localId(target, input.id)
-  const expected = syncState(input.expected, target)
-  if (expected.sync.base !== null || expected.sync.pending || expected.local.outbox.entry || !expected.local.metadata.adoption) fail('workspace_conflict')
-  const preview = buildOwnerWorkspaceCloudLinkPreview(input.base, expected.local.snapshot)
-  if (preview.issues.length) fail('workspace_conflict')
-  const copy = { id: input.id, expected, base: preview.base }
-  return Object.freeze({ ...copy, hash: await digest(canonical({ operation: 'cloud-link-1', target, ...copy })) })
-}
-export async function buildOwnerWorkspacePrepareCloudRequest(target: string,
-  input: Pick<OwnerWorkspacePrepareCloudRequest, 'id' | 'expected'>): Promise<OwnerWorkspacePrepareCloudRequest> {
-  if (!closed(input, ['id', 'expected'])) fail('workspace_invalid_input')
-  localId(target, input.id)
-  const expected = syncState(input.expected, target)
-  if (!expected.sync.base || expected.sync.pending || expected.local.outbox.entry || !expected.local.metadata.adoption) fail('workspace_conflict')
-  const intent = planOwnerWorkspaceCloudIntent(expected.sync.base, expected.local.snapshot)
-  if (intent.issues.length) fail('workspace_conflict')
-  if (!intent.operations.length) fail('workspace_noop')
-  let packet: BuiltOwnerSyncRequest
-  try {
-    const built = await buildOwnerSyncRequest({ request_id: input.id, expected_revision: expected.sync.base.pulledRevision,
-      operations: intent.operations })
-    // Bind the original wire DTO, not an in-memory duplicate whose signed
-    // numeric zero can differ after JSON restoration. B and L stay unchanged.
-    packet = await restoreOwnerSyncRequest(built.rawBody, built.requestHash)
-  } catch { return fail('workspace_invalid_input') }
-  const copy = { id: input.id, expected, packet }
-  return Object.freeze({ ...copy, hash: await digest(canonical({ operation: 'cloud-prepare-1', target, ...copy })) })
-}
-export async function buildOwnerWorkspaceCancelCloudRequest(target: string,
-  input: Omit<OwnerWorkspaceCancelCloudRequest, 'hash'>): Promise<OwnerWorkspaceCancelCloudRequest> {
-  if (!closed(input, ['id', 'expected', 'requestId', 'requestHash'])) fail('workspace_invalid_input')
-  localId(target, input.id); localId(target, input.requestId)
-  if (typeof input.requestHash !== 'string' || !HASH.test(input.requestHash) || input.id === input.requestId) fail('workspace_invalid_input')
-  const expected = syncState(input.expected, target)
-  const pending = expected.sync.pending
-  if (expected.local.outbox.entry?.state !== 'prepared' || !pending
-    || pending.requestId !== input.requestId || pending.requestHash !== input.requestHash) fail('workspace_pending')
-  const copy = { id: input.id, expected, requestId: input.requestId, requestHash: input.requestHash }
-  return Object.freeze({ ...copy, hash: await digest(canonical({ operation: 'cloud-cancel-1', target, ...copy })) })
-}
-
 // Excludes mutable delivery state, but binds every local row/archive/receipt
 // count and the exact complete common base. Hashes are not source authentication.
-function pendingPreimage(image: Image, epoch: number, preparedOutboxVersion: number): string {
-  return canonical({ target: image.sync?.targetFingerprint, snapshot: image.working.snapshot, metadata: image.metadata,
-    receiptCount: image.receiptCount, base: image.sync?.base, epoch, preparedOutboxVersion })
-}
-
-function makeWorkspace(db: IDBDatabase, target: string): OwnerWorkspace {
+function makeWorkspace(db: IDBDatabase, target: string, codec: SyncCodec | null = null): OwnerWorkspace {
+  if (db.version === 4 && !codec) fail('workspace_invalid_database')
   const storesForVersion = db.version === 4 ? [...STORES, SYNC] : STORES
   let closedHandle = false
   const inFlight = new Set<(value: OwnerWorkspaceErrorCode) => void>()
@@ -513,7 +337,7 @@ function makeWorkspace(db: IDBDatabase, target: string): OwnerWorkspace {
           if (db.version === 4 && requests.syncs.result !== 1) fail('workspace_invalid_database')
           let sync: OwnerWorkspaceSyncMetadata | null = null
           if (db.version === 4) {
-            try { sync = validateOwnerWorkspaceSyncMetadata(requests.sync.result, target, { snapshot: currentWorking.snapshot, metadata,
+            try { sync = codec!.validateOwnerWorkspaceSyncMetadata(requests.sync.result, target, { snapshot: currentWorking.snapshot, metadata,
               outbox: { version: slot.version, entry: slot.entry } }) }
             catch { fail('workspace_invalid_database') }
           }
@@ -535,21 +359,8 @@ function makeWorkspace(db: IDBDatabase, target: string): OwnerWorkspace {
   async function readImage(guard: OwnerWorkspaceGuard, id?: string, originalId?: string): Promise<Image> {
     const result = await image('readonly', guard, id, originalId)
     await ownerSyncOutboxStorage.validateEntry(result.slot.entry, 'outbox_invalid_database')
-    if (result.sync?.pending) {
-      try {
-        const pending = result.sync.pending
-        const packet = await restoreOwnerSyncRequest(pending.rawBody, pending.requestHash)
-        // Delivery-state transitions may advance the slot, not the preparation
-        // epoch. Recover the exact pre-prepare local envelope to verify the
-        // independently retained preparation hash as well as its data image.
-        const beforeSync = { ...result.sync, epoch: result.sync.epoch - 1, pending: null }
-        const beforeLocal = { ...stateOf(result), outbox: { version: pending.preparedOutboxVersion - 1, entry: null }, sync: beforeSync }
-        const expected = syncState({ local: beforeLocal, sync: beforeSync }, target)
-        if (packet.request.request_id !== pending.requestId || packet.request.expected_revision !== pending.baseRevision
-          || await digest(canonical({ operation: 'cloud-prepare-1', target, id: pending.requestId, expected, packet })) !== pending.preparationHash
-          || await digest(pendingPreimage(result, result.sync.epoch, pending.preparedOutboxVersion)) !== pending.preimageHash) fail('workspace_invalid_database')
-      } catch { fail('workspace_invalid_database') }
-    }
+    if (result.sync?.pending) await codec!.verifyPending(result, target, value => localState(value, target, codec))
+
     for (const receipt of [result.receipt, result.original]) if (receipt) await verifyReceipt(receipt)
     ensureOpen(); assertGuard(guard)
     return result
@@ -614,9 +425,6 @@ function makeWorkspace(db: IDBDatabase, target: string): OwnerWorkspace {
   function expectedImage(current: Image, expected: OwnerWorkspaceLocalState): void {
     if (canonical(stateOf(current)) !== canonical(expected)) fail('workspace_conflict')
   }
-  function expectedSyncImage(current: Image, expected: OwnerWorkspaceSyncState): void {
-    if (canonical(syncStateOf(current)) !== canonical(expected)) fail('workspace_conflict')
-  }
   function matchingLocal(image: Image, id: string, hash: string): boolean {
     const receipt = image.metadata.recentEdit
     if (receipt?.id !== id) return false
@@ -671,111 +479,40 @@ function makeWorkspace(db: IDBDatabase, target: string): OwnerWorkspace {
     }
     return { snapshot: snapshot({ ...before, localVersion: increment(before.localVersion), entries: list }), changedKeys }
   }
+  const cloudHost: CloudWorkspaceHost = {
+    target, readImage, toSyncState: syncStateOf,
+    validateLocalState: value => localState(value, target, codec),
+    assertActive(guard) { ensureOpen(); assertGuard(guard) },
+    async commitCloud(expected, baseline, post, mode, guard) {
+      if (!codec) fail('workspace_invalid_database')
+      ensureOpen(); assertGuard(guard)
+      const committed = await image('readwrite', guard, undefined, undefined,
+        (current, stores) => codec.commitCloudImage(target, current, baseline, expected, post, mode, stores))
+      ensureOpen(); assertGuard(guard); observe(committed)
+      return syncStateOf(committed)
+    },
+  }
+  function cloudCall<T>(name: 'linkCloudBase' | 'prepareCloud' | 'cancelPreparedCloud' | 'syncReceipt' | 'transitionCloudDelivery' | 'ackCloud',
+    args: unknown[], guard: OwnerWorkspaceGuard): Promise<T> {
+    return bounded(guard, async () => {
+      if (!codec) fail('workspace_invalid_database')
+      const commands = await loadCloudCommands()
+      ensureOpen(); assertGuard(guard)
+      const call = commands[name] as (...args: unknown[]) => Promise<T>
+      return call(cloudHost, ...args, guard)
+    })
+  }
   const api: OwnerWorkspace = {
     targetFingerprint: target,
     read(guard: OwnerWorkspaceGuard) { return bounded(guard, async () => (await readImage(guard)).working.snapshot) },
     readLocalState(guard) { return bounded(guard, async () => stateOf(await readImage(guard))) },
     readSyncState(guard) { return bounded(guard, async () => syncStateOf(await readImage(guard))) },
-    linkCloudBase(input, guard) { return bounded(guard, async () => {
-      if (!closed(input, ['id', 'hash', 'expected', 'base'])) fail('workspace_invalid_input')
-      const request = await buildOwnerWorkspaceLinkCloudRequest(target, { id: input.id, expected: input.expected, base: input.base })
-      if (request.hash !== input.hash) fail('workspace_invalid_input')
-      const baseline = await readImage(guard)
-      expectedSyncImage(baseline, request.expected)
-      const preview = buildOwnerWorkspaceCloudLinkPreview(request.base, baseline.working.snapshot)
-      if (preview.issues.length) fail('workspace_conflict')
-      const next = snapshot({ ...preview.snapshot, localVersion: increment(baseline.working.snapshot.localVersion) })
-      const outboxVersion = increment(baseline.slot.version), epoch = increment(baseline.sync!.epoch)
-      const metadata = validateOwnerWorkspaceLocalMetadata({ ...baseline.metadata,
-        displayTimes: [...baseline.metadata.displayTimes, ...preview.addedKeys.map(key => ({ key, updated_at: null }))],
-        recentEdit: { id: request.id, hash: request.hash, beforeLocalVersion: baseline.working.snapshot.localVersion,
-          localVersion: next.localVersion, outboxVersion } }, next)
-      // The unchanged watch/holding backup remains exportable; it deliberately
-      // excludes sync metadata, credentials, manual assets and pending packets.
-      await buildOwnerWorkspaceBackup({ snapshot: next, metadata })
-      const sync = validateOwnerWorkspaceSyncMetadata({ ...baseline.sync, epoch, base: preview.base,
-        recentReceipt: { id: request.id, hash: request.hash, operation: 'link', syncEpoch: epoch, outboxVersion,
-          localVersion: next.localVersion } }, target, { snapshot: next, metadata, outbox: { version: outboxVersion, entry: null } })
-      const committed = await image('readwrite', guard, undefined, undefined, (current, stores) => {
-        expectedSyncImage(current, request.expected)
-        writable(current, baseline, request.expected.local.snapshot.localVersion, request.expected.local.outbox.version)
-        const slot = advanceEmptySlot(current, stores), nextWorking = working({ schema: SCHEMA, targetFingerprint: target, snapshot: next }, target)
-        stores[WORKING].put(nextWorking, CURRENT); stores[METADATA].put(metadata, CURRENT); stores[SYNC].put(sync, CURRENT)
-        return { ...current, slot, working: nextWorking, metadata, sync }
-      })
-      ensureOpen(); assertGuard(guard); observe(committed)
-      return syncStateOf(committed)
-    }) },
-    prepareCloud(input, guard) { return bounded(guard, async () => {
-      if (!closed(input, ['id', 'hash', 'expected', 'packet'])
-        || !closed(input.packet, ['request', 'rawBody', 'requestHash', 'byteLength'])) fail('workspace_invalid_input')
-      const request = await buildOwnerWorkspacePrepareCloudRequest(target, { id: input.id, expected: input.expected })
-      let supplied: BuiltOwnerSyncRequest
-      try { supplied = await buildOwnerSyncRequest(input.packet.request) } catch { return fail('workspace_invalid_input') }
-      // Re-derive B->L, then bind original bytes. Never let the old candidate
-      // rebase an operation against a newer GET or repack this stored request.
-      if (request.hash !== input.hash || request.packet.rawBody !== input.packet.rawBody
-        || request.packet.requestHash !== input.packet.requestHash || request.packet.byteLength !== input.packet.byteLength
-        || supplied.rawBody !== request.packet.rawBody || supplied.requestHash !== request.packet.requestHash) fail('workspace_invalid_input')
-      const baseline = await readImage(guard)
-      expectedSyncImage(baseline, request.expected)
-      const adoption = baseline.metadata.adoption!
-      if (request.id === adoption.id) fail('workspace_idempotency_conflict')
-      const version = increment(baseline.slot.version), epoch = increment(baseline.sync!.epoch)
-      const slot: SlotRow = { resourceFingerprint: target, version,
-        entry: { schema: 'owner-sync-outbox-1', state: 'prepared', rawBody: request.packet.rawBody, requestHash: request.packet.requestHash } }
-      const sync = validateOwnerWorkspaceSyncMetadata({ ...baseline.sync, epoch,
-        pending: { requestId: request.id, requestHash: request.packet.requestHash, rawBody: request.packet.rawBody,
-          preparationHash: request.hash, preimageHash: await digest(pendingPreimage(baseline, epoch, version)),
-          adoptionId: adoption.id, adoptionHash: adoption.hash, localVersion: baseline.working.snapshot.localVersion,
-          preparedOutboxVersion: version, baseRevision: baseline.sync!.base!.pulledRevision } }, target,
-      { snapshot: baseline.working.snapshot, metadata: baseline.metadata, outbox: { version, entry: slot.entry } })
-      const committed = await image('readwrite', guard, undefined, undefined, (current, stores) => {
-        expectedSyncImage(current, request.expected)
-        writable(current, baseline, request.expected.local.snapshot.localVersion, request.expected.local.outbox.version)
-        stores.slot.put(slot, CURRENT); stores[SYNC].put(sync, CURRENT)
-        return { ...current, slot, sync }
-      })
-      ensureOpen(); assertGuard(guard); observe(committed)
-      return syncStateOf(committed)
-    }) },
-    cancelPreparedCloud(input, guard) { return bounded(guard, async () => {
-      if (!closed(input, ['id', 'hash', 'expected', 'requestId', 'requestHash'])) fail('workspace_invalid_input')
-      const request = await buildOwnerWorkspaceCancelCloudRequest(target, { id: input.id, expected: input.expected,
-        requestId: input.requestId, requestHash: input.requestHash })
-      if (request.hash !== input.hash) fail('workspace_invalid_input')
-      const baseline = await readImage(guard)
-      expectedSyncImage(baseline, request.expected)
-      const version = increment(baseline.slot.version), epoch = increment(baseline.sync!.epoch)
-      const slot: SlotRow = { resourceFingerprint: target, version, entry: null }
-      const sync = validateOwnerWorkspaceSyncMetadata({ ...baseline.sync, epoch, pending: null,
-        recentReceipt: { id: request.id, hash: request.hash, operation: 'cancel', syncEpoch: epoch,
-          outboxVersion: version, localVersion: baseline.working.snapshot.localVersion } }, target,
-      { snapshot: baseline.working.snapshot, metadata: baseline.metadata, outbox: { version, entry: slot.entry } })
-      const committed = await image('readwrite', guard, undefined, undefined, (current, stores) => {
-        expectedSyncImage(current, request.expected)
-        if (canonical(current) !== canonical(baseline)) fail('workspace_conflict')
-        stores.slot.put(slot, CURRENT); stores[SYNC].put(sync, CURRENT)
-        return { ...current, slot, sync }
-      })
-      ensureOpen(); assertGuard(guard); observe(committed)
-      return syncStateOf(committed)
-    }) },
-    syncReceipt(id, hash, guard) { return bounded(guard, async () => {
-      localId(target, id)
-      if (typeof hash !== 'string' || !HASH.test(hash)) fail('workspace_invalid_input')
-      const current = await readImage(guard), state = syncStateOf(current)
-      const pending = state.sync.pending, receipt = state.sync.recentReceipt
-      if (pending?.requestId === id) {
-        if (pending.preparationHash !== hash) fail('workspace_idempotency_conflict')
-        return Object.freeze({ state: 'matched' as const, value: state })
-      }
-      if (receipt?.id !== id) return Object.freeze({ state: 'unknown' as const })
-      if (receipt.hash !== hash) fail('workspace_idempotency_conflict')
-      if (receipt.syncEpoch !== state.sync.epoch || receipt.outboxVersion !== state.local.outbox.version
-        || receipt.localVersion !== state.local.snapshot.localVersion) return Object.freeze({ state: 'unknown' as const })
-      return Object.freeze({ state: 'matched' as const, value: state })
-    }) },
+    linkCloudBase(input, guard) { return cloudCall('linkCloudBase', [input], guard) },
+    prepareCloud(input, guard) { return cloudCall('prepareCloud', [input], guard) },
+    cancelPreparedCloud(input, guard) { return cloudCall('cancelPreparedCloud', [input], guard) },
+    syncReceipt(id, hash, guard) { return cloudCall('syncReceipt', [id, hash], guard) },
+    transitionCloudDelivery(input, guard) { return cloudCall('transitionCloudDelivery', [input], guard) },
+    ackCloud(input, guard) { return cloudCall('ackCloud', [input], guard) },
     adoptLocal(input, guard) { return bounded(guard, async () => {
       if (!closed(input, ['id', 'hash', 'expected', 'sourceArchive', 'backupSha256'])) fail('workspace_invalid_input')
       const request = await buildOwnerWorkspaceAdoptLocalRequest(target, { id: input.id, expected: input.expected,
@@ -1087,17 +824,24 @@ function openExistingWorkspace(factory: IDBFactory, target: string, signal: Abor
         db = request.result
         if (settled) { db.close(); return }
         if (![3, 4].includes(db.version) || !isOwnerSyncOutboxDatabase(db)) { finish('workspace_invalid_database'); return }
-        handle = makeWorkspace(db, target)
-        handle.readLocalState({ signal, assertActive() { if (signal.aborted) fail('workspace_timeout') } })
-          .then(() => finish(), error => finish(code(error)))
+        db.onversionchange = () => finish('workspace_closed')
+        db.onclose = () => finish('workspace_closed')
+        const ready = (codec: SyncCodec | null) => {
+          if (settled || signal.aborted) { db?.close(); return }
+          try {
+            handle = makeWorkspace(db!, target, codec)
+            handle.readLocalState({ signal, assertActive() { if (signal.aborted) fail('workspace_timeout') } })
+              .then(() => finish(), error => finish(code(error)))
+          } catch (error) { finish(code(error)) }
+        }
+        if (db.version === 4) loadSyncCodec().then(ready, () => finish('workspace_unavailable'))
+        else ready(null)
       }
     } catch (error) { finish(code(error)) }
   })
 }
 
-/** Explicit upgrade of the original adopted v3 target only. Versionchange and
- * strict initialization are separate commits: an interrupted v4 with no current
- * metadata fails closed on every normal open. There is no automatic repair. */
+/** Explicit v3->v4 upgrade; lazy code loading shares the original cancellation window. */
 export async function upgradeOwnerWorkspaceSync(factory: IDBFactory, target: string,
   expectedInput: OwnerWorkspaceLocalState, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspace> {
   localId(target, 'workspace-sync-upgrade')
@@ -1113,97 +857,13 @@ export async function upgradeOwnerWorkspaceSync(factory: IDBFactory, target: str
     if (timedOut) fail('workspace_timeout')
     assertGuard(guard)
   } }
+  const abortCode = (): OwnerWorkspaceErrorCode => timedOut ? 'workspace_timeout' : 'workspace_context_changed'
   try {
-    const existing = await openExistingWorkspace(factory, target, controller.signal)
-    try {
-      const current = await existing.readLocalState(activeGuard)
-      if (canonical(current) !== canonical(expected)) fail('workspace_conflict')
-    } finally { existing.close() }
-    const version = await strictProbe(factory, target, { ...expected.outbox, resourceFingerprint: target }, controller.signal)
-    if (version !== 3) fail('workspace_invalid_database')
+    const [commands, codec] = await waitForImport(Promise.all([loadCloudCommands(), loadSyncCodec()]), controller.signal, abortCode)
     assertGuard(activeGuard)
-    return await new Promise<OwnerWorkspace>((resolve, reject) => {
-      let db: IDBDatabase | undefined, tx: IDBTransaction | undefined, handle: OwnerWorkspace | undefined, settled = false
-      const finish = (problem?: OwnerWorkspaceErrorCode) => {
-        if (settled) return
-        if (!problem) { try { assertGuard(activeGuard) } catch (error) { problem = code(error) } }
-        settled = true; controller.signal.removeEventListener('abort', abort)
-        if (problem) {
-          try { tx?.abort() } catch { /* a completed versionchange remains visible */ }
-          handle?.close(); db?.close(); reject(new OwnerWorkspaceError(problem))
-        } else resolve(handle!)
-      }
-      const abort = () => finish(timedOut ? 'workspace_timeout' : 'workspace_context_changed')
-      controller.signal.addEventListener('abort', abort, { once: true })
-      if (controller.signal.aborted) { abort(); return }
-      const readExpected = (transaction: IDBTransaction, accept: () => void) => {
-        try {
-          assertGuard(activeGuard)
-          for (const name of STORES) {
-            const store = transaction.objectStore(name)
-            if (store.keyPath !== null || store.autoIncrement || store.indexNames.length) fail('workspace_invalid_database')
-          }
-          const stores = Object.fromEntries(STORES.map(name => [name, transaction.objectStore(name)]))
-          const reads = [stores.slot.get(CURRENT), stores.slot.count(), stores[WORKING].get(CURRENT), stores[WORKING].count(),
-            stores[METADATA].get(CURRENT), stores[METADATA].count(), stores[RECEIPTS].count()]
-          let remaining = reads.length
-          for (const read of reads) read.onsuccess = () => {
-            if (--remaining !== 0 || settled) return
-            try {
-              assertGuard(activeGuard)
-              if (reads[1].result !== 1 || reads[3].result !== 1 || reads[5].result !== 1) fail('workspace_invalid_database')
-              const state = working(reads[2].result, target).snapshot
-              const current = localState({ snapshot: state, metadata: checkedMetadata(reads[4].result, state),
-                outbox: (() => { const slot = ownerSyncOutboxStorage.rowShape(reads[0].result, target)
-                  return { version: slot.version, entry: slot.entry } })(), receiptCount: reads[6].result }, target)
-              if (canonical(current) !== canonical(expected)) fail('workspace_conflict')
-              accept()
-            } catch (error) { finish(code(error)) }
-          }
-        } catch (error) { finish(code(error)) }
-      }
-      try {
-        assertGuard(activeGuard)
-        const request = factory.open(OWNER_SYNC_OUTBOX_DB_PREFIX + target, 4)
-        request.onblocked = () => finish('workspace_blocked')
-        request.onerror = () => finish('workspace_invalid_database')
-        request.onupgradeneeded = event => {
-          db = request.result; tx = request.transaction!
-          if (settled || event.oldVersion !== 3 || db.objectStoreNames.length !== STORES.length
-            || !STORES.every(name => db!.objectStoreNames.contains(name))) {
-            try { tx.abort() } catch { /* rejection remains fixed */ }; finish('workspace_invalid_database'); return
-          }
-          readExpected(tx, () => { db!.createObjectStore(SYNC) })
-        }
-        request.onsuccess = () => {
-          db = request.result
-          if (settled) { db.close(); return }
-          db.onversionchange = () => finish('workspace_closed')
-          try {
-            assertGuard(activeGuard)
-            if (db.version !== 4 || !isOwnerSyncOutboxDatabase(db)) fail('workspace_invalid_database')
-            tx = db.transaction([...STORES, SYNC], 'readwrite', { durability: 'strict' })
-            if (tx.durability !== 'strict') fail('workspace_unavailable')
-            const store = tx.objectStore(SYNC)
-            if (store.keyPath !== null || store.autoIncrement || store.indexNames.length) fail('workspace_invalid_database')
-            // Do not repair another tab's already initialized/incomplete state.
-            const count = store.count()
-            count.onsuccess = () => {
-              if (settled) return
-              if (count.result !== 0) { finish('workspace_invalid_database'); return }
-              readExpected(tx!, () => store.add(emptyOwnerWorkspaceSyncMetadata(target), CURRENT))
-            }
-            tx.onerror = () => finish(code(tx?.error, 'workspace_aborted'))
-            tx.onabort = () => finish(code(tx?.error, 'workspace_aborted'))
-            tx.oncomplete = () => {
-              if (settled) { db?.close(); return }
-              handle = makeWorkspace(db!, target)
-              handle.readSyncState(activeGuard).then(() => finish(), error => finish(code(error)))
-            }
-          } catch (error) { finish(code(error)) }
-        }
-      } catch (error) { finish(code(error)) }
-    })
+    return await commands.upgradeOwnerWorkspaceSync({ target, openExistingWorkspace, strictProbe, working, checkedMetadata,
+      localState: value => localState(value, target, codec), makeWorkspace: db => makeWorkspace(db, target, codec) },
+      factory, expected, activeGuard, controller.signal, abortCode)
   } catch (error) { throw new OwnerWorkspaceError(timedOut ? 'workspace_timeout' : code(error)) }
   finally { clearTimeout(timer); guard.signal.removeEventListener('abort', revoked) }
 }

@@ -51,6 +51,16 @@ function mutate<T>(value: T, action: (copy: any) => void): T {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('pure guarded workspace sync metadata', () => {
+  it('retains explicit ack for the current empty epoch and for the next preparation', () => {
+    const ack = { ...linked(), epoch: 3, recentReceipt: { ...linked().recentReceipt!, operation: 'ack' as const,
+      syncEpoch: 3, outboxVersion: 5 } }
+    expect(validateOwnerWorkspaceSyncMetadata(ack, TARGET, context(ack))).toEqual(ack)
+    const next = { ...ack, epoch: 4, pending: prepared().pending }
+    expect(validateOwnerWorkspaceSyncMetadata(next, TARGET, context(next))).toEqual(next)
+    rejected({ ...ack, recentReceipt: { ...ack.recentReceipt, syncEpoch: 2 } })
+    rejected({ ...next, recentReceipt: { ...ack.recentReceipt, syncEpoch: 4 } })
+  })
+
   it('creates only a frozen unlinked epoch0 with no cloud, packet or receipt claims', () => {
     const empty = emptyOwnerWorkspaceSyncMetadata(TARGET)
     expect(empty).toEqual({ schema: 'owner-workspace-sync-1', targetFingerprint: TARGET,
@@ -164,7 +174,7 @@ describe('pure guarded workspace sync metadata', () => {
     ['base without receipt', (row: any) => { row.recentReceipt = null }],
     ['pending without base', (row: any) => { row.base = null }],
     ['future receipt epoch', (row: any) => { row.recentReceipt.syncEpoch = 3 }],
-    ['wrong receipt operation', (row: any) => { row.recentReceipt.operation = 'ack' }],
+    ['wrong receipt operation', (row: any) => { row.recentReceipt.operation = 'remote-confirmed' }],
     ['old cloud base', (row: any) => { row.pending.baseRevision = 2 }],
     ['extra private field', (row: any) => { row.ownerToken = 'synthetic-never-real' }],
     ['partial base', (row: any) => { row.base.records.pop() }],

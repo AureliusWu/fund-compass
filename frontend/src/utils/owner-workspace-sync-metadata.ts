@@ -11,7 +11,9 @@ import type { OwnerSyncOutboxSnapshot } from '@/stores/ownerSyncOutbox'
 import { OWNER_SYNC_MAX_BODY_BYTES } from '@/utils/ownerSyncContract'
 import { validateOwnerWorkspaceSnapshot, type OwnerWorkspaceSnapshot } from '@/utils/owner-cloud-import'
 import { validateOwnerWorkspaceLocalMetadata, type OwnerWorkspaceLocalMetadata } from '@/utils/owner-workspace-backup'
-import { validateOwnerWorkspaceCloudBaseline, OwnerWorkspaceSyncError } from '@/utils/owner-workspace-sync'
+import { validateOwnerWorkspaceCloudBaseline } from '@/utils/owner-workspace-sync-baseline'
+import { OwnerWorkspaceSyncError, OwnerWorkspaceSyncMetadataError } from '@/utils/owner-workspace-sync-errors'
+export { OwnerWorkspaceSyncMetadataError } from '@/utils/owner-workspace-sync-errors'
 
 export interface OwnerWorkspaceSyncPending {
   readonly requestId: string
@@ -28,7 +30,7 @@ export interface OwnerWorkspaceSyncPending {
 export interface OwnerWorkspaceSyncReceipt {
   readonly id: string
   readonly hash: string
-  readonly operation: 'link' | 'cancel'
+  readonly operation: 'link' | 'cancel' | 'ack'
   readonly syncEpoch: number
   readonly outboxVersion: number
   readonly localVersion: number
@@ -45,12 +47,6 @@ export interface OwnerWorkspaceSyncMetadataContext {
   readonly snapshot: OwnerWorkspaceSnapshot
   readonly metadata: OwnerWorkspaceLocalMetadata
   readonly outbox: OwnerSyncOutboxSnapshot
-}
-export class OwnerWorkspaceSyncMetadataError extends Error {
-  constructor(readonly code: 'invalid_metadata' | 'capacity_exceeded' = 'invalid_metadata') {
-    super('Owner workspace sync metadata rejected')
-    this.name = 'OwnerWorkspaceSyncMetadataError'
-  }
 }
 
 const HASH = /^[0-9a-f]{64}(?![\s\S])/
@@ -113,7 +109,7 @@ function pending(input: unknown, base: OwnerSyncBaseline | null): OwnerWorkspace
 function receipt(input: unknown, epoch: number): OwnerWorkspaceSyncReceipt | null {
   if (input === null) return null
   const row = closed(input, ['id', 'hash', 'operation', 'syncEpoch', 'outboxVersion', 'localVersion'])
-  if (row.operation !== 'link' && row.operation !== 'cancel') fail()
+  if (row.operation !== 'link' && row.operation !== 'cancel' && row.operation !== 'ack') fail()
   const result: OwnerWorkspaceSyncReceipt = { id: id(row.id), hash: hash(row.hash), operation: row.operation,
     syncEpoch: counter(row.syncEpoch, 1), outboxVersion: counter(row.outboxVersion, 1),
     localVersion: counter(row.localVersion, 1) }
@@ -145,11 +141,10 @@ export function validateOwnerWorkspaceSyncMetadata(input: unknown, target: strin
     const base = row.base === null ? null : validateOwnerWorkspaceCloudBaseline(row.base)
     const slotBinding = pending(row.pending, base), recentReceipt = receipt(row.recentReceipt, epoch)
     if (base === null ? epoch !== 0 || slotBinding !== null || recentReceipt !== null : epoch < 1 || recentReceipt === null) fail()
-    // Current explicit primitives are link -> prepare -> cancel. A prepare
-    // advances the epoch exactly once while retaining the last link/cancel
+    // An empty-slot link/cancel/ack receipt belongs to the current epoch.
+    // A prepare advances the epoch exactly once while retaining the last
     // receipt. Delivery may advance only the slot version, not this epoch.
-    // A future acknowledgement path must review/update this closed contract;
-    // do not pre-authorize unknown intermediate states here.
+    // receipt; delivery advances only the slot version, never this epoch.
     if (base !== null && recentReceipt !== null) {
       if (slotBinding === null ? recentReceipt.syncEpoch !== epoch
         : epoch < 2 || recentReceipt.syncEpoch !== epoch - 1

@@ -120,6 +120,24 @@ receipt 核对必须同时提供原始 request_id 和单一 `X-Owner-Sync-Reques
 
 操作协作总预算30秒、单次请求/响应16MiB、1024条应用语句、每语句900参数；opt-in HTTP限制拒绝重复JSON键、非法原生typed值、超量正文与矛盾批次确认，legacy默认行为不变。该本地故障模型与loopback实测不证明真实Turso的JSON1/TEMP能力、TLS、云耐久或恢复。真实云同步启用、受控迁移、远端独立恢复、多设备UI、Holding/Policy/Decision新版本链及正式证据仍未完成，不关闭整个I19-02或存储发布出口。
 
+### I19-02 显式 v4 受控协调与三方 ACK（未注册应用）
+
+新增 `createOwnerWorkspaceSync` 只接受显式 workspace、transport、session getter 与真实 authority guard；构造不读取业务存储、不联网，默认关闭。它不代替真实 UI/会话接线，也不开放 main Turso 工厂。当前 app 已接的本机权威编辑仍整体待云确认。
+
+共同基线 B 是已经应用的完整云像，不随新的观察 D 改写。准备原包只推导 B→L 意图；本机原包与 preparation envelope 先同库保存，再由受控 delivery 在 strict 事务推进 prepared→attempted。只有该提交成功、再次核同一前像/原 hash 与当前 guard 后才能发一次 POST；unknown 没有重发、换包或清包入口，重载只手动核原 id/hash 回执。已决槽位亦须当前 generation 的原始 write/receipt 响应核对，不从状态字符串推断成功。
+
+delivery 只推进 slot.version，不改 B、sync epoch、metadata、snapshot、preparedOutboxVersion 或任何原包字节。它不能用旧通用 outbox CAS 代替；v4 旧 CAS 仍全部拒绝。prepared 取消是独立显式操作，已 attempted/unknown/confirmed/conflict 均不能当取消处理。
+
+ACK 还须完整 since=0、固定 upper 的全部分页 D，不能把 POST 的部分 records 拼接旧 B 当 D。成功响应必须核原操作与实际值，409 的 key_digest 由原 key 的实际 SHA256 前16位核定；非本包/global 冲突摘要固定拒绝作为可自动消化的 ACK。三方预览明确区分200意图已消费与409仍保留 B→L 意图，核字段与生命周期 revision/ABA，真正冲突逐项显式选择本机或云端。账户 rename 为整组选择，不可一半删除一半创建；选择云端取消未上传 rename 仍保留新键本机 tombstone，不能因本次未上传而遗忘身份。缺 B 基金行或缺 D 已有行不推断为删除；manual_asset 完整保留 D，但不伪称已导入手工资产 UI。
+
+已解决 ACK 请求同时绑定输入与派生预览，重建时核原包 SHA、封闭原始回执、完整 D、head 下限及原请求 hash；它不是身份认证。最终同一 strict 事务核完整前像、推进独立 localVersion/slot.version/sync epoch，写 snapshot/metadata/完整 D、清原包并保存本机 ACK 回执。旧 adoption、原文/复导档案、原显示时间、0/null/负零与 tombstone 保留；新云键时间只能 null，不造现在时钟，不丢档案换容量成功。所有条目仍 local_pending，ACK revision 不授予 Holding/Policy/Decision 版本或当前行动资格。
+
+严格合法分页 upper 即使后续分页或本机 exact 检查失败，亦属于本会话已观察 head；经原包语义核验的成功200即使本机确认 CAS 失败亦先保留其 head。普通失败清私有预览而不洗掉该下限，低 head 的完整 D 拒绝；非法200（错 key/kind/deleted/值或缺 live 记录）不能抬高该下限。只有完整拉取及同一前像/当前 generation/guard 均通过才有 D，观察 head 不能冒充 D。
+
+一次受控操作原12秒总预算涵盖本机读取、懒加载/摘要、网络和最终写；撤销/会话变化使旧预览与迟到回调失效。link/prepare/cancel/ACK 的本机成功后若 hydrate/reset 丢响应，仍保存原本机 id/hash，只手动核本机回执，不重放；缺失仍 unknown。调用者确认请求在 canonical 前先拒 getter/隐藏/symbol/特殊 prototype/循环，不能先执行其属性再交下层校验。协调器释放不关闭共享应用 handle，Token 仍仅在已有 Owner 会话内存。
+
+v3 核心与云命令/完整 v4 codec 分离，相关 codec 先于事务加载；事务内只做已加载同步校验，懒加载失败/超时/撤销固定失败关闭。不把代码分块等同安装字节减少，PWA仍预缓存懒块。新增 ack receipt 不被旧 v4 codec 接纳；旧代码读到它会失败关闭，不是可直接降级的本机格式。真实 UI 启用前仍须保存升级前备份并验旧PWA/离线与同格式恢复，不得把源码回退冒充数据回滚。合成 fake-IDB/注入 transport 验证这些合同，不是 Chrome 落盘、旧 PWA 离线、多设备、实际云 schema/权限/耐久/独立恢复或 v9 发布证据。
+
 ### 历史捕获的私有 raw schema 合同
 
 捕获结果的 `_schema_inventory` 为可缺省的私有 keyword-only 字段，不增加公开 metadata。成功捕获才构造 frozen/slots/repr=False DTO：完整原始四列 tuple、SQL NULL、精确 UTF-8 字节与顺序、版本化 typed 摘要，以及同次 resource/image/rows 内部绑定。格式等价只用于支持合同准入，raw 摘要仍区分任何拼写/空白变化；不得执行输入 DDL、从重建参考库反推原始 DDL、或用泛用 `asdict` 公开私有内容。

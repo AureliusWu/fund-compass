@@ -1184,3 +1184,38 @@ prepare 在事务外重推真实 B→L、严格构造/恢复原包和摘要；�
 证据目录 `fc-i19-v4-build-20261022-cbbbaa07fe5b4ec889062d1c206bb60a`，helper SHA=`1563d3b27b9e194023c0e2cd496aaadb70876911ff1cd85aff678fdd3fa29528`；完整 frozen-file=`79c2e96e1242599c4d5b2b66779233c9ae14b6864ce88c59ea68f3cacb4a1cd2`，当前 frontend source aggregate=`b648db73f70c5d40a91e276db2ca4904846acdfd2da504dbf7a732fb8da14cac`；artifact-summary=`b5b29d8f1b64d46094892449ea473b277f40311a46a6e413b2823f9db3f42dcb`。根独立重哈希十份机械报告及 frozen pin 一致；原始 npm stdout/耗时来自直接工具记录，不伪造为封存原件或把报告 SHA 称来源认证。
 
 本片段仍只闭合本机共同基线/原子 prepare/cancel，不是整个 I19 出口。下一步是受控原包状态迁移/单次发送、当前会话核原回执、完整固定 upper 拉取与三方合入/ack 同库提交、真实 UI/同意接线；成功 POST 只有批次记录，不得拼接旧 B 冒充完整新基线。所有 IDB 当前仍云端未确认；I18 实际迁移/轮换/停写/耐久/恢复、I19业务版本/手工资产/历史/机器消费者、I20自然窗口和I21实机/PWA/性能尚未关闭。未读凭据输入、不绕 OAuth/浏览器限制、不改云套餐/秘密/部署/重启、main 或 Gist；应用保持8.0.0。
+
+### a888671 自然 CI 与 I19 受控发送/完整 D/同库 ACK（2026-10-22）
+
+上一片段已正常提交/推送 `a888671c93dca1237da81d899dccb68c9d8a764b`，tree=`ebfb0b26b4be82a18edf95e8fdb10d5227dd6cf5`。[CI39734032660](https://github.com/AureliusWu/fund-compass/actions/runs/39734032660) attempt1/run185 completed/success；实际 merge=`0611394f62d62be522fbe0eebc6985c2ff67fd64`，parents=f8d519a+a888671，先前已通过 GitHub commit API 核 tree 与 feature 一致。本轮再次核真实 jobs/logs：后端 **3689 passed/2 warnings/204.11s**、pip check clean；前端 **1596 passed/69文件**、type/build8.51s/PWA7/7；Worker **148 passed/4文件**、check/dry-run114.28KiB/gzip26.58，两端 install 和独立 audit 步骤成功。deploy/candidate_smoke/formal_smoke 全 skipped/steps=null，没有部署步骤执行。一次后端日志读取发生 connector transport send error，同一原 job 的正常只读重取成功；不将观察故障当 CI 失败、不换认证或重跑任务。远端 main 本轮仍 f8d519a，功能分支推送前仍 a888671。
+
+本片段新增实际工作区 `transitionCloudDelivery` / `ackCloud` 和显式 `createOwnerWorkspaceSync`，没有注册 app UI 或调用真实云库。协调器显式注入 workspace/transport/session/真实 authority guard，构造零 IO、默认关闭；只从持久 B→L 制包，actual strict attempted 提交之后才单次转交原包。新 outbox adapter 不接受 null/new prepared/unknown→attempted，不暴露 candidate 的 prepare、clear 或 resendUnknown；所有 unknown 保留原字节，仅手动核回执/导出。重新载入已决槽位仍需当前 generation 的原始匹配回执，而非状态字符串。delivery 只改 slot/version，sync/B/preparation envelope/epoch/metadata/working copy 均不改，原恢复校验继续可重开。
+
+候选新增完整 since=0 拉取、原 id/hash/generation 绑定结果和已完成 ACK 后的只读内存复位。200 的批次记录不拼旧 B；完整 D 必须走实际固定 upper 全分页，并核当前完整本机前像。纯三方 planner 处理200已消费意图、409未消费意图、字段/lifecycle ABA、真实 key SHA256前16位摘要、整组 rename 和显式 local/cloud 选择；未决不给 snapshot，非法不给 D。完整 manual 留 D，不冒称手工资产 UI 已迁移；0/null/原负零与原时间保留，新云键只能 null 时间。取消未上传 rename 保留新键本机 tombstone，后续没有上传意图。审查中曾假定所有云 tombstone 不可恢复，核实际 `_plan`、`_stamp` 与后端 `test_delete_record_level_conflict_tombstone_and_explicit_fresh_revive` 后撤回该假定：服务端合法 fresh 全输入恢复仍允许，新增200/409正向回归要求 ACK 预览明确显示恢复与新值，不引入一律拒绝合法 D 的新政策。
+
+ACK 请求绑定原始响应/原包/完整 D/派生预览 hash，重建核封闭 DTO 与实际 SHA；同库 strict 事务最终核完整前像，snapshot/metadata/完整 D/空 outbox/本机 ack receipt 一起提交，独立 localVersion、slot.version、sync epoch 各推进。adoption、所有原文/复导档案与显示时间不丢，先验原24MiB备份容量。所有条目仍 local_pending；成功 ACK 不授予云业务确认、Holding/Policy/Decision 版本或当前行动资格。
+
+独立审查真实红/绿关闭：ACK 重建外壳可替换（初141项139P/2F，现冻结并复用一次派生预览）；普通错误清掉已观察 head；完整 GET 已读完但本机前像竞争失败、首个合法分页后第二页500均丢 head（review初4项2P/2F）；合法 write200/receipt200 后本机 confirmed CAS 失败丢 head（扩11项9P/2F）。现严格合法分页立即保留观察 upper，经原包 key/kind/deleted/实际 changes 核验的成功200在 CAS 前保留 head，根在同 generation/epoch 失败清视图前保留下限；只观察 head 不授予完整 D。四种结构合法但原包语义错误的200反向控制不抬 head。候选另补三条独立回归。preview 确认入口在 canonical 前先核原生枚举 data descriptors，不执行 getter；本机成功后 hydrate/reset 丢响应也保留原本机 id/hash，只手动核本机回执，不重放。原12秒协作总预算覆盖加载/本机/网络等待与迟到守卫，不声称能硬终止主线程同步校验。
+
+最终普通直接 `npm run test` **1917 passed/75文件/6.06s**，`npm run type-check` exit0/9.44s；不是先前 WIP 的1889/1915结果。包括纯 ACK61、delivery150、候选59、真实 fake-IDB 原子方法31/懒加载10、真实工作区协调器35、独立审查11等；相关既有实际 watchlist/locator/SFC 旅程仍在全量中。测试真实采用/升级/link/prepare/delivery/ACK、两 handle 竞争、put后abort/配额/严格事务、跨标签替包、8秒本机预检+网络总12秒撤销和迟到、本机成功后丢响应手核；fixture 使用注入 fake-IDB/transport，未接 Chrome/真实下载/云库。Worker普通直接 test **148 passed/4文件/4.96s**、check exit0。两端普通独立官方 registry audit（含dev，零自动重试/20秒请求超时）均0漏洞/exit0，锁未改；Wrangler 内嵌风险的正式 deploy 固定阻断仍保留。
+
+#### 同机五样本：单块、完整静态闭包与安装制品分别核对
+
+复用上一轮 a51940d 的已保留 Git archive 与同 node_modules junction，先核原 archive/旧 setup/frozen SHA 和基线 source pin 未漂移、package/lock normalized-LF 与 JSON语义同时一致。本轮独立冻结最终全部 frontend 输入，按 A/B/B/A/A/B/B/A/A/B 十次普通直接 `npm run build`，每次 exit0/PWA7/7；统计脚本只读源/产物并机械新写报告，不启动 npm/子进程、联网、安装、杀进程或覆盖旧证据。源与依赖前后 pin 相同，每侧五份完整产物逐字稳定、无map；实际 TS AST 核静态 import/export-from 闭包、literal动态引用和Vite preload引用，非文字猜 chunk 闭包，未解析引用数0。
+
+| 本机/制品指标 | A：a51940d | B：当前最终源码 | 结论 |
+| --- | ---: | ---: | --- |
+| Vite秒，p50/p95 nearest-rank，n=5 | 7.12 / 7.95 | 7.64 / 7.75 | median +7.30%，不是用户冷热时延 |
+| 工具等待完整命令秒，p50/p95 | 11.810 / 12.597 | 11.769 / 12.301 | 非实际网络/浏览器测量 |
+| 全JS+CSS raw/gzip9字节，含SW/不含data/map | 1,489,486 / 524,443 | 1,536,895 / 538,942 | gzip +2.76% |
+| workspace自身 raw/gzip9 | 27,552 / 7,787 | 33,365 / 9,487 | 原局部20%线 **+21.83% FAIL** |
+| workspace实际完整静态JS闭包 raw/gzip9 | 323,571 / 116,409 | 329,924 / 118,289 | gzip +1.61%，分别5文件 |
+| WatchlistPage自身 raw/gzip9 | 72,809 / 25,869 | 72,809 / 25,867 | 本片段不增，不抹掉对52c3013旧局部FAIL |
+| 实际precache URL对应制品 raw/gzip9 | 999,202 / 400,938 | 1,046,480 / 415,418 | gzip +3.61%，不是首次HTTP传输 |
+| precache与SW/registrar/Workbox文件并集 raw/gzip9 | 1,027,066 / 410,446 | 1,074,475 / 424,946 | gzip +3.53%，非安装实测 |
+
+相对上一提交 a888671 的 workspace单块12785gzip9，现9487为 **-25.80%**，但不能称已恢复原预算。现静态闭包精确为 core9487、bootstrap index96233、backup5243、contract4635、outbox2691；cloud命令9080和v4 codec3299为实际动态边界、不在该闭包中。Workbox仍预缓存这两块（71 URL，基线69），不声称减少安装网络。PWA7/7及所有HTML/manifest/CSS/字面量JS/precache路径与非null MD5校验是制品证据，不是实际旧PWA升级或离线打开v4。ECharts532397B低于既有600kB告警线，ownerSession静态/动态重复提示仍保留。宿主缓存/背景负载、EOL与checkout路径未完全控制；完整静态闭包小增长不能掩盖单块FAIL，I21仍开放。
+
+新证据目录 `fc-i19-managed-build-20261022-c38a3796219c4b0589d9c19a39f237cd`，helper=`653f5b7cc792c72cb72ba200790439e35c1ddcaf8487fe6f4a219954dbfad15c`；frozen文件=`e2a624aeece9458041ca51a83b0c405576ec2128f065a0e152f200faa58aff69`，current frontend source aggregate=`2d4a3e4bde569c80f80233e562f5b735ae7e883a01aeddae7c8654151af890a9`；summary=`a952fcdd2009ce02355bb68cd9840831253a7de9c170639b23ed5c70200955e6`。根独立重核十份报告 SHA 一致；原npm stdout/exit/耗时来自正常工具调用，不宣称另有封存日志或SHA来源认证。
+
+下一段继续真实 UI/会话同意与v4显式升级/故障恢复接线，以及I19-04云 revision→Holding/Policy/Decision全链；还需手工资产/历史/机器消费者迁移、真实多设备。新 ack receipt 会被旧 v4 codec 拒绝，源码回退不是已 ACK 本机数据的降级迁移；真实启用前必须保存升级前备份并验证同格式恢复、旧PWA/离线，不能据本轮未启用即略过该门禁。I18实际writer停写排空、新保护备份、Free配额/凭据轮换、provider能力/容量、受控迁移、应用写入→Render重启读回及独立远端恢复仍缺；I20自然窗口与I21旧PWA/实机/性能亦未关闭。本轮未读凭据输入、不绕过此前OAuth/浏览器/PR写403边界、不改云套餐/秘密/部署/重启/main/Gist，应用保持8.0.0；当前功能分支验证与计划v9正式发布严格分开。

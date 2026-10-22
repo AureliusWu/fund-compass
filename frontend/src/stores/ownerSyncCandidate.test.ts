@@ -63,6 +63,318 @@ async function replacedPreparedSlot() {
   return { first, second, other: await second.outbox.read() }
 }
 
+async function trackedFixture() {
+  const base = await fixture()
+  let session = { authenticated: true, generation: 1 }
+  const storage: OwnerSyncOutbox = {
+    targetFingerprint: TARGET,
+    read: vi.fn(() => base.outbox.read()),
+    compareAndSwap: vi.fn((version, next) => base.outbox.compareAndSwap(version, next)),
+    close: () => base.outbox.close(),
+  }
+  const candidate = createOwnerSyncCandidate({ outbox: storage, transport: base.transport, session: () => session })
+  return { ...base, candidate, storage,
+    setSession: (next: typeof session) => { session = next } }
+}
+async function trackedPrepared() {
+  const value = await trackedFixture()
+  value.candidate.setCloudConsent(true)
+  await value.candidate.pullBaseline()
+  await value.candidate.prepare('synthetic-managed-0001', [DRAFT])
+  return value
+}
+async function resolvedManaged() {
+  const value = await trackedPrepared()
+  value.transport.write.mockImplementation(async original => success(original, 4))
+  await value.candidate.sendPrepared()
+  return value
+}
+
+describe('managed candidate full pull, bound observations and memory-only reset', () => {
+  it.each(['write', 'receipt'] as const)('retains a matched %s head before a failed confirmed CAS', async source => {
+    const f = await trackedPrepared()
+    const original = await buildOwnerSyncRequest(JSON.parse((await f.outbox.read()).entry!.rawBody))
+    if (source === 'receipt') {
+      f.transport.write.mockRejectedValueOnce(new Error('synthetic response lost'))
+      await f.candidate.sendPrepared()
+      const response = success(original, 10)
+      f.transport.receipt.mockResolvedValueOnce({ status: 200, rawBody: JSON.stringify({
+        state: 'matched', status: 200, result: JSON.parse(response.rawBody),
+      }) })
+    } else f.transport.write.mockResolvedValueOnce(success(original, 10))
+    vi.spyOn(f.storage, 'compareAndSwap').mockImplementation(async (version, next) => {
+      if (next?.state === 'confirmed') throw new Error('synthetic local confirmation CAS failure')
+      return f.outbox.compareAndSwap(version, next)
+    })
+    if (source === 'write') await f.candidate.sendPrepared()
+    else await f.candidate.reconcilePending()
+    expect(f.candidate.status()).toMatchObject({ state: 'unknown', latestObservedHead: 10, baselineReady: false })
+    expect(f.candidate.getBoundResult()).toBeNull()
+    f.transport.changes.mockResolvedValueOnce(page([record(DRAFT.key, 9)], 9))
+    await expect(f.candidate.pullCompleteBaseline()).rejects.toMatchObject({ code: 'sync_unavailable' })
+    expect(f.candidate.status().latestObservedHead).toBe(10)
+    expect(f.candidate.getBaseline()).toBeNull()
+    expect(f.transport.write).toHaveBeenCalledTimes(1)
+  })
+
+  it('retains a parsed partial-page upper when a later page fails without inventing a complete baseline', async () => {
+    const f = await trackedFixture()
+    f.candidate.setCloudConsent(true)
+    const rows = Array.from({ length: 200 }, (_, index) => record('asset:partial-' + String(index).padStart(3, '0'), 10))
+    f.transport.changes.mockResolvedValueOnce(page(rows, 10, [10, rows[199]!.key]))
+      .mockResolvedValueOnce({ status: 500, rawBody: '{}' })
+    await expect(f.candidate.pullCompleteBaseline()).rejects.toMatchObject({ code: 'sync_unavailable' })
+    expect(f.candidate.status()).toMatchObject({ latestObservedHead: 10, baselineReady: false, lastCompletePulledRevision: null })
+    f.transport.changes.mockResolvedValueOnce(page([record(DRAFT.key, 9)], 9))
+    await expect(f.candidate.pullCompleteBaseline()).rejects.toMatchObject({ code: 'sync_unavailable' })
+    expect(f.candidate.status().latestObservedHead).toBe(10)
+    expect(f.storage.compareAndSwap).not.toHaveBeenCalled()
+  })
+
+  it('keeps incremental pull behavior while full D always starts at0 and replaces its complete synthetic image', async () => {
+    const f = await trackedFixture()
+    f.candidate.setCloudConsent(true)
+    f.transport.changes.mockResolvedValueOnce(page([record('asset:synthetic-old', 2)], 2))
+    await f.candidate.pullBaseline()
+    f.transport.changes.mockResolvedValueOnce(page([record('asset:synthetic-new', 3)], 3))
+    await f.candidate.pullBaseline()
+    expect(f.transport.changes.mock.calls[1][0]).toEqual({ sinceRevision: 2, limit: 200 })
+    expect(f.candidate.getBaseline()!.records).toHaveLength(2)
+    f.transport.changes.mockResolvedValueOnce(page([record('asset:synthetic-new', 4)], 4))
+    await f.candidate.pullCompleteBaseline()
+    expect(f.transport.changes.mock.calls[2][0]).toEqual({ sinceRevision: 0, limit: 200 })
+    expect(f.candidate.getBaseline()).toEqual({ pulledRevision: 4, records: [record('asset:synthetic-new', 4)] })
+    expect(f.storage.compareAndSwap).not.toHaveBeenCalled()
+    expect(f.transport.write).not.toHaveBeenCalled()
+  })
+
+  it('pins one upper across all full-D pages without inheriting the old checkpoint cursor', async () => {
+    const f = await trackedFixture()
+    f.candidate.setCloudConsent(true)
+    f.transport.changes.mockResolvedValueOnce(page([record('asset:synthetic-old', 1)], 1))
+    await f.candidate.pullBaseline()
+    const first = Array.from({ length: 200 }, (_, index) => record('asset:synthetic-' + String(index).padStart(3, '0'), 2))
+    const cursor = [2, first.at(-1)!.key] as const
+    const final = record('asset:synthetic-final', 3)
+    f.transport.changes.mockResolvedValueOnce(page(first, 3, cursor)).mockResolvedValueOnce(page([final], 3))
+    await f.candidate.pullCompleteBaseline()
+    expect(f.transport.changes.mock.calls.slice(1).map(call => call[0])).toEqual([
+      { sinceRevision: 0, limit: 200 }, { sinceRevision: 0, upperRevision: 3, cursor, limit: 200 },
+    ])
+    expect(f.candidate.getBaseline()!.records).toEqual([...first, final])
+  })
+
+  it('publishes the actual original packet identity, current generation and deeply immutable result', async () => {
+    const f = await resolvedManaged(), original = f.transport.write.mock.calls[0][0]
+    const bound = f.candidate.getBoundResult()!
+    expect(bound).toEqual({ requestId: original.request.request_id, requestHash: original.requestHash,
+      generation: 1, result: f.candidate.getLastResult() })
+    expect(Object.isFrozen(bound)).toBe(true)
+    expect(Object.isFrozen(bound.result)).toBe(true)
+    expect(Object.isFrozen(bound.result.result)).toBe(true)
+    expect(Reflect.set(bound, 'requestHash', 'f'.repeat(64))).toBe(false)
+    expect(Reflect.set(bound.result, 'kind', 'conflict')).toBe(false)
+    f.setSession({ authenticated: true, generation: 2 })
+    expect(f.candidate.getBoundResult()).toBeNull()
+    expect(f.candidate.getLastResult()).toBeNull()
+  })
+
+  it.each(['success', 'conflict'] as const)('freezes the plain outer receipt-derived %s wrapper and clears its binding on hydrate/revoke', async outcome => {
+    const f = await trackedPrepared()
+    f.transport.write.mockRejectedValueOnce(new Error('synthetic unknown'))
+    await f.candidate.sendPrepared()
+    const raw = (await f.outbox.read()).entry!, original = await buildOwnerSyncRequest(JSON.parse(raw.rawBody))
+    const response = outcome === 'success' ? success(original, 4) : conflict()
+    f.transport.receipt.mockResolvedValueOnce({ status: 200,
+      rawBody: JSON.stringify({ state: 'matched', status: response.status, result: JSON.parse(response.rawBody) }) })
+    await f.candidate.reconcilePending()
+    expect(f.candidate.getBoundResult()).toMatchObject({ requestId: original.request.request_id,
+      requestHash: original.requestHash, generation: 1, result: { kind: outcome } })
+    const result = f.candidate.getLastResult()!
+    expect(Object.isFrozen(result)).toBe(true)
+    expect(Reflect.set(result, 'kind', 'failure')).toBe(false)
+    await f.candidate.hydratePending()
+    expect(f.candidate.getBoundResult()).toBeNull()
+    expect(f.candidate.getLastResult()).toBeNull()
+    await expect(f.candidate.resetAfterManagedAcknowledgement(raw.requestHash)).rejects.toMatchObject({ code: 'sync_invalid_transition' })
+    f.candidate.setCloudConsent(false)
+    expect(f.candidate.getBoundResult()).toBeNull()
+  })
+
+  it('keeps the exact bound result and original durable slot across a complete D pull', async () => {
+    const f = await resolvedManaged(), before = await f.outbox.read(), bound = f.candidate.getBoundResult()
+    vi.mocked(f.storage.compareAndSwap).mockClear()
+    f.transport.changes.mockResolvedValueOnce(page([record(DRAFT.key, 5)], 5))
+    await f.candidate.pullCompleteBaseline()
+    expect(f.candidate.getBoundResult()).toBe(bound)
+    expect(f.candidate.getLastResult()).toBe(bound!.result)
+    expect(f.candidate.status()).toMatchObject({ latestObservedHead: 5, lastCompletePulledRevision: 5, baselineReady: true })
+    expect(await f.outbox.read()).toEqual(before)
+    expect(f.storage.compareAndSwap).not.toHaveBeenCalled()
+    expect(f.transport.write).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['low-head', 'bad-upper', 'malformed', 'http-error'] as const)('retains original result/slot on failed complete D: %s', async fault => {
+    const f = await resolvedManaged(), before = await f.outbox.read(), bound = f.candidate.getBoundResult()
+    const response = fault === 'low-head' ? page([record(DRAFT.key, 3)], 3)
+      : fault === 'bad-upper' ? page([record(DRAFT.key, 5)], 3)
+        : fault === 'malformed' ? { status: 200, rawBody: '{"upper_revision":4,"upper_revision":4}' }
+          : { status: 503, rawBody: 'synthetic unavailable' }
+    f.transport.changes.mockResolvedValueOnce(response)
+    vi.mocked(f.storage.compareAndSwap).mockClear()
+    await expect(f.candidate.pullCompleteBaseline()).rejects.toMatchObject({ code: 'sync_unavailable' })
+    expect(f.candidate.getBaseline()).toBeNull()
+    expect(f.candidate.getBoundResult()).toBe(bound)
+    expect(f.candidate.status()).toMatchObject({ latestObservedHead: 4, baselineReady: false })
+    expect(await f.outbox.read()).toEqual(before)
+    expect(f.storage.compareAndSwap).not.toHaveBeenCalled()
+    expect(f.transport.write).toHaveBeenCalledTimes(1)
+  })
+
+  it('times out the whole full pull while retaining original result and blocking any late next page', async () => {
+    const f = await resolvedManaged(), before = await f.outbox.read(), bound = f.candidate.getBoundResult()
+    let finish!: (response: ReturnType<typeof page>) => void
+    f.transport.changes.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const count = f.transport.changes.mock.calls.length
+    vi.mocked(f.storage.compareAndSwap).mockClear()
+    vi.useFakeTimers()
+    const pending = f.candidate.pullCompleteBaseline()
+    const rejected = expect(pending).rejects.toMatchObject({ code: 'sync_unavailable' })
+    await vi.advanceTimersByTimeAsync(12_001)
+    await rejected
+    expect(f.candidate.getBoundResult()).toBe(bound)
+    finish(page([record(DRAFT.key, 5)], 5, [5, DRAFT.key]))
+    await vi.advanceTimersByTimeAsync(1)
+    expect(f.transport.changes).toHaveBeenCalledTimes(count + 1)
+    expect(f.storage.compareAndSwap).not.toHaveBeenCalled()
+    expect(f.transport.write).toHaveBeenCalledTimes(1)
+    vi.useRealTimers()
+    expect(await f.outbox.read()).toEqual(before)
+  })
+
+  it('cannot apply a late full D or retain its private bound result after logout', async () => {
+    const f = await resolvedManaged(), before = await f.outbox.read()
+    let finish!: (response: ReturnType<typeof page>) => void
+    f.transport.changes.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const pulling = f.candidate.pullCompleteBaseline()
+    const rejected = expect(pulling).rejects.toMatchObject({ code: 'sync_unavailable' })
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+    f.setSession({ authenticated: false, generation: 2 })
+    f.candidate.notifySessionChanged()
+    finish(page([record(DRAFT.key, 5)], 5))
+    await rejected
+    expect(f.candidate.getBoundResult()).toBeNull()
+    expect(f.candidate.getLastResult()).toBeNull()
+    expect(f.candidate.getBaseline()).toBeNull()
+    expect(await f.outbox.read()).toEqual(before)
+    expect(f.transport.write).toHaveBeenCalledTimes(1)
+  })
+
+  it('refuses reset before the actual ACK empty slot and never performs a clearing CAS', async () => {
+    const f = await resolvedManaged(), bound = f.candidate.getBoundResult()!, before = await f.outbox.read()
+    vi.mocked(f.storage.compareAndSwap).mockClear()
+    await expect(f.candidate.resetAfterManagedAcknowledgement(bound.requestHash)).rejects.toMatchObject({ code: 'sync_invalid_transition' })
+    expect(f.candidate.getBoundResult()).toBe(bound)
+    expect(await f.outbox.read()).toEqual(before)
+    expect(f.storage.compareAndSwap).not.toHaveBeenCalled()
+    expect(f.transport.write).toHaveBeenCalledTimes(1)
+  })
+
+  it('resets only memory after independently emptying the original resolved slot, preserving the head floor', async () => {
+    const f = await resolvedManaged(), bound = f.candidate.getBoundResult()!, before = await f.outbox.read()
+    // A standalone legacy test adapter emulates the caller's independently
+    // proved local ACK. This is not a real managed transaction/confirmation.
+    const empty = await f.outbox.compareAndSwap(before.version, null)
+    vi.mocked(f.storage.compareAndSwap).mockClear()
+    const state = await f.candidate.resetAfterManagedAcknowledgement(bound.requestHash)
+    expect(state).toMatchObject({ state: 'idle', baselineReady: false,
+      lastCompletePulledRevision: null, latestObservedHead: 4 })
+    expect(f.candidate.getBoundResult()).toBeNull()
+    expect(f.candidate.getLastResult()).toBeNull()
+    expect(f.candidate.getBaseline()).toBeNull()
+    expect(await f.outbox.read()).toEqual(empty)
+    expect(f.storage.compareAndSwap).not.toHaveBeenCalled()
+    f.transport.changes.mockResolvedValueOnce(page([record(DRAFT.key, 3)], 3))
+    await expect(f.candidate.pullCompleteBaseline()).rejects.toMatchObject({ code: 'sync_unavailable' })
+    expect(f.transport.changes.mock.calls.at(-1)![0]).toEqual({ sinceRevision: 0, limit: 200 })
+    expect(f.candidate.status().latestObservedHead).toBe(4)
+    expect(f.transport.write).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects malformed, boxed or different reset hashes before any outbox read or write', async () => {
+    const f = await resolvedManaged(), bound = f.candidate.getBoundResult()
+    vi.mocked(f.storage.read).mockClear()
+    vi.mocked(f.storage.compareAndSwap).mockClear()
+    for (const hash of [null, undefined, true, 1, new String(bound!.requestHash), 'a'.repeat(63),
+      'A'.repeat(64), bound!.requestHash + '\n', 'f'.repeat(64)]) {
+      await expect(f.candidate.resetAfterManagedAcknowledgement(hash as string)).rejects.toMatchObject({ code: 'sync_invalid_transition' })
+    }
+    expect(f.storage.read).not.toHaveBeenCalled()
+    expect(f.storage.compareAndSwap).not.toHaveBeenCalled()
+    expect(f.candidate.getBoundResult()).toBe(bound)
+  })
+
+  it('does not use an old bound result to reset a different cross-tab packet', async () => {
+    const f = await resolvedManaged(), bound = f.candidate.getBoundResult()!, known = await f.outbox.read()
+    const empty = await f.outbox.compareAndSwap(known.version, null)
+    const other = await buildOwnerSyncRequest({ request_id: 'synthetic-other-managed-0001', expected_revision: 0,
+      operations: [DRAFT] })
+    const next = await f.outbox.compareAndSwap(empty.version, { schema: 'owner-sync-outbox-1', state: 'prepared',
+      rawBody: other.rawBody, requestHash: other.requestHash })
+    vi.mocked(f.storage.compareAndSwap).mockClear()
+    await expect(f.candidate.resetAfterManagedAcknowledgement(other.requestHash)).rejects.toMatchObject({ code: 'sync_invalid_transition' })
+    await expect(f.candidate.resetAfterManagedAcknowledgement(bound.requestHash)).rejects.toMatchObject({ code: 'sync_invalid_transition' })
+    expect(await f.outbox.read()).toEqual(next)
+    expect(f.candidate.getBoundResult()).toBe(bound)
+    expect(f.storage.compareAndSwap).not.toHaveBeenCalled()
+  })
+
+  it('refuses a busy reset before reading storage and retains the result during the complete pull', async () => {
+    const f = await resolvedManaged(), bound = f.candidate.getBoundResult()!
+    let finish!: (response: ReturnType<typeof page>) => void
+    f.transport.changes.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const pulling = f.candidate.pullCompleteBaseline()
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+    vi.mocked(f.storage.read).mockClear()
+    await expect(f.candidate.resetAfterManagedAcknowledgement(bound.requestHash)).rejects.toMatchObject({ code: 'sync_busy' })
+    expect(f.storage.read).not.toHaveBeenCalled()
+    expect(f.candidate.getBoundResult()).toBe(bound)
+    finish(page([record(DRAFT.key, 4)], 4))
+    await pulling
+  })
+
+  it('rejects an empty-slot reset whose session changed while the adapter read was pending', async () => {
+    const f = await resolvedManaged(), bound = f.candidate.getBoundResult()!, old = await f.outbox.read()
+    const empty = await f.outbox.compareAndSwap(old.version, null)
+    let finish!: (snapshot: typeof empty) => void
+    vi.mocked(f.storage.read).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    vi.mocked(f.storage.compareAndSwap).mockClear()
+    const resetting = f.candidate.resetAfterManagedAcknowledgement(bound.requestHash)
+    const rejected = expect(resetting).rejects.toMatchObject({ code: 'sync_signed_out' })
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+    f.setSession({ authenticated: false, generation: 2 })
+    f.candidate.notifySessionChanged()
+    finish(empty)
+    await rejected
+    expect(f.candidate.getBoundResult()).toBeNull()
+    expect(await f.outbox.read()).toEqual(empty)
+    expect(f.storage.compareAndSwap).not.toHaveBeenCalled()
+  })
+
+  it('does not create a bound result from unknown, rehydrated or missing receipt state', async () => {
+    const f = await trackedPrepared()
+    expect(f.candidate.getBoundResult()).toBeNull()
+    f.transport.write.mockRejectedValueOnce(new Error('synthetic unknown'))
+    await f.candidate.sendPrepared()
+    expect(f.candidate.getBoundResult()).toBeNull()
+    await f.candidate.hydratePending()
+    expect(f.candidate.getBoundResult()).toBeNull()
+    await f.candidate.reconcilePending()
+    expect(f.candidate.getBoundResult()).toBeNull()
+    expect(f.transport.write).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('explicit owner sync candidate', () => {
   it('imports/constructs disabled without requesting, reading legacy storage or persisting consent', async () => {
     const { candidate, transport, outbox } = await fixture()

@@ -32,6 +32,13 @@ export interface OwnerSyncCandidateStatus {
 export type OwnerSyncBaseline = Readonly<{ pulledRevision: number; records: readonly OwnerSyncRecord[] }>
 type DraftOperation = Omit<OwnerSyncRequestInput['operations'][number], 'base_values'>
 type WriteOutcome = ReturnType<typeof parseSyncWriteResponse>
+export type OwnerSyncResolvedResult = Extract<WriteOutcome, { kind: 'success' | 'conflict' }>
+export interface OwnerSyncBoundResult {
+  readonly requestId: string
+  readonly requestHash: string
+  readonly generation: number
+  readonly result: OwnerSyncResolvedResult
+}
 
 export class OwnerSyncCandidateError extends Error {
   constructor(readonly code: 'sync_disabled' | 'sync_signed_out' | 'sync_context_changed'
@@ -45,6 +52,7 @@ export class OwnerSyncCandidateError extends Error {
 
 const TOTAL_DEADLINE_MS = 12_000
 const MAX_CHANGES = 100_000
+const REQUEST_HASH = /^[0-9a-f]{64}(?![\s\S])/
 
 export function createOwnerSyncCandidate(options: {
   outbox: OwnerSyncOutbox
@@ -68,11 +76,12 @@ export function createOwnerSyncCandidate(options: {
   let lastResult: WriteOutcome | null = null
   let lastResultGeneration: number | null = null
   let lastBoundRequestHash: string | null = null
+  let lastBoundResult: OwnerSyncBoundResult | null = null
 
   function context(): SessionContext {
     const current = options.session()
     if (!current || typeof current.authenticated !== 'boolean'
-      || !Number.isSafeInteger(current.generation) || current.generation < 0) {
+      || !Number.isSafeInteger(current.generation) || current.generation < 0 || Object.is(current.generation, -0)) {
       return { authenticated: false, generation: -1 }
     }
     return current
@@ -87,6 +96,7 @@ export function createOwnerSyncCandidate(options: {
     lastResult = null
     lastResultGeneration = null
     lastBoundRequestHash = null
+    lastBoundResult = null
   }
 
   function invalidate(): void {
@@ -169,6 +179,7 @@ export function createOwnerSyncCandidate(options: {
     lastResult = null
     lastResultGeneration = null
     lastBoundRequestHash = null
+    lastBoundResult = null
     if (snapshot.entry?.state === 'confirmed' || snapshot.entry?.state === 'conflict') {
       state = snapshot.entry.state
       return
@@ -216,20 +227,76 @@ export function createOwnerSyncCandidate(options: {
       await markUnknown(snapshot)
       return
     }
+    // A semantically matched success is already an observed server head.
+    // A later local delivery CAS failure cannot make an older cloud snapshot
+    // acceptable. This is still not a completed pull or an ACK certificate.
+    if (result.kind === 'success') {
+      latestObservedHead = Math.max(latestObservedHead ?? 0, result.result.revision)
+      baselineReady = false
+    }
     const nextState = result.kind === 'success' ? 'confirmed' : 'conflict'
     if (snapshot.entry!.state !== nextState) {
       await options.outbox.compareAndSwap(snapshot.version, { ...snapshot.entry!, state: nextState })
     }
     assertActive(captured)
     state = nextState
-    lastResult = result
+    // Parsed inner DTOs are deeply frozen. Reconciliation constructs a new
+    // union wrapper, so freeze/copy that outer object as well before exposure.
+    const resolved: OwnerSyncResolvedResult = Object.freeze({ ...result })
+    lastResult = resolved
     lastResultGeneration = captured.generation
     lastBoundRequestHash = original.requestHash
-    if (result.kind === 'success') {
-      latestObservedHead = Math.max(latestObservedHead ?? 0, result.result.revision)
-      // A global head observed in POST is NOT a completed pull checkpoint.
-      // Do not rebase old drafts or fill other records with that newer revision.
+    lastBoundResult = Object.freeze({ requestId: original.request.request_id,
+      requestHash: original.requestHash, generation: captured.generation, result: resolved })
+  }
+
+  async function pull(forceComplete: boolean, captured: { epoch: number; generation: number }): Promise<void> {
+    const currentGeneration = context().generation
+    const sinceRevision = !forceComplete && baselineGeneration === currentGeneration ? lastCompletePulledRevision ?? 0 : 0
+    const candidate = sinceRevision === 0 ? new Map<string, OwnerSyncRecord>() : new Map(baseline)
+    let upperRevision: number | undefined
+    let cursor: OwnerSyncCursor | undefined
+    let count = 0
+    try {
+      await deadline(async signal => {
+        for (let pages = 0; pages <= MAX_CHANGES; pages++) {
+          assertActive(captured)
+          if (signal.aborted) throw new OwnerSyncCandidateError('sync_context_changed')
+          const parameters = { sinceRevision, limit: 200,
+            ...(upperRevision === undefined ? {} : { upperRevision }),
+            ...(cursor === undefined ? {} : { cursor }) }
+          const response = await options.transport.changes(parameters, signal)
+          assertActive(captured)
+          if (signal.aborted) throw new OwnerSyncCandidateError('sync_context_changed')
+          if (response.status !== 200) throw new OwnerSyncCandidateError('sync_unavailable')
+          const page = parseSyncChangesPage(response.rawBody, parameters)
+          upperRevision = page.upper_revision
+          // Even if a later page fails, this strictly parsed page has observed
+          // a fixed head. Do not promote it to a complete baseline, or forget
+          // its anti-rollback floor on an ordinary failed pull.
+          latestObservedHead = Math.max(latestObservedHead ?? 0, page.upper_revision)
+          count += page.changes.length
+          if (count > MAX_CHANGES) throw new OwnerSyncCandidateError('sync_invalid_response')
+          for (const record of page.changes) candidate.set(record.key, record)
+          if (candidate.size > MAX_CHANGES) throw new OwnerSyncCandidateError('sync_invalid_response')
+          if (page.complete) return
+          cursor = page.next_cursor!
+        }
+        throw new OwnerSyncCandidateError('sync_invalid_response')
+      })
+      assertActive(captured)
+      if (upperRevision === undefined || upperRevision < (latestObservedHead ?? 0)) {
+        throw new OwnerSyncCandidateError('sync_invalid_response')
+      }
+      baseline = candidate
+      baselineGeneration = captured.generation
+      lastCompletePulledRevision = upperRevision!
+      latestObservedHead = Math.max(latestObservedHead ?? 0, upperRevision!)
+      baselineReady = true
+    } catch {
+      state = 'blocked'
       baselineReady = false
+      throw new OwnerSyncCandidateError('sync_unavailable')
     }
   }
 
@@ -246,6 +313,13 @@ export function createOwnerSyncCandidate(options: {
       const current = context()
       return enabled && current.authenticated && lastResultGeneration === current.generation ? lastResult : null
     },
+    /** Current-session observation of one original packet, not live-slot or ACK authority. */
+    getBoundResult(): OwnerSyncBoundResult | null {
+      const current = context()
+      return enabled && current.authenticated && lastBoundResult?.generation === current.generation
+        && lastResultGeneration === current.generation && lastResult === lastBoundResult.result
+        && lastBoundRequestHash === lastBoundResult.requestHash ? lastBoundResult : null
+    },
     async hydratePending(): Promise<OwnerSyncCandidateStatus> {
       return exclusively(async captured => {
         const snapshot = await options.outbox.read()
@@ -253,56 +327,43 @@ export function createOwnerSyncCandidate(options: {
         state = !snapshot.entry ? 'idle' : snapshot.entry.state === 'attempted' ? 'unknown' : snapshot.entry.state
         lastResult = null
         lastResultGeneration = null
+        lastBoundResult = null
         lastBoundRequestHash = snapshot.entry?.requestHash ?? null
         return status()
       })
     },
     async pullBaseline(): Promise<OwnerSyncCandidateStatus> {
+      return exclusively(captured => pull(false, captured))
+    },
+    /** A fixed-since-zero D read, without clearing the original packet/result/head floor. */
+    async pullCompleteBaseline(): Promise<OwnerSyncCandidateStatus> {
+      return exclusively(captured => pull(true, captured))
+    },
+    /** Memory-only reset after the caller separately proves a managed local ACK.
+     * Reading an empty slot is not a business-confirmation certificate. This
+     * method cannot clear a packet, apply a baseline, or issue network requests.
+     */
+    async resetAfterManagedAcknowledgement(expectedRequestHash: string): Promise<OwnerSyncCandidateStatus> {
       return exclusively(async captured => {
-        const currentGeneration = context().generation
-        const sinceRevision = baselineGeneration === currentGeneration ? lastCompletePulledRevision ?? 0 : 0
-        const candidate = sinceRevision === 0 ? new Map<string, OwnerSyncRecord>() : new Map(baseline)
-        let upperRevision: number | undefined
-        let cursor: OwnerSyncCursor | undefined
-        let count = 0
-        try {
-          await deadline(async signal => {
-            for (let pages = 0; pages <= MAX_CHANGES; pages++) {
-              assertActive(captured)
-              if (signal.aborted) throw new OwnerSyncCandidateError('sync_context_changed')
-              const parameters = { sinceRevision, limit: 200,
-                ...(upperRevision === undefined ? {} : { upperRevision }),
-                ...(cursor === undefined ? {} : { cursor }) }
-              const response = await options.transport.changes(parameters, signal)
-              assertActive(captured)
-              if (signal.aborted) throw new OwnerSyncCandidateError('sync_context_changed')
-              if (response.status !== 200) throw new OwnerSyncCandidateError('sync_unavailable')
-              const page = parseSyncChangesPage(response.rawBody, parameters)
-              upperRevision = page.upper_revision
-              count += page.changes.length
-              if (count > MAX_CHANGES) throw new OwnerSyncCandidateError('sync_invalid_response')
-              for (const record of page.changes) candidate.set(record.key, record)
-              if (candidate.size > MAX_CHANGES) throw new OwnerSyncCandidateError('sync_invalid_response')
-              if (page.complete) return
-              cursor = page.next_cursor!
-            }
-            throw new OwnerSyncCandidateError('sync_invalid_response')
-          })
-          assertActive(captured)
-          if (upperRevision === undefined || upperRevision < (latestObservedHead ?? 0)) {
-            throw new OwnerSyncCandidateError('sync_invalid_response')
-          }
-          baseline = candidate
-          baselineGeneration = captured.generation
-          lastCompletePulledRevision = upperRevision!
-          latestObservedHead = Math.max(latestObservedHead ?? 0, upperRevision!)
-          baselineReady = true
-          return status()
-        } catch {
-          state = 'blocked'
-          baselineReady = false
-          throw new OwnerSyncCandidateError('sync_unavailable')
+        if (typeof expectedRequestHash !== 'string' || !REQUEST_HASH.test(expectedRequestHash)
+          || lastBoundRequestHash !== expectedRequestHash || !lastBoundResult
+          || lastBoundResult.requestHash !== expectedRequestHash || lastBoundResult.generation !== captured.generation) {
+          throw new OwnerSyncCandidateError('sync_invalid_transition')
         }
+        const snapshot = await options.outbox.read()
+        assertActive(captured)
+        if (snapshot.entry !== null || lastBoundRequestHash !== expectedRequestHash) {
+          throw new OwnerSyncCandidateError('sync_invalid_transition')
+        }
+        baseline.clear()
+        baselineReady = false
+        baselineGeneration = null
+        lastCompletePulledRevision = null
+        lastResult = null
+        lastResultGeneration = null
+        lastBoundRequestHash = null
+        lastBoundResult = null
+        state = 'idle'
       })
     },
     async prepare(requestId: string, drafts: readonly DraftOperation[]): Promise<OwnerSyncCandidateStatus> {
@@ -333,6 +394,7 @@ export function createOwnerSyncCandidate(options: {
         assertActive(captured)
         lastResult = null
         lastResultGeneration = null
+        lastBoundResult = null
         lastBoundRequestHash = original.requestHash
         state = 'prepared'
         return status()
@@ -443,6 +505,7 @@ export function createOwnerSyncCandidate(options: {
         lastResult = null
         lastResultGeneration = null
         lastBoundRequestHash = null
+        lastBoundResult = null
         return status()
       })
     },
