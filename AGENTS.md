@@ -91,6 +91,9 @@ uvicorn main:app --reload --port 8000
 
 ## I19 本机格式与实际同步界面约束
 
+- `POST /api/v2/owner/analysis` 是独立 `run_personal_analysis` Owner scope 与 `owner-analysis-v1` 同意的本地候选链，不复用 Admin/Worker 或 write_holdings。只收 expected_revision、原请求标识、已有 production Evidence 与显式 Policy 引用；完整服务端来源（含所有账户/manual/tombstone）在同一 BEGIN IMMEDIATE 核验，跨账户 fund_only 聚合后真实 Holding/Decision/来源/回执一起追加。不完整定价不构造部分分母；0份仍 held，未知仍 null。完整原始来源保留 int/float/负零，V8 业务模型沿用自身 canonical_json；不能把两种合同混用。
+- 分析扩展 `owner-analysis-schema-1` 只显式本地候选 provision；正常 startup/factory 不补 DDL，旧 Owner-only 公共 verifier 和 Turso profile 仍封闭。已配置本地工厂仅兼容固定的 Owner-only/完整 analysis 两种 inventory，不能放宽路径、远端或 schema8 拒绝。原 id/hash 回执仅核原历史模型/引用/映射，不用当前策略重算；`source_current` 只表明该读事务中的完整来源 revision+SHA 相同，不认证 active Policy/策略、行情新鲜或当前动作资格。超时/commit或close异常后只能手核原回执，不从缺失推断回滚或自动重发；30秒为协作预算，授权回调及提交前后均重核，不能声称硬中断 SQLite。
+
 - 完整文件 `sinan-owner-workspace-recovery-1` 与旧普通行备份分开：含当前完整 local/sync、B/manual/tombstone、原包与 preparationHash、最近本机回执及旧档案；严格闭集、原 UTF-8 SHA、24 MiB，重核原 adoption 备份与 pending 原 envelope。无凭据、独立资产存储或组合历史；解码成功不是来源认证、自动重发许可或丢库恢复证明。
 - v3→v4 必须本轮导出后选回相同完整文件、空槽、原 target/active locator/adoption/完整前像及明确确认。正常 existingOnly 仍不补 current；显式中断核对只接受原 v3 文件与已存在物理 v4 的完整未变原像，strict 初始化唯一空 sync current（或核对完全相同初始 current）。缺库不创建、物理 v3 不升级、额外 store/行或后续编辑不覆盖；这是窄范围升级完成核对，不是灾难恢复、降级或云迁移。
 - watchlist 自有 managed facade 按操作核真实 locator/端点原字符串/会话 generation/两槽来源/当前内存/完整本机状态及 handle；不能由 UI 传恒真 guard。关闭面板或退出只撤销并隐藏私人响应，保留当前 store 内原未知本机 id/hash；整次 writer、后置 hydrate 与 Pinia 同步发布完成之前不能丢该标识。手动原回执匹配才释放，不重放；跨刷新未知标识仍需独立导出，不声称内存标识永久持久。

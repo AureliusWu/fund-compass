@@ -1271,3 +1271,23 @@ ACK 请求绑定原始响应/原包/完整 D/派生预览 hash，重建核封闭
 [自然 CI39886314049](https://github.com/AureliusWu/fund-compass/actions/runs/39886314049) run188/attempt1 completed/success，实际后端 **3689 passed/2 warnings/257.32s**、pip check clean；前端 **1988/81文件**、type/build9.00s/PWA7/7；Worker **148/4文件**、check/dry-run114.28KiB/gzip26.58，独立官方 audit 步骤均通过。日志 checkout merge=`32d2bb63fb08452c441fbb74b6be56092e7fa2e3`，GitHub commit API核parents=7afc4e6+08c8f15，tree与功能分支完全相同。deploy/candidate_smoke/formal_smoke全skipped/steps=null。一次本地 `gh run watch` 观察EOF终止，随后同run只读查询确认仍在运行并最终成功；没有重启工作流或把观察错误当CI失败。
 
 最后收口一处可见状态：IDB工作区已可显式发送后，旧固定“未上传”文案会误报；现改为“同步状态请查看私人同步面板，持仓决策版本仍待确认”。仅文案变化，相关真实Store/组件 **33 passed**，不新增镜像文案测试；该新提交有自己的自然CI，前一run不当作其精确证据。单块+25.09% FAIL及安装制品WARN、真实云/浏览器/I19业务链未完成的边界继续保留。
+
+### a27038a 自然 CI 与 I19-04 实际 Owner 来源 → Holding/Decision（2026-10-23）
+
+上一文案提交 `a27038a193c340af30bbc4b1cde1a3bf80ca94f2`，tree=`fd2d06a4c8d0b69e115826993bc51ca0739a17e9`，已普通推送原功能分支。[自然CI39886870118](https://github.com/AureliusWu/fund-compass/actions/runs/39886870118) run189/attempt1 success；日志实际后端 **3689 passed/2 warnings/193.69s**、pip check clean，前端 **1988/81文件**、type/build8.97s/PWA7/7，Worker **148/4文件**、type/dry-run114.28KiB/gzip26.58及两端独立audit成功。实际merge=`c35a83a588b0b441ff83cc85c36b62b780f4a583`，GitHub API核parents=7afc4e6+a270、tree等于feature。deploy/candidate_smoke/formal_smoke全skipped/0steps；main仍7afc4e6，PR4 OPEN/DRAFT。此为上一精确提交证据，不是本轮新后端的全量PASS。
+
+本片段新增受限 `POST /api/v2/owner/analysis` 与原id/hash回执，不再停留在独立事务pair。请求只收expected_revision、已有production Evidence与显式Policy引用；真实Owner/run_personal_analysis与独立同意，读回另需read_private，机器角色不扩张。原始正文严格闭集、16KiB/5秒，重复header/key、坏Unicode/数值、query拒绝；当前会话在正文后、线程入口、实际仓储守卫、commit前后、关闭及序列化后重核。所有私人响应no-store/nosniff，驱动/factory错误固定脱敏，未知不重发。
+
+同一caller-owned `BEGIN IMMEDIATE`核完整Owner head/history/全部当前行和latest change，保存所有账户/manual/tombstone的原始source/SHA。基金证据必须完整覆盖live基金，full source不能由选中的账户伪造。fund_only按基金合并份额、份额加权成本及目标；真实0仍held、未知仍null。任一正持仓缺有效官方NAV或份额未知则所有基金current_weight未知，已知金额保留但不能当完整分母；hold/watch、低强度和无position_guidance。manual保留来源但不进基金分母，未声称已做手工资产/PortfolioDecision迁移。真实Holding、Decision及scope、run、映射、原回执一起追加；原Evidence/Policy/Owner同步状态不改，不联网生成行情或自动promote Policy。
+
+显式 `owner-analysis-schema-1`本地profile含3表/6不可变触发器/精确索引和FK；正常启动不补DDL、旧公共Owner-only与Turso profile保持封闭。已有本地配置工厂只兼容固定Owner-only或完整analysis两种inventory；Turso/schema8/URI/UNC/内存/缺失文件仍拒绝。真实Python3.12的db.init_db会产生sqlite_stat1，故仅在显式Owner候选provision前像新增精确engine表兼容，不新建运维表。扩大回归初 **936P/7F** 揭示误接受未扩展core自带universe_import_state和旧CORS闭集断言未更新；现保留原universe拒绝，只给新增两个analysis header明确闭集，不改来源/凭据权限。收紧后新测试中的两条过宽正向预期也改为拒绝控制；旧反向测试未移除。
+
+实际故障红/绿修复：降级action已变但首个ACTION码未变，触发V8验证；授权回调返回后预算未重核；历史回执曾重执行今天策略、策略升级后读不回；改为核原不可变模型与当时strategy/run_id/来源/映射，future策略替换和builder禁止执行仍读原输出。新历史验证首轮 **75P/5F** 暴露V8仓储规范化负零、响应仍保留-0.0造成的真实不一致；业务快照现沿用V8 canonical_json，完整Owner raw source仍保留int/float/负零，不把两类合同混同。独立审查另以实际COMMIT后时钟31秒复现仍返回200；三个出口现均提交后重核，新增new/replay/receipt三条回归，超时后原回执保留，不补偿删除或产生第二次写入。30秒仍是协作预算，不能硬中断SQLite或称超时证明未提交。
+
+最终Python3.12普通插件聚焦 **959 passed/2 warnings/143.44s**，25文件，包含全部六个新analysis测试文件、旧Owner schema/repo/HTTP/main/lifespan/Turso、Owner权限/cache/security、V8真实仓储/事务pair/API/精确INSERT和scope。两warning为既有Starlette/httpx弃用与故意inf反向fixture的Pydantic序列化告警。真实三基金/多账户/关注/manual/tombstone完整来源、16个实际INSERT后故障逐点整批回滚、真实COMMIT后丢响应独立连接回执、缺/旧revision/引用/容量、0/null/负零、过期与撤权均有实际SQLite用例。真实main.app另通过14项，连同router和旧sync-main为94项；独立SQL核source SHA与实际业务外键链，连接关闭、无DDL、旧profile/坏结构/缺文件和401拒绝。TestClient不进入main lifespan，均为合成SQLite/本地ASGI，不是实际服务进程、Chrome、多设备、市场源、云写入/重启或耐久证明。
+
+本轮按用户授权各自直接运行 `npm run test` / `npm run type-check` / `npm run build`，没有launcher/supervisor：前端 **1988 passed/81文件/11.89s**、type exit0、build15.11s/PWA7/7。三命令与后端并行，此耗时只记质量门禁，不并入性能五样本或宣称性能退化/恢复；前端源码/锁未改，request和ownerSession重复导入提示保留。Worker本地未重跑、源码未改，由新推送自然CI重新核完整后端/Worker/audit；此前148不冒充本轮新跑。原单块+25.09% FAIL、安装制品WARN和真实设备/PWA/API性能仍开放。
+
+返回的 `source_current`只表示当前读快照与原完整来源revision+SHA相同，不能表示Policy/策略仍active、行情仍新鲜或当前强动作资格；旧结果始终保留原run。应用仍8.0.0，I19-04整项不勾选；下一步是原id/hash持久任务与实际前端消费/统一门禁、显式Policy版本流程，再接经独立验收的云profile。新profile不被旧代码接纳，不能删表伪造源码降级；当前只在独立合成库测试，回退应保留候选原库/原像，不将代码回退当作数据迁移。
+
+I18实际轮换/停写排空/新保护备份、Free能力与额度/受控迁移、应用写入跨Render重启及独立远端恢复；I19手工资产/历史/机器消费者与多设备；I20自然交易日/周窗口；I21真实浏览器/旧PWA/性能仍未关闭。不读取未确认凭据输入，不绕OAuth/浏览器或PR写403，不改云秘密/套餐/部署/重启/main/Gist，不先改v9版本；本轮只普通推送既有功能分支并观察其自然CI。

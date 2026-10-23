@@ -150,3 +150,19 @@ v3 核心与云命令/完整 v4 codec 分离，相关 codec 先于事务加载�
 - 匿名拒绝、退出/撤销/到期和迟到响应测试通过。
 - 存储工具报告准确 scope，正式 smoke 保持失败关闭。
 - 后续同步/机器任务按上述不变量开发，未实现部分保持待办。
+
+## I19-04 本地服务端来源 → Holding/Decision（2026-10-23）
+
+`POST /api/v2/owner/analysis` 仅接受原始 JSON：`request_id`、`expected_revision`、`policy_version`、`evidence:[{code,evidence_id}]`。正文16KiB、最多100个唯一六位基金代码，拒绝多余/重复字段、BOM、坏Unicode、布尔/不安全revision；不接受浏览器传入份额、成本或价格。需真实 Owner 的 `run_personal_analysis` 与独立单一 `X-Owner-Analysis-Consent: owner-analysis-v1`；`write_holdings`、Admin、Worker和私人只读机器凭据不能替代。正文5秒预算，鉴权/限频先于正文，正文后、线程入口、事务核验/提交前后、连接关闭及响应序列化后重核会话。回应 no-store/nosniff，固定错误不回显私人输入、驱动异常或路径。
+
+仅在显式 provision 的本地核心9+Owner+`owner-analysis-schema-1`完整固定profile中执行；正常启动不创建扩展，旧 Owner-only与远端迁移合同不变。分析表3张、六个不可变UPDATE/DELETE触发器和精确隐式索引封闭校验；工厂的已有普通路径、外键已开启和schema约束均保留。不开放 Turso、schema8、内存/URI/UNC/缺失文件。显式本地旧Owner provision仅新增兼容正常 `db.init_db` 已存在的精确 sqlite_stat1 DDL，不创建辅助表；未扩展core自带universe_import_state的原拒绝保持。已扩展profile的正常只读验证仍兼容原有两张精确运维表，不接受相似对象。
+
+同一 `BEGIN IMMEDIATE` 内读取完整 Owner 当前记录，核head/history/每行最新change、字段及生命周期revision；来源包含全部账户、manual、tombstone，保存完整原始数值表示和SHA，不只取请求选中的账户。请求Evidence代码必须正好覆盖所有live基金；只认已存在且production scope、确定性ID/摘要与引用链一致的Evidence和显式Policy，不自动创建或promote策略，也不在事务中联网取行情。
+
+基金视角 `fund_only` 排除manual与墓碑，但它们仍参加完整来源绑定。同基金聚合份额、按份额加权成本、账户目标；关注记录不贡献金额。真实0份仍held，未知份额/成本/目标保留null。任一正持仓不能以7日内官方净值完整定价或份额未知，则所有基金current_weight未知，不将已知小计归一；动作hold/watch、低证据强度、无调仓指导。陈旧/不可用估值也降级；未来行情/来源时间拒绝。持仓更新时间未知不以生成时钟补造。真实Holding/Decision及scope、完整source、run和component映射、原请求回执同批提交；任一写失败整批回滚，历史不覆写。
+
+成功响应为 `{run,source_current}`。run含原id/hash、独立run_id、完整来源revision/SHA/count/fund_only、原Policy、strategy_version、生成时间、pricing_complete/unavailable_codes及每基金实际Holding/Evidence/Decision和账户数。它不是PortfolioDecision或手工资产迁移。`source_current`只是当前读快照与原完整来源相同，不代表行情仍新鲜、Policy/策略仍active或允许当前强动作；后续前端统一门禁必须独立核对。原Owner同步revision不是Holding/Policy/Decision版本，客户端local_pending尚不因此解除。
+
+回执读取 `GET /api/v2/owner/analysis/requests/{request_id}` 需 `read_private` 与单一原 `X-Owner-Analysis-Request-Hash`。精确匹配返回 `{state:matched,status:200,result:{run,source_current}}`；缺失404或不可核对503均unknown。历史读取核原始source/请求/响应hash、当时strategy/run_id、实际不可变模型和component映射，不执行今天的策略；策略升级不改旧输出。同id不同hash拒绝；同id/hash只读原结果，无新Holding/Decision；完整来源改变只令source_current=false，新id/旧expected_revision拒绝。
+
+业务源/回执各2MiB、最多100k runs/components，容量满不清历史；30秒总协作预算覆盖校验、授权回调及提交前后，不能硬中断SQLite/任意驱动。commit成功后超时或丢响应、close异常仍可已提交，只保留原id/hash手动核回执；absent不证明回滚、超时不授权重发。当前无浏览器分析请求/outbox/UI、新Policy编辑、实际云profile迁移、受保护恢复或跨Render重启证据；I19-04和v9正式出口继续未通过。

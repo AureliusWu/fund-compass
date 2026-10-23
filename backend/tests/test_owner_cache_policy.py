@@ -79,6 +79,7 @@ def test_owner_sync_preflight_allows_only_the_closed_browser_headers(monkeypatch
     assert response.headers["access-control-allow-origin"] == origin
     assert response.headers["access-control-allow-headers"].lower().split(", ") == [
         "accept", "accept-language", "authorization", "content-language", "content-type",
+        "x-owner-analysis-consent", "x-owner-analysis-request-hash",
         "x-owner-sync-consent", "x-owner-sync-request-hash",
     ]
     assert "access-control-allow-credentials" not in response.headers

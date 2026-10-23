@@ -19,7 +19,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.requests import ClientDisconnect
 
 from database import db
-from database.owner_sync_schema import verify_owner_sync_schema
+from database.owner_analysis_schema import verify_owner_workspace_schema
 from models.owner_sync import MAX_BODY_BYTES, MAX_SAFE_INTEGER, SyncValidationError, parse_sync_request
 from service import owner_sessions as owners
 from service import owner_sync_repo as repo
@@ -137,7 +137,7 @@ def configured_local_sync_connection() -> sqlite3.Connection:
         conn.execute("PRAGMA foreign_keys = ON")
         if conn.execute("PRAGMA foreign_keys").fetchone()[0] != 1:
             raise sqlite3.DatabaseError("foreign_keys_unavailable")
-        verify_owner_sync_schema(conn)
+        verify_owner_workspace_schema(conn)
         return conn
     except Exception:
         if conn is not None:

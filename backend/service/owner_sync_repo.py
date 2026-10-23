@@ -13,7 +13,7 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from database.owner_sync_schema import verify_owner_sync_schema
+from database.owner_analysis_schema import verify_owner_workspace_schema
 from models.owner_sync import allowed_fields, normalize_key, normalize_record, parse_sync_request
 
 MAX_SAFE_REVISION = 2**53 - 1
@@ -130,7 +130,7 @@ def _ready(conn: sqlite3.Connection) -> None:
 
 def _verify_locked(conn: sqlite3.Connection) -> None:
     try:
-        verify_owner_sync_schema(conn)
+        verify_owner_workspace_schema(conn)
     except Exception as exc:
         raise SyncReadError("schema_unavailable") from exc
 

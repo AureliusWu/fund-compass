@@ -139,23 +139,33 @@ def _verify_core(conn, actual: dict) -> dict:
     return expected
 
 
-def verify_owner_sync_schema(conn) -> None:
-    """SELECT/PRAGMA only. Unknown objects and incompatible versions fail closed."""
-    _local_connection(conn)
-    actual = _objects(conn)
+def _optional_operational_objects(actual: dict) -> dict:
+    """Only these present operational tables have an exact reviewed shape."""
+    expected = {}
+    for name, ddl in (("universe_import_state", _UNIVERSE_IMPORT_STATE_DDL),
+                      ("sqlite_stat1", _SQLITE_STAT1_DDL)):
+        key = ("table", name)
+        if key in actual:
+            if not _same_ddl(actual[key], ddl):
+                raise sqlite3.DatabaseError("Owner sync operational schema contract mismatch")
+            expected[key] = ddl
+    return expected
+
+
+def _verify_owner_sync_objects(conn, actual: dict) -> dict:
+    """Verify the fixed core/Owner subset; callers must close the inventory.
+
+    This private kernel does not approve any additional object. Each public
+    profile must compare its complete, independently fixed inventory itself.
+    """
     expected = _verify_core(conn, actual)
     expected.update({("table", name): ddl for name, ddl in OWNER_SYNC_DDL.items()})
     expected.update(_implicit_indexes(True))
     # Permit only this present, exact operational table. Unknown objects,
     # including extra indexes or similarly named tables, remain rejected below.
-    if ("table", "universe_import_state") in actual:
-        expected[("table", "universe_import_state")] = _UNIVERSE_IMPORT_STATE_DDL
-    if ("table", "sqlite_stat1") in actual:
-        expected[("table", "sqlite_stat1")] = _SQLITE_STAT1_DDL
-    if set(actual) != set(expected):
-        raise sqlite3.DatabaseError("Owner sync schema contains missing or unknown objects")
+    expected.update(_optional_operational_objects(actual))
     for key, ddl in expected.items():
-        if not _same_ddl(actual[key], ddl):
+        if key not in actual or not _same_ddl(actual[key], ddl):
             raise sqlite3.DatabaseError("Owner sync schema contract mismatch")
     rows = conn.execute("SELECT singleton,version FROM owner_sync_schema").fetchall()
     if len(rows) != 1 or tuple(rows[0]) != (1, OWNER_SYNC_SCHEMA_VERSION):
@@ -163,6 +173,16 @@ def verify_owner_sync_schema(conn) -> None:
     rows = conn.execute("SELECT singleton,revision FROM owner_sync_state").fetchall()
     if len(rows) != 1 or rows[0][0] != 1 or type(rows[0][1]) is not int or not 0 <= rows[0][1] <= MAX_SAFE_INTEGER:
         raise sqlite3.DatabaseError("Owner sync state metadata mismatch")
+    return expected
+
+
+def verify_owner_sync_schema(conn) -> None:
+    """SELECT/PRAGMA only. This original five-table profile stays closed."""
+    _local_connection(conn)
+    actual = _objects(conn)
+    expected = _verify_owner_sync_objects(conn, actual)
+    if set(actual) != set(expected):
+        raise sqlite3.DatabaseError("Owner sync schema contains missing or unknown objects")
 
 
 def provision_owner_sync_candidate(conn, *, synthetic_candidate: bool = False) -> dict:
@@ -180,6 +200,13 @@ def provision_owner_sync_candidate(conn, *, synthetic_candidate: bool = False) -
     try:
         actual = _objects(conn)
         core = _verify_core(conn, actual)
+        # PRAGMA optimize in the real initializer can create sqlite_stat1.
+        # Keep the old unextended-core refusal for unrelated application tables
+        # (including universe_import_state); only the fixed engine table is new.
+        operational = _optional_operational_objects(actual)
+        stat1 = ("table", "sqlite_stat1")
+        if stat1 in operational:
+            core[stat1] = operational[stat1]
         if any(name in OWNER_SYNC_DDL for _kind, name in actual):
             verify_owner_sync_schema(conn)
             changed = False
