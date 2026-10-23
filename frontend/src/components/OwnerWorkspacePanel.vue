@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { useWatchlistStore } from '@/stores/watchlist'
 import { OWNER_WORKSPACE_BACKUP_MAX_BYTES, restoreOwnerWorkspaceBackup,
   type OwnerWorkspaceBackup } from '@/utils/owner-workspace-backup'
 import type { OwnerWorkspaceEntry } from '@/utils/owner-cloud-import'
 
 const store = useWatchlistStore()
+const OwnerWorkspaceFormatPanel = defineAsyncComponent(() => import('./OwnerWorkspaceFormatPanel.vue'))
+const formatOpened = ref(false)
 type RestorePreview = Awaited<ReturnType<typeof store.previewLocalWorkspaceRestore>>
 const opened = ref(false)
 const busy = ref(false)
@@ -46,7 +48,7 @@ function invalidate(clearExport = false) {
   if (clearExport) { exportedSha.value = ''; sha.value = '' }
 }
 function open() { lifecycle++; opened.value = true }
-function close() { lifecycle++; invalidate(true); opened.value = false; message.value = '' }
+function close() { lifecycle++; invalidate(true); opened.value = false; formatOpened.value = false; message.value = '' }
 watch(() => store.authorityState, () => { invalidate(); message.value = '' }, { flush: 'sync' })
 onBeforeUnmount(() => { mounted = false; lifecycle++; invalidate(true) })
 function current(value: number) { return mounted && value === generation && opened.value }
@@ -213,7 +215,11 @@ async function reconcileActivation() {
     <div v-if="opened" class="workspace-body">
       <p class="workspace-boundary">此处只处理本机自选与账户持仓，不需要登录私人会话，也不授权云同步。旧两槽原文保留；启用后旧版 Gist 不再读写。</p>
       <p class="workspace-boundary">备份不含手工资产或组合历史，不读取凭据键、认证元数据或同步原包槽。这不是整个应用的数据备份，也不是云端确认、耐久或恢复证明。旧原文档案可能含任意私人内容；请只保存在自己的设备，不上传或公开分享。</p>
-      <p v-if="store.authorityState === 'idb'" class="workspace-boundary">当前仅启用本机工作区；新版云端上传暂未启用。</p>
+      <p v-if="store.authorityState === 'idb'" class="workspace-boundary">私人同步须另行登录和同意；只有明确升级本机同步格式后，才能通过新的同步流程处理变更。</p>
+      <template v-if="['idb', 'blocked'].includes(store.authorityState)">
+        <button type="button" class="workspace-button" data-action="open-format" @click="formatOpened = !formatOpened">{{ formatOpened ? '隐藏同步格式与完整备份' : '同步格式与完整备份' }}</button>
+        <OwnerWorkspaceFormatPanel v-if="formatOpened" />
+      </template>
       <p v-if="!authorityReady" class="workspace-error" role="alert">{{ store.authorityError || '本机权威尚未核定，编辑和导入已暂停。请保留原文件与摘要，不要清除浏览器存储。' }}</p>
       <button v-if="store.authorityState === 'blocked'" type="button" class="workspace-button" data-action="reconcile-local" :disabled="busy || !store.hasPendingLocalWorkspaceEdit" @click="reconcileLocal">核对上次本机写入</button>
       <button type="button" class="workspace-button" data-action="export" :disabled="busy || !authorityReady" @click="exportBackup">下载本机工作区备份</button>

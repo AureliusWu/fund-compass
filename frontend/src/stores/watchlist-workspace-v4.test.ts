@@ -161,7 +161,8 @@ describe('real watchlist writers on the explicitly upgraded v4 authority', () =>
       await expect(store.remove('510300', '银行', { confirmed: true,
         expected: [{ id: KEY, snapshot: store.entrySnapshot(KEY)! }] })).rejects.toBeInstanceOf(Error)
     }
-    expect(store.authorityState).toBe('blocked')
+    expect(store.authorityState).toBe('idb')
+    expect(store.hasPendingLocalWorkspaceEdit).toBe(false)
     expect(await image(current.target)).toEqual(before)
     const kept = await current.handle.readSyncState(current.guard)
     expect(kept.local.outbox.entry?.rawBody).toBe(request.packet.rawBody)

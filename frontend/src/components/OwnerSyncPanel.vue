@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { hasOwnerSession, ownerSession, ownerSessionGeneration } from '@/stores/ownerSession'
 import { useWatchlistStore, type OwnerSyncWatchSnapshot } from '@/stores/watchlist'
 import type { OwnerSyncBaseline, OwnerSyncCandidateStatus, OwnerSyncCandidateTransport } from '@/stores/ownerSyncCandidate'
@@ -13,6 +13,9 @@ interface Context { epoch: number; generation: number }
 interface PendingView extends OwnerSyncOutboxEntry { readonly targetFingerprint: string }
 
 const watchlist = useWatchlistStore()
+// Only the explicit IDB panel opening loads the managed UI. Its controller,
+// storage and transport remain owned and consent-gated by the watchlist store.
+const OwnerManagedSyncPanel = defineAsyncComponent(() => import('./OwnerManagedSyncPanel.vue'))
 const opened = ref(false)
 const consent = ref(false)
 const enabled = ref(false)
@@ -78,7 +81,10 @@ function dispose(closePanel = false): void {
 }
 watch(consent, value => { if (!value) dispose() }, { flush: 'sync' })
 watch(ownerSessionGeneration, () => dispose(), { flush: 'sync' })
-watch(() => watchlist.authorityState, () => {
+watch(() => watchlist.authorityState, value => {
+  // A legacy candidate may CAS during reconciliation. Never carry that second
+  // write path into an adopted IDB authority, even for a previously known slot.
+  if (value !== 'legacy') { dispose(); return }
   preview.value = null; localSnapshot.value = null; preparedSnapshot.value = null
   singleSendConsent.value = false
 }, { flush: 'sync' })
@@ -285,7 +291,9 @@ const checked = (event: Event) => (event.target as HTMLInputElement | null)?.che
       <button v-if="!opened" type="button" class="sync-button" @click="opened = true">查看私人同步</button>
       <button v-else type="button" class="sync-button" @click="dispose(true)">关闭并隐藏</button>
     </header>
-    <div v-if="opened" class="owner-sync-body">
+    <OwnerManagedSyncPanel v-if="opened && watchlist.authorityState === 'idb'" @close="dispose(true)" />
+    <p v-else-if="opened && watchlist.authorityState !== 'legacy'" class="sync-notice" role="status">本机权威尚未准备好。请先在“本机工作区”核对原数据库；不会回退旧版归档或打开旧同步写路径。</p>
+    <div v-else-if="opened" class="owner-sync-body">
       <p class="sync-boundary">不含手工资产。只核对当前本机完整自选和账户记录；不读取旧版 Gist，不把云端记录合并到本机。</p>
       <p class="sync-boundary">同步账本确认不等于持仓决策版本。这里不会清除本地待确认状态，也不会解除当前行动门禁。</p>
       <p class="sync-boundary">服务端须先完成兼容配置。本面板不自动迁移数据库，也不证明云端耐久或恢复能力。</p>

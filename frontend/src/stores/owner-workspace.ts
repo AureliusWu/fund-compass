@@ -168,6 +168,19 @@ function localState(value: unknown, target: string, codec: SyncCodec | null = nu
   return Object.freeze({ snapshot: copy, outbox: Object.freeze({ version: slot.version, entry: slot.entry }),
     metadata, receiptCount, ...(sync ? { sync } : {}) })
 }
+/** Pure full-image validation for explicit recovery files, never an IDB open.
+ * Pending packets retain their original bytes and must pass the same hashes as
+ * a normal v4 reopen. Callers cannot provide an alternative codec. */
+export async function validateOwnerWorkspaceLocalState(target: string, input: unknown): Promise<OwnerWorkspaceLocalState> {
+  localId(target, 'workspace-image-validation')
+  const codec = await stateCodec(input), copy = localState(input, target, codec)
+  if (copy.sync && codec) await codec.verifyPending({
+    slot: { ...copy.outbox, resourceFingerprint: target },
+    working: { schema: SCHEMA, targetFingerprint: target, snapshot: copy.snapshot },
+    metadata: copy.metadata, sync: copy.sync, receiptCount: copy.receiptCount, receipt: null, original: null,
+  }, target, value => localState(value, target, codec))
+  return copy
+}
 function stateOf(image: Image): OwnerWorkspaceLocalState {
   return Object.freeze({ snapshot: image.working.snapshot, outbox: Object.freeze({ version: image.slot.version, entry: image.slot.entry }),
     metadata: image.metadata, receiptCount: image.receiptCount, ...(image.sync ? { sync: image.sync } : {}) })
@@ -864,6 +877,36 @@ export async function upgradeOwnerWorkspaceSync(factory: IDBFactory, target: str
     return await commands.upgradeOwnerWorkspaceSync({ target, openExistingWorkspace, strictProbe, working, checkedMetadata,
       localState: value => localState(value, target, codec), makeWorkspace: db => makeWorkspace(db, target, codec) },
       factory, expected, activeGuard, controller.signal, abortCode)
+  } catch (error) { throw new OwnerWorkspaceError(timedOut ? 'workspace_timeout' : code(error)) }
+  finally { clearTimeout(timer); guard.signal.removeEventListener('abort', revoked) }
+}
+
+/** Explicit recovery of the v3->v4 initialization gap only. Never recreates a
+ * missing database, restores an old business image, or downgrades v4. */
+export async function reconcileOwnerWorkspaceSyncUpgrade(factory: IDBFactory, target: string,
+  expectedInput: OwnerWorkspaceLocalState, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspace> {
+  localId(target, 'workspace-sync-upgrade-reconcile')
+  const expected = localState(expectedInput, target)
+  if (!expected.metadata.adoption || expected.outbox.entry !== null || expected.receiptCount !== 0) fail('workspace_pending')
+  assertGuard(guard)
+  const controller = new AbortController()
+  let timedOut = false
+  const revoked = () => controller.abort()
+  guard.signal.addEventListener('abort', revoked, { once: true })
+  const timer = setTimeout(() => { timedOut = true; controller.abort() }, OWNER_SYNC_OUTBOX_TIMEOUT_MS)
+  const activeGuard: OwnerWorkspaceGuard = { signal: controller.signal, assertActive() {
+    if (timedOut) fail('workspace_timeout')
+    assertGuard(guard)
+  } }
+  const abortCode = (): OwnerWorkspaceErrorCode => timedOut ? 'workspace_timeout' : 'workspace_context_changed'
+  try {
+    const [recovery, codec] = await waitForImport(Promise.all([
+      import('./owner-workspace-upgrade-recovery'), loadSyncCodec(),
+    ]), controller.signal, abortCode)
+    assertGuard(activeGuard)
+    return await recovery.reconcileUpgrade({ target, openExistingWorkspace, strictProbe, working, checkedMetadata,
+      localState: value => localState(value, target, codec), makeWorkspace: db => makeWorkspace(db, target, codec) },
+    factory, expected, activeGuard, controller.signal, abortCode)
   } catch (error) { throw new OwnerWorkspaceError(timedOut ? 'workspace_timeout' : code(error)) }
   finally { clearTimeout(timer); guard.signal.removeEventListener('abort', revoked) }
 }

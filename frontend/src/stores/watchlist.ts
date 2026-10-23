@@ -8,6 +8,9 @@ import { positionKind, validateHolding, WatchMutationError, type HoldingInput, t
 import { openOwnerAuthority, OWNER_AUTHORITY_SEEN_HINT, type OwnerAuthority, type OwnerAuthorityRecord } from './owner-authority'
 import type { OwnerWorkspace, OwnerWorkspaceGuard, OwnerWorkspaceLocalState, OwnerWorkspaceLocalCommand } from './owner-workspace'
 import type { BuiltOwnerWorkspaceBackup, OwnerWorkspaceBackup, OwnerWorkspaceRestorePreview } from '@/utils/owner-workspace-backup'
+import type { ManagedWatchlistOwner, OwnerWorkspaceSyncFacade } from './owner-workspace-managed-store'
+import type { BuiltOwnerWorkspaceRecoveryBackup } from '@/utils/owner-workspace-recovery'
+export type { OwnerWorkspaceSyncFacade } from './owner-workspace-managed-store'
 
 const LS = 'sinan_watchlist_v2'
 const LEGACY_LS = 'sinan_watchlist_v1'
@@ -103,6 +106,12 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     : '本地工作副本；尚未同步至新版私人存储，不代表已确认持仓版本')
   let locator: OwnerAuthority | null = null, locatorRecord: OwnerAuthorityRecord | null = null
   let workspace: OwnerWorkspace | null = null, localState: OwnerWorkspaceLocalState | null = null
+  const physicalFormat = ref<'v3' | 'v4' | null>(null)
+  const localSyncFormat = computed(() => authorityState.value === 'idb' ? physicalFormat.value : null)
+  let syncOwner: ManagedWatchlistOwner | null = null, syncEnable: AbortController | null = null
+  let syncEpoch = 0
+  let formatInFlight = false
+  let syncRecovery: { value: BuiltOwnerWorkspaceRecoveryBackup; expected: OwnerWorkspaceLocalState; generation: number } | null = null
   let initialization: Promise<void> | null = null, alive = true
   const lifetime = new AbortController()
   let exported: { value: LocalWorkspaceBackup; legacy: OwnerSyncWatchSnapshot | null } | null = null
@@ -126,6 +135,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     setLegacySyncConsent(false) // also aborts in-flight gist.withCloud requests
   }
   function block(cause?: unknown) {
+    disableWorkspaceSync()
     authorityState.value = 'blocked'; localStorageError.value = true; cancelPush(); requestGeneration++
     authorityError.value = cause && typeof cause === 'object' && 'code' in cause && typeof cause.code === 'string'
       ? cause.code : '本机权威存储无法安全核对'
@@ -133,17 +143,25 @@ export const useWatchlistStore = defineStore('watchlist', () => {
   function activeGuard(extra: () => void = () => {}): OwnerWorkspaceGuard {
     return { signal: lifetime.signal, assertActive() { if (!alive || lifetime.signal.aborted) throw new WatchMutationError('storage'); extra() } }
   }
-  function acceptLocal(state: OwnerWorkspaceLocalState) {
-    if (!alive) throw new WatchMutationError('storage')
+  function localEntries(state: OwnerWorkspaceLocalState): LocalWatchEntry[] {
     const times = new Map(state.metadata.displayTimes.map(row => [row.key, row.updated_at]))
-    const next = state.snapshot.entries.map(row => {
+    return state.snapshot.entries.map(row => {
       const separator = row.key.indexOf('::')
       return { id: row.key, code: row.key.slice(0, separator), account: row.key.slice(separator + 2),
         name: row.values.name, position_kind: row.kind, shares: row.values.shares, cost: row.values.cost,
         target_weight: row.values.target_weight, deleted: row.deleted, updated_at: times.get(row.key) ?? null,
         ...(row.local_pending ? { local_pending: true as const } : {}) }
     })
-    entries.value = next; localState = state; localStorageError.value = false; mutationGeneration++
+  }
+  function acceptLocal(state: OwnerWorkspaceLocalState, fromManaged = false) {
+    if (!alive) throw new WatchMutationError('storage')
+    // Once an active adoption has been observed, refresh/export/receipt paths
+    // cannot bless a changed identity as a new source baseline. Initial adopt
+    // and explicit cross-reload recovery have their own locator/file checks.
+    if (localState?.metadata.adoption && locatorRecord?.phase === 'active') assertWorkspaceAdoption(state)
+    entries.value = localEntries(state); localState = state; localStorageError.value = false; mutationGeneration++
+    physicalFormat.value = state.sync ? 'v4' : 'v3'
+    if (!fromManaged) syncOwner?.sourceChanged()
     exported = null; restorePreview = null
   }
   async function verifyAuthority(phase: 'legacy' | 'active') {
@@ -205,6 +223,229 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     if (authorityState.value === 'unresolved') await initialize()
     if (authorityState.value !== 'legacy' && authorityState.value !== 'idb') throw new WatchMutationError('storage')
     await verifyAuthority(authorityState.value === 'legacy' ? 'legacy' : 'active')
+  }
+  function assertWorkspaceAdoption(state: OwnerWorkspaceLocalState) {
+    const adoption = state.metadata.adoption, original = localState?.metadata.adoption
+    if (!locatorRecord || locatorRecord.phase !== 'active' || !workspace || !adoption || !original
+      || workspace.targetFingerprint !== locatorRecord.targetFingerprint || adoption.id !== locatorRecord.activationId
+      || adoption.backupSha256 !== locatorRecord.backupSha256 || adoption.hash !== original.hash
+      || adoption.id !== original.id || adoption.localVersion !== original.localVersion
+      || adoption.sourceArchive.sourceKey !== original.sourceArchive.sourceKey
+      || adoption.sourceArchive.v1Raw !== original.sourceArchive.v1Raw || adoption.sourceArchive.v2Raw !== original.sourceArchive.v2Raw) {
+      throw new WatchMutationError('storage')
+    }
+  }
+  async function readActiveWorkspace(signal: AbortSignal, requireSync = false): Promise<OwnerWorkspaceLocalState> {
+    await ready()
+    if (signal.aborted || !alive || authorityState.value !== 'idb' || !workspace || !localState
+      || requireSync && !localState.sync || pendingLocal.value || localWriteInFlight) throw new WatchMutationError('storage')
+    const generation = mutationGeneration, target = locatorRecord!.targetFingerprint!
+    const guard = { signal, assertActive() {
+      if (signal.aborted || !alive || authorityState.value !== 'idb' || generation !== mutationGeneration
+        || locatorRecord?.targetFingerprint !== target || localWriteInFlight) throw new WatchMutationError('conflict')
+    } }
+    let state: OwnerWorkspaceLocalState
+    try { state = await workspace.readLocalState(guard) }
+    catch (cause) {
+      const code = cause && typeof cause === 'object' && 'code' in cause ? cause.code : null
+      if (code !== 'workspace_closed' && code !== 'workspace_timeout') throw cause
+      guard.assertActive()
+      const storage = await import('./owner-workspace')
+      guard.assertActive()
+      const reopened = await storage.openOwnerWorkspace(globalThis.indexedDB, target, { existingOnly: true })
+      try {
+        guard.assertActive(); state = await reopened.readLocalState(guard); guard.assertActive()
+        const old = workspace; workspace = reopened
+        try { assertWorkspaceAdoption(state) } catch (error) { workspace = old; throw error }
+        old?.close()
+      } catch (error) { reopened.close(); throw error }
+    }
+    guard.assertActive(); assertWorkspaceAdoption(state)
+    if (requireSync && !state.sync) throw new WatchMutationError('storage')
+    await verifyAuthority('active'); guard.assertActive()
+    return state
+  }
+  async function prepareManagedWorkspace(signal: AbortSignal) {
+    if (formatInFlight) throw new WatchMutationError('conflict')
+    const { canonicalOwnerLocal } = await import('@/utils/owner-workspace-backup')
+    if (!localState || canonicalOwnerLocal(entries.value) !== canonicalOwnerLocal(localEntries(localState))) throw new WatchMutationError('conflict')
+    await readActiveWorkspace(signal, true)
+  }
+  function disableWorkspaceSync() {
+    syncEpoch++; syncEnable?.abort(); syncEnable = null; syncOwner?.disable()
+  }
+  async function enableWorkspaceSync(consent: true): Promise<OwnerWorkspaceSyncFacade> {
+    if (consent !== true || syncEnable) throw new WatchMutationError('conflict')
+    const controller = new AbortController(), epoch = syncEpoch
+    syncEnable = controller
+    const abort = () => controller.abort()
+    lifetime.signal.addEventListener('abort', abort, { once: true })
+    let rejectAbort!: () => void
+    const stopped = new Promise<never>((_resolve, reject) => {
+      rejectAbort = () => reject(new WatchMutationError('storage'))
+      controller.signal.addEventListener('abort', rejectAbort, { once: true })
+    })
+    const timer = setTimeout(abort, 12_000)
+    const check = () => {
+      if (controller.signal.aborted || !alive || epoch !== syncEpoch || authorityState.value !== 'idb') throw new WatchMutationError('storage')
+    }
+    try {
+      return await Promise.race([(async () => {
+        await prepareManagedWorkspace(controller.signal); check()
+        if (!syncOwner) {
+          const module = await import('./owner-workspace-managed-store'); check()
+          const target = locatorRecord!.targetFingerprint!
+          const checked = async (guard: OwnerWorkspaceGuard) => { await verifyAuthority('active'); guard.assertActive() }
+          const port = Object.freeze({ targetFingerprint: target,
+            async readSyncState(guard: OwnerWorkspaceGuard) {
+              await checked(guard)
+              const state = await workspace!.readSyncState(guard); assertWorkspaceAdoption(state.local); return state
+            },
+            async linkCloudBase(request: Parameters<OwnerWorkspace['linkCloudBase']>[0], guard: OwnerWorkspaceGuard) {
+              await checked(guard); return workspace!.linkCloudBase(request, guard)
+            },
+            async prepareCloud(request: Parameters<OwnerWorkspace['prepareCloud']>[0], guard: OwnerWorkspaceGuard) {
+              await checked(guard); return workspace!.prepareCloud(request, guard)
+            },
+            async cancelPreparedCloud(request: Parameters<OwnerWorkspace['cancelPreparedCloud']>[0], guard: OwnerWorkspaceGuard) {
+              await checked(guard); return workspace!.cancelPreparedCloud(request, guard)
+            },
+            async transitionCloudDelivery(request: Parameters<OwnerWorkspace['transitionCloudDelivery']>[0], guard: OwnerWorkspaceGuard) {
+              await checked(guard); return workspace!.transitionCloudDelivery(request, guard)
+            },
+            async ackCloud(request: Parameters<OwnerWorkspace['ackCloud']>[0], guard: OwnerWorkspaceGuard) {
+              await checked(guard); return workspace!.ackCloud(request, guard)
+            },
+            async syncReceipt(id: string, hash: string, guard: OwnerWorkspaceGuard) {
+              await checked(guard); return workspace!.syncReceipt(id, hash, guard)
+            },
+          })
+          const created = await module.createManagedWatchlistOwner({ target, lifetime: lifetime.signal, port,
+            prepare: prepareManagedWorkspace,
+            assertActive() { if (!alive || authorityState.value !== 'idb' || locatorRecord?.targetFingerprint !== target) throw new WatchMutationError('storage') },
+            capture(signal, canonical) {
+              const generation = mutationGeneration, memory = canonical(entries.value), state = canonical(localState),
+                authority = JSON.stringify(locatorRecord), handle = workspace
+              return { signal, assertActive() {
+                if (signal.aborted || !alive || authorityState.value !== 'idb' || localWriteInFlight || pendingLocal.value
+                  || workspace !== handle || generation !== mutationGeneration || canonical(entries.value) !== memory
+                  || canonical(localState) !== state || JSON.stringify(locatorRecord) !== authority) throw new WatchMutationError('conflict')
+              } }
+            }, accept(state, canonical) {
+              const memory = canonical(localEntries(state)), generation = mutationGeneration
+              acceptLocal(state, true)
+              if (!alive || mutationGeneration !== generation + 1 || canonical(entries.value) !== memory
+                || canonical(localState) !== canonical(state)) throw new WatchMutationError('conflict')
+            } })
+          try { check() } catch (error) { created.close(); throw error }
+          syncOwner = created
+        }
+        const facade = await syncOwner.enable(true, controller.signal); check(); return facade
+      })(), stopped])
+    } finally {
+      clearTimeout(timer); lifetime.signal.removeEventListener('abort', abort)
+      controller.signal.removeEventListener('abort', rejectAbort)
+      if (syncEnable === controller) syncEnable = null
+    }
+  }
+  async function formatOperation<T>(work: (signal: AbortSignal, ensure: () => void) => Promise<T>): Promise<T> {
+    if (formatInFlight || localWriteInFlight || syncOwner?.isBusy()) throw new WatchMutationError('conflict')
+    const controller = new AbortController(), abort = () => controller.abort()
+    lifetime.signal.addEventListener('abort', abort, { once: true })
+    let rejectAbort!: () => void
+    const stopped = new Promise<never>((_resolve, reject) => {
+      rejectAbort = () => reject(new WatchMutationError('storage'))
+      controller.signal.addEventListener('abort', rejectAbort, { once: true })
+    })
+    const timer = setTimeout(abort, 12_000)
+    const ensure = () => { if (!alive || controller.signal.aborted || lifetime.signal.aborted) throw new WatchMutationError('storage') }
+    formatInFlight = true
+    try { ensure(); return await Promise.race([work(controller.signal, ensure), stopped]) }
+    finally {
+      clearTimeout(timer); controller.signal.removeEventListener('abort', rejectAbort)
+      lifetime.signal.removeEventListener('abort', abort); controller.abort(); formatInFlight = false
+    }
+  }
+  async function createSyncRecoveryBackup(): Promise<BuiltOwnerWorkspaceRecoveryBackup> {
+    return formatOperation(async (signal, ensure) => {
+      const [codec, { canonicalOwnerLocal }] = await Promise.all([
+        import('@/utils/owner-workspace-recovery'), import('@/utils/owner-workspace-backup'),
+      ])
+      ensure()
+      const state = await readActiveWorkspace(signal), target = workspace!.targetFingerprint
+      const result = await codec.buildOwnerWorkspaceRecoveryBackup(target, state)
+      ensure()
+      const current = await readActiveWorkspace(signal)
+      if (canonicalOwnerLocal(current) !== canonicalOwnerLocal(state)) throw new WatchMutationError('conflict')
+      acceptLocal(state)
+      syncRecovery = { value: result, expected: state, generation: mutationGeneration }
+      return result
+    })
+  }
+  async function changeSyncFormat(raw: string, sha256: string, confirmed: true, reconcile: boolean): Promise<void> {
+    if (confirmed !== true) throw new WatchMutationError('requires-confirmation')
+    return formatOperation(async (signal, ensure) => {
+      const [codec, storage, { canonicalOwnerLocal }, sessionModule, requestModule] = await Promise.all([
+        import('@/utils/owner-workspace-recovery'), import('./owner-workspace'),
+        import('@/utils/owner-workspace-backup'), import('./ownerSession'), import('@/api/request'),
+      ])
+      const targetUrl = requestModule.ownerApiTarget()
+      const backup = await codec.restoreOwnerWorkspaceRecoveryBackup(raw, sha256)
+      ensure()
+      if (reconcile) {
+        // Failed initialize() is deliberately cached. The narrow explicit
+        // recovery uses only its already opened original active locator.
+        if (authorityState.value === 'unresolved') { try { await initialize() } catch { /* check the original locator below */ } }
+        if (!locator || !locatorRecord) throw new WatchMutationError('storage')
+        await verifyAuthority('active')
+      } else {
+        await ready()
+        if (authorityState.value !== 'idb' || !syncRecovery || syncRecovery.value.raw !== raw
+          || syncRecovery.value.sha256 !== sha256 || syncRecovery.generation !== mutationGeneration
+          || canonicalOwnerLocal(syncRecovery.expected) !== canonicalOwnerLocal(backup.local)) throw new WatchMutationError('conflict')
+      }
+      ensure()
+      const pointer = locatorRecord!, adoption = backup.local.metadata.adoption
+      if (pointer.phase !== 'active' || backup.physicalVersion !== 3 || backup.local.sync || backup.local.outbox.entry
+        || !adoption || backup.targetFingerprint !== pointer.targetFingerprint || adoption.id !== pointer.activationId
+        || adoption.backupSha256 !== pointer.backupSha256
+        || await sessionModule.getOwnerSyncTargetFingerprint() !== pointer.targetFingerprint) throw new WatchMutationError('conflict')
+      ensure()
+      const generation = mutationGeneration, memory = canonicalOwnerLocal(entries.value), authority = JSON.stringify(pointer)
+      const guard: OwnerWorkspaceGuard = { signal, assertActive() {
+        ensure()
+        if (generation !== mutationGeneration || canonicalOwnerLocal(entries.value) !== memory
+          || JSON.stringify(locatorRecord) !== authority || requestModule.ownerApiTarget() !== targetUrl
+          || !['idb', 'blocked'].includes(authorityState.value)) throw new WatchMutationError('conflict')
+      } }
+      let replacement: OwnerWorkspace | null = null
+      try {
+        if (!reconcile) {
+          const current = await readActiveWorkspace(signal)
+          if (canonicalOwnerLocal(current) !== canonicalOwnerLocal(backup.local)) throw new WatchMutationError('conflict')
+        }
+        await verifyAuthority('active'); guard.assertActive(); disableWorkspaceSync()
+        replacement = await (reconcile ? storage.reconcileOwnerWorkspaceSyncUpgrade : storage.upgradeOwnerWorkspaceSync)(
+          globalThis.indexedDB, pointer.targetFingerprint!, backup.local, guard)
+        guard.assertActive()
+        const next = await replacement.readLocalState(guard)
+        guard.assertActive(); await verifyAuthority('active'); guard.assertActive()
+        if (!next.sync || canonicalOwnerLocal(next.metadata.adoption) !== canonicalOwnerLocal(adoption)) throw new WatchMutationError('conflict')
+        workspace?.close(); workspace = replacement; replacement = null
+        acceptLocal(next); pendingLocal.value = null; authorityState.value = 'idb'; authorityError.value = ''; loaded.value = true
+        syncRecovery = null; notifyAuthority()
+      } catch (cause) {
+        replacement?.close(); block(cause)
+        // Keep the original file binding for explicit manual recovery; never replay.
+        throw cause
+      }
+    })
+  }
+  async function upgradeLocalSyncFormat(raw: string, sha256: string, confirmed: true) {
+    return changeSyncFormat(raw, sha256, confirmed, false)
+  }
+  async function reconcileLocalSyncUpgrade(raw: string, sha256: string, confirmed: true) {
+    return changeSyncFormat(raw, sha256, confirmed, true)
   }
   if (eventChannel) eventChannel.onmessage = () => {
     if (alive && locatorRecord) void verifyAuthority(locatorRecord.phase === 'legacy' ? 'legacy' : 'active').catch(() => {})
@@ -290,6 +531,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
   const storageWindow = typeof window === 'undefined' ? null : window
   storageWindow?.addEventListener('storage', storageChanged)
   onScopeDispose(() => {
+    disableWorkspaceSync(); syncOwner?.close()
     alive = false; lifetime.abort(); cancelPush(); unsubscribe(); requestGeneration++
     workspace?.close(); locator?.close(); eventChannel?.close()
     storageWindow?.removeEventListener('storage', storageChanged)
@@ -440,10 +682,34 @@ export const useWatchlistStore = defineStore('watchlist', () => {
       throw cause
     }
   }
+  function isPrewriteRefusal(cause: unknown, storage: typeof import('./owner-workspace')) {
+    return cause instanceof storage.OwnerWorkspaceError && ['workspace_invalid_input', 'workspace_invalid_target',
+      'workspace_conflict', 'workspace_pending', 'workspace_capacity', 'workspace_version_exhausted',
+      'workspace_noop', 'workspace_idempotency_conflict'].includes(cause.code)
+  }
+  function isPendingRefusal(cause: unknown, storage: typeof import('./owner-workspace')) {
+    return cause instanceof storage.OwnerWorkspaceError && cause.code === 'workspace_pending'
+  }
+  async function assertLocalWritable() {
+    if (!workspace || !localState || authorityState.value !== 'idb') throw new WatchMutationError('storage')
+    await verifyAuthority('active')
+    const generation = mutationGeneration
+    const current = await workspace.readLocalState(activeGuard(() => {
+      if (generation !== mutationGeneration || authorityState.value !== 'idb') throw new WatchMutationError('conflict')
+    }))
+    // A known durable packet is a sync workflow, never an uncertain local edit.
+    // Refuse BEFORE allocating a new id/hash or setting pendingLocal.
+    if (current.outbox.entry !== null) throw new WatchMutationError('conflict')
+    const { canonicalOwnerLocal } = await import('@/utils/owner-workspace-backup')
+    if (generation !== mutationGeneration || canonicalOwnerLocal(current) !== canonicalOwnerLocal(localState)) {
+      block(new WatchMutationError('conflict')); throw new WatchMutationError('conflict')
+    }
+  }
   async function writeLocal(command: OwnerWorkspaceLocalCommand): Promise<void> {
-    if (localWriteInFlight) throw new WatchMutationError('conflict')
+    if (formatInFlight || localWriteInFlight || syncOwner?.isBusy()) throw new WatchMutationError('conflict')
     localWriteInFlight = true
     try {
+      await assertLocalWritable()
       const storage = await import('./owner-workspace')
       const expected = localState!
       const request = await storage.buildOwnerWorkspaceEditLocalRequest(workspace!.targetFingerprint,
@@ -455,7 +721,11 @@ export const useWatchlistStore = defineStore('watchlist', () => {
           if (authorityState.value !== 'idb' || generation !== mutationGeneration || JSON.stringify(entries.value) !== memory) throw new WatchMutationError('conflict')
         }))
         acceptLocal(state); pendingLocal.value = null
-      } catch (cause) { block(cause); throw cause }
+      } catch (cause) {
+        if (isPrewriteRefusal(cause, storage)) pendingLocal.value = null
+        if (!isPendingRefusal(cause, storage)) block(cause)
+        throw cause
+      }
     } finally { localWriteInFlight = false }
   }
   async function reconcileLocalWorkspaceEdit(): Promise<void> {
@@ -475,27 +745,33 @@ export const useWatchlistStore = defineStore('watchlist', () => {
   async function previewLocalWorkspaceRestore(raw: string, sha256: string): Promise<LocalWorkspaceRestorePreview> {
     await ready()
     if (authorityState.value !== 'idb') throw new WatchMutationError('storage')
-    const module = await import('@/utils/owner-workspace-backup'), backup = await module.restoreOwnerWorkspaceBackup(raw, sha256)
-    const expected = await workspace!.readLocalState(activeGuard())
-    acceptLocal(expected)
-    const preview = module.previewOwnerWorkspaceRestore(expected, backup)
-    const value = Object.freeze({ ...preview, counts: Object.freeze({ total: preview.rows.length,
-      added: preview.added, noops: preview.noops, conflicts: preview.conflicts }) })
-    restorePreview = { raw, sha256, backup, expected, value }
-    return value
+    if (formatInFlight || localWriteInFlight || syncOwner?.isBusy()) throw new WatchMutationError('conflict')
+    localWriteInFlight = true
+    try {
+      await assertLocalWritable()
+      const module = await import('@/utils/owner-workspace-backup'), backup = await module.restoreOwnerWorkspaceBackup(raw, sha256)
+      const expected = await workspace!.readLocalState(activeGuard())
+      acceptLocal(expected)
+      const preview = module.previewOwnerWorkspaceRestore(expected, backup)
+      const value = Object.freeze({ ...preview, counts: Object.freeze({ total: preview.rows.length,
+        added: preview.added, noops: preview.noops, conflicts: preview.conflicts }) })
+      restorePreview = { raw, sha256, backup, expected, value }
+      return value
+    } finally { localWriteInFlight = false }
   }
   async function restoreLocalWorkspaceBackup(raw: string, sha256: string): Promise<void> {
     await ready()
     if (authorityState.value !== 'idb' || !restorePreview || restorePreview.raw !== raw || restorePreview.sha256 !== sha256
       || restorePreview.value.conflicts !== 0) throw new WatchMutationError('conflict')
-    const original = restorePreview
-    const [module, storage] = await Promise.all([import('@/utils/owner-workspace-backup'), import('./owner-workspace')])
-    const current = await workspace!.readLocalState(activeGuard())
-    if (module.canonicalOwnerLocal(current) !== module.canonicalOwnerLocal(original.expected)) throw new WatchMutationError('conflict')
-    if (original.value.added === 0) return // exact duplicates/empty files never overwrite or delete current entries
-    if (localWriteInFlight) throw new WatchMutationError('conflict')
+    if (formatInFlight || localWriteInFlight || syncOwner?.isBusy()) throw new WatchMutationError('conflict')
     localWriteInFlight = true
     try {
+      await assertLocalWritable()
+      const original = restorePreview
+      const [module, storage] = await Promise.all([import('@/utils/owner-workspace-backup'), import('./owner-workspace')])
+      const current = await workspace!.readLocalState(activeGuard())
+      if (module.canonicalOwnerLocal(current) !== module.canonicalOwnerLocal(original.expected)) throw new WatchMutationError('conflict')
+      if (original.value.added === 0) return // exact duplicates/empty files never overwrite or delete current entries
       const request = await storage.buildOwnerWorkspaceRestoreLocalRequest(workspace!.targetFingerprint,
         { id: 'local-restore-' + crypto.randomUUID(), expected: original.expected, backup: original.backup })
       const generation = mutationGeneration
@@ -505,7 +781,11 @@ export const useWatchlistStore = defineStore('watchlist', () => {
           if (authorityState.value !== 'idb' || restorePreview !== original || generation !== mutationGeneration) throw new WatchMutationError('conflict')
         }))
         acceptLocal(state); pendingLocal.value = null
-      } catch (cause) { block(cause); throw cause }
+      } catch (cause) {
+        if (isPrewriteRefusal(cause, storage)) pendingLocal.value = null
+        if (!isPendingRefusal(cause, storage)) block(cause)
+        throw cause
+      }
     } finally { localWriteInFlight = false }
   }
 
@@ -662,6 +942,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     gist.clearConfig(); hasToken.value = false; lastSync.value = ''
   }
   return {
+    localSyncFormat, enableWorkspaceSync, disableWorkspaceSync, createSyncRecoveryBackup, upgradeLocalSyncFormat, reconcileLocalSyncUpgrade,
     authorityState, authorityError, initialize, createLocalWorkspaceBackup, activateLocalWorkspace,
     previewLocalWorkspaceRestore, restoreLocalWorkspaceBackup, reconcileLocalWorkspaceEdit, hasPendingLocalWorkspaceEdit,
     items, entries, activeHoldings, accounts, loaded, syncing, lastSync, hasToken, legacySyncEnabled, localStorageError, localStatus,

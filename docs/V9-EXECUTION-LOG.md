@@ -1219,3 +1219,47 @@ ACK 请求绑定原始响应/原包/完整 D/派生预览 hash，重建核封闭
 新证据目录 `fc-i19-managed-build-20261022-c38a3796219c4b0589d9c19a39f237cd`，helper=`653f5b7cc792c72cb72ba200790439e35c1ddcaf8487fe6f4a219954dbfad15c`；frozen文件=`e2a624aeece9458041ca51a83b0c405576ec2128f065a0e152f200faa58aff69`，current frontend source aggregate=`2d4a3e4bde569c80f80233e562f5b735ae7e883a01aeddae7c8654151af890a9`；summary=`a952fcdd2009ce02355bb68cd9840831253a7de9c170639b23ed5c70200955e6`。根独立重核十份报告 SHA 一致；原npm stdout/exit/耗时来自正常工具调用，不宣称另有封存日志或SHA来源认证。
 
 下一段继续真实 UI/会话同意与v4显式升级/故障恢复接线，以及I19-04云 revision→Holding/Policy/Decision全链；还需手工资产/历史/机器消费者迁移、真实多设备。新 ack receipt 会被旧 v4 codec 拒绝，源码回退不是已 ACK 本机数据的降级迁移；真实启用前必须保存升级前备份并验证同格式恢复、旧PWA/离线，不能据本轮未启用即略过该门禁。I18实际writer停写排空、新保护备份、Free配额/凭据轮换、provider能力/容量、受控迁移、应用写入→Render重启读回及独立远端恢复仍缺；I20自然窗口与I21旧PWA/实机/性能亦未关闭。本轮未读凭据输入、不绕过此前OAuth/浏览器/PR写403边界、不改云套餐/秘密/部署/重启/main/Gist，应用保持8.0.0；当前功能分支验证与计划v9正式发布严格分开。
+
+### d97027b 自然 CI 与 I19 实际同步界面 / 完整本机格式文件（2026-10-22）
+
+前片段正常提交/推送 `d97027b2d3ae63ec92d26c04f5193369981ce00f`，tree=`eb189cd8f7561f9489bad828ccbe67e1083c96ee`。[CI39743590050](https://github.com/AureliusWu/fund-compass/actions/runs/39743590050) run186/attempt1 success；本轮重读实际 jobs 和三个 job 日志：backend **3689 passed/2 warnings/247.03s**，frontend **1917 passed/75文件**、type/build5.41s/PWA7/7，Worker **148 passed/4文件**、check/dry-run114.28KiB/gzip26.58，两端独立 audit 成功。实际 checkout merge=`d3b32e84ae6d576108171c7f76e7b7c0dcbb3f29`，GitHub commit API 独立核 parents=f8d519a+d970、tree 与 feature 一致。deploy/candidate_smoke/formal_smoke 全 skipped/steps=null。PR4 仍 OPEN/DRAFT，main 仍 f8d519a；没有触发部署或把该历史 CI 当成当前修改的通过。
+
+本片段在真实 watchlist 中持有懒加载 managed facade，注入真实会话/locator/端点原字符串/源像/当前内存/版本/handle 守卫。原 IDB 工作区只由应用管理，退出/关闭面板撤 consent、清私人视图但不销毁本机未知请求标识；facade 返回完整动作之后才更新 Pinia，发布同步 watcher 再次退出仍必须拒绝返回并保留原 tuple。原目标 handle 关闭只 existingOnly 重开并核 adoption，不回退 LS 或创建新库。旧 candidate UI 在 authority 转 IDB 时销毁其旧 CAS 路径，不能留下第二条写路径。
+
+`OwnerManagedSyncPanel` 从默认关闭和本轮同意开始，支持完整云快照、首次共同基线预览/确认、真实 B→L 制包预览/确认、原包单次发送、匹配原回执与完整 D、逐字段/生命周期/更名整组冲突选择及单独 ACK 确认。变更选择立即丢旧 ACK 请求及同意；unknown 仅回执/导出/关闭，prepared 才可取消。保留 0/null/负零、删除和未知原时间，不把同步 revision 当 Holding/Decision，不清 local_pending。手工资产完整留基线，不声称已经迁移独立资产存储。
+
+新增 `sinan-owner-workspace-recovery-1` 完整文件与升级界面，和原普通行备份分开。包含实际完整 local/sync、B/manual/tombstone、pending 原字节及 preparation envelope、最近本机回执、adoption 原档案和复导档案。严格闭集/原生 descriptor、24MiB、原 UTF-8 SHA、重算原 adoption 备份 SHA 和 pending 原制包前像；重复 JSON key/BOM/坏 Unicode/隐藏或 getter 字段拒绝。完整文件没有登录凭据、其他独立资产存储或组合历史，完整解码不是丢库灾难恢复能力。
+
+显式 v3→v4 需本轮导出后选回相同完整文件、原 target/locator/adoption、空槽与未变全前像。仍承认 versionchange 与 strict 初始化是两次提交；新增手动中断核对仅打开已有物理 v4，严格检查全部 store/行和原 v3 完整文件，在唯一 sync current 为空时补初始元数据，或核已完成的相同初始像。缺库时 abort upgrade、不创建；物理 v3 不升级；后续编辑、额外行/store、非空或非初始 sync 不覆写。不重导、不降级、不复发原包。正常启动的 existingOnly 缺项拒绝未放宽。
+
+独立真实红绿关闭：在途切换 location.origin 后仍接收旧端点 D（15项14P/1F）；ACK strict 提交后的 Pinia flush:sync watcher 退出仍返回私人结果且丢本机 tuple（16项15P/1F）。最终独立17项均通过，覆盖真实 Pinia/locator/工作区/Owner session/HTTP transport 和编译后 SFC checkbox/click 全链；only fake-IDB、自定义 Vue 渲染宿主、固定合成 HTTP provider 及显式 postcommit 故障。ACK 后完整文件还核 actual local 全等、receipt.operation=ack、manual 完整、原槽空及 local_pending。全库遗失恢复、实际浏览器文件落盘/安装旧 PWA/多设备和真实云来源不在此合成证据内。
+
+质量与性能的最终冻结结果见下节；过程中首轮 1982/80 文件全量和 build8.19s/PWA7/7 在最后并发互斥修补之前，不能绑定到修补后的源码。独立审查又指出本机写预检 await 之前未占用互斥的竞争窗口，后续测试与修补按最终证据记录，不抹去该发现。
+
+#### 中断后收口与最终源码验证（2026-10-23）
+
+先核实际 Node 进程已无本项目执行中的测试/构建，再续用中断保留的修改。write/restore/复导预览在第一个异步预检之前占用同一互斥，finally 释放；只有真实预检通过才分配本机 id/hash。两条真实 commit 后 close+throw 故障回归证明并发保存、格式操作和复导不能覆盖原 tuple，手核原回执后才释放。`acceptLocal` 统一核已观察 adoption，普通 load/行备份不能把已变 hash/sourceArchive 洗成新原像。新增回归最初误对 Vue proxy 用 structuredClone，2项 DataCloneError 是测试前置错误，改成逐行普通对象后通过；未把该失败称为业务红测。
+
+再次独立审查发现：ACK 落库后同步 Pinia watcher 退出，tuple 保留但 action 已结束，本机 add 仍能写并推进原回执依赖的版本。根扩真实集成用例复现 **16P/1F**（add实际 resolve），随后将 store 写互斥包含私有 publication，即使退出隐藏也保留占位，手核原 id/hash 才释放。最终真实集成17、格式8、写串行4共 **29 passed**；独立审查未发现额外本轮P0/P1。打开面板、导出原包、手核不重放的既有边界保持。
+
+最终冻结源码直接 `npm run test`：**1988 passed / 81文件 / 7.91s**；`npm run type-check` exit0。包含真实 SFC 点击链、Pinia/locator/工作区、完整恢复文件、同目标重开、实际 strict 提交故障。后端本片段未改，当前完整后端证据由本次推送后的自然 CI 核验；前片段3689并非本机新跑。Worker上轮直接148/check/dry-run通过，源未改；10/23两端独立官方 npm audit（含dev、20秒请求界限、0自动重试）均0漏洞/exit0；Wrangler内嵌风险的正式deploy固定阻断仍在。
+
+冻结全部 frontend 输入后，复用保留的 a51940d Git archive 和同 node_modules junction，A/B/B/A/A/B/B/A/A/B 十次各自直接 `npm run build`，全部 exit0/PWA7/7；计量脚本仅读源/制品和生成新统计，不运行子进程。每侧五份产物逐字稳定，源/依赖 pin 前后相同，实际 AST 静态/动态依赖与 PWA URL/MD5 校验通过。以下是合并新 main 数据前的独立性能切面：
+
+| 制品或本地构建 | A：a51940d | B：本次冻结 | 结论 |
+| --- | ---: | ---: | --- |
+| Vite秒，p50 / p95 nearest-rank，n=5/侧 | 6.72 / 6.98 | 7.00 / 7.11 | median +4.17%，非浏览器延迟 |
+| JS+CSS raw / gzip9字节 | 1,489,486 / 524,443 | 1,612,983 / 566,232 | gzip +7.97% |
+| workspace自身 raw / gzip9 | 27,552 / 7,787 | 34,861 / 9,741 | **+25.09% FAIL**，原局部20%线不变 |
+| workspace实际静态JS闭包 raw / gzip9 | 323,571 / 116,409 | 342,424 / 121,918 | gzip +4.73% |
+| WatchlistPage自身 raw / gzip9 | 72,809 / 25,869 | 74,103 / 26,231 | +1.40%，旧52c3013局部FAIL仍开放 |
+| precache制品 raw / gzip9 | 999,202 / 400,938 | 1,121,958 / 442,560 | **+10.38% WARN** |
+| precache及worker支持并集 raw / gzip9 | 1,027,066 / 410,446 | 1,150,563 / 452,236 | **+10.18% WARN** |
+
+主要增长来自实际同步 UI/协调器接线、完整格式文件与恢复校验；旧候选和新工作区流程并存增加预缓存。小静态闭包增长不抵消单块FAIL；下一性能工作须按实际功能加载入口与安装需求减少有效负载，不移除校验或提高预算。request/ownerSession静态/动态重复导入提示保留；ECharts532397B低于现有600kB线。全部为制品与本机构建，不是实际 warm/cold、安装旧PWA、离线、物理设备或网络交互性能证据。
+
+原始直接 npm stdout/exit/Vite秒在工具记录，未伪称封存完整日志。统计目录 `fc-i19-ui-build-20261022-43b7fe99a42d4c5087623d347e698c61`，helper SHA=`ab16c6541920fcf8a1a5bb64a6e12782dfe021e44b6c36d970b2cabb394d40e9`；frozen文件SHA=`f599ddab2fd4d5bf501ad520add893ba829c5de2a2bbbcba78ce3c662ab078a9`，frontend source aggregate=`998a30983dc14d3cc89919819322be3677ebbef1e0412e0935d451a7483fc87d`，summary SHA=`4c12250055e11a307b5d9d05391185a28f3f3ef3f2500c6e370e446a127af62d`。报告只作本地完整性，不是来源认证。
+
+期间 main 新增公开账本 bot 提交 `7afc4e6c17451d55404344593b1c6f004697e99e`，仅4个公开数据文件：新增3条有效预测、总87行、63 settled/5 pending/17历史错位/2 observed；一个候选样本16→17、仍 collecting/required20/eligible=false，active模型未改。数据审查后正常合入升级分支，并由最终集成构建/自然CI重新验证；前述性能切面不冒称包含这次新数据。
+
+应用仍8.0.0，当前只提交功能分支候选。I18实际轮换/停写排空/新保护备份、provider能力/容量/受控迁移、应用写入跨Render重启与独立远端恢复；I19完整服务端revision→Holding/Policy/Decision、手工资产/历史/机器消费者；I20自然交易日/周窗口；I21真实浏览器/旧PWA/实机和性能回退仍未关闭。未读凭据输入、未绕过既有OAuth/浏览器/PR写403、未修改云配置/重启/main或删除Gist。下一实现优先使用caller-owned事务内核，核完整服务端组合来源和expected_revision，原子保存真实Holding/Decision/来源映射与任务回执，不以本轮同步ACK或另一个验证器代替业务链。

@@ -172,28 +172,31 @@ afterEach(() => {
 })
 
 describe('real Owner sync panel journey', () => {
-  it('does not prepare or send archived legacy rows when the current authority is IDB', async () => {
-    const root = await prepared()
+  it('disposes the legacy candidate when authority becomes IDB and never carries its old write/CAS UI across', async () => {
+    const root = await prepared(), before = (await slot()).entry!
     watchlist.authorityState = 'idb'; await nextTick()
-    expect(button(root, '单次发送原包').props.disabled).toBe(true)
-    expect(output(root)).toContain('不会从旧版归档恢复上传')
-    expect(button(root, '导出本机完整副本（含删除记录）').props.disabled).toBe(true)
+    await vi.waitFor(() => expect(output(root)).toContain('显式升级 v4'))
+    expect(buttons(root).some(item => /单次发送原包|准备这一批原包|取消尚未发送的提交|结束已决请求/.test(output(item)))).toBe(false)
+    expect(output(root)).not.toContain(before.requestHash)
+    expect(mocks.close).toHaveBeenCalled()
     expect(mocks.write).not.toHaveBeenCalled()
     expect((await slot()).entry?.state).toBe('prepared')
   })
 
-  it('retains manual original unknown receipt reconciliation in IDB authority without preparing or resending', async () => {
+  it('retains the original unknown slot but removes the legacy receipt-CAS path after authority becomes IDB', async () => {
     const root = await prepared()
     mocks.write.mockRejectedValueOnce(new Error('synthetic connection lost'))
     await check(root, 'owner-sync-single-send'); await click(root, '单次发送原包')
     const original = (await slot()).entry!
     expect(original.state).toBe('unknown')
     watchlist.authorityState = 'idb'; await nextTick()
-    await click(root, '核对原请求回执')
-    expect(mocks.receipt).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(output(root)).toContain('显式升级 v4'))
+    expect(buttons(root).some(item => output(item).trim() === '核对原请求回执')).toBe(false)
+    expect(mocks.receipt).not.toHaveBeenCalled()
     expect(mocks.write).toHaveBeenCalledTimes(1)
     expect((await slot()).entry).toMatchObject({ rawBody: original.rawBody, requestHash: original.requestHash })
-    expect(output(root)).toContain('结果未知')
+    expect(output(root)).not.toContain(original.requestHash)
+    expect(mocks.close).toHaveBeenCalled()
   })
 
   it('is discoverable in the real Watchlist page and stays dormant on mount/open/login without round consent', async () => {
