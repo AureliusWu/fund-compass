@@ -1263,3 +1263,11 @@ ACK 请求绑定原始响应/原包/完整 D/派生预览 hash，重建核封闭
 期间 main 新增公开账本 bot 提交 `7afc4e6c17451d55404344593b1c6f004697e99e`，仅4个公开数据文件：新增3条有效预测、总87行、63 settled/5 pending/17历史错位/2 observed；一个候选样本16→17、仍 collecting/required20/eligible=false，active模型未改。数据审查后正常合入升级分支，并由最终集成构建/自然CI重新验证；前述性能切面不冒称包含这次新数据。
 
 应用仍8.0.0，当前只提交功能分支候选。I18实际轮换/停写排空/新保护备份、provider能力/容量/受控迁移、应用写入跨Render重启与独立远端恢复；I19完整服务端revision→Holding/Policy/Decision、手工资产/历史/机器消费者；I20自然交易日/周窗口；I21真实浏览器/旧PWA/实机和性能回退仍未关闭。未读凭据输入、未绕过既有OAuth/浏览器/PR写403、未修改云配置/重启/main或删除Gist。下一实现优先使用caller-owned事务内核，核完整服务端组合来源和expected_revision，原子保存真实Holding/Decision/来源映射与任务回执，不以本轮同步ACK或另一个验证器代替业务链。
+
+#### 已推送的集成检查点与文案收口（2026-10-23）
+
+功能实现提交=`79a9ea27568e15fae7727f957ebf7ebd685b37d0`，正常合入公开 main 数据后=`08c8f158b93bcc4f1211f32fe1d381ab6c87c25c`，tree=`3b9667b8a7fa581206dd222c574a84ebc641545e`，已普通推送原功能分支。合并后本机再次 **1988/81文件 PASS**、build/PWA7/7通过；该并行测试/build的12.70s不并入前述性能五样本。
+
+[自然 CI39886314049](https://github.com/AureliusWu/fund-compass/actions/runs/39886314049) run188/attempt1 completed/success，实际后端 **3689 passed/2 warnings/257.32s**、pip check clean；前端 **1988/81文件**、type/build9.00s/PWA7/7；Worker **148/4文件**、check/dry-run114.28KiB/gzip26.58，独立官方 audit 步骤均通过。日志 checkout merge=`32d2bb63fb08452c441fbb74b6be56092e7fa2e3`，GitHub commit API核parents=7afc4e6+08c8f15，tree与功能分支完全相同。deploy/candidate_smoke/formal_smoke全skipped/steps=null。一次本地 `gh run watch` 观察EOF终止，随后同run只读查询确认仍在运行并最终成功；没有重启工作流或把观察错误当CI失败。
+
+最后收口一处可见状态：IDB工作区已可显式发送后，旧固定“未上传”文案会误报；现改为“同步状态请查看私人同步面板，持仓决策版本仍待确认”。仅文案变化，相关真实Store/组件 **33 passed**，不新增镜像文案测试；该新提交有自己的自然CI，前一run不当作其精确证据。单块+25.09% FAIL及安装制品WARN、真实云/浏览器/I19业务链未完成的边界继续保留。

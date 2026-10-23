@@ -99,7 +99,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
   const hasToken = ref(false)
   const legacySyncEnabled = ref(false)
   const localStatus = computed(() => authorityState.value === 'idb'
-    ? '本机 IDB 工作区；未上传，不代表已确认持仓版本'
+    ? '本机工作区；同步状态请查看私人同步面板，持仓决策版本仍待确认'
     : authorityState.value === 'unresolved' ? '正在核对本机权威存储，尚未加载记录'
     : authorityState.value === 'activating' ? '本机切换待手动核对，编辑暂停；不会重导旧数据'
     : authorityState.value === 'blocked' ? '本机权威存储无法安全核对，编辑暂停；未回退旧存储'
