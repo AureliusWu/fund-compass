@@ -183,30 +183,68 @@ def build_run_context(
     }
 
 
-def calculate_model(model: dict, quotes: dict[str, dict], target_date: str) -> dict | None:
-    def calculate(candidate: dict) -> dict | None:
+def _count_reason(counts: dict[str, int] | None, reason: str) -> None:
+    """Only callers' aggregate counters; never include source values or fund IDs."""
+    if counts is not None:
+        counts[reason] = counts.get(reason, 0) + 1
+
+
+def _predicted_nav(base_value, change_value) -> float | None:
+    base, change = _float(base_value), _number(change_value)
+    if base is None or change is None:
+        return None
+    value = base * (1 + change / 100)
+    if not math.isfinite(value) or value <= 0:
+        return None
+    rounded = round(value, 4)
+    return rounded if rounded > 0 else None
+
+
+def calculate_model(
+    model: dict, quotes: dict[str, dict], target_date: str,
+    *, reason_counts: dict[str, int] | None = None,
+) -> dict | None:
+    def calculate(candidate: dict, stage: str) -> dict | None:
+        def reject(reason: str) -> None:
+            _count_reason(reason_counts, stage + "_" + reason)
+            return None
+
+        if not isinstance(candidate, dict) or not isinstance(quotes, dict):
+            return reject("invalid_shape")
+        legs = candidate.get("legs")
+        if not isinstance(legs, list) or not legs:
+            return reject("invalid_shape")
         available = []
-        for leg in candidate.get("legs") or []:
+        dated_quotes = 0
+        for leg in legs:
+            if not isinstance(leg, dict) or not isinstance(leg.get("code"), str):
+                continue
             code = leg.get("code")
             evidence = quotes.get(code)
-            if not isinstance(evidence, dict) or evidence.get("quote_date") != target_date:
+            if not isinstance(evidence, dict):
                 continue
+            if evidence.get("quote_date") != target_date:
+                continue
+            dated_quotes += 1
             change = _number(evidence.get("change"))
             weight = _number(leg.get("weight"))
             if code and change is not None and weight is not None and weight > 0:
                 available.append((leg, change, weight, evidence))
         coverage = sum(weight for _, _, weight, _ in available)
-        min_weight = _number(candidate.get("min_weight")) or 0
+        min_weight = _number(candidate.get("min_weight", 0))
+        if min_weight is None or min_weight < 0 or not math.isfinite(coverage):
+            return reject("invalid_parameters")
         if coverage < min_weight or not available:
-            return None
+            return reject("coverage_insufficient" if dated_quotes else "target_quotes_missing")
         raw_change = sum(change * weight for _, change, weight, _ in available) / coverage
         scale = _number(candidate.get("scale", 1))
         bias = _number(candidate.get("bias", 0))
         if scale is None or bias is None:
-            return None
+            return reject("invalid_parameters")
         predicted_change = raw_change * scale + bias
         if not math.isfinite(predicted_change):
-            return None
+            return reject("nonfinite_prediction")
+        _count_reason(reason_counts, stage + "_accepted")
         return {
             "raw_change": round(raw_change, 6),
             "predicted_change": round(predicted_change, 4),
@@ -225,14 +263,22 @@ def calculate_model(model: dict, quotes: dict[str, dict], target_date: str) -> d
             "fallback_used": candidate is not model,
         }
 
-    return calculate(model) or (calculate(model["fallback"]) if isinstance(model.get("fallback"), dict) else None)
+    prediction = calculate(model, "model_primary")
+    if prediction is not None:
+        return prediction
+    if isinstance(model, dict) and isinstance(model.get("fallback"), dict):
+        return calculate(model["fallback"], "model_fallback")
+    return None
 
 
 def _history_nav(detail: dict, value_date: str) -> float | None:
+    history = detail.get("nav_history")
+    if not isinstance(history, list):
+        return None
     matches = [
         _float(point.get("nav"))
-        for point in (detail.get("nav_history") or [])
-        if point.get("date") == value_date
+        for point in history
+        if isinstance(point, dict) and point.get("date") == value_date
     ]
     return matches[-1] if matches else None
 
@@ -262,12 +308,19 @@ def resolve_prediction_axis(
     observation_date: str,
     max_age_days: int = MAX_BASE_AGE_DAYS,
     non_trading_dates: set[str] | None = None,
+    *, reason_counts: dict[str, int] | None = None,
 ) -> tuple[str, str, float] | None:
     """Resolve observation T -> target T-1 -> official base T-2.
 
     Calendar dates establish the expected axis; NAV history and the top-level
     latest NAV independently corroborate the base.  Any gap fails closed.
     """
+    def reject(reason: str) -> None:
+        _count_reason(reason_counts, "axis_" + reason)
+        return None
+
+    if not isinstance(detail, dict) or not detail:
+        return reject("detail_missing")
     latest_date = detail.get("latest_nav_date")
     latest_nav = _float(detail.get("latest_nav"))
     try:
@@ -276,16 +329,19 @@ def resolve_prediction_axis(
         expected_base = previous_trading_date(target, non_trading_dates)
         base = dt.date.fromisoformat(latest_date)
     except (TypeError, ValueError):
-        return None
+        return reject("date_or_calendar_invalid")
     history_nav = _history_nav(detail, latest_date)
-    if (
-        latest_nav is None
-        or history_nav is None
-        or base != expected_base
-        or (target - base).days > max_age_days
-        or not math.isclose(latest_nav, history_nav, rel_tol=1e-8, abs_tol=1e-8)
-    ):
-        return None
+    if latest_nav is None:
+        return reject("latest_nav_missing")
+    if history_nav is None:
+        return reject("history_nav_missing")
+    if base != expected_base:
+        return reject("base_date_mismatch")
+    if (target - base).days > max_age_days:
+        return reject("base_interval_too_long")
+    if not math.isclose(latest_nav, history_nav, rel_tol=1e-8, abs_tol=1e-8):
+        return reject("nav_disagrees")
+    _count_reason(reason_counts, "axis_accepted")
     return target.isoformat(), latest_date, latest_nav
 
 
@@ -369,6 +425,7 @@ def add_predictions(
     delay_minutes: float | None = None,
     max_base_age_days: int = MAX_BASE_AGE_DAYS,
     non_trading_dates: set[str] | None = None,
+    reason_counts: dict[str, int] | None = None,
 ) -> int:
     existing = {
         (row.get("code"), row.get("prediction_date"), row.get("model_version"))
@@ -386,12 +443,22 @@ def add_predictions(
         detail = details.get(code) or {}
         active = entry["active"]
         key = (code, observation_date, active["version"])
-        axis = resolve_prediction_axis(detail, observation_date, max_base_age_days, non_trading_dates)
-        if key in existing or axis is None:
+        if key in existing:
+            _count_reason(reason_counts, "prediction_already_recorded")
+            continue
+        axis = resolve_prediction_axis(
+            detail, observation_date, max_base_age_days, non_trading_dates,
+            reason_counts=reason_counts,
+        )
+        if axis is None:
             continue
         target_date, base_nav_date, base_nav = axis
-        prediction = calculate_model(active, quotes, target_date)
+        prediction = calculate_model(active, quotes, target_date, reason_counts=reason_counts)
         if not prediction:
+            continue
+        predicted_nav = _predicted_nav(base_nav, prediction["predicted_change"])
+        if predicted_nav is None:
+            _count_reason(reason_counts, "prediction_invalid_nav")
             continue
         quote_times = [
             evidence.get("quote_time")
@@ -405,7 +472,7 @@ def add_predictions(
             "target_nav_date": target_date,
             "base_nav_date": base_nav_date,
             "base_nav": base_nav,
-            "predicted_nav": round(base_nav * (1 + prediction["predicted_change"] / 100), 4),
+            "predicted_nav": predicted_nav,
             "model_version": active["version"],
             "observed_at": local_now.isoformat(timespec="seconds"),
             "quote_time": max(quote_times) if quote_times else None,
@@ -417,6 +484,7 @@ def add_predictions(
             **prediction,
         })
         written += 1
+        _count_reason(reason_counts, "prediction_written")
     return written
 
 
@@ -424,10 +492,18 @@ def settle_records(ledger: dict, details: dict[str, dict], now: dt.datetime | No
     settled_at = (now or dt.datetime.now(CST)).isoformat(timespec="seconds")
     settled = 0
     for row in ledger.get("records", []):
-        if row.get("status") not in ("pending", "stale", "market_closed"):
+        if not isinstance(row, dict) or row.get("status") not in ("pending", "stale", "market_closed"):
             continue
         detail = details.get(row.get("code"), {})
-        history = {point.get("date"): _float(point.get("nav")) for point in (detail.get("nav_history") or [])}
+        if not isinstance(detail, dict):
+            continue
+        points = detail.get("nav_history")
+        if not isinstance(points, list):
+            continue
+        history = {
+            point["date"]: _float(point.get("nav")) for point in points
+            if isinstance(point, dict) and isinstance(point.get("date"), str)
+        }
         actual_nav = history.get(row.get("target_nav_date"))
         base_history_nav = history.get(row.get("base_nav_date"))
         base_nav = _float(row.get("base_nav"))
@@ -450,6 +526,8 @@ def settle_records(ledger: dict, details: dict[str, dict], now: dt.datetime | No
             continue
         actual_change = (actual_nav / base_nav - 1) * 100
         error = predicted_change - actual_change
+        if not math.isfinite(actual_change) or not math.isfinite(error):
+            continue
         row.update({
             "actual_nav": round(actual_nav, 4),
             "actual_change": round(actual_change, 4),
@@ -653,6 +731,8 @@ def count_effective_predictions(ledger: dict, registry: dict, observation_date: 
         and valid_feature_evidence(row)
         and _float(row.get("base_nav")) is not None
         and _number(row.get("predicted_change")) is not None
+        and _predicted_nav(row.get("base_nav"), row.get("predicted_change")) is not None
+        and ("predicted_nav" not in row or _float(row.get("predicted_nav")) is not None)
         for row in ledger.get("records", [])
     )
 
@@ -669,10 +749,12 @@ def _float(value):
 
 
 def _number(value):
+    if isinstance(value, bool):
+        return None
     try:
         number = float(value)
         return number if math.isfinite(number) else None
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
 
 
@@ -704,6 +786,7 @@ def run_pipeline(now: dt.datetime | None = None, *, run_mode: str | None = None)
             quote_error = type(ex).__name__
             print(f"quote feed unavailable: {quote_error}")
     written = 0
+    reason_counts = {}
     if run["prediction_allowed"]:
         written = add_predictions(
             ledger,
@@ -713,6 +796,7 @@ def run_pipeline(now: dt.datetime | None = None, *, run_mode: str | None = None)
             now,
             scheduled_for=run["scheduled_for"],
             delay_minutes=run["delay_minutes"],
+            reason_counts=reason_counts,
         )
     update_pending_states(ledger, now.date())
     ledger["updated_at"] = now.isoformat(timespec="seconds")
@@ -759,6 +843,7 @@ def run_pipeline(now: dt.datetime | None = None, *, run_mode: str | None = None)
         "quotes_count": len(quotes),
         "details_count": len(details),
         "quote_error": quote_error,
+        "prediction_diagnostics": reason_counts,
     })
     if written:
         pipeline["last_prediction_at"] = now.isoformat(timespec="seconds")
@@ -775,6 +860,7 @@ def run_pipeline(now: dt.datetime | None = None, *, run_mode: str | None = None)
         f"predictions={written}, effective={effective_for_observation}, "
         f"settled={settled}, quotes={len(quotes)}"
     )
+    print("prediction diagnostics: " + json.dumps(reason_counts, sort_keys=True))
     return {
         "predictions_written": written,
         "settlements_written": settled,

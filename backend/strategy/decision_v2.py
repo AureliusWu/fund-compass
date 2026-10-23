@@ -884,12 +884,18 @@ def _reason_codes(
 
 
 def _reason_text(code: str, evidence: EvidenceSnapshot) -> str:
+    valuation_labels = {
+        "VALUATION_LOW": "相对低位", "VALUATION_HIGH": "相对高位", "VALUATION_MID": "中位区域",
+    }
+    if code in valuation_labels:
+        # Format only the selected reason. Missing valuation must not crash
+        # unrelated reasons or become a fabricated zero-percentile reading.
+        if evidence.valuation_percentile is None:
+            return "估值证据不足"
+        return f"估值处于{valuation_labels[code]}（约 {evidence.valuation_percentile:.0f}% 分位）"
     mapping = {
         "SCORE_INSUFFICIENT": f"综合评分覆盖仅 {evidence.score_coverage * 100:.0f}%，不支持强动作",
         "VALUATION_MISSING": "估值证据不足",
-        "VALUATION_LOW": f"估值处于相对低位（约 {evidence.valuation_percentile:.0f}% 分位）",
-        "VALUATION_HIGH": f"估值处于相对高位（约 {evidence.valuation_percentile:.0f}% 分位）",
-        "VALUATION_MID": f"估值处于中位区域（约 {evidence.valuation_percentile:.0f}% 分位）",
         "TREND_WEAK": f"趋势偏弱（{evidence.trend_state}）",
         "TREND_STRONG": f"趋势偏强（{evidence.trend_state}）",
         "TREND_NEUTRAL": f"趋势中性（{evidence.trend_state}）",

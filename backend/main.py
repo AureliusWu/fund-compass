@@ -38,6 +38,10 @@ from models.v8 import (
 )
 from service import eastmoney, repo, v8_decisions, v8_repo
 from service.security import require_admin, require_private_read, require_worker_or_admin
+from service.owner_sessions import router as owner_session_router
+from service.owner_sync import build_owner_sync_router, configured_local_sync_connection
+from service.owner_analysis import build_owner_analysis_router
+from service.owner_policy import build_owner_policy_router
 from strategy import backtest, decide_fund, score_fund, timing_signal
 from strategy.calibration import calibrate
 from strategy.index_valuation import status as index_valuation_status
@@ -93,8 +97,27 @@ app.add_middleware(
         "https://aureliuswu.github.io",
     ],
     allow_methods=["*"],
-    allow_headers=["*"]
+    allow_headers=[
+        "Authorization", "Content-Type", "X-Owner-Sync-Consent", "X-Owner-Sync-Request-Hash",
+        "X-Owner-Analysis-Consent", "X-Owner-Analysis-Request-Hash",
+    ],
 )
+
+app.include_router(owner_session_router)
+app.include_router(build_owner_sync_router(configured_local_sync_connection))
+app.include_router(build_owner_analysis_router(configured_local_sync_connection))
+app.include_router(build_owner_policy_router(configured_local_sync_connection))
+
+
+@app.middleware("http")
+async def private_response_cache_policy(request, call_next):
+    """Never cache private DTOs, credentials, or authorization failures."""
+    response = await call_next(request)
+    if request.url.path.startswith(("/api/private/", "/api/v2/private/", "/api/v2/owner/")):
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
 
 OWNER_READ_DENIED_RESPONSES = {
     403: {

@@ -30,7 +30,7 @@ describe('首屏性能约束', () => {
 
     expect(watchlist).toContain('hydrateLocal()\nonMounted(refresh)')
     expect(watchlist).toContain('Promise.allSettled([refreshItems(localItems), watch.load(true)])')
-    expect(watchlist).toContain("const loading = ref(watch.items.length === 0 && watch.hasToken)")
+    expect(watchlist).toContain("const loading = ref(watch.items.length === 0 && watch.hasToken && watch.legacySyncEnabled)")
     expect(watchlist).toContain("const label = estimate.cached ? '缓存估值' : estimate.label")
   })
 

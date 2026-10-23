@@ -1,9 +1,30 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { loadOverseasAccuracy, type AccuracyReport } from '@/utils/overseasAccuracy'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { accuracyFreshness, loadOverseasAccuracy, type AccuracyReport } from '@/utils/overseasAccuracy'
 
 const report = ref<AccuracyReport | null>(null)
-onMounted(async () => { report.value = await loadOverseasAccuracy() })
+const now = ref(Date.now())
+const request = new AbortController()
+let timer: ReturnType<typeof setInterval> | undefined
+const refreshClock = () => { now.value = Date.now() }
+const onVisible = () => { if (document.visibilityState === 'visible') refreshClock() }
+onMounted(() => {
+  refreshClock()
+  // The same dated report can become stale while its page stays mounted.
+  timer = setInterval(refreshClock, 30_000)
+  if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisible)
+  void loadOverseasAccuracy(false, { signal: request.signal }).then(value => {
+    if (!request.signal.aborted) {
+      report.value = value
+      refreshClock()
+    }
+  })
+})
+onUnmounted(() => {
+  request.abort()
+  if (timer !== undefined) clearInterval(timer)
+  if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisible)
+})
 
 const funds = computed(() => {
   if (!report.value) return []
@@ -12,6 +33,7 @@ const funds = computed(() => {
     .map(([code, summary]) => ({
       code,
       summary,
+      freshness: accuracyFreshness(report.value!, code, summary.model_version, now.value),
       anomaly: report.value!.records.find((row) => row.code === code && row.status === 'observed_only'),
     }))
 })
@@ -24,9 +46,17 @@ const value = (n: number | null, suffix = '%') => n == null ? '--' : `${n.toFixe
     <div class="section-title">海外估值精度</div>
     <div v-for="fund in funds" :key="fund.code" class="accuracy-row">
       <div class="accuracy-head">
-        <div><b>{{ fund.code }}</b><span>{{ fund.summary.confidence }}</span></div>
+        <div><b>{{ fund.code }}</b><span :class="{ 'accuracy-expired': fund.freshness.status === 'stale' || fund.freshness.status === 'unknown' }">{{ fund.freshness.confidence }}</span></div>
         <em>{{ fund.summary.samples }} 个可训练样本</em>
       </div>
+      <div class="accuracy-time">
+        <template v-if="fund.freshness.effectiveAt">
+          {{ fund.summary.samples > 0 ? '结算有效时间' : '预测有效时间' }}：<time :datetime="fund.freshness.effectiveAt">{{ fund.freshness.effectiveAt }}</time>
+        </template>
+        <template v-else>{{ fund.summary.samples > 0 ? '结算有效时间未知' : '预测有效时间未知' }}</template>
+        · 模型 {{ fund.summary.model_version || '未知' }}
+      </div>
+      <div v-if="fund.freshness.status === 'stale' || fund.freshness.status === 'unknown'" class="quality-row">历史指标，仅供回看</div>
       <div class="accuracy-metrics">
         <div><span>平均误差</span><b>{{ value(fund.summary.mae) }}</b></div>
         <div><span>方向命中</span><b>{{ value(fund.summary.direction_accuracy) }}</b></div>
@@ -54,6 +84,8 @@ const value = (n: number | null, suffix = '%') => n == null ? '--' : `${n.toFixe
 .accuracy-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .accuracy-head b { display: block; color: var(--ink); font-size: 14px; }
 .accuracy-head span { display: block; color: var(--teal); font-size: 11px; margin-top: 3px; }
+.accuracy-head span.accuracy-expired { color: var(--warn); }
+.accuracy-time { margin-top: 7px; color: var(--text-muted); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
 .accuracy-head em { color: var(--text-hint); font-size: 11px; font-style: normal; }
 .accuracy-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
 .accuracy-metrics div { border-left: 2px solid var(--border); padding-left: 8px; }

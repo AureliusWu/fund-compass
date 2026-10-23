@@ -6,8 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  actions: write
+  contents: read
 
 concurrency:
   group: scheduled-data-main
@@ -35,62 +34,41 @@ jobs:
           test -n "$FUND_API_BASE" || { echo "FUND_API_BASE is required"; exit 1; }
           test -n "$PRIVATE_READ_TOKEN" || { echo "PRIVATE_READ_TOKEN secret is required"; exit 1; }
       - name: Calibrate strategy candidate
+        id: calibration
         env:
           CALIBRATION_MIN_VALID: '12'
           CALIBRATION_MAX_FUNDS: '30'
+          CALIBRATION_OUTCOME_ATTEMPTS: '3'
+          CALIBRATION_OUTCOME_TIMEOUT_SECONDS: '45'
+          CALIBRATION_OUTCOME_TOTAL_BUDGET_SECONDS: '150'
+          CALIBRATION_OUTCOME_BACKOFF_SECONDS: '5'
+          CALIBRATION_OUTCOME_RETRY_AFTER_MAX_SECONDS: '15'
+          CALIBRATION_OUTCOME_MAX_RESPONSE_BYTES: '8388608'
           FUND_API_BASE: ${{ secrets.FUND_API_BASE }}
           PRIVATE_READ_TOKEN: ${{ secrets.PRIVATE_READ_TOKEN }}
           PYTHONUNBUFFERED: '1'
         run: python tools/calibrate_strategy.py
-      - name: Upload calibration evidence
-        if: success()
-        uses: actions/upload-artifact@v7
-        with:
-          name: strategy-calibration-${{ github.run_number }}
-          path: |
-            frontend/public/data/strategy-calibration.json
-            backend/data/strategy-params.json
-          retention-days: 90
-      - name: Commit calibration evidence when changed
+      - name: Enforce private calibration publication boundary
+        if: always()
+        env:
+          CALIBRATION_STEP_OUTCOME: ${{ steps.calibration.outcome }}
         shell: bash
         run: |
-          if [[ -n "$(git status --porcelain frontend/public/data/strategy-calibration.json backend/data/strategy-params.json)" ]]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add frontend/public/data/strategy-calibration.json backend/data/strategy-params.json
-            git commit -m "chore: calibrate strategy"
-            base_sha=$(git rev-parse HEAD^)
-            pushed=false
-            for attempt in 1 2 3; do
-              if ! git fetch --no-tags origin main; then
-                sleep $((attempt * 2))
-                continue
-              fi
-              remote_sha=$(git rev-parse origin/main)
-              [[ "$remote_sha" == "$base_sha" ]] || {
-                echo "main changed while data was generated; rerun on the new HEAD" >&2
-                exit 1
-              }
-              if git push origin HEAD:main; then
-                pushed=true
-                break
-              fi
-              sleep $((attempt * 2))
-            done
-            [[ "$pushed" == "true" ]] || { echo "Failed to push generated data" >&2; exit 1; }
-            commit_sha=$(git rev-parse HEAD)
-            dispatched=false
-            for attempt in 1 2 3; do
-              if gh workflow run ci.yml --ref main -f target_sha="$commit_sha"; then
-                dispatched=true
-                break
-              fi
-              sleep $((attempt * 2))
-            done
-            [[ "$dispatched" == "true" ]] || { echo "Failed to create exact-source CI run" >&2; exit 1; }
-            echo "Created exact-source CI run for generated commit"
+          if [[ "$CALIBRATION_STEP_OUTCOME" == "success" ]]; then
+            execution_status=blocked
+            reason=private_sink_required
           else
-            echo "No calibration changes"
+            execution_status=failed
+            reason=calibration_validation_failed
           fi
-        env:
-          GH_TOKEN: ${{ github.token }}
+          {
+            echo "### Strategy calibration publication"
+            echo
+            echo "- execution_status: $execution_status"
+            echo "- artifact_status: unavailable"
+            echo "- reason: $reason"
+            echo "- publication: BLOCKED_PRIVATE_SINK_REQUIRED"
+            echo "- private_output_published: false"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Calibration output remains unpublished until authenticated private storage is available." >&2
+          exit 1

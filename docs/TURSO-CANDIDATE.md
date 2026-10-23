@@ -1,6 +1,6 @@
 # Turso 零成本候选数据库验证
 
-本文描述候选接入与验证，不代表生产数据库已迁移或 V8 正式发布已通过。目前没有实库凭据证据；本地 SQLite 注入测试只能验证工具行为。
+本文描述候选接入与验证，不代表生产数据库已迁移或 V8 正式发布已通过。2026-10-01 已用用户明确提供的本机配置完成一次真实候选库只读 `inspect`；本地 SQLite 注入测试与真实只读连接分开记录，均不替代应用耐久/恢复验收。
 
 ## 费用和范围
 
@@ -41,6 +41,83 @@ python tools/turso_candidate.py inspect
 
 只读执行 `SELECT 1`，读取 schema 版本、应用表数量以及公开基金目录 `funds` 的数量。没有 `funds` 表时返回 `null`，不会伪造为零；空库 schema 版本可为 0。不会读取私有决策、持仓、通知或审计记录，不会自动启动迁移。`fund_count` 是一次实际聚合查询，不适合作为高频保活任务。
 
+### 已验证的无浏览器替代路线（2026-10-01）
+
+数据库 SQL 访问不依赖 Dashboard、MCP OAuth 或组织级 CLI 登录。使用已有候选数据库 URL 与数据库 Token，经子进程环境传给上述工具即可；不要为此枚举浏览器密钥、读取登录 Cookie 或降低 OAuth 校验。配置只从用户明确提供的确切文件读取，本轮未在仓库保存凭据，也未把值放入命令行或输出。
+
+本次结果：`connectivity=true`、`schema_version=8`（`schema_table`）、`table_count=20`、`fund_count=27947`、`evidence_scope=database_probe_only`、`formal_release_verified=false`。没有执行 DDL/DML、读取私人账本、初始化/迁移 schema、写标记、轮换/撤销 Token 或更改套餐。现有凭据可读不证明其写权限、最小权限、有效期或已完成旧 Token 轮换；费用配置也仍未核验。
+
+本地已实现不可变 scope 旁表与默认 V8 读取隔离，物理 schema 因合同变化独立升至 9，应用版本仍为 8.0.0。SQLite 8→9 迁移保留原 payload/ID 和备份；已有 schema 9 缺失 scope 元数据拒绝自动重分类。线上仍是 schema 8，尚未做受控增量迁移；新代码会拒绝该旧库，不能直接推 main 自动部署，也不能用重复 `initialize` 冒充迁移。远端验收写入、独立恢复与应用跨重启证据仍未完成。
+
+### 2026-10-02：元数据核对与离线升级演练
+
+真实候选库只读结构核对：54 个非 SQLite 内置核心 schema 对象没有缺失或 DDL 差异，版本仍为 8。额外两张表分别为既有 `turso_candidate_probe_v1` 和 `universe_import_state`，DDL 与仓库固定定义一致；无其他额外对象。仅查询 schema/版本元数据，不读私人账本记录，不输出 DDL 值、地址或 Token，没有 DDL/DML 或远端应用迁移。这不是全体业务数据、并发、恢复或耐久证明。
+
+新增入口只处理显式本地快照，不会自动导出或连接云库：
+
+```powershell
+python tools/turso_scope_upgrade.py plan --source <closed-snapshot.db> --source-kind remote-schema-table
+python tools/turso_scope_upgrade.py rehearse --source <closed-snapshot.db> --source-kind remote-schema-table --expected-plan-sha256 <plan摘要> --expected-backup-sha256 <逻辑备份摘要>
+```
+
+本地 header 版本 8 使用 `--source-kind local-header`，不自动猜测来源；输入必须是一致、关闭的 SQLite 快照，存在 WAL/SHM/journal、坏结构/JSON/引用链、漂移或超限时拒绝。工具只读输入，在私有内存执行仓库固定 DDL；验证 typed 行、ID/hash/投影/完整派生链，保留 payload、rowid 和序列，并将逻辑备份独立恢复、再次升级和仓储读回。计划绑定输入字节、逻辑行、代码、合同与备份摘要，不接受旧计划代替当前核验。
+
+输出 scope 固定 `local_turso_schema_migration_rehearsal`，`remote_applied=false`、`remote_restore_verified=false`、`formal_release_verified=false`。默认 `core-only` 仍拒绝额外用户对象；显式 `--operational-profile known-operational-v1` 只接受上述两张固定辅助表的零张、一张或两张组合，并验证精确 DDL、完整 typed 行、rowid 和序列在备份/恢复中保留。profile 与辅助表生产者源码摘要纳入计划绑定；未知表、额外索引/触发器/视图和旧计划均拒绝，不使用前缀或表数量豁免。快照含这些表时，plan 与 rehearse 必须使用相同的显式 profile。
+
+当前工具没有 apply、远端导出、原子前像/receipt/reconcile、独立远端恢复或发布能力；不能直接对真实候选库执行升级。
+
+### 2026-10-02：受限只读快照模块
+
+`backend/database/turso_scope_snapshot.py` 仅提供显式注入 transport 的 schema-8 捕获函数，没有默认网络实现、凭据发现、落盘或 apply。固定单批 Hrana 3 查询在同一 SQL 事务内读取闭集结构、typed 行、rowid/sequence 和完整性信息，只有确认提交、autocommit 和关闭成功后才返回私有内存 SQLite。只接受明示的固定辅助表 inventory，不执行远端返回的 DDL。
+
+默认 `query_mode_profile='query-only-v1'` 设置并严格要求远端 query_only=1；失败不自动降级。真实候选首次拒绝该赋值（`SQL_PARSE_ERROR`），因此增加显式 `turso-fixed-read-v1`：只发送仓库固定读取/事务语句，不含远端 DDL/DML/PRAGMA 赋值，仍保留全部事务、结构和 typed 数据门禁。兼容 profile 的 `query_only_observed` 必须为真实整数 0 或 1，`server_write_protection_verified=false`，不能用重建内存连接的 query_only=1 冒充远端写保护。
+
+响应最多 64 MiB、100,000 总行、单 cell 256 KiB、30 秒；transport 必须另外保证单次发送、禁止重定向和阻塞读取预算。官方协议实现中的 optional `replication_index` 和标准无 padding BLOB 编码按固定类型支持，未知字段仍拒绝，参见 [官方 Hrana 实现](https://github.com/tursodatabase/libsql/blob/main/libsql-hrana/src/proto.rs)。
+
+`consistent_sql_snapshot=true` 只表示本次历史 SQL 快照一致，不是应用时锁内前像。`remote_verified`、`remote_applied`、`remote_restore_verified`、`formal_release_verified`、`migration_rehearsed` 和 `apply_preimage_verified` 均保持 false。本地快照/恢复演练不代表远端升级、独立恢复或正式耐久资格；实际捕获结果另记执行记录。
+
+2026-10-03 已实际使用兼容 profile 完成一次候选只读捕获：31,957 行、21 张表（含 SQLite sequence），真实 query_only=0。快照保存在仓库外、仅当前用户/SYSTEM 可访问的只读文件中；本地 8→9 演练验证旧行不变、独立逻辑恢复、仓储读回及源文件不变。真实云端 schema 未改变；此证据不关闭远端迁移、独立远端恢复或跨部署耐久门禁。摘要与测试见 [执行记录](V9-EXECUTION-LOG.md)。
+
+### 私有原始结构前像
+
+后续捕获结果新增 keyword-only、默认 None 的私有 `_schema_inventory`，旧两个位置参数及全部公开 `safe_metadata` 字段不变。捕获在闭集 schema/data/lineage/roundtrip 与 transport/response 清理成功后，保留同一次历史 SQL 事务的 `sqlite_master` 原始四列 tuple，包括 SQL=NULL 的自动索引和内置对象；SQL 拼写、空白、literal 不被改写。DTO 为 frozen/slots/repr=False，原始 typed 摘要具有独立版本域，内部绑定同次 resource/image/rows SHA。
+
+原始 SQL 只作为私有数据，模块不执行输入 DDL、不自动序列化/落盘、不进入日志或公开 metadata；`asdict()` 等泛用序列化仍会展开字段，因此禁止把私有 DTO 整体交给日志/公开响应。重建本地参考库和 normalized contract digest 只能验证支持合同，不能反推真实原始结构。旧快照不能补造这份前像；新消费者须重新捕获并保留旧 artifact。
+
+DTO 不是签名、授权或锁内前像证明。未来原子 compiler 必须重新核对闭集、raw digest、资源/镜像/行绑定，并在实际同一写事务内做完整 schema/typed 行断言；None、错绑、漂移或未知对象拒绝。历史捕获与实际云端迁移/独立恢复/跨重启门禁继续分开，所有六个 capture 放行旗标仍 false。模块 SHA 改变后旧 helper 必须按原 pin 拒绝，不自动更新旧脚本或把历史结果当成新源码证明。
+
+2026-10-03 已通过新修订捕获工具执行一次真实只读保存：21 表 / 31,957 行，同次私有 sidecar 与 SQLite 镜像通过 source/resource/rows 三绑定，关闭后和本地演练后均重验；本地 8→9/独立逻辑恢复/仓储读回通过，云库未修改。原始结构和私人数据只在 user/SYSTEM-only、只读的仓库外文件；另保存非临时本机副本，未复制凭据、移动/删除旧文件或上传 GitHub。sidecar 文件 SHA `7f101cbb8e63243f5c640ed59bd1ca796105dd535c23b49fe3b651e46193fd08` 不是 raw DTO 摘要或锁内前像资格。所有 remote/apply/restore/formal 旗标继续 false；完整指纹、合成复审修复与本地备份边界见 [V9-EXECUTION-LOG.md](V9-EXECUTION-LOG.md)。
+
+### 本地不可变迁移包编译器（2026-10-03）
+
+`backend/database/turso_scope_packet.py` 接入纯本地 compiler，只接收已验证的私有 `CapturedSnapshot`；不读取凭据/输入路径，不连接云库，不提供 transport/apply。资源身份、显式 `sqlite-atan2-zero-v1` 和 canonical UTC 秒时间不可省略。重新验证 raw inventory、镜像/typed 行/引用链与有限可信源码后，生成不可变 bytes、native tuple 语句及响应规格。
+
+包内仅使用仓库固定 DDL。计划包含同一 `BEGIN IMMEDIATE` 下的完整 raw schema/typed 行前像、scope backfill、schema 8→9 CAS、完整旧业务后像、原回执保留及新回执十列校验，并编入条件回滚及 autocommit/close 请求；没有完整响应核对时仍属 unknown，不推断失败必然已回滚。不执行捕获的原始 SQL。回执身份稳定且与目标资源绑定，已有 reserved 槽位拒绝复用；丢失响应不自动重试或回收槽位。计划摘要与包摘要分别绑定，未来发送前必须以外部保存的原始 resource/plan/packet SHA 重编译精确比较整个 artifact，不接受包自身声明的身份。
+
+独立复审发现旧候选的公开摘要闭集缺口后，新修订在构造与每次访问均校验完整 keys/native 类型/绑定/六项 literalFalse 旗标并核对 metadata seal；未知私有字段、伪造远端成功和元数据替换拒绝。seal 不是签名、来源认证或写入授权。包体、语句参数和 artifact 含私人数据，不能打印、泛用序列化到公开响应或上传 CI/GitHub。六项远端/恢复/正式资格均 false。
+
+有界预算为 100,000 行、单 cell 256 KiB、镜像/包/响应各 64 MiB、每语句最多 900 参数、16,384 步、30 秒本地编译；不是 Turso 实际容量或事务时长证明。项目内无 TEMP 原型依赖，198 项隔离合成测试及 Windows/Linux 各 2057 项后端全量通过，有限源码前后未变；详见 [执行记录](V9-EXECUTION-LOG.md)。模块未挂载生产路由，独立未知提交对账、真实停写/容量/云迁移/远端恢复/跨重启仍待完成。应用保持 8.0.0；10-11 通过已有配置和隔离 CLI 新只读检查确认远端 schema 8、基金目录 28010，未执行初始化或迁移。新代码要求 schema 9，不能直接合入 main 触发自动部署。
+
+### 本地响应合同核验（2026-10-11）
+
+`backend/database/turso_scope_response.py` 仅接收已有私有内存快照、artifact 和原生响应 bytes；不读输入文件/凭据、不联网、不发送、不应用或重试、不读取云端回执。调用方必须独立固定原始 resource/plan/packet SHA，完整重编译核对 artifact 后才解释响应；验证器自身及 compiler 有限源码均在前后核对。
+
+严格 UTF-8/JSON、重复键拒绝、原生类型、固定三段 pipeline、完整 step 数组、精确 guard 标量、最终 autocommit/close、同源 stream 和有界指标均须匹配。只有完整成功前缀+COMMIT+跳过 ROLLBACK、BEGIN 被拒+全后续跳过，或唯一错误+精确回滚成功符合本地 acknowledged 合同；COMMIT 错误而回滚缺失、任何矛盾/缺失/漂移保持 unknown。已知权限码仅在固定槽位观察，不能从错误文案/任意嵌套内容猜测权限，不能授权换凭据或回放。
+
+公开 verdict 为 frozen/slots/repr 隐藏、闭集摘要，构造与 getter 共享身份/状态/权限关系及 seal 校验。`response_contract_verified`、`commit_acknowledged` 和 `session_closed_verified` 仅描述**提供字节**的合同形状：伪造/重放/合成响应也可能符合形状，不是来源认证、真实提交、真实会话关闭或持久化证明。所有 remote/apply/restore/formal/retry 旗标仍为 false；seal/源码指纹/直接构造 DTO 均不是写入或发布资格。
+
+预算为响应 64 MiB、深度 24、保守计数 2,000,000 节点、错误文案 256 KiB/代码 128 字节及 30 秒合作式总预算，覆盖重编译、解析、最终源码核验和 DTO 构造；不抢占 C 调用、不等于远端时限或进程监督。私有包/SQL/参数/原始响应不输出。独立复审和隔离合成门禁覆盖 152 项及 87 个实际故障位置；项目回归另见执行记录。模块未挂载生产路由，下一门禁仍是独立未知提交对账、真实停写/容量/远端应用/恢复与跨重启验收。
+
+捕获阶段预算只约束构建过程，不是交接后的快照生命周期 TTL。成功交接前须在预算前后检查之间解除该阶段的 SQLite progress handler；query_only、图像与身份绑定不变，失败仍关闭私有连接。后续 compiler 在独立 reference/decoder 上建立新预算，不继承过期 capture 回调。10-11 的原 Linux 失败已用真实时钟诊断为该回调残留，修复与新门禁终态见执行记录；旧冻结工具/packet 的源码 pin 不因修复自动更新或重新获准。
+
+### 本地读回合同核（2026-10-13）
+
+`backend/database/turso_scope_reconcile.py` 接收原 schema-8 私有捕获、完整不可变 artifact、独立保存的原 resource/plan/packet SHA 和明确 native `read_schema=8|9`。完整重编译与原图像再次绑定后，只生成固定单事务读取：原始 schema/临时 schema、数据库列表/header、完整性、全表 typed 行及 reserved receipt 两路查询，最后 COMMIT/条件ROLLBACK/autocommit/close。没有默认 transport、凭据发现、输入路径、远端写入或重试，不执行输入 DDL。
+
+提供字节只有精确全后像与十列回执一致才为 `matched`；完整原前像、无回执且 reserved 槽位为空才为 `missing`，其余 `unknown`。missing 是历史读回形状，不证明请求当前未提交、已停写或可重放；matched 也不证明响应来源、云端耐久或恢复成功。权限只在原身份和同源 stream 绑定后的固定槽识别；外部身份/源错误不能冒充平台权限拒绝。公开 verdict 闭集、构造/getter/seal 验证，五项 remote/apply/restore/formal/retry 始终 false。
+
+沿用响应64MiB、100,000行、单cell256KiB、schema128、深度24/节点2,000,000和30秒合作式总预算，包括重编译、解析、源码前后核验和结果构造。库模块未挂载生产路由；合成协议测试与完整仓库门禁详见执行记录，不代表真实独立远端对账、受控迁移或发布已通过。
+
 ## 合成标记写入与独立连接读回
 
 ```powershell
@@ -55,6 +132,22 @@ python tools/turso_candidate.py read-probe --nonce <上一步返回的64位nonce
 全局超时参数放在子命令之前，例如 `python tools/turso_candidate.py --timeout 20 inspect`。成功结果始终包含 `evidence_scope=database_probe_only` 和 `formal_release_verified=false`。
 
 两次本地命令即便连接同一远端数据库，也只证明跨连接/进程读回；不能作为 Render 重启或重新部署证据。
+
+### 脱敏失败分类（2026-10-01）
+
+只有适配器实际观察到合法整数 HTTP 状态时，CLI 才返回下列固定码；不读取非 200 响应正文，不从提供方异常文本或任意 `status_code` 属性推断分类。分类不改变失败退出码 `1`，也不新增成功、写入确认或撤销确认字段。
+
+| HTTP 观察 | 固定错误码 | 能说明的边界 |
+| --- | --- | --- |
+| 401 | `candidate_authentication_rejected` | 本次鉴权被拒；不能区分过期、错误配置、撤销等原因 |
+| 403 | `candidate_access_denied` | 本次访问被拒；不证明旧 Token 已撤销 |
+| 429 | `candidate_rate_limited` | 本次收到限流状态；不会自动重试或启用付费超额 |
+| 500–599 | `candidate_service_unavailable` | 本次收到服务端错误；不证明请求未执行或写入可安全重放 |
+| 其他状态、传输/协议错误或不可信异常 | `candidate_operation_failed` | 原因未知；不解析错误文本，不输出地址、凭据或私账 |
+
+HTTP 错误保持 `sqlite3.OperationalError` 兼容性。失败连接被标记为不可继续使用，后续 SQL、回滚和关闭不重放请求。响应/会话关闭失败不得掩盖原始 HTTP 或协议错误；独立关闭失败同样脱敏。提交、批量写入或关闭失败时，CLI 不输出成功 JSON 或 `committed=true`；这不能倒推数据库一定未提交，应独立核对结果后再决定后续操作。
+
+这些码用于诊断，不是凭据轮换验收。撤销结论仍需要平台明确操作结果、准确作用范围，以及同资源的新旧凭据对照；只读成功不证明写权限或耐久。
 
 ## 导入副本、重部署和恢复验收
 

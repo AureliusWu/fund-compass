@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { useWatchlistStore } from '@/stores/watchlist'
 import { useFundsStore } from '@/stores/funds'
@@ -13,6 +13,12 @@ const funds = useFundsStore()
 
 const lt = ref<Lookthrough | null>(null)
 const loading = ref(true)
+const refreshError = ref('')
+const localAuthorityReady = computed(() => ['legacy', 'idb'].includes(watch.authorityState) && !watch.localStorageError)
+const authorityError = '本机持仓权威无法安全读取，持仓穿透已暂停；未知记录不当作 0 或空组合。请到自选页核对本机工作区，未回退旧存储。'
+const visibleError = computed(() => !localAuthorityReady.value ? authorityError : refreshError.value)
+let mounted = true
+onBeforeUnmount(() => { mounted = false })
 
 const SOURCE_LABEL: Record<string, string> = {
   enrich: '公开定期报告持仓（AKShare 富集）',
@@ -23,20 +29,33 @@ const SOURCE_LABEL: Record<string, string> = {
 
 async function refresh() {
   loading.value = true
-  await watch.load(true)
-  const held: HeldFund[] = []
-  await Promise.all(
-    watch.entries
-      .filter((e) => !e.deleted && e.shares && e.shares > 0)
-      .map(async (e) => {
-        try {
-          const d = await funds.detail(e.code)
-          if (d.latest_nav != null) held.push({ code: e.code, name: d.name || e.code, value: e.shares! * d.latest_nav })
-        } catch { /* 跳过 */ }
-      }),
-  )
-  lt.value = held.length ? await computeLookthrough(held) : null
-  loading.value = false
+  refreshError.value = ''
+  let authorityRead = false
+  try {
+    await watch.load(true)
+    if (!mounted) return
+    if (!localAuthorityReady.value) throw new Error('local_authority_unavailable')
+    authorityRead = true
+    const held: HeldFund[] = []
+    await Promise.all(
+      watch.entries
+        .filter((e) => !e.deleted && e.shares && e.shares > 0)
+        .map(async (e) => {
+          try {
+            const d = await funds.detail(e.code)
+            if (d.latest_nav != null) held.push({ code: e.code, name: d.name || e.code, value: e.shares! * d.latest_nav })
+          } catch { /* 跳过 */ }
+        }),
+    )
+    if (!mounted) return
+    if (!localAuthorityReady.value) throw new Error('local_authority_unavailable')
+    const next = held.length ? await computeLookthrough(held) : null
+    if (!mounted) return
+    if (!localAuthorityReady.value) throw new Error('local_authority_unavailable')
+    lt.value = next
+  } catch {
+    if (mounted) refreshError.value = authorityRead && localAuthorityReady.value ? '穿透数据更新未完成，当前结果未更新。' : authorityError
+  } finally { if (mounted) loading.value = false }
 }
 
 const topStocks = computed(() => (lt.value?.stocks || []).slice(0, 15))
@@ -64,6 +83,7 @@ onMounted(refresh)
     <van-nav-bar title="持仓穿透" left-arrow @click-left="router.back()" />
     <div class="page-body">
       <van-loading v-if="loading" style="text-align:center;padding:40px" />
+      <section v-else-if="visibleError" class="load-error" role="alert"><p>{{ visibleError }}</p><p v-if="lt">先前已知的穿透结果已保留，未当作本次新结果展示。</p></section>
       <van-empty v-else-if="!lt || !lt.stocks.length"
         description="无可穿透的持仓。去自选页给基金填上份额，且基金需有重仓股数据" />
       <template v-else>
@@ -106,6 +126,7 @@ onMounted(refresh)
 </template>
 
 <style scoped>
+.load-error { padding: 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--danger); background: var(--card-bg); font-size: 12px; line-height: 1.7; }
 .card { background: #fff; border-radius: 10px; padding: 14px; margin-bottom: 12px; }
 .sec { font-size: 13px; color: #5A6A60; margin: 4px 4px 8px; }
 .sum-row { display: grid; grid-template-columns: repeat(3, 1fr); }

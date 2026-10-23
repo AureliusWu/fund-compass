@@ -1,4 +1,7 @@
 // 选基排行数据（V3-4 + V6-P4 决策质量筛选）。懒加载 frontend/public/data/screener.json
+import { ApiError, fetchWithDeadline, requestJson } from '@/api/request'
+import { mapStaticCollection } from './static-collection'
+
 export interface ScreenFund {
   c: string // 代码
   n: string // 简称
@@ -124,41 +127,95 @@ function validLegacy(raw: unknown): raw is { updated: string; funds: ScreenFund[
     && Number.isFinite(Date.parse(row.fetched_at)) && validFunds(row.funds)
 }
 
-export async function loadScreener(): Promise<ScreenerDataset> {
-  if (cache) return cache
+export async function loadScreener(options?: { signal?: AbortSignal }): Promise<ScreenerDataset> {
+  const controller = new AbortController()
+  let timedOut = false
+  const cancel = () => controller.abort(options?.signal?.reason)
+  if (options?.signal?.aborted) cancel()
+  else options?.signal?.addEventListener('abort', cancel, { once: true })
+  const timer = globalThis.setTimeout(() => {
+    timedOut = true
+    controller.abort('timeout')
+  }, 12_000)
+  let rejectOnAbort: (() => void) | undefined
+  try {
+    const cancelled = new Promise<never>((_resolve, reject) => {
+      rejectOnAbort = () => reject(new ApiError(timedOut ? '请求超时，请稍后重试' : '请求已取消', timedOut ? 'timeout' : 'cancelled'))
+      if (controller.signal.aborted) rejectOnAbort()
+      else controller.signal.addEventListener('abort', rejectOnAbort, { once: true })
+    })
+    return await Promise.race([fetchScreener(controller.signal), cancelled])
+  } finally {
+    globalThis.clearTimeout(timer)
+    options?.signal?.removeEventListener('abort', cancel)
+    if (rejectOnAbort) controller.signal.removeEventListener('abort', rejectOnAbort)
+    // A failed chunk must not leave its sibling requests running in the background.
+    controller.abort('finished')
+  }
+}
+
+async function fetchScreener(signal: AbortSignal): Promise<ScreenerDataset> {
+  const ensureActive = () => {
+    if (signal?.aborted) throw new ApiError('请求已取消', 'cancelled')
+  }
+  ensureActive()
+  if (cache) {
+    // A mounted page can cross a Beijing date boundary without fetching again.
+    Object.assign(cache, screenerFreshness(cache.updated))
+    return cache
+  }
   const base = `${import.meta.env.BASE_URL}data/screener`
-  const manifestResponse = await fetch(`${base}/manifest.json`, { cache: 'no-cache' })
-  if (manifestResponse.ok) {
-    const manifest = await manifestResponse.json() as unknown
+  let manifest: unknown
+  let manifestMissing = false
+  try {
+    manifest = await requestJson<unknown>(`${base}/manifest.json`, { cache: 'no-cache', signal })
+  } catch (error) {
+    // A missing manifest supports old static deployments. An outage or timeout
+    // must not silently substitute another generation.
+    if (!(error instanceof ApiError && error.kind === 'http' && error.status === 404)) throw error
+    manifestMissing = true
+  }
+  if (!manifestMissing) {
     if (!validManifest(manifest, 'funds')) throw new Error('排行数据清单格式无效')
-    const chunks = await Promise.all(manifest.chunks.map(async (file) => {
-      const response = await fetch(`${base}/${file}`, { cache: 'force-cache' })
-      if (!response.ok) throw new Error('排行数据分片加载失败')
-      const text = await response.text()
-      if (await sha256Text(text) !== manifest.chunk_sha256[file]) throw new Error('排行数据分片校验失败')
-      const prefix = '{"funds":'
-      if (!text.startsWith(prefix) || !text.endsWith('}')) throw new Error('排行数据分片格式无效')
-      const arrayText = text.slice(prefix.length, -1)
-      if (!arrayText.startsWith('[') || !arrayText.endsWith(']')) throw new Error('排行数据分片格式无效')
-      let payload: unknown
-      try { payload = JSON.parse(text) } catch { throw new Error('排行数据分片格式无效') }
-      const rows = (payload as { funds?: unknown })?.funds
-      if (!Array.isArray(rows) || !rows.every(validScreenFund)) throw new Error('排行数据分片格式无效')
-      return { rows, arrayText }
-    }))
+    const chunks = await mapStaticCollection(manifest.chunks, signal, async (file) => {
+      try {
+        return await fetchWithDeadline(`${base}/${file}`, { cache: 'force-cache', signal }, async (response) => {
+          const text = await response.text()
+          if (await sha256Text(text) !== manifest.chunk_sha256[file]) throw new ApiError('排行数据分片校验失败', 'network')
+          const prefix = '{"funds":'
+          if (!text.startsWith(prefix) || !text.endsWith('}')) throw new ApiError('排行数据分片格式无效', 'network')
+          const arrayText = text.slice(prefix.length, -1)
+          if (!arrayText.startsWith('[') || !arrayText.endsWith(']')) throw new ApiError('排行数据分片格式无效', 'network')
+          let payload: unknown
+          try { payload = JSON.parse(text) } catch { throw new ApiError('排行数据分片格式无效', 'network') }
+          const rows = (payload as { funds?: unknown })?.funds
+          if (!Array.isArray(rows) || !rows.every(validScreenFund)) throw new ApiError('排行数据分片格式无效', 'network')
+          return { rows, arrayText }
+        })
+      } catch (error) {
+        if (error instanceof ApiError && error.kind === 'http') throw new Error('排行数据分片加载失败')
+        throw error
+      }
+    })
     const funds = chunks.flatMap((chunk) => chunk.rows)
     if (!validFunds(funds, manifest.total)) throw new Error('排行数据分片不完整')
     const datasetText = `[${chunks.map((chunk) => chunk.arrayText.slice(1, -1)).filter(Boolean).join(',')}]`
     if (await sha256Text(datasetText) !== manifest.sha256) {
       throw new Error('排行数据集合校验失败')
     }
+    ensureActive()
     cache = { funds, updated: manifest.updated, ...screenerFreshness(manifest.updated) }
     return cache
   }
-  const legacy = await fetch(`${import.meta.env.BASE_URL}data/screener.json`, { cache: 'no-cache' })
-  if (!legacy.ok) throw new Error('暂无排行数据')
-  const d = await legacy.json() as unknown
+  let d: unknown
+  try {
+    d = await requestJson<unknown>(`${import.meta.env.BASE_URL}data/screener.json`, { cache: 'no-cache', signal })
+  } catch (error) {
+    if (error instanceof ApiError && error.kind === 'http' && error.status === 404) throw new Error('暂无排行数据')
+    throw error
+  }
   if (!validLegacy(d)) throw new Error('排行数据格式无效')
+  ensureActive()
   cache = { funds: d.funds, updated: d.updated, ...screenerFreshness(d.updated) }
   return cache
 }

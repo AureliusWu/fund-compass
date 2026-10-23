@@ -1,0 +1,44 @@
+{
+  "schema": "fc-owner-analysis-artifact-comparison-1",
+  "baselineCommit": "17ee22034e11ee36fb05d4359aea4071a5a9ed11",
+  "baselineArchiveSha256": "d4aaf07c925c00915434832db53591050a9ae00b487b74592f9b6ae593ad901f",
+  "frontendTreePins": {
+    "baseline": "c41cd5d664cfe79f503774a04be2439edc7c179365df62a9954cedcdbb8a5a99",
+    "current": "065cd2a3f610d467e56a64228abe90aecdff2e490953db68de971102e95a562f"
+  },
+  "method": "Three stable artifact samples per side; direct npm builds, same installed node_modules junction, manifests equal after LF normalization. Static dependency closure follows actual TypeScript-parsed emitted import/export declarations; dynamic imports not expanded. gzip level9 sums are not browser transferred bytes.",
+  "samplesPerSide": 3,
+  "artifactStable": true,
+  "viteBuildSeconds": {
+    "baseline": [7.72, 8.91, 8.02],
+    "current": [7.59, 7.33, 7.04],
+    "baselineMedian": 8.02,
+    "baselineWorst": 8.91,
+    "currentMedian": 7.33,
+    "currentWorst": 7.59,
+    "excludedConcurrentQualityBuild": 8.92
+  },
+  "gzip9Bytes": {
+    "jsCss": { "baseline": 566240, "current": 591943, "deltaPercent": 4.54 },
+    "workspaceChunk": { "baseline": 9740, "current": 9653, "deltaPercent": -0.89 },
+    "workspaceStaticClosure": { "baseline": 121934, "current": 129519, "deltaPercent": 6.22 },
+    "watchlistStaticClosure": { "baseline": 149408, "current": 156241, "deltaPercent": 4.57 },
+    "precache": { "baseline": 442573, "current": 468139, "deltaPercent": 5.78 },
+    "precacheAndWorkerSupportUnion": { "baseline": 452245, "current": 477946, "deltaPercent": 5.68 }
+  },
+  "precacheUrlCount": { "baseline": 80, "current": 90 },
+  "unchangedHistoricalBudgetDebt": {
+    "reference": "a51940d, separately measured prior baseline; not rebuilt in this comparison",
+    "workspaceChunkGzip9": { "baseline": 7787, "current": 9653, "deltaPercent": 23.96, "thresholdPercent": 20, "verdict": "FAIL" },
+    "precacheGzip9": { "baseline": 400938, "current": 468139, "deltaPercent": 16.76, "thresholdPercent": 10, "verdict": "WARN" },
+    "installationUnionGzip9": { "baseline": 410446, "current": 477946, "deltaPercent": 16.45, "thresholdPercent": 10, "verdict": "WARN" }
+  },
+  "limitations": [
+    "Small local build samples are directional; no critical user-navigation latency verdict from compiler timings.",
+    "Initial diagnostic builds preceded source freeze. One additional 8.92s current quality build overlapped unit tests and is excluded from timing samples, not recorded as a hidden failure.",
+    "First baseline build generated only mechanical components.d.ts LF normalization before freeze. Sources and manifests were unchanged during measurements.",
+    "After measurement, git diff --check removed only the extra blank EOF line in the test-only backend wire fixture; the current pin above identifies the measured tree before that whitespace-only cleanup.",
+    "Raw artifact/AST inventory, measurement helper and freeze file remain in local Temp fc-analysis-perf-9f79a65071084acca5b64efaa1eb42c4, not independently archived evidence.",
+    "No real browser, warm/cold navigation, interaction, installed PWA, offline, device, API, cloud persistence or formal release verification. Historical FAIL/WARN remain open."
+  ]
+}

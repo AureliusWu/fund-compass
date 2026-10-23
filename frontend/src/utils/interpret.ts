@@ -1,15 +1,22 @@
-// 智能解读（双模式）。
-// B 规则模板：把评分四维 / 三层信号 / 回测合成中文点评，纯前端、免费、离线、稳定。
-// A LLM：用用户自带 Anthropic key（存本机），浏览器直连 api.anthropic.com，措辞更自然。
+// 规则解读：在数据覆盖与时效门禁内，合成离线中文点评。
+// 自由文本 AI 暂停，避免未经核验的金融数字与操作倾向。
 import type { FundDetail, ScoreResp, SignalResp, BacktestResp } from '@/api/client'
-import { chat } from './ai'
+import { FREE_TEXT_AI_UNAVAILABLE } from './ai'
 
 export interface InterpSection { h: string; t: string }
 export interface Interpretation { verdict: string; tone: 'good' | 'mid' | 'weak'; sections: InterpSection[] }
 
+function finite(n: unknown): n is number {
+  return typeof n === 'number' && Number.isFinite(n)
+}
+
 function pctStr(n: number | null | undefined): string {
-  if (n == null || Number.isNaN(n)) return '—'
+  if (!finite(n)) return '—'
   return (n >= 0 ? '+' : '') + n.toFixed(2) + '%'
+}
+
+function scalarStr(n: unknown): string {
+  return finite(n) ? String(n) : '—'
 }
 
 // ── B：规则模板解读 ───────────────────────────────────────
@@ -17,27 +24,34 @@ export function templateInterpret(
   detail: FundDetail, score: ScoreResp | null, signal: SignalResp | null, bt: BacktestResp | null,
 ): Interpretation {
   const sections: InterpSection[] = []
-  const s = score?.score ?? null
+  const currentDataEligible = score?.eligible === true
+    && finite(score.coverage) && score.coverage >= 0.7 && score.coverage <= 1
+    && (!signal || (finite(signal.coverage) && signal.coverage >= 0.7 && signal.coverage <= 1))
+    && !score.data_stale && !detail.stale && !signal?.data_stale
+  const s = currentDataEligible && finite(score?.score) && score.score >= 0 && score.score <= 100
+    ? score.score : null
 
   // 1. 总评
   let tone: 'good' | 'mid' | 'weak' = 'mid'
-  let verdict = '数据有限，建议结合更多信息判断。'
+  let verdict = '数据不足或已过期，暂不作当前评分与操作倾向判断。'
   if (s != null) {
     if (s >= 75) { tone = 'good'; verdict = `综合评分 ${s}，在同类中表现优秀。` }
     else if (s >= 55) { tone = 'mid'; verdict = `综合评分 ${s}，整体中规中矩。` }
     else { tone = 'weak'; verdict = `综合评分 ${s}，相对偏弱，需谨慎。` }
   }
-  if (score?.rank_in_type && score?.rank_total) {
+  if (s != null && finite(score?.rank_in_type) && finite(score?.rank_total)
+    && Number.isInteger(score.rank_in_type) && Number.isInteger(score.rank_total)
+    && score.rank_in_type >= 1 && score.rank_total >= score.rank_in_type) {
     const p = Math.max(1, Math.round((score.rank_in_type / score.rank_total) * 100))
     verdict += ` 同类排名前 ${p}%（${score.rank_in_type}/${score.rank_total}）。`
   }
 
   // 2. 评分拆解：最强 / 最弱维度
-  if (score?.components) {
+  if (s != null && score?.components) {
     const NM: Record<string, string> = { return: '收益', risk: '风险控制', management: '管理', cost: '成本' }
     const arr = (Object.entries(score.components) as [string, { score: number | null; weight: number }][])
       .map(([k, c]) => ({ k, name: NM[k] || k, v: c.score }))
-      .filter((x): x is { k: string; name: string; v: number } => x.v != null)
+      .filter((x): x is { k: string; name: string; v: number } => finite(x.v) && x.v >= 0 && x.v <= 100)
     if (arr.length) {
       const best = arr.reduce((a, b) => (b.v > a.v ? b : a))
       const worst = arr.reduce((a, b) => (b.v < a.v ? b : a))
@@ -53,25 +67,28 @@ export function templateInterpret(
   const mgr = detail.manager
     ? `现任经理 ${detail.manager}${detail.manager_worktime ? `（任职 ${detail.manager_worktime}）` : ''}。`
     : ''
-  sections.push({ h: '收益与管理', t: `${rets}。${mgr}${detail.scale != null ? `规模约 ${detail.scale} 亿。` : ''}` })
+  const historyNote = detail.stale ? `历史缓存（${detail.updated_at || detail.latest_nav_date || '时间未知'}），不代表当前数据。` : ''
+  sections.push({ h: '收益与管理', t: `${historyNote}${rets}。${mgr}${finite(detail.scale) ? `规模约 ${detail.scale} 亿。` : ''}` })
 
   // 4. 择时信号
-  if (signal) {
+  if (signal && s == null) {
+    sections.push({ h: '择时信号', t: '数据不足或已过期，暂停当前择时信号与操作倾向解读。' })
+  } else if (signal) {
     let t = `当前信号「${signal.signal}」。`
     const L = signal.layers
     const bits: string[] = []
     if (L?.valuation?.label) {
       const v = L.valuation
       if (v.source === 'index_pe_pb' && v.index_name) {
-        bits.push(`估值${v.label}（${v.index_name} PE${v.pe} 分位${v.pe_pct}%）`)
-      } else if (v.percentile != null) {
+        bits.push(`估值${v.label}（${v.index_name} PE ${scalarStr(v.pe)}，分位 ${finite(v.pe_pct) ? v.pe_pct + '%' : '—'}）`)
+      } else if (finite(v.percentile)) {
         bits.push(`估值${v.label}（分位 ${v.percentile}）`)
       } else {
         bits.push(`估值${v.label}`)
       }
     }
     if (L?.trend?.label) bits.push(`趋势${L.trend.label}`)
-    if (L?.sentiment?.label) bits.push(`情绪${L.sentiment.label}${L.sentiment.rsi != null ? `（RSI ${L.sentiment.rsi}）` : ''}`)
+    if (L?.sentiment?.label) bits.push(`情绪${L.sentiment.label}${finite(L.sentiment.rsi) ? `（RSI ${L.sentiment.rsi}）` : ''}`)
     if (bits.length) t += bits.join('、') + '。'
     if (signal.advice) t += signal.advice
     sections.push({ h: '择时信号', t })
@@ -79,17 +96,21 @@ export function templateInterpret(
 
   // 5. 回测验证
   if (bt?.available && bt.strategy && bt.benchmark) {
-    const out = bt.outperform ?? 0
-    let t = `历史回测：择时策略 ${pctStr(bt.strategy.total_return)}（回撤 ${bt.strategy.max_drawdown}%）vs 一直持有 ${pctStr(bt.benchmark.total_return)}（回撤 ${bt.benchmark.max_drawdown}%）。`
-    if (out > 0) t += `策略跑赢 ${pctStr(out)}，胜率 ${bt.win_rate}%。`
-    else t += `策略未跑赢持有（${pctStr(out)}）——对该基金择时不如长期持有，强趋势品种尤其如此。`
+    const out = bt.outperform
+    let t = `历史回测：择时策略 ${pctStr(bt.strategy.total_return)}（回撤 ${finite(bt.strategy.max_drawdown) ? bt.strategy.max_drawdown + '%' : '—'}）vs 一直持有 ${pctStr(bt.benchmark.total_return)}（回撤 ${finite(bt.benchmark.max_drawdown) ? bt.benchmark.max_drawdown + '%' : '—'}）。`
+    if (!finite(out)) t += '超额收益数据不足，暂不比较策略优劣。'
+    else if (out > 0) t += `本次历史回测区间策略超额 ${pctStr(out)}。`
+    else if (out === 0) t += '本次历史回测区间与一直持有收益相同（+0.00%）。'
+    else t += `本次历史回测区间策略低于一直持有 ${pctStr(out)}。`
+    if (finite(bt.win_rate) && bt.win_rate >= 0 && bt.win_rate <= 100) t += `胜率 ${bt.win_rate}%。`
+    t += '历史回测不代表未来表现。'
     sections.push({ h: '回测验证', t })
   }
 
   // 6. 操作建议
   const sig = signal?.signal
   let op: string
-  if (s == null) op = '数据不足，建议补充信息后再决策。'
+  if (s == null) op = '数据不足或已过期，暂不提供操作倾向；请补充有效数据后再判断。'
   else if (s >= 70 && (sig === '买入' || sig === '定投')) op = '基本面较好且信号偏积极，可考虑分批 / 定投介入，避免一次性追高。'
   else if (s >= 70 && sig === '减仓') op = '基本面尚可但当前位置偏高，已持有可考虑逢高减仓、落袋部分收益。'
   else if (s >= 55) op = '中等品种，适合小仓位定投跟踪，不宜重仓押注。'
@@ -99,28 +120,9 @@ export function templateInterpret(
   return { verdict, tone, sections }
 }
 
-// ── A：LLM 解读（用户自带 Key，浏览器直连，Provider 见 utils/ai）──────
+// 保留调用边界，暂停期间即使被直接调用也不得发送模型请求。
 export async function llmInterpret(
-  detail: FundDetail, score: ScoreResp | null, signal: SignalResp | null, bt: BacktestResp | null,
+  _detail: FundDetail, _score: ScoreResp | null, _signal: SignalResp | null, _bt: BacktestResp | null,
 ): Promise<string> {
-  const comp = score?.components
-  const facts = {
-    名称: detail.name, 类型: detail.type, 规模亿: detail.scale,
-    经理: detail.manager, 任职: detail.manager_worktime,
-    收益: { 近1月: detail.ret_1m, 近6月: detail.ret_6m, 近1年: detail.ret_1y, 近3年: detail.ret_3y },
-    同类排名: score?.rank_in_type && score?.rank_total ? `${score.rank_in_type}/${score.rank_total}` : null,
-    综合评分: score?.score,
-    评分四维: comp ? { 收益: comp.return?.score, 风险: comp.risk?.score, 管理: comp.management?.score, 成本: comp.cost?.score } : null,
-    择时信号: signal?.signal,
-    三层: signal?.layers ? { 估值: signal.layers.valuation?.label, 趋势: signal.layers.trend?.label, 情绪: signal.layers.sentiment?.label } : null,
-    回测: bt?.available ? { 策略收益: bt.strategy?.total_return, 持有收益: bt.benchmark?.total_return, 超额: bt.outperform, 胜率: bt.win_rate } : null,
-  }
-
-  const system =
-    '你是中立的基金数据解读助手，面向个人投资者。基于给定数据用简体中文写一段 150–250 字的点评：' +
-    '先给总体判断，再点出收益 / 风险 / 择时 / 回测的要点，最后给一句操作倾向。' +
-    '口吻客观克制，不夸大、不做收益承诺，不构成投资建议。不要罗列原始字段，要像分析师口吻自然成段。' +
-    '结尾另起一行加：「以上为数据解读，仅供个人参考，不构成投资建议。」'
-
-  return chat(system, '基金数据：\n' + JSON.stringify(facts))
+  throw new Error(FREE_TEXT_AI_UNAVAILABLE)
 }

@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as apiClient from './client'
+import { withRequestDeadline } from './request'
+import { clearOwnerSession, loginOwnerSession } from '@/stores/ownerSession'
+const SYNTHETIC_TOKEN = 'own_' + 'a'.repeat(43)
 import {
   ApiError,
   getV8Decision,
@@ -15,12 +18,63 @@ import {
 } from './client'
 
 afterEach(() => {
+  clearOwnerSession()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
   vi.useRealTimers()
 })
 
 describe('API request resilience', () => {
+  it('accepts empty 204 responses without trying to parse JSON', async () => {
+    const json = vi.fn()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 204, json }))
+    await expect(request('/empty', { method: 'DELETE' })).resolves.toBeUndefined()
+    expect(json).not.toHaveBeenCalled()
+  })
+
+  it('does not start a fetch when the caller signal was already aborted', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(request('/cancelled', { signal: controller.signal })).rejects.toMatchObject({ kind: 'cancelled' })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('does not return a response body that completed after cancellation', async () => {
+    let finishBody!: (value: unknown) => void
+    const body = new Promise(resolve => { finishBody = resolve })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, json: () => body }))
+    const controller = new AbortController()
+    const pending = request('/late-body', { signal: controller.signal })
+    const assertion = expect(pending).rejects.toMatchObject({ kind: 'cancelled' })
+    await Promise.resolve()
+    controller.abort()
+    finishBody({ private: 'synthetic' })
+    await assertion
+  })
+
+  it('enforces its deadline while parsing a response body', async () => {
+    vi.useFakeTimers()
+    let finishBody!: (value: unknown) => void
+    const body = new Promise(resolve => { finishBody = resolve })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, json: () => body }))
+    const pending = request('/late-json', undefined, 100)
+    const assertion = expect(pending).rejects.toMatchObject({ kind: 'timeout' })
+    await vi.advanceTimersByTimeAsync(100)
+    finishBody({ private: 'synthetic' })
+    await assertion
+  })
+
+  it('ends promptly at the deadline even when a transport ignores abort', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => new Promise(() => {})))
+    const pending = request('/ignores-abort', undefined, 100)
+    const assertion = expect(pending).rejects.toMatchObject({ kind: 'timeout' })
+    await vi.advanceTimersByTimeAsync(100)
+    await assertion
+  })
+
   it('aborts a request after its deadline', async () => {
     vi.useFakeTimers()
     vi.stubGlobal('fetch', vi.fn((_url, init) => new Promise((_resolve, reject) => {
@@ -42,9 +96,96 @@ describe('API request resilience', () => {
       status: 503,
     })
   })
+
+  it.each([404, 409])('ordinary API requests still reject %s before decoding', async status => {
+    const json = vi.fn()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status, json }))
+    await expect(request('/not-a-sync-request')).rejects.toMatchObject({ kind: 'http', status })
+    expect(json).not.toHaveBeenCalled()
+  })
+
+  it('shared deadline never starts an operation for an already-aborted caller', async () => {
+    const operation = vi.fn(), controller = new AbortController()
+    controller.abort()
+    await expect(withRequestDeadline(operation, controller.signal)).rejects.toMatchObject({ kind: 'cancelled' })
+    expect(operation).not.toHaveBeenCalled()
+  })
+
+  it('shared deadline covers non-fetch validation and rejects its late completion', async () => {
+    vi.useFakeTimers()
+    let finish!: (value: string) => void
+    const pending = withRequestDeadline(async (_signal, ensureActive) => {
+      const value = await new Promise<string>(resolve => { finish = resolve })
+      ensureActive()
+      return value
+    }, undefined, 100)
+    const assertion = expect(pending).rejects.toMatchObject({ kind: 'timeout' })
+    await vi.advanceTimersByTimeAsync(100)
+    await assertion
+    finish('synthetic late value')
+    await Promise.resolve()
+    await expect(pending).rejects.toMatchObject({ kind: 'timeout' })
+  })
+
+  it('shared deadline checks elapsed monotonic time even before its timer callback can run', async () => {
+    vi.stubGlobal('performance', { now: vi.fn().mockReturnValueOnce(0).mockReturnValueOnce(0).mockReturnValue(101) })
+    await expect(withRequestDeadline(async (_signal, ensureActive) => { ensureActive(); return 'late' },
+      undefined, 100)).rejects.toMatchObject({ kind: 'timeout' })
+  })
 })
 
 describe('v8 API contracts', () => {
+  it('public legacy fund reads never serialize local positions, costs or weights', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ code: '000001' }) })
+    vi.stubGlobal('fetch', fetchMock)
+    const privateInputs = { held: true, current_weight: 12.34, target_weight: 56.78, force: true }
+    await apiClient.getAnalyze('000001', privateInputs)
+    await apiClient.getDecision('000001', privateInputs)
+    expect(fetchMock.mock.calls.map(call => call[0])).toEqual(['/api/fund/000001/analyze', '/api/fund/000001/decision'])
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(init.body).toBeUndefined()
+      expect(init.headers).toBeUndefined()
+    }
+  })
+
+  it('blocks legacy Admin-only personal POSTs before any network request', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const items = [{ code: '000001', current_weight: 100, target_weight: 100 }]
+    await expect(apiClient.postPortfolioLab(items, 12345)).rejects.toMatchObject({ kind: 'cancelled', message: expect.stringContaining('本地输入未发送') })
+    await expect(apiClient.postPortfolioDecisions(items, 12345)).rejects.toMatchObject({ kind: 'cancelled' })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+  it('maps authenticated reads to audited private URLs but keeps public calls anonymous', async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string) => Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => url.endsWith('/owner/session') ? {
+        access_token: SYNTHETIC_TOKEN, token_type: 'Bearer', owner_id: 'owner',
+        expires_at: new Date(Date.now() + 30 * 60_000).toISOString(),
+        scopes: ['read_private', 'write_holdings', 'run_personal_analysis'],
+      } : { code: '510300' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    await loginOwnerSession('synthetic-password')
+    await getV8Decision('510300')
+    await getWatchlist()
+    await apiClient.getStrategyOutcomes()
+    await apiClient.getPortfolioOutcomes()
+    await apiClient.getHealth()
+    expect(fetchMock.mock.calls.map(call => String(call[0]))).toEqual([
+      '/api/v2/owner/session', '/api/v2/private/fund/510300/decision', '/api/private/watchlist',
+      '/api/private/strategy/outcomes', '/api/private/strategy/portfolio-outcomes', '/api/health',
+    ])
+    for (const [, init] of fetchMock.mock.calls.slice(1, 5)) {
+      expect(new Headers(init.headers).get('Authorization')).toBe(`Bearer ${SYNTHETIC_TOKEN}`)
+      expect(init.cache).toBe('no-store')
+      expect(init.credentials).toBe('omit')
+      expect(init.redirect).toBe('error')
+    }
+    expect(fetchMock.mock.calls[5]?.[1]?.headers).toBeUndefined()
+  })
+
   it('exposes snapshot reads without state-changing query parameters', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

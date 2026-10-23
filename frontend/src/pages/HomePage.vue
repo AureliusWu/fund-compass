@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch as observe } from 'vue'
 import { ApiError, getHealth, getV8Decision, type SignalResp, type V8DecisionResult } from '@/api/client'
 import { useAppStore } from '@/stores/app'
 import { useWatchlistStore } from '@/stores/watchlist'
+import { useOwnerAnalysisStore } from '@/stores/ownerAnalysis'
+import { ownerSession, ownerSessionGeneration } from '@/stores/ownerSession'
 import { useFundsStore } from '@/stores/funds'
 import IndexBar from '@/components/IndexBar.vue'
 import HomeActionCenter from '@/components/HomeActionCenter.vue'
+import LocalHoldingGate from '@/components/LocalHoldingGate.vue'
 import type { HomeDecisionError } from '@/components/homeActionCenter'
 import { getSourceSummary, recordSource, type SourceStatus } from '@/utils/resilience'
 import { fetchTaskStatuses, type TaskStatus } from '@/utils/taskStatus'
@@ -17,6 +20,7 @@ import { temperatureLabel, TEMPERATURE_DEFINITION } from '@/utils/terminology'
 
 const app = useAppStore()
 const watch = useWatchlistStore()
+const ownerAnalysis = useOwnerAnalysisStore()
 const funds = useFundsStore()
 const backendOk = ref<boolean | null>(null)
 const healthText = ref('检查中')
@@ -167,6 +171,15 @@ async function loadV8ActionCenter() {
   if (requestVersion === v8RequestVersion) v8Loading.value = false
 }
 
+observe(ownerSessionGeneration, () => {
+  v8RequestVersion++
+  v8Decisions.value = []
+  v8Errors.value = watch.items.map(item => ({ code: item.code, name: item.name, kind: 'redacted' }))
+  v8Requested.value = watch.items.length
+  v8Loading.value = false
+  if (ownerSession.value) void loadV8ActionCenter()
+}, { flush: 'sync' })
+
 async function refreshWatchHome(force: boolean) {
   try { await watch.load(force) } catch { /* keep the local watchlist */ }
   await Promise.allSettled([loadWatchSignals(), loadV8ActionCenter()])
@@ -234,12 +247,14 @@ onMounted(() => { void refreshHome(false) })
 
     <van-pull-refresh v-model="refreshing" @refresh="refreshHome(true)">
       <div class="page-body">
-        <HomeActionCenter
-          :decisions="v8Decisions"
-          :errors="v8Errors"
-          :requested="v8Requested"
-          :loading="v8Loading"
-        />
+        <LocalHoldingGate :pending="watch.hasLocalChanges() && !ownerAnalysis.qualified">
+          <HomeActionCenter
+            :decisions="ownerAnalysis.qualified ? ownerAnalysis.results : v8Decisions"
+            :errors="ownerAnalysis.qualified ? [] : v8Errors"
+            :requested="ownerAnalysis.qualified ? ownerAnalysis.results.length : v8Requested"
+            :loading="ownerAnalysis.qualified ? false : v8Loading"
+          />
+        </LocalHoldingGate>
 
         <div class="secondary-home">
           <div class="sec">市场与持仓温度</div>

@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:fund-compass:storage-verification-context:v1",
+  "title": "Trusted out-of-band storage verification context v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["context_version", "target_sha", "write_source_sha256", "engine", "authority", "resource_fingerprint", "credential_configuration_revision", "database_schema_version", "current_read_boot", "generator_ci_run_id"],
+  "properties": {
+    "context_version": {"const": 1},
+    "target_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "write_source_sha256": {"$ref": "storage-release-evidence-v1.json#/$defs/digest"},
+    "engine": {"enum": ["sqlite", "libsql"]},
+    "authority": {"enum": ["persistent_disk", "turso_cloud"]},
+    "resource_fingerprint": {"$ref": "storage-release-evidence-v1.json#/$defs/digest"},
+    "credential_configuration_revision": {"$ref": "storage-release-evidence-v1.json#/$defs/identifier"},
+    "database_schema_version": {"type": "integer", "minimum": 8, "maximum": 9223372036854775807},
+    "current_read_boot": {"$ref": "storage-release-evidence-v1.json#/$defs/boot"},
+    "generator_ci_run_id": {"type": "integer", "minimum": 1, "maximum": 9223372036854775807}
+  },
+  "oneOf": [
+    {"properties": {"engine": {"const": "sqlite"}, "authority": {"const": "persistent_disk"}}},
+    {"properties": {"engine": {"const": "libsql"}, "authority": {"const": "turso_cloud"}}}
+  ],
+  "x-trust-requirements": [
+    "Construct only from the protected executor's independently observed current deployment metadata, never copy from the evidence",
+    "generator_ci_run_id is the approved evidence generator run, not the later verifier run id",
+    "current_read_boot must bind the actual current application boot and target SHA exactly",
+    "An arbitrary user-controlled context file does not establish trusted production state",
+    "No credentials, private database URLs or holding payloads are allowed"
+  ]
+}

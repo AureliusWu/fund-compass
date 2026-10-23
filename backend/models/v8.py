@@ -236,6 +236,25 @@ class PortfolioPolicy(FrozenModel):
         return self
 
 
+class OwnerPolicyState(FrozenModel):
+    """One verified read snapshot of an existing Policy chain, never a write."""
+
+    schema_version: Literal["owner-policy-state-1"] = "owner-policy-state-1"
+    observed_at: datetime
+    current: PortfolioPolicy | None
+    next_effective_at: datetime | None
+    history: tuple[PortfolioPolicy, ...] = Field(max_length=1000)
+
+    @field_validator("observed_at", "next_effective_at")
+    @classmethod
+    def utc_observation(cls, value: datetime | None) -> datetime | None:
+        if value is not None:
+            if value.tzinfo is None or value.utcoffset() is None:
+                raise ValueError("policy observation time must include a timezone")
+            return value.astimezone(timezone.utc)
+        return value
+
+
 class PositionGuidance(FrozenModel):
     current_weight: float | None = Field(default=None, ge=0, le=100)
     target_weight: float | None = Field(default=None, ge=0, le=100)
