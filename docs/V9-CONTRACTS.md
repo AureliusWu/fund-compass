@@ -180,3 +180,17 @@ v3 核心与云命令/完整 v4 codec 分离，相关 codec 先于事务加载�
 首页、自选、详情通过同一 app-owned store 使用实际 component 的 Holding/Evidence/Decision/Policy；diff=null明确“未提供同来源历史比较”，不猜首次或动作未变。保留工作区 local_pending，只给本轮已核对分析的独立消费资格；过期即恢复旧行动阻断。共用金融门禁核真实模型链/代码/0-null语义、坏/未来日期、七日行情与净值、评分70%及模型覆盖70%、缺失状态和既有动作/Policy较高置信度；不凭本轮生成时间给陈旧源续期，不把合法下一净值目标当已实现收益。未来/坏QDII结算轴仅保留历史条目，不展示已实现收益/命中。
 
 本地验证使用实际 Vue SFC、Pinia、watchlist locator/adopt/v4/link、fake-IDB strict事务与真实后端合成 wire fixture；HTTP/登录仍为合成，不能认证 Chrome下载/落盘、整页reload、旧PWA、跨设备、实际市场数据、云schema/权限/耐久/独立恢复或v9发布。
+
+### I19-04 策略当前/待生效/历史只读流程（2026-10-23）
+
+Owner 不得推进 Admin 全局护栏。新增 `GET /api/v2/private/portfolio/policy-state` 仅需独立 Owner/read_private；Admin、Worker、私人机器凭据均不能替代，不收 query。仍复用关闭的普通本地配置工厂，不创建连接目标、默认 Policy 或 DDL，不开放 Turso/schema8/URI。构造零 IO；会话在 factory/读取/关闭/序列化各出口重核，独立限频，所有响应 no-store/Pragma/nosniff，驱动伪造的 HTTPException 不穿过存储边界。
+
+`owner-policy-state-1` 仅五字段：schema_version、observed_at、current（可 null）、next_effective_at（可 null）、history。一次本机读事务验证固定 Policy/scope DDL、完整单链、原 canonical payload/ID/SHA/全部冗余列和 production 来源；future effective_at 合法，created_at 不得晚于本次观察。current 为实际 UTC 微秒不晚于 observed 的最新版本；next 为最早未来版本；history 为完整逆序单链，根/前驱/分支/环/漏注册/孤儿均拒绝，不拿被 view 隐藏的损坏链当空历史。最多1000版、2MiB完整输出（含 current 重复字段），超过拒绝，不分页截断冒称完整。读取12秒/HTTP30秒仍为协作预算，不硬中断 SQLite。旧 read_policy/history 的历史 at 语义保留，只将合法非UTC直接模型投影改为实际UTC排序；正常 HTTP builder 已输出UTC，不声称发现线上时间错误。
+
+前端原始 JSON parser 保留 lexical number，严格闭集/唯一键/Unicode/数值和微秒时间；沿用原 Policy 模型校验，不在JS重算Python ID/SHA。新 state 必须完整链、current/next精确相符；旧 analysis 四操作之外只新增固定GET policy_state，Owner同步三操作不扩张。此快照不是持仓、Evidence 或业务回执，不凭读取新策略解除 local_pending。
+
+实际面板显示读时当前/待生效/历史、已知下一生效时刻和与直接前驱的完整业务字段差异；null与0保留不同语义。每页10个版本，完整规则仅显式展开渲染。过期仍可看历史但不宣称当前；微秒状态用已验证链的次序，不在展示时降为毫秒比较。只读 review 不拉D/Evidence、不写任务或调用分析POST，也不续原分析资格。
+
+原 state 具有内存单调proof，墙钟与performance均检查；已知next或observed+60秒取最早边界，保守毫秒截断只会提早过期。Evidence/本机摘要/IDB耗时消耗同一个窗口，最终资格不重新起算该proof。预览最终发布、prepare验证及CAS前后、send验证及attempted CAS后POST前重核原state；CAS已提交却跨期时保留原attempted，不发送也不取消/回退。Store响应tick独立递增，墙钟停滞不能让已缓存的三页结果永久保鲜。坏/已观察回退时钟失败粘住，恢复时钟不自动续资格。统一withRequestDeadline另拒绝非有限起点/预算/进度、非正预算及中途回退；原计时器、取消优先级和超时上限未放宽。
+
+这是本机候选策略读取与显示子链，不是 Owner 策略编辑、云端迁移、多设备/Chrome/PWA、远端持久化或完整 I19/v9 发布验收。

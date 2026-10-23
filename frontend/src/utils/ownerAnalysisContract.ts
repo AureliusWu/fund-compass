@@ -538,8 +538,29 @@ export function parseOwnerAnalysisReceiptResponse(status: number, raw: string, p
   if (row.state !== 'matched' || integer(row.status) !== 200) reject()
   return frozen({ state: 'matched', status: 200, result: result(row.result, packet, maximum) })
 }
+const checkedPolicyValues = new WeakSet<object>()
+/** Shared raw grammar for closed Owner input envelopes, not a materialized DTO.
+ * Retains numeric tokens until a model validator has checked their semantics. */
+export function parseOwnerAnalysisJson(raw: string, maximumBytes: number): unknown {
+  if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1 || maximumBytes > OWNER_ANALYSIS_MAX_RESPONSE_BYTES) reject()
+  const value = parse(raw, maximumBytes)
+  const remember = (item: unknown) => {
+    if (item && typeof item === 'object') {
+      checkedPolicyValues.add(item)
+      Object.values(item).forEach(remember)
+    }
+  }
+  remember(value)
+  return frozen(value)
+}
+/** Only accepts an unmodified object produced by the bounded raw grammar.
+ * No serialization, Python ID/hash reconstruction, or source authentication. */
+export function validateOwnerAnalysisPolicyValue(value: unknown, nowMs = Date.now()): V8PortfolioPolicy {
+  if (!value || typeof value !== 'object' || !checkedPolicyValues.has(value)) reject()
+  return frozen(materialize(policy(value, clock(nowMs))) as V8PortfolioPolicy)
+}
 export function parseOwnerAnalysisPolicy(raw: string, nowMs = Date.now()): V8PortfolioPolicy {
-  return frozen(materialize(policy(parse(raw, OWNER_ANALYSIS_MAX_RESPONSE_BYTES), clock(nowMs))) as V8PortfolioPolicy)
+  return validateOwnerAnalysisPolicyValue(parseOwnerAnalysisJson(raw, OWNER_ANALYSIS_MAX_RESPONSE_BYTES), nowMs)
 }
 export function parseOwnerAnalysisEvidence(raw: string, expectedCode: string, nowMs = Date.now()): V8EvidenceSnapshot {
   return frozen(materialize(evidence(parse(raw, OWNER_ANALYSIS_MAX_RESPONSE_BYTES), code(expectedCode), clock(nowMs))) as V8EvidenceSnapshot)

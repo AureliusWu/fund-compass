@@ -1320,3 +1320,39 @@ I18实际轮换/停写排空/新保护备份、Free能力与额度/受控迁移�
 Vite内部秒：基线7.72/8.91/8.02，中位8.02/最差8.91；当前7.59/7.33/7.04，中位7.33/最差7.59。小样本/路径/EOL/宿主缓存不能作用户关键延迟结论。增长主要来自严格分析parser/任务/UI、新OwnerSession固定transport和真实source守卫；可延后启用的模块仍被Workbox预缓存，懒载不等于安装字节减少。统一金融检查复用减少自选页单块，bootstrap增大，不能只报单块缩小。既有更早a519 workspace7787→9653仍 **+23.96% FAIL（20%线不变）**，precache400938→468139 **+16.76% WARN**、安装并集410446→477946 **+16.45% WARN**；该历史基线本轮未重建，不宣称预算债务已消失。request/ownerSession静态/动态提示仍保留，ECharts532397B未变。
 
 本轮继续仅功能分支候选，版本8.0.0。I18实际停写/新保护备份/轮换/Free quota/provider能力与容量/受控迁移、应用跨Render重启读回及独立远端恢复；I19 Policy编辑/手工资产/历史/机器消费者/多设备；I20自然窗口；I21真实三页浏览器/PWA/旧版本和性能债务仍待完成。未读取未确认凭据输入、不绕OAuth/浏览器或PR写403，不改云配置/套餐/部署/重启/main/Gist。本轮自然CI未完成前不将本地PASS称CI/部署通过；代码回退保留v4及原任务，不能删除任务或伪造数据格式降级。
+
+### 008dc195 精确自然 CI 与 I19-04 策略只读版本流程（2026-10-23）
+
+前片段已普通推送 `008dc195703dab3bdcd3a9706db3ac68c17f99ce`，tree=`40c62e0d7c14dd110481caf678ecb62b277a9f37`。[自然CI39912590788](https://github.com/AureliusWu/fund-compass/actions/runs/39912590788) run191/attempt1 completed/success。实际日志后端 **3964 passed/2 warnings/296.34s**、pip check clean；前端 **2216/89文件**、type/build5.62s/PWA7/7、官方audit0；Worker **148/4文件**、check/dry-run114.28KiB/gzip26.58、audit0。日志checkout merge=`223bb92bdcff2a11aac446e2922109ce0e246326`，GitHub git-commit API核parents=main7afc4e6+feature008、tree等于feature。deploy/candidate_smoke/formal_smoke均skipped/0steps。这是上一精确源码的CI，不冒充本轮新Policy代码CI。
+
+本轮实际补齐 Owner/read_private 的 `GET /api/v2/private/portfolio/policy-state` 与策略版本面板，不让Owner编辑Admin全局护栏。已有本地schema9一次读事务核固定Policy/scope DDL、完整生产单链、原canonical payload/ID/SHA及全部冗余列；按UTC微秒选current/next/history，合法未来effective可见，future-created拒绝。1000版/2MiB完整容量上限，超量拒绝而非截断；原main本地工厂/远端schema8拒绝不变，不创建默认策略或补DDL。授权覆盖factory、读回、关闭、序列化各边界，驱动伪造HTTP错误固定脱敏，单调预算同时拒中途回退。12/30秒仍是协作预算，不硬中断SQLite。
+
+严格前端raw parser保留lexical number与微秒，验证完整chain/current/nearest-next，不在JS重算Python ID。既有四类analysis之外仅新增固定GET policy_state，同步三操作不扩张；实际预览及资格改用新完整state，不回退旧policy单读。面板只读展示读时当前/待生效/历史、下一生效时刻和与直接前驱的业务字段差异；10条一页，完整规则仅显式展开。只读review不拉D/Evidence、不写任务、不POST分析，不续旧资格；UI复用现有字体/颜色/布局，不新增设计系统或依赖。
+
+真实红/绿审查：①实际Pinia缓存资格/preview在Date.now停滞但真实timer/单调时间到期后仍true，现独立响应tick+原WeakMap proof；②实际IDB attempted事务complete跨过最后新鲜1ms后仍POST，现prepare验证/CAS前后及send attempted CAS后、真实POST前重核同一原state，保留attempted原字节且POST0、不得回退/取消/重发；③Evidence耗时10秒后错误从qualify完成另起60秒，现资格绑定同一个原proof，50秒后即暂停。独立Store新6例与实际SFC回归都绿。微秒future展示另修Date.parse截断误标历史；用实际后端Policy payload不变、观察提前1us的合成SFC证明待生效标签正确。首条新测试误把原fixture相隔一天当同毫秒，出现1F/6P，修正观察时刻后7/7绿，没有改变生产模型ID或放宽parser。
+
+独立审查还实际复现既有统一 `withRequestDeadline` 起点NaN、110→109中途回退、恢复时钟洗掉失败、NaN/Infinity预算可错误resolve。新增真实helper19例首轮 **5F/14P**，修复finite起点/正预算/进度与last单调检查后19/19，独立联跑既有client/Owner transport为110通过；原独立timer、撤销优先级、清理与超时粘性均保持，不改默认预算。
+
+旧 `read_policy/history` 同时修复真实SQLite中合法直接PortfolioPolicy带+08偏移时按ISO字符串排序选错版本；原历史at语义/production view保持。正常HTTP builder/admin入口原本已UTC，不能称已确认线上事故。一次将严格新kernel直接替代旧接口的中间实现触发旧scope语义测试 **1F/116P**，已分离旧兼容读取与新严格快照；原反向测试保留。后端聚焦9文件 **323 passed/2 warnings/111.52s**；最终Windows Python3.12普通插件全量 **4088 passed/2 warnings/757.49s**，直接pytest，无替换旧PASS。两warning仍为Starlette/httpx弃用与故意inf反向fixture的Pydantic告警；`uv pip check --python 原环境`核31包兼容。12分37秒只作此环境功能证据，不与Linux CI或旧2918项/300秒样本混成性能通过，也未修改CI15分钟预算。
+
+最终直接 `npm run test` **2342 passed/93文件/11.49s**，`npm run type-check` exit0；官方 `npm audit --include=dev --audit-level=moderate --registry=https://registry.npmjs.org` **0**。包含实际后端SQLite state wire、严格Policy parser与Owner transport独立137、原manager25、独立Store6、实际Panel7、纯业务diff5与新共享deadline19等。先前2322/92文件是helper/微秒UI回归之前的中间全量，不当作最终计数。HTTP/登录为合成，fake-IDB/真实SFC不等于Chrome落盘、旧PWA、真实多设备、市场源或云资格。Worker源码/锁未动，本轮本地未重跑，由功能分支自然CI另核。
+
+#### Policy 冻结制品对照（非浏览器性能）
+
+Git archive008 +同node_modules junction，依赖清单LF等价；诊断生成声明后冻结全部前端输入，A/B/B/A/A/B各3份稳定、每次直接npm构建/PWA7/7。首个archive命令PowerShell参数表达式失败、未产出archive，改用显式路径成功后才开始；两个初诊断build（current11.06s/baseline9.63s）排除，current诊断还跨最后helper编辑，不能当最终source-bound证明。6次正式制品核实际AST静态闭包与全部precache/非null MD5，机器摘要见 `OWNER-POLICY-PERFORMANCE-20261023.json`；原始helper/freeze/6份完整统计仅存Temp且未独立封存。所有构建与本机后端suite有重叠，因此compiler时延只观察不做性能判定。
+
+| gzip9制品字节（非实际网络） | 008重建基线 | 当前 | 变化/局部判定 |
+| --- | ---: | ---: | --- |
+| JS+CSS | 591,937 | 596,631 | +0.79% |
+| workspace单块 / 静态闭包 | 9,654 / 129,514 | 9,653 / 129,678 | -0.01% / +0.13% |
+| 自选页静态闭包 | 156,227 | 156,390 | +0.10% |
+| analysis manager单块 / 闭包 | 3,593 / 127,886 | 4,293 / 130,289 | +19.48% WARN / +1.88% |
+| analysis Panel单块 / 闭包 | 4,071 / 110,191 | 6,075 / 112,360 | +49.23% FAIL / +1.97% |
+| precache（90→91 URL） | 468,138 | 472,817 | +1.00% |
+| precache/SW/支持文件并集 | 477,942 | 482,635 | +0.98% |
+
+新增Policy parser gzip1418B；版本UI/差异使Panel+2004B，严格proof使manager+700B。整体/闭包小增不洗掉局部FAIL/WARN；可延后启用的块仍被Workbox预缓存，不称安装优化。Vite基线9.02/8.45/7.98（中位8.45/最差9.02），当前9.01/8.29/7.40（中位8.29/最差9.01），并行宿主负载/路径/EOL不支持用户时延结论。更早a519的workspace7787→9653仍+23.96% FAIL，precache400938→472817为+17.93% WARN、安装410446→482635为+17.59% WARN；旧基线未重建、预算未调高。request/ownerSession重复导入提示和ECharts532397B保留，真实大Policy交互/warm/cold/旧PWA/设备/API性能继续未验收。
+
+Render MCP本轮可正常只读访问：已明确使用用户确认的My Workspace（tea-d8v0rljtqb8s73f28mh0），不选新工作区或换认证。候选srv-dab7g0n40ujc73a2ma50和旧srv-d8v0t26rnols73fq6beg均Free；候选最新dep-dbcvus6k1f9s73b543ag为main7afc4e6/live/new_commit，仍main分支且autoDeploy=commit。只读metadata不能当健康API/新feature部署、Turso写入或耐久证据，也不能从CI推断平台自动部署受保护；未改任何云配置、秘密、套餐或重启。main只读复核仍7afc4e6，PR4仍OPEN/DRAFT（前次write403不绕过、不更新）。
+
+应用仍8.0.0，完整I18/I19/I20/I21与v9发布继续未通过；Policy只读子链不冒充Owner编辑策略、手工资产/组合历史或机器消费者完成。下一实际实现优先补独立资产/历史进入共同权威与恢复/同步，再将Worker及应急任务脱离Gist并接同源claim，配合既有受控云迁移/远端恢复门禁。只普通提交推送原feature并观察其自然CI，不改main/tag/云/Gist，不把本轮本地PASS或下一CI成功升级为已发布。

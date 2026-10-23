@@ -41,6 +41,7 @@ from service.security import require_admin, require_private_read, require_worker
 from service.owner_sessions import router as owner_session_router
 from service.owner_sync import build_owner_sync_router, configured_local_sync_connection
 from service.owner_analysis import build_owner_analysis_router
+from service.owner_policy import build_owner_policy_router
 from strategy import backtest, decide_fund, score_fund, timing_signal
 from strategy.calibration import calibrate
 from strategy.index_valuation import status as index_valuation_status
@@ -105,6 +106,7 @@ app.add_middleware(
 app.include_router(owner_session_router)
 app.include_router(build_owner_sync_router(configured_local_sync_connection))
 app.include_router(build_owner_analysis_router(configured_local_sync_connection))
+app.include_router(build_owner_policy_router(configured_local_sync_connection))
 
 
 @app.middleware("http")

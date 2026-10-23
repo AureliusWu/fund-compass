@@ -8,13 +8,15 @@ import { canonicalOwnerLocal } from '@/utils/owner-workspace-backup'
 import { validateOwnerWorkspaceCloudBaseline } from '@/utils/owner-workspace-sync-baseline'
 import { compareSyncKeys, parseSyncChangesPage, type OwnerSyncCursor, type OwnerSyncRecord } from '@/utils/ownerSyncContract'
 import { buildOwnerAnalysisRequest, restoreOwnerAnalysisRequest, parseOwnerAnalysisWriteResponse,
-  parseOwnerAnalysisReceiptResponse, parseOwnerAnalysisPolicy, parseOwnerAnalysisEvidence,
+  parseOwnerAnalysisReceiptResponse, parseOwnerAnalysisEvidence,
   type BuiltOwnerAnalysisRequest, type OwnerAnalysisResult } from '@/utils/ownerAnalysisContract'
+import { parseOwnerPolicyState, type OwnerPolicyState } from '@/utils/ownerPolicyState'
 import type { V8EvidenceSnapshot, V8PortfolioPolicy } from '@/api/client'
 
 export interface OwnerAnalysisPreview {
   readonly packet: BuiltOwnerAnalysisRequest
   readonly policy: V8PortfolioPolicy
+  readonly policyState: OwnerPolicyState
   readonly evidence: readonly V8EvidenceSnapshot[]
   readonly records: readonly OwnerSyncRecord[]
 }
@@ -24,6 +26,9 @@ export interface OwnerAnalysisView {
   readonly preview: OwnerAnalysisPreview | null
   readonly result: OwnerAnalysisResult | null
   readonly qualifiedAt: number | null
+  readonly qualificationUntil: number | null
+  readonly policyState: OwnerPolicyState | null
+  readonly nextExpiryInMs: number | null
   readonly message: string
 }
 export class OwnerAnalysisWorkflowError extends Error {
@@ -51,11 +56,22 @@ export function createOwnerAnalysisManager(options: {
   const target = options.transport.targetFingerprint, endpoint = options.endpoint()
   const ownerGeneration = options.session().generation
   if (target !== options.outbox.targetFingerprint || target !== options.sync.targetFingerprint) fail()
-  const clock = options.now ?? Date.now
+  const rawClock = options.now ?? Date.now
+  let lastClock = -Infinity
+  function clock() {
+    const now = rawClock()
+    if (!Number.isFinite(now) || now < lastClock) fail()
+    lastClock = now
+    return now
+  }
   let epoch = 0, disposed = false, active: AbortController | null = null
   let slot: OwnerAnalysisTaskSlot | null = null, preview: OwnerAnalysisPreview | null = null
   let previewSource: OwnerAnalysisLocalSource | null = null, previewHash = ''
   let result: OwnerAnalysisResult | null = null, qualifiedAt: number | null = null
+  let qualificationUntil: number | null = null, policyState: OwnerPolicyState | null = null
+  let qualificationPolicyState: OwnerPolicyState | null = null
+  let qualifiedMonotonic: number | null = null, lastQualifiedMonotonic: number | null = null
+  const policyProofs = new WeakMap<OwnerPolicyState, { at: number; last: number; remaining: number; failed: boolean }>()
   let qualificationSource: OwnerAnalysisLocalSource | null = null, matchedHash = '', message = ''
   // A legal page is an observed head even if later pages/local checks fail.
   // Keep this session's lower bound across invalidations; it is not complete D.
@@ -63,7 +79,8 @@ export function createOwnerAnalysisManager(options: {
   const changed = () => options.changed()
   function invalidate() {
     epoch++; active?.abort(); preview = null; previewSource = null; previewHash = ''
-    result = null; qualifiedAt = null; qualificationSource = null; matchedHash = ''; message = ''; changed()
+    result = null; qualifiedAt = null; qualificationUntil = null; policyState = null
+    qualificationSource = null; qualificationPolicyState = null; matchedHash = ''; message = ''; changed()
   }
   function close() { invalidate(); disposed = true; options.outbox.close() }
   async function run(work: (signal: AbortSignal, check: () => void) => Promise<void>, timeout = 30_000) {
@@ -83,11 +100,38 @@ export function createOwnerAnalysisManager(options: {
         catch (error) { controller.abort(); throw error }
       }, controller.signal, timeout)
     } catch (error) {
-      result = null; qualifiedAt = null; qualificationSource = null
+      result = null; qualifiedAt = null; qualificationUntil = null; qualificationSource = null; qualificationPolicyState = null
       message = slot?.task?.state === 'attempted' ? '提交结果未知。原请求已保留，只能核对原回执、导出或关闭。'
         : '本次核对未完成。请保留原请求，检查登录、同步基线与存储后手动核对。'
       throw error
     } finally { if (active === controller) active = null; changed() }
+  }
+  function policyDeadline(state: OwnerPolicyState): number {
+    return Math.min(Date.parse(state.observed_at) + 60_000,
+      state.next_effective_at === null ? Infinity : Date.parse(state.next_effective_at))
+  }
+  function assertPolicyFresh(state: OwnerPolicyState) {
+    const proof = policyProofs.get(state)
+    try {
+      const now = clock(), observed = Date.parse(state.observed_at), until = policyDeadline(state)
+      const monotonic = globalThis.performance.now()
+      // Millisecond truncation may expire a sub-ms future boundary early,
+      // never extend it. Monotonic time also bounds a stalled wall clock.
+      if (!proof || proof.failed || !Number.isFinite(observed) || !Number.isFinite(until)
+        || !Number.isFinite(monotonic) || monotonic < proof.last || monotonic - proof.at >= proof.remaining
+        || now < observed || now >= until) fail()
+      proof.last = monotonic
+    } catch (error) { if (proof) proof.failed = true; throw error }
+  }
+  async function policies(signal: AbortSignal, check: () => void) {
+    const response = await options.transport.policyState(signal); check()
+    if (response.status !== 200) fail()
+    const state = parseOwnerPolicyState(response.rawBody, clock()); check()
+    const at = globalThis.performance.now(), remaining = policyDeadline(state) - clock()
+    if (!Number.isFinite(at) || !Number.isFinite(remaining) || remaining <= 0) fail()
+    policyProofs.set(state, { at, last: at, remaining, failed: false })
+    assertPolicyFresh(state); policyState = state
+    return state
   }
   async function complete(signal: AbortSignal, check: () => void, floor: number): Promise<OwnerSyncBaseline> {
     let upper: number | undefined, cursor: OwnerSyncCursor | undefined, bytes = 0, count = 0
@@ -115,8 +159,8 @@ export function createOwnerAnalysisManager(options: {
     return fail()
   }
   async function inputs(codes: readonly string[], signal: AbortSignal, check: () => void) {
-    const response = await options.transport.policy(signal); check()
-    const policy = parseOwnerAnalysisPolicy(response.rawBody, clock())
+    const state = await policies(signal, check), policy = state.current
+    if (policy === null) fail()
     const evidence: V8EvidenceSnapshot[] = new Array(codes.length)
     let next = 0
     await Promise.all(Array.from({ length: Math.min(4, codes.length) }, async () => {
@@ -126,7 +170,7 @@ export function createOwnerAnalysisManager(options: {
         evidence[index] = parseOwnerAnalysisEvidence(response.rawBody, codes[index], clock()); check()
       }
     }))
-    check(); return { policy, evidence }
+    check(); assertPolicyFresh(state); return { policy, policyState: state, evidence }
   }
   async function source(signal: AbortSignal, check: () => void) {
     const local = await options.source(signal); check(); local.assertActive()
@@ -147,7 +191,7 @@ export function createOwnerAnalysisManager(options: {
     return current
   }
   async function qualify(value: OwnerAnalysisResult, task: NonNullable<OwnerAnalysisTaskSlot['task']>, signal: AbortSignal, check: () => void) {
-    result = value; qualifiedAt = null; qualificationSource = null
+    result = value; qualifiedAt = null; qualificationUntil = null; qualificationSource = null; qualificationPolicyState = null
     if (!value.source_current) { message = '原回执已核对，持仓来源已有变化；本轮只保留历史记录。'; return }
     const { local, cloud } = await source(signal, check)
     const contextHash = await digest(local.preimage); check(); local.assertActive()
@@ -162,7 +206,11 @@ export function createOwnerAnalysisManager(options: {
     }
     await local.verify(signal); check(); local.assertActive()
     await verifySlot(slot!, signal, check)
-    qualificationSource = local; qualifiedAt = clock()
+    assertPolicyFresh(current.policyState)
+    qualificationSource = local; qualificationPolicyState = current.policyState; qualifiedAt = clock()
+    qualificationUntil = Math.min(qualifiedAt + 60_000, policyDeadline(current.policyState))
+    qualifiedMonotonic = globalThis.performance.now(); lastQualifiedMonotonic = qualifiedMonotonic
+    if (!Number.isFinite(qualifiedMonotonic)) fail()
     message = '完整来源、原回执和当前策略/证据已核对。基金权重不含手工资产，金融门禁仍逐项检查。'
   }
   async function receive(value: OwnerAnalysisResult, packet: BuiltOwnerAnalysisRequest, signal: AbortSignal, check: () => void) {
@@ -179,21 +227,60 @@ export function createOwnerAnalysisManager(options: {
     view(): OwnerAnalysisView {
       const session = options.session(), visible = !disposed && session.authenticated && session.generation === ownerGeneration
         && options.endpoint() === endpoint
-      return Object.freeze(visible ? { busy: active !== null, slot, preview, result, qualifiedAt, message }
-        : { busy: false, slot: null, preview: null, result: null, qualifiedAt: null, message: '' })
+      const monotonic = globalThis.performance.now(), proof = policyState ? policyProofs.get(policyState) : undefined
+      const deadlines: number[] = []
+      if (qualifiedMonotonic !== null && qualifiedAt !== null && qualificationUntil !== null) {
+        deadlines.push(qualifiedMonotonic + qualificationUntil - qualifiedAt)
+      }
+      if (proof) deadlines.push(proof.failed || !Number.isFinite(monotonic) || monotonic < proof.last ? monotonic : proof.at + proof.remaining)
+      const nextExpiryInMs = deadlines.length ? Math.max(0, Math.min(...deadlines) - monotonic) : null
+      return Object.freeze(visible ? { busy: active !== null, slot, preview, result, qualifiedAt, qualificationUntil, policyState, nextExpiryInMs, message }
+        : { busy: false, slot: null, preview: null, result: null, qualifiedAt: null, qualificationUntil: null, policyState: null, nextExpiryInMs: null, message: '' })
+    },
+    isPolicyStateFresh(): boolean {
+      try { if (!policyState || disposed || !options.session().authenticated
+        || options.session().generation !== ownerGeneration || options.endpoint() !== endpoint) return false
+        assertPolicyFresh(policyState); return true } catch { return false }
+    },
+    isPreviewFresh(): boolean {
+      try { if (!preview || disposed || !options.session().authenticated
+        || options.session().generation !== ownerGeneration || options.endpoint() !== endpoint) return false
+        assertPolicyFresh(preview.policyState); return true } catch { return false }
     },
     isQualified(): boolean {
-      const now = clock()
-      if (!result || qualifiedAt === null || !qualificationSource || !Number.isFinite(now)
-        || !Number.isFinite(qualifiedAt) || now < qualifiedAt || now - qualifiedAt >= 60_000) return false
-      try { qualificationSource.assertActive(); return !disposed && options.session().authenticated
-        && options.session().generation === ownerGeneration && options.endpoint() === endpoint } catch { return false }
+      try {
+        const now = clock(), monotonic = globalThis.performance.now()
+        if (!result || qualifiedAt === null || qualificationUntil === null || !qualificationSource || !qualificationPolicyState
+          || qualifiedMonotonic === null || lastQualifiedMonotonic === null) return false
+        if (!Number.isFinite(monotonic) || monotonic < lastQualifiedMonotonic
+          || now < qualifiedAt || now >= qualificationUntil
+          || monotonic - qualifiedMonotonic >= qualificationUntil - qualifiedAt) fail()
+        lastQualifiedMonotonic = monotonic
+        // Evidence/source work consumes the original Policy proof window;
+        // qualifying a result must never start that window again.
+        assertPolicyFresh(qualificationPolicyState)
+        qualificationSource.assertActive()
+        return !disposed && options.session().authenticated
+          && options.session().generation === ownerGeneration && options.endpoint() === endpoint
+      } catch {
+        // An observed clock anomaly or expiry never renews itself when a
+        // later tick looks healthy. A new explicit receipt/source check is needed.
+        qualifiedAt = null; qualificationUntil = null; qualificationSource = null; qualificationPolicyState = null
+        qualifiedMonotonic = null; lastQualifiedMonotonic = null
+        return false
+      }
     },
     hydrate: () => run(async (signal, check) => {
       slot = await options.outbox.read(signal); check(); preview = null; previewSource = null
-      result = null; qualifiedAt = null; matchedHash = ''
+      result = null; qualifiedAt = null; qualificationUntil = null; policyState = null; qualificationPolicyState = null; matchedHash = ''
       message = slot.task ? '已读取原任务。刷新或重登后须手动核对原回执，不会自动发送。' : '没有待处理分析任务。'
     }, 12_000),
+    reviewPolicy: () => run(async (signal, check) => {
+      policyState = null; qualifiedAt = null; qualificationUntil = null; qualificationSource = null; qualificationPolicyState = null
+      preview = null; previewSource = null
+      await policies(signal, check)
+      message = '已读取策略版本。这里只读核对，不修改策略，也不把原分析自动提升为当前行动。'
+    }),
     preview: (id: string) => run(async (signal, check) => {
       const stored = await options.outbox.read(signal); check()
       if (stored.task && stored.task.state !== 'prepared') fail()
@@ -209,26 +296,34 @@ export function createOwnerAnalysisManager(options: {
       if (stored.task && (stored.task.rawBody !== packet.rawBody || stored.task.requestHash !== packet.requestHash
         || stored.task.contextHash !== contextHash)) fail()
       await local.verify(signal); check(); await verifySlot(stored, signal, check)
+      assertPolicyFresh(refs.policyState)
       slot = stored; previewSource = local; previewHash = contextHash
       preview = Object.freeze({ packet, ...refs, records: cloud.records })
-      result = null; qualifiedAt = null; message = '请逐项核对完整持仓、策略与证据，再保存原包；尚未发送分析。'
+      result = null; qualifiedAt = null; qualificationUntil = null
+      message = '请逐项核对完整持仓、策略与证据，再保存原包；尚未发送分析。'
     }),
     prepare: (confirmed: true) => run(async (signal, check) => {
       if (confirmed !== true || !preview || !previewSource || !slot || slot.task) fail()
+      assertPolicyFresh(preview.policyState)
       await previewSource.verify(signal); check(); await verifySlot(slot, signal, check)
+      assertPolicyFresh(preview.policyState)
       slot = await options.outbox.compareAndSwap(slot, { state: 'prepared', rawBody: preview.packet.rawBody,
         requestHash: preview.packet.requestHash, contextHash: previewHash }, signal); check()
+      assertPolicyFresh(preview.policyState)
       message = '原包已保存，尚未发送。请另行确认一次发送。'
     }, 12_000),
     sendOnce: (confirmed: true) => run(async (signal, check) => {
       if (confirmed !== true || !preview || !previewSource || !slot?.task || slot.task.state !== 'prepared') fail()
+      assertPolicyFresh(preview.policyState)
       await previewSource.verify(signal); check()
       const current = await verifySlot(slot, signal, check)
       if (current.task!.rawBody !== preview.packet.rawBody || current.task!.contextHash !== previewHash) fail()
+      assertPolicyFresh(preview.policyState)
       // Commit the marker before transfer. A cancellation/CAS lost response
       // leaves an original task to inspect, never an invitation to send again.
       slot = await options.outbox.compareAndSwap(current, { ...current.task!, state: 'attempted' }, signal); check()
       previewSource.assertActive()
+      assertPolicyFresh(preview.policyState)
       const packet = preview.packet, response = await options.transport.write(packet, signal); check()
       const parsed = parseOwnerAnalysisWriteResponse(response.status, response.rawBody, packet, clock())
       if (parsed.kind !== 'success') fail()

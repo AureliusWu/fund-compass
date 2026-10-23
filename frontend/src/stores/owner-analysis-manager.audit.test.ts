@@ -85,6 +85,10 @@ async function setup(baseRevision: 1 | 2, manualCount = 0) {
   const forbiddenWrite = vi.fn(async () => { throw new Error('audit must not send') })
   const transport = { targetFingerprint: TARGET, write: forbiddenWrite, receipt: forbiddenWrite,
     policy: vi.fn(async () => ({ status: 200, rawBody: fixture.policy })),
+    policyState: vi.fn(async () => ({ status: 200, rawBody: JSON.stringify({
+      schema_version: 'owner-policy-state-1', observed_at: new Date(NOW).toISOString(),
+      current: JSON.parse(fixture.policy), history: [JSON.parse(fixture.policy)], next_effective_at: null,
+    }) })),
     evidence: vi.fn(async () => ({ status: 200, rawBody: fixture.evidence })),
   }
   const manager = createOwnerAnalysisManager({ outbox, source, transport,

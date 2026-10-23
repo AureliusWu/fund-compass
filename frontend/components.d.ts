@@ -23,6 +23,7 @@ declare module 'vue' {
     OverseasAccuracyPanel: typeof import('./src/components/OverseasAccuracyPanel.vue')['default']
     OwnerAnalysisPanel: typeof import('./src/components/OwnerAnalysisPanel.vue')['default']
     OwnerManagedSyncPanel: typeof import('./src/components/OwnerManagedSyncPanel.vue')['default']
+    OwnerPolicyVersions: typeof import('./src/components/OwnerPolicyVersions.vue')['default']
     OwnerSessionPanel: typeof import('./src/components/OwnerSessionPanel.vue')['default']
     OwnerSyncPanel: typeof import('./src/components/OwnerSyncPanel.vue')['default']
     OwnerWorkspaceFormatPanel: typeof import('./src/components/OwnerWorkspaceFormatPanel.vue')['default']

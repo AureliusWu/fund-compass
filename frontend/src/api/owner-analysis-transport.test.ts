@@ -7,6 +7,8 @@ import { clearOwnerSession, hasOwnerSession, loginOwnerSession, ownerSession, ow
 import { buildOwnerAnalysisRequest, restoreOwnerAnalysisRequest, type BuiltOwnerAnalysisRequest } from '@/utils/ownerAnalysisContract'
 import * as contract from '@/utils/ownerAnalysisContract'
 import { ownerAnalysisBackendFixture } from '@/utils/ownerAnalysisContract.fixtures'
+import * as policyStateContract from '@/utils/ownerPolicyState'
+import { ownerPolicyStateBackendWireFixture, ownerPolicyStateRawFixture, OWNER_POLICY_STATE_FIXTURE_NOW } from '@/utils/ownerPolicyState.fixtures'
 
 const API = 'https://synthetic-owner.example/api'
 const TOKEN = 'own_' + 'a'.repeat(43)
@@ -51,7 +53,7 @@ describe('closed Owner analysis HTTP transport', () => {
     vi.stubGlobal('localStorage', storage); vi.stubGlobal('sessionStorage', storage); vi.stubGlobal('fetch', fetchMock)
     const transport = await createOwnerAnalysisHttpTransport()
     expect(transport.targetFingerprint).toBe(createHash('sha256').update(API).digest('hex'))
-    expect(Object.keys(transport).sort()).toEqual(['evidence', 'policy', 'receipt', 'targetFingerprint', 'write'])
+    expect(Object.keys(transport).sort()).toEqual(['evidence', 'policy', 'policyState', 'receipt', 'targetFingerprint', 'write'])
     expect(Object.isFrozen(transport)).toBe(true)
     expect(hasOwnerSession()).toBe(false)
     expect(fetchMock).not.toHaveBeenCalled(); expect(storage.getItem).not.toHaveBeenCalled(); expect(storage.setItem).not.toHaveBeenCalled()
@@ -62,7 +64,9 @@ describe('closed Owner analysis HTTP transport', () => {
     vi.stubGlobal('fetch', vi.fn())
     await expect(transport.write(original, new AbortController().signal)).rejects.toMatchObject({ status: 401 })
     await expect(transport.policy(new AbortController().signal)).rejects.toMatchObject({ status: 401 })
+    await expect(transport.policyState(new AbortController().signal)).rejects.toMatchObject({ status: 401 })
     await expect(requestOwnerRead('/v2/owner/analysis')).rejects.toMatchObject({ status: 400 })
+    await expect(requestOwnerRead('/v2/private/portfolio/policy-state')).rejects.toMatchObject({ status: 400 })
     const { fetchMock } = await connected()
     await expect(requestOwnerSync({ kind: 'analysis', packet: original } as never,
       new AbortController().signal, transport.targetFingerprint)).rejects.toMatchObject({ status: 400 })
@@ -140,6 +144,113 @@ describe('closed Owner analysis HTTP transport', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
+  it('reads the explicit complete Policy timeline using only the closed readonly Owner path', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(OWNER_POLICY_STATE_FIXTURE_NOW)
+    const { transport, fetchMock } = await connected(), raw = ownerPolicyStateBackendWireFixture()
+    const response = reply(raw, 200), json = vi.spyOn(response, 'json'), text = vi.spyOn(response, 'text')
+    fetchMock.mockResolvedValueOnce(response)
+    expect(await transport.policyState(new AbortController().signal)).toEqual({ status: 200, rawBody: raw })
+    const [url, init] = fetchMock.mock.calls[1]
+    expect(url).toBe(API + '/v2/private/portfolio/policy-state')
+    expect(new URL(url).search).toBe('')
+    expect(init).toMatchObject({ method: 'GET', cache: 'no-store', redirect: 'error', credentials: 'omit' })
+    expect(init.body).toBeUndefined()
+    expect(new Headers(init.headers).get('Authorization')).toBe('Bearer ' + TOKEN)
+    for (const name of ['X-Admin-Token', 'X-Worker-Token', 'X-Owner-Sync-Consent', 'X-Owner-Analysis-Consent']) {
+      expect(new Headers(init.headers).get(name)).toBeNull()
+    }
+    expect(json).not.toHaveBeenCalled(); expect(text).not.toHaveBeenCalled(); expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it.each(['duplicate', 'future-created', 'oversized', 'utf8', 'mime', 'declared', 'stream'])(
+    'strictly rejects policy-state %s without private body echo or fallback to a default Policy', async fault => {
+      vi.useFakeTimers(); vi.setSystemTime(OWNER_POLICY_STATE_FIXTURE_NOW)
+      const { transport, fetchMock } = await connected(), raw = ownerPolicyStateRawFixture()
+      let response = reply(raw, 200)
+      if (fault === 'duplicate') response = reply(raw.replace('{', '{"observed_at":"' + PRIVATE + '",'), 200)
+      if (fault === 'future-created') response = reply(raw.replace(/2026-10-23T06:07:29\.561786Z/g, '2026-10-25T00:00:00Z'), 200)
+      if (fault === 'oversized') response = reply(raw + ' '.repeat(2 * 1024 * 1024 - raw.length + 1), 200)
+      if (fault === 'utf8') response = reply(new Uint8Array([0xff]), 200)
+      if (fault === 'mime') response = reply(PRIVATE, 200, { 'Content-Type': 'text/html' })
+      if (fault === 'declared') response = reply(PRIVATE, 200, { 'Content-Length': String(MAX_RESPONSE + 1) })
+      if (fault === 'stream') response = reply(new Uint8Array(MAX_RESPONSE + 1), 200, { 'Content-Length': '0' })
+      fetchMock.mockResolvedValueOnce(response)
+      const pending = transport.policyState(new AbortController().signal)
+      await expect(pending).rejects.toMatchObject({ status: 502 })
+      await expect(pending).rejects.not.toThrow(PRIVATE)
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+      expect(fetchMock.mock.calls[1][0]).toBe(API + '/v2/private/portfolio/policy-state')
+    },
+  )
+
+  it.each([401, 403, 404, 503, 307, 500])('does not read or retry policy-state private error status %s', async status => {
+    const { transport, fetchMock } = await connected(), cancel = vi.fn()
+    const response = new Response(new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new TextEncoder().encode(PRIVATE)) }, cancel,
+    }), { status, headers: { 'Content-Type': 'application/json' } })
+    const read = vi.spyOn(response.body!, 'getReader')
+    fetchMock.mockResolvedValueOnce(response)
+    const pending = transport.policyState(new AbortController().signal)
+    await expect(pending).rejects.toMatchObject({ status })
+    await expect(pending).rejects.not.toThrow(PRIVATE)
+    expect(read).not.toHaveBeenCalled(); expect(cancel).toHaveBeenCalledOnce(); expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(hasOwnerSession()).toBe(status !== 401)
+  })
+
+  it.each(['endpoint', 'logout', 'expiry', 'new-login'])(
+    'rejects late policy-state after %s without publishing or clearing a newer generation', async fault => {
+      vi.useFakeTimers(); vi.setSystemTime(OWNER_POLICY_STATE_FIXTURE_NOW)
+      const { transport, fetchMock } = await connected()
+      let finish!: (response: Response) => void
+      fetchMock.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+      const pending = transport.policyState(new AbortController().signal)
+      const assertion = expect(pending).rejects.toMatchObject({ status: fault === 'endpoint' ? 400 : 401 })
+      await microtasks(); expect(fetchMock).toHaveBeenCalledTimes(2)
+      if (fault === 'endpoint') vi.stubGlobal('location', { origin: 'https://other.example' })
+      if (fault === 'logout') clearOwnerSession()
+      if (fault === 'expiry') vi.setSystemTime(OWNER_POLICY_STATE_FIXTURE_NOW + 30 * 60_000)
+      if (fault === 'new-login') {
+        fetchMock.mockResolvedValueOnce(loginReply('own_' + 'b'.repeat(43)))
+        await loginOwnerSession('synthetic-new-password')
+      }
+      const response = reply(ownerPolicyStateRawFixture(), 200), read = vi.spyOn(response.body!, 'getReader')
+      finish(response); await assertion; await microtasks()
+      expect(read).not.toHaveBeenCalled()
+      expect(hasOwnerSession()).toBe(fault === 'endpoint' || fault === 'new-login')
+      expect(fetchMock).toHaveBeenCalledTimes(fault === 'new-login' ? 3 : 2)
+    },
+  )
+
+  it('keeps endpoint hashing, fetch, bounded body and strict policy-state parsing within one 30-second budget', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(OWNER_POLICY_STATE_FIXTURE_NOW)
+    const { transport, fetchMock } = await connected(), digest = vi.mocked(crypto.subtle.digest)
+    const actualDigest = digest.getMockImplementation()!
+    let finish!: (value: ArrayBuffer) => void
+    digest.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const hashing = transport.policyState(new AbortController().signal)
+    const hashAssertion = expect(hashing).rejects.toMatchObject({ kind: 'timeout' })
+    await microtasks(); await vi.advanceTimersByTimeAsync(30_000); await hashAssertion
+    finish(await actualDigest('SHA-256', new TextEncoder().encode(API))); await microtasks()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const cancel = vi.fn(() => new Promise<void>(() => {}))
+    fetchMock.mockResolvedValueOnce(new Response(new ReadableStream<Uint8Array>({ cancel }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }))
+    const reading = transport.policyState(new AbortController().signal)
+    const readAssertion = expect(reading).rejects.toMatchObject({ kind: 'timeout' })
+    await microtasks(); await vi.advanceTimersByTimeAsync(30_000); await readAssertion
+    expect(cancel).toHaveBeenCalled(); expect(fetchMock).toHaveBeenCalledTimes(2)
+    let now = 0
+    vi.spyOn(globalThis.performance, 'now').mockImplementation(() => now)
+    const actualParse = policyStateContract.parseOwnerPolicyState
+    vi.spyOn(policyStateContract, 'parseOwnerPolicyState').mockImplementation((...args) => {
+      const result = actualParse(...args); now = 30_001; return result
+    })
+    fetchMock.mockResolvedValueOnce(reply(ownerPolicyStateRawFixture(), 200))
+    await expect(transport.policyState(new AbortController().signal)).rejects.toMatchObject({ kind: 'timeout' })
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
   it('strictly validates quote keys and fund identity before delivering private input references', async () => {
     vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-24T06:00:00Z'))
     const { transport, fetchMock } = await connected(), fixture = ownerAnalysisBackendFixture()
@@ -183,6 +294,7 @@ describe('closed Owner analysis HTTP transport', () => {
 
   it.each([
     { kind: 'policy', url: '/v2/portfolio/policy' }, { kind: 'policy', packet: {} },
+    { kind: 'policy_state', url: '/v2/private/portfolio/policy-state' }, { kind: 'policy_state', method: 'POST' },
     { kind: 'evidence', code: '../admin' }, { kind: 'evidence', code: '５１０３００' },
     { kind: 'evidence', code: '510300\n' }, { kind: 'evidence', code: '510300', method: 'POST' },
     { kind: 'write', requestId: 'synthetic-analysis-0001', requestHash: 'a'.repeat(64) },
@@ -203,6 +315,7 @@ describe('closed Owner analysis HTTP transport', () => {
     captured.scopes = ['run_personal_analysis', 'write_holdings']
     await expect(transport.receipt(original, new AbortController().signal)).rejects.toMatchObject({ status: 403 })
     await expect(transport.policy(new AbortController().signal)).rejects.toMatchObject({ status: 403 })
+    await expect(transport.policyState(new AbortController().signal)).rejects.toMatchObject({ status: 403 })
     await expect(transport.evidence('510300', new AbortController().signal)).rejects.toMatchObject({ status: 403 })
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })

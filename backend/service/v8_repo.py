@@ -395,35 +395,31 @@ def read_policy(policy_version: str | None = None, *, at: datetime | None = None
     if current.tzinfo is None:
         raise ValueError("policy lookup time must include a timezone")
     current = current.astimezone(timezone.utc)
-    if policy_version:
-        conn = db.get_conn()
-        try:
+    conn = db.get_conn()
+    try:
+        if policy_version:
             policy = _existing_model(
                 conn, "portfolio_policy_versions", "policy_version", policy_version, PortfolioPolicy, scope=scope,
             )
-        finally:
-            conn.close()
+        else:
+            scope = scopes.validate_scope(scope)
+            table = scopes.production_table("portfolio_policy_versions") if scope == scopes.PRODUCTION else "portfolio_policy_versions"
+            rows = conn.execute(
+                f"SELECT p.payload_json FROM {table} p JOIN v8_record_scopes s "
+                "ON s.record_kind='policy' AND s.record_id=p.policy_version WHERE s.scope_key=? "
+                "ORDER BY p.effective_at DESC,p.created_at DESC", (scope.key,),
+            ).fetchall()
+            policies = [PortfolioPolicy.model_validate_json(row["payload_json"]) for row in rows]
+            policies.sort(key=lambda item: (item.effective_at.astimezone(timezone.utc),
+                                           item.created_at.astimezone(timezone.utc)), reverse=True)
+            policy = next((item for item in policies if item.effective_at <= current), None)
         if policy is None:
-            raise LookupError("policy version not found")
+            raise LookupError("policy version not found" if policy_version else "no effective policy version")
         if policy.effective_at.astimezone(timezone.utc) > current:
             raise LookupError("policy version is not effective at the requested time")
         return policy
-    conn = db.get_conn()
-    try:
-        scope = scopes.validate_scope(scope)
-        table = scopes.production_table("portfolio_policy_versions") if scope == scopes.PRODUCTION else "portfolio_policy_versions"
-        rows = conn.execute(
-            f"SELECT p.payload_json FROM {table} p JOIN v8_record_scopes s "
-            "ON s.record_kind='policy' AND s.record_id=p.policy_version WHERE s.scope_key=? "
-            "ORDER BY p.effective_at DESC,p.created_at DESC", (scope.key,),
-        ).fetchall()
     finally:
         conn.close()
-    policies = [PortfolioPolicy.model_validate_json(row["payload_json"]) for row in rows]
-    active = next((policy for policy in policies if policy.effective_at <= current), None)
-    if active is None:
-        raise LookupError("no effective policy version")
-    return active
 
 
 def policy_history() -> list[PortfolioPolicy]:
@@ -438,7 +434,9 @@ def read_policy_history() -> list[PortfolioPolicy]:
         rows = conn.execute(
             "SELECT payload_json FROM production_portfolio_policy_versions ORDER BY effective_at DESC, created_at DESC"
         ).fetchall()
-        return [PortfolioPolicy.model_validate_json(row["payload_json"]) for row in rows]
+        policies = [PortfolioPolicy.model_validate_json(row["payload_json"]) for row in rows]
+        return sorted(policies, key=lambda policy: (policy.effective_at.astimezone(timezone.utc),
+                      policy.created_at.astimezone(timezone.utc)), reverse=True)
     finally:
         conn.close()
 

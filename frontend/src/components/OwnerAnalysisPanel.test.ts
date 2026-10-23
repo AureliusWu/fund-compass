@@ -5,6 +5,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { createRenderer, nextTick } from 'vue'
 import { IDBFactory } from 'fake-indexeddb'
 import OwnerAnalysisPanel from './OwnerAnalysisPanel.vue'
+import OwnerPolicyVersions from './OwnerPolicyVersions.vue'
 import { useOwnerAnalysisStore } from '@/stores/ownerAnalysis'
 import { useWatchlistStore } from '@/stores/watchlist'
 import { clearOwnerSession, loginOwnerSession } from '@/stores/ownerSession'
@@ -13,11 +14,13 @@ import { openOwnerWorkspace, upgradeOwnerWorkspaceSync, buildOwnerWorkspaceLinkC
   type OwnerWorkspace, type OwnerWorkspaceGuard } from '@/stores/owner-workspace'
 import { openOwnerAnalysisOutbox, type OwnerAnalysisOutbox } from '@/stores/owner-analysis-outbox'
 import { ownerAnalysisBackendFixture } from '@/utils/ownerAnalysisContract.fixtures'
+import { ownerPolicyStateBackendWireFixture } from '@/utils/ownerPolicyState.fixtures'
+import { parseOwnerPolicyState } from '@/utils/ownerPolicyState'
 import type { OwnerSyncRecord } from '@/utils/ownerSyncContract'
 import { setLegacySyncConsent } from '@/utils/cloud-consent'
 
 const mocks = vi.hoisted(() => ({ analysis: vi.fn(), sync: vi.fn(), write: vi.fn(), receipt: vi.fn(),
-  policy: vi.fn(), evidence: vi.fn(), changes: vi.fn(), syncWrite: vi.fn(), fetch: vi.fn() }))
+  policy: vi.fn(), policyState: vi.fn(), evidence: vi.fn(), changes: vi.fn(), syncWrite: vi.fn(), fetch: vi.fn() }))
 vi.mock('@/api/owner-analysis-transport', () => ({ createOwnerAnalysisHttpTransport: mocks.analysis }))
 vi.mock('@/api/owner-sync-transport', () => ({ createOwnerSyncHttpTransport: mocks.sync }))
 
@@ -120,11 +123,15 @@ beforeEach(async () => {
   mocks.write.mockResolvedValue({ status: 200, rawBody: fixture.response })
   mocks.receipt.mockResolvedValue({ status: 200, rawBody: JSON.stringify({ state: 'matched', status: 200, result: JSON.parse(fixture.response) }) })
   mocks.policy.mockResolvedValue({ status: 200, rawBody: fixture.policy })
+  mocks.policyState.mockImplementation(async () => ({ status: 200, rawBody: JSON.stringify({
+    schema_version: 'owner-policy-state-1', observed_at: new Date(Date.now() - 1).toISOString(),
+    current: JSON.parse(fixture.policy), history: [JSON.parse(fixture.policy)], next_effective_at: null,
+  }) }))
   mocks.evidence.mockResolvedValue({ status: 200, rawBody: fixture.evidence })
   mocks.changes.mockResolvedValue({ status: 200, rawBody: JSON.stringify({ upper_revision: 1, changes: records, next_cursor: null, complete: true }) })
   mocks.syncWrite.mockRejectedValue(new Error('analysis cannot send sync writes'))
   mocks.analysis.mockImplementation(async () => ({ targetFingerprint: target, write: mocks.write,
-    receipt: mocks.receipt, policy: mocks.policy, evidence: mocks.evidence }))
+    receipt: mocks.receipt, policy: mocks.policy, policyState: mocks.policyState, evidence: mocks.evidence }))
   mocks.sync.mockImplementation(async () => ({ targetFingerprint: target, write: mocks.syncWrite,
     receipt: vi.fn(), changes: mocks.changes }))
   setActivePinia(createPinia()); const first = useWatchlistStore(); stores.push(first); await first.initialize()
@@ -147,6 +154,23 @@ afterEach(() => {
 })
 
 describe('actual Owner analysis panel and adopted workspace journey', () => {
+  it('renders a backend Policy scheduled one microsecond later as upcoming, including a stale read', async () => {
+    const envelope = JSON.parse(ownerPolicyStateBackendWireFixture())
+    // Keep both actual backend Policy payloads unchanged; advance only the
+    // observation to one microsecond before the actual scheduled boundary.
+    envelope.observed_at = envelope.next_effective_at.replace('.000001Z', '.000000Z')
+    const state = parseOwnerPolicyState(JSON.stringify(envelope), Date.parse(envelope.observed_at) + 1)
+    expect(Date.parse(state.next_effective_at!)).toBe(Date.parse(state.observed_at))
+    const root = node(), app = renderer.createApp(OwnerPolicyVersions, { state, fresh: false, busy: false })
+    app.mount(root); apps.push(() => app.unmount()); await nextTick()
+    const future = state.history[0]
+    const futureButton = all(root).find(item => item.tag === 'button' && output(item).includes(future.policy_version))!
+    expect(output(futureButton)).toContain('待生效')
+    expect(output(futureButton)).not.toContain('历史')
+    expect(output(root)).toContain('以下只作历史')
+    expect(mocks.policyState).not.toHaveBeenCalled(); expect(mocks.write).not.toHaveBeenCalled()
+  })
+
   it('defaults off before and after login, and enable/UI preview never generate analysis', async () => {
     const root = await mount()
     expect(output(root)).toContain('请先登录私人会话')
@@ -215,5 +239,46 @@ describe('actual Owner analysis panel and adopted workspace journey', () => {
     expect(analysis.view).toBeNull(); expect(analysis.qualified).toBe(false)
     expect((await slot()).task?.state).toBe('attempted')
     expect(mocks.write).toHaveBeenCalledOnce(); expect(mocks.receipt).not.toHaveBeenCalled()
+  })
+
+  it('reads and selects Policy history in the actual SFC without source pulls or writes', async () => {
+    await login(); const root = await mount(); await enabled(root)
+    const current = JSON.parse(fixture.policy), now = Date.now()
+    const future = { ...current, policy_version: 'pol_' + 'd'.repeat(64), supersedes: current.policy_version,
+      name: '即将生效的合成护栏', effective_at: new Date(now + 30_000).toISOString(),
+      created_at: new Date(now - 1000).toISOString(), rebalance_band: 0, max_theme_weight: null }
+    mocks.policyState.mockResolvedValueOnce({ status: 200, rawBody: JSON.stringify({
+      schema_version: 'owner-policy-state-1', observed_at: new Date(now).toISOString(), current,
+      next_effective_at: future.effective_at, history: [future, current],
+    }) })
+    await click(root, '读取策略版本')
+    // A child emits synchronously; its parent's real async action completes
+    // later. Observe the actual store outcome instead of awaiting emit().
+    await vi.waitFor(() => expect(analysis.view?.policyState?.history).toHaveLength(2)); await nextTick()
+    expect(output(root)).toContain('核对时生效'); expect(output(root)).toContain('待生效')
+    expect(output(root)).toContain('完整版本 2 份'); expect(analysis.qualified).toBe(false)
+    const futureButton = all(root).find(item => item.tag === 'button' && output(item).includes(future.name))!
+    ;(futureButton.props.onClick as () => void)(); await nextTick()
+    expect(output(root)).toContain('再平衡带（%）'); expect(output(root)).toContain('所选版本')
+    expect(mocks.policyState).toHaveBeenCalledOnce(); expect(mocks.changes).not.toHaveBeenCalled()
+    expect(mocks.evidence).not.toHaveBeenCalled(); expect(mocks.write).not.toHaveBeenCalled()
+    expect(mocks.syncWrite).not.toHaveBeenCalled(); expect((await slot()).task).toBeNull()
+  })
+
+  it('does not restore private Policy history after logout while its read is outstanding', async () => {
+    await login(); const root = await mount(); await enabled(root)
+    let finish!: (value: { status: number; rawBody: string }) => void
+    mocks.policyState.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const reading = click(root, '读取策略版本')
+    await vi.waitFor(() => expect(mocks.policyState).toHaveBeenCalledOnce())
+    clearOwnerSession(); await nextTick()
+    finish({ status: 200, rawBody: JSON.stringify({ schema_version: 'owner-policy-state-1',
+      observed_at: new Date(Date.now() - 1).toISOString(), current: JSON.parse(fixture.policy),
+      next_effective_at: null, history: [JSON.parse(fixture.policy)],
+    }) })
+    await reading; await new Promise<void>(resolve => setImmediate(resolve)); await nextTick()
+    expect(analysis.view).toBeNull(); expect(analysis.qualified).toBe(false)
+    expect(output(root)).not.toContain('Synthetic analysis guardrails')
+    expect(mocks.write).not.toHaveBeenCalled(); expect((await slot()).task).toBeNull()
   })
 })

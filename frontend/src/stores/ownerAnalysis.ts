@@ -11,7 +11,7 @@ import type { V8Action, V8DecisionResult } from '@/api/client'
 const labels: Record<V8Action, string> = { buy: '买入', dca: '定投', watch: '观察', add: '加仓', hold: '持有', reduce: '减仓', sell: '卖出' }
 export const useOwnerAnalysisStore = defineStore('owner-analysis', () => {
   const workspace = useWatchlistStore(), enabled = ref(false), enabling = ref(false)
-  const view = shallowRef<OwnerAnalysisView | null>(null), tick = ref(Date.now())
+  const view = shallowRef<OwnerAnalysisView | null>(null), tick = ref(0)
   let manager: OwnerAnalysisManager | null = null, epoch = 0, endpoint = ''
   let opening: AbortController | null = null, expiry: ReturnType<typeof setTimeout> | null = null
   let clockTimer: ReturnType<typeof setInterval> | null = null
@@ -35,8 +35,9 @@ export const useOwnerAnalysisStore = defineStore('owner-analysis', () => {
       view.value = null; return
     }
     if (expiry) clearTimeout(expiry)
-    const at = view.value?.qualifiedAt
-    expiry = at == null ? null : setTimeout(() => { tick.value = Date.now() }, Math.max(1, at + 60_000 - Date.now()))
+    const remaining = view.value?.nextExpiryInMs
+    expiry = remaining == null || !Number.isFinite(remaining) ? null
+      : setTimeout(() => { tick.value++ }, Math.max(1, Math.ceil(remaining)))
   }
   const stopSession = watch(ownerSessionGeneration, stop, { flush: 'sync' })
   const stopSource = watch(() => workspace.ownerAnalysisEpoch, () => {
@@ -82,7 +83,7 @@ export const useOwnerAnalysisStore = defineStore('owner-analysis', () => {
         check(); endpoint = url; manager = created.value; enabled.value = true
         if (!manager) throw new Error('analysis_not_ready')
         await manager.hydrate(); check(); publish()
-        clockTimer = setInterval(() => { tick.value = Date.now() }, 15_000)
+        clockTimer = setInterval(() => { tick.value++ }, 15_000)
       }, controller.signal)
     } catch (error) {
       if (created.value && manager !== created.value) created.value.close()
@@ -101,7 +102,11 @@ export const useOwnerAnalysisStore = defineStore('owner-analysis', () => {
       action: row.decision.action, action_label: labels[row.decision.action], strength: row.decision.strength,
       confidence: row.decision.confidence, summary: row.decision.summary, decision: row.decision,
       evidence: row.evidence, holding: row.holding, policy: view.value!.result!.run.policy, diff: null })) : [])
-  async function invoke<K extends 'hydrate' | 'preview' | 'prepare' | 'sendOnce' | 'reconcile' | 'cancelPrepared' | 'finishMatched'>(
+  const policyStateFresh = computed(() => { void tick.value; void view.value
+    return enabled.value && authenticated() && manager?.isPolicyStateFresh() === true })
+  const previewFresh = computed(() => { void tick.value; void view.value
+    return enabled.value && authenticated() && manager?.isPreviewFresh() === true })
+  async function invoke<K extends 'hydrate' | 'reviewPolicy' | 'preview' | 'prepare' | 'sendOnce' | 'reconcile' | 'cancelPrepared' | 'finishMatched'>(
     name: K, ...args: Parameters<OwnerAnalysisManager[K]>) {
     if (!manager || !enabled.value || !authenticated()) throw new Error('analysis_not_ready')
     const current = manager, generation = ownerSessionGeneration.value
@@ -110,9 +115,10 @@ export const useOwnerAnalysisStore = defineStore('owner-analysis', () => {
     finally { if (manager === current && generation === ownerSessionGeneration.value) publish() }
     if (manager !== current || generation !== ownerSessionGeneration.value || !authenticated()) throw new Error('analysis_context_changed')
   }
-  return { enabled, enabling, view, qualified, results, enable, disable: stop,
+  return { enabled, enabling, view, qualified, results, policyStateFresh, previewFresh, enable, disable: stop,
     resultFor: (code: string) => results.value.find(row => row.code === code) ?? null,
     hydrate: () => invoke('hydrate'), preview: (id: string) => invoke('preview', id),
+    reviewPolicy: () => invoke('reviewPolicy'),
     prepare: (confirmed: true) => invoke('prepare', confirmed), sendOnce: (confirmed: true) => invoke('sendOnce', confirmed),
     reconcile: () => invoke('reconcile'), cancelPrepared: (confirmed: true) => invoke('cancelPrepared', confirmed),
     finishMatched: (confirmed: true) => invoke('finishMatched', confirmed),

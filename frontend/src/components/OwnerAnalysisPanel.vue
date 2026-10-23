@@ -3,10 +3,12 @@ import { computed, ref, watch } from 'vue'
 import { useOwnerAnalysisStore } from '@/stores/ownerAnalysis'
 import { useWatchlistStore } from '@/stores/watchlist'
 import { ownerSession } from '@/stores/ownerSession'
+import OwnerPolicyVersions from './OwnerPolicyVersions.vue'
 
 const analysis = useOwnerAnalysisStore(), workspace = useWatchlistStore()
 const consent = ref(analysis.enabled), saveConsent = ref(false), sendConsent = ref(false)
 const cancelConsent = ref(false), finishConsent = ref(false), localBusy = ref(false), message = ref(''), page = ref(0)
+const previewRules = ref(false)
 const authenticated = computed(() => ownerSession.value?.scopes.includes('read_private')
   && ownerSession.value.scopes.includes('run_personal_analysis'))
 const visible = computed(() => analysis.enabled && authenticated.value)
@@ -19,7 +21,8 @@ const stateLabel = computed(() => task.value?.state === 'attempted' ? '结果未
   : task.value?.state === 'matched' ? '原回执已核对'
     : task.value?.state === 'prepared' ? '原包已保存 · 尚未发送' : '先核对完整来源')
 function resetChecks() { saveConsent.value = sendConsent.value = cancelConsent.value = finishConsent.value = false }
-watch(() => [analysis.view?.slot?.version, analysis.view?.preview?.packet.requestHash], () => { resetChecks(); page.value = 0 })
+watch(() => [analysis.view?.slot?.version, analysis.view?.preview?.packet.requestHash], () => { resetChecks(); page.value = 0; previewRules.value = false })
+function togglePreviewRules(event: Event) { previewRules.value = (event.target as HTMLDetailsElement).open === true }
 watch(() => analysis.enabled, enabled => { if (!enabled) { consent.value = false; resetChecks(); message.value = '' } })
 async function work(operation: () => Promise<unknown>) {
   if (busy.value) return
@@ -63,7 +66,8 @@ function exportTask() {
       <template v-if="visible">
         <header class="analysis-status"><strong>{{ busy ? '正在核对，请勿重复操作' : stateLabel }}</strong><button type="button" @click="disable">关闭分析</button></header>
         <p role="status" aria-live="polite">{{ analysis.view?.message }}</p>
-        <p v-if="analysis.qualified" class="source-seal">最近一分钟内已核对完整来源与引用链。首页、自选、详情使用同一结果，过期或失配即暂停。</p>
+        <p v-if="analysis.qualified" class="source-seal">最近一分钟内已核对完整来源与引用链。首页、自选、详情使用同一结果，过期、已知新策略生效或失配即暂停。</p>
+        <OwnerPolicyVersions :state="analysis.view?.policyState ?? null" :fresh="analysis.policyStateFresh" :busy="!!busy" @review="work(() => analysis.reviewPolicy())" />
         <div class="analysis-actions">
           <button v-if="!task || task.state === 'prepared'" type="button" :disabled="busy" @click="work(previewAnalysis)">读取并预览完整来源</button>
           <button v-if="task && task.state !== 'prepared'" type="button" :disabled="busy" @click="work(() => analysis.reconcile())">核对原回执与当前来源</button>
@@ -73,16 +77,17 @@ function exportTask() {
         <p v-if="task">原包 SHA：<code>{{ task.requestHash }}</code>。刷新后不会自动发送；缺失回执也不表示未提交。任务文件不含登录凭据，但仍属私人资料。</p>
         <section v-if="preview" class="analysis-preview">
           <h3>发送前核对</h3>
+          <p v-if="!analysis.previewFresh" role="status">预览引用已过期。请重新读取完整来源；若策略已变化，须先明确取消尚未发送的原包，不能重制或重发原任务。</p>
           <p>完整同步版本 {{ preview.packet.request.expected_revision }} · {{ preview.records.length }} 条来源 · {{ preview.evidence.length }} 只基金。手工资产、删除记录均保留来源，但不加入基金权重分母。</p>
           <p>策略：{{ preview.policy.name }} · <code>{{ preview.policy.policy_version }}</code></p>
-          <details><summary>查看完整策略规则</summary><pre>{{ JSON.stringify(preview.policy, null, 2) }}</pre></details>
+          <details :open="previewRules" @toggle="togglePreviewRules"><summary>查看完整策略规则</summary><pre v-if="previewRules">{{ JSON.stringify(preview.policy, null, 2) }}</pre></details>
           <div class="source-table"><table><thead><tr><th>账户 / 资产身份</th><th>类型与状态</th><th>原始业务值</th></tr></thead><tbody>
             <tr v-for="row in rows" :key="row.key"><td>{{ row.key }}</td><td>{{ row.kind === 'holding' ? '持仓（含0份）' : row.kind === 'watch' ? '仅关注' : '手工资产' }} · {{ row.deleted ? '已删除，保留历史' : '有效' }}</td><td>{{ valuesText(row.values) }}</td></tr>
           </tbody></table></div>
           <nav v-if="pages > 1" aria-label="来源记录分页"><button :disabled="page === 0" @click="page--">上一页</button><span>{{ page + 1 }} / {{ pages }}</span><button :disabled="page + 1 >= pages" @click="page++">下一页</button></nav>
           <ul class="evidence-list"><li v-for="row in preview.evidence" :key="row.fund_code"><strong>{{ row.fund_code }} {{ row.fund_name }}</strong> · 证据 {{ row.created_at }} · 正式净值 {{ valueText(row.official_nav) }} / {{ row.official_nav_date ?? '日期未知' }} · {{ row.estimate_status }}<code>{{ row.evidence_id }}</code></li></ul>
-          <template v-if="!task"><label><input v-model="saveConsent" type="checkbox" :disabled="busy">确认完整来源、策略和证据，保存本轮原包（尚不发送）</label><button :disabled="!saveConsent || busy" @click="work(() => analysis.prepare(true))">保存原包</button></template>
-          <template v-else-if="task.state === 'prepared'"><label><input v-model="sendConsent" type="checkbox" :disabled="busy">确认只发送这个原包一次，失败后仅核对原回执</label><button :disabled="!sendConsent || busy" @click="work(() => analysis.sendOnce(true))">单次生成分析</button></template>
+          <template v-if="!task"><label><input v-model="saveConsent" type="checkbox" :disabled="busy || !analysis.previewFresh">确认完整来源、策略和证据，保存本轮原包（尚不发送）</label><button :disabled="!saveConsent || busy || !analysis.previewFresh" @click="work(() => analysis.prepare(true))">保存原包</button></template>
+          <template v-else-if="task.state === 'prepared'"><label><input v-model="sendConsent" type="checkbox" :disabled="busy || !analysis.previewFresh">确认只发送这个原包一次，失败后仅核对原回执</label><button :disabled="!sendConsent || busy || !analysis.previewFresh" @click="work(() => analysis.sendOnce(true))">单次生成分析</button></template>
         </section>
         <template v-if="task?.state === 'prepared'"><label><input v-model="cancelConsent" type="checkbox" :disabled="busy">确认取消这个尚未发送的原包</label><button :disabled="!cancelConsent || busy" @click="work(() => analysis.cancelPrepared(true))">取消未发送原包</button></template>
         <template v-if="task?.state === 'matched'"><label><input v-model="finishConsent" type="checkbox" :disabled="busy">确认结束已核对任务，刷新后不再自动找回这份结果</label><button :disabled="!finishConsent || busy" @click="work(() => analysis.finishMatched(true))">结束已核对任务</button></template>

@@ -423,6 +423,7 @@ export type OwnerAnalysisHttpOperation =
   | { readonly kind: 'write'; readonly packet: BuiltOwnerAnalysisRequest }
   | { readonly kind: 'receipt'; readonly packet: BuiltOwnerAnalysisRequest }
   | { readonly kind: 'policy' }
+  | { readonly kind: 'policy_state' }
   | { readonly kind: 'evidence'; readonly code: string }
 
 const ANALYSIS_RESPONSE_MAX_BYTES = 2 * 1024 * 1024 + 4096
@@ -461,7 +462,7 @@ export async function requestOwnerAnalysis(operation: OwnerAnalysisHttpOperation
         if (values.kind === 'write' || values.kind === 'receipt') {
           syncObject(values, ['kind', 'packet'])
           supplied = syncObject(values.packet, ['request', 'rawBody', 'requestHash', 'byteLength'])
-        } else if (values.kind === 'policy') syncObject(values, ['kind'])
+        } else if (values.kind === 'policy' || values.kind === 'policy_state') syncObject(values, ['kind'])
         else if (values.kind === 'evidence') {
           syncObject(values, ['kind', 'code'])
           if (typeof values.code !== 'string' || !/^[0-9]{6}(?![\s\S])/.test(values.code)) return invalidAnalysisRequest()
@@ -470,6 +471,8 @@ export async function requestOwnerAnalysis(operation: OwnerAnalysisHttpOperation
       requiredScope = values.kind === 'write' ? 'run_personal_analysis' : 'read_private'
       check()
       const contract = await import('@/utils/ownerAnalysisContract')
+      check()
+      const policyState = values.kind === 'policy_state' ? await import('@/utils/ownerPolicyState') : null
       check()
       let original: BuiltOwnerAnalysisRequest | null = null
       if (supplied !== null) try {
@@ -495,7 +498,8 @@ export async function requestOwnerAnalysis(operation: OwnerAnalysisHttpOperation
           ? { path: '/v2/owner/analysis/requests/' + encodeURIComponent(original!.request.request_id), method: 'GET',
             headers: { 'X-Owner-Analysis-Request-Hash': original!.requestHash }, statuses: [200, 404, 503] }
           : { path: values.kind === 'policy' ? '/v2/private/portfolio/policy'
-            : '/v2/private/fund/' + encodeURIComponent(values.code as string) + '/evidence', method: 'GET',
+            : values.kind === 'policy_state' ? '/v2/private/portfolio/policy-state'
+              : '/v2/private/fund/' + encodeURIComponent(values.code as string) + '/evidence', method: 'GET',
           headers: {}, statuses: [200] }
       const response = await sendOwnerHttpResponse(input, target, token, active, check,
         (reply, stopped, guarded) => readOwnerBody(reply, stopped, guarded, ANALYSIS_RESPONSE_MAX_BYTES, '分析'), '分析')
@@ -504,6 +508,7 @@ export async function requestOwnerAnalysis(operation: OwnerAnalysisHttpOperation
         if (values.kind === 'write') contract.parseOwnerAnalysisWriteResponse(response.status, response.rawBody, original!)
         else if (values.kind === 'receipt') contract.parseOwnerAnalysisReceiptResponse(response.status, response.rawBody, original!)
         else if (values.kind === 'policy') contract.parseOwnerAnalysisPolicy(response.rawBody)
+        else if (values.kind === 'policy_state') policyState!.parseOwnerPolicyState(response.rawBody)
         else contract.parseOwnerAnalysisEvidence(response.rawBody, values.code as string)
       } catch { throw new ApiError('分析响应契约无效', 'http', 502) }
       check()

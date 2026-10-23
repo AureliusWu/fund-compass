@@ -84,6 +84,10 @@ async function setup(extra = false, additionalManuals = 0) {
     write: vi.fn(async (_packet: BuiltOwnerAnalysisRequest, _signal: AbortSignal) => ({ status: 200, rawBody: fixture.response })),
     receipt: vi.fn(async (_packet: BuiltOwnerAnalysisRequest, _signal: AbortSignal) => ({ status: 200, rawBody: JSON.stringify({ state: 'matched', status: 200, result: JSON.parse(fixture.response) }) })),
     policy: vi.fn(async (_signal: AbortSignal) => ({ status: 200, rawBody: fixture.policy })),
+    policyState: vi.fn(async (_signal: AbortSignal) => ({ status: 200, rawBody: JSON.stringify({
+      schema_version: 'owner-policy-state-1', observed_at: new Date(mutable.now).toISOString(),
+      current: JSON.parse(fixture.policy), history: [JSON.parse(fixture.policy)], next_effective_at: null,
+    }) })),
     evidence: vi.fn(async (_code: string, _signal: AbortSignal) => ({ status: 200, rawBody: fixture.evidence })),
   }
   const sync = { targetFingerprint: TARGET,
@@ -114,6 +118,18 @@ type Setup = Awaited<ReturnType<typeof setup>>
 async function prepared(context: Setup) {
   await context.value.hydrate(); await context.value.preview(context.fixture.request.request_id); await context.value.prepare(true)
 }
+function scheduledPolicy(context: Setup, delay = 20_000) {
+  const original = JSON.parse(context.fixture.policy)
+  const future = { ...original, policy_version: 'pol_' + 'd'.repeat(64), supersedes: original.policy_version,
+    name: 'Synthetic scheduled successor', created_at: new Date(NOW - 1000).toISOString(),
+    effective_at: new Date(NOW + delay).toISOString() }
+  context.transport.policyState.mockImplementation(async () => ({ status: 200, rawBody: JSON.stringify({
+    schema_version: 'owner-policy-state-1', observed_at: new Date(context.mutable.now).toISOString(),
+    current: context.mutable.now < NOW + delay ? original : future,
+    next_effective_at: context.mutable.now < NOW + delay ? future.effective_at : null, history: [future, original],
+  }) }))
+  return future
+}
 
 describe('real source-bound Owner analysis manager', () => {
   it('constructs with no task reads, source reads, quote, sync or analysis HTTP', async () => {
@@ -121,7 +137,7 @@ describe('real source-bound Owner analysis manager', () => {
     const read = vi.fn(context.outbox.read)
     context.manager({ ...context.outbox, read })
     expect(read).not.toHaveBeenCalled(); expect(context.source).not.toHaveBeenCalled()
-    for (const call of [context.transport.write, context.transport.receipt, context.transport.policy,
+    for (const call of [context.transport.write, context.transport.receipt, context.transport.policy, context.transport.policyState,
       context.transport.evidence, context.sync.changes]) expect(call).not.toHaveBeenCalled()
   })
 
@@ -314,5 +330,86 @@ describe('real source-bound Owner analysis manager', () => {
     await expect(delivery.reconcile()).rejects.toBeDefined()
     expect((await context.outbox.read(signal())).task?.state).toBe('attempted')
     expect(context.transport.write).not.toHaveBeenCalled()
+  })
+
+  it('reads the complete Policy timeline only explicitly, with no source/quote/POST/task write', async () => {
+    const context = await setup(); await context.value.hydrate()
+    const before = await context.outbox.read(signal())
+    expect(context.transport.policyState).not.toHaveBeenCalled()
+    await context.value.reviewPolicy()
+    expect(context.value.view().policyState?.current?.policy_version).toBe(JSON.parse(context.fixture.policy).policy_version)
+    expect(context.transport.policyState).toHaveBeenCalledOnce()
+    expect(context.transport.policy).not.toHaveBeenCalled(); expect(context.source).not.toHaveBeenCalled()
+    expect(context.transport.evidence).not.toHaveBeenCalled(); expect(context.sync.changes).not.toHaveBeenCalled()
+    expect(context.transport.write).not.toHaveBeenCalled(); expect(context.transport.receipt).not.toHaveBeenCalled()
+    expect(await context.outbox.read(signal())).toEqual(before)
+  })
+
+  it('expires at the known next Policy before a minute, retaining the exact historical receipt and source', async () => {
+    const context = await setup(), successor = scheduledPolicy(context)
+    await prepared(context); await context.value.sendOnce(true)
+    expect(context.value.isQualified()).toBe(true)
+    expect(context.value.view().qualificationUntil).toBe(NOW + 20_000)
+    context.mutable.now = NOW + 19_999; expect(context.value.isQualified()).toBe(true)
+    context.mutable.now = NOW + 20_000; expect(context.value.isQualified()).toBe(false)
+    const original = await context.outbox.read(signal())
+    await context.value.reconcile()
+    expect(context.value.view().result?.source_current).toBe(true)
+    expect(context.value.view().result?.run.request_hash).toBe(context.fixture.requestHash)
+    expect(context.value.view().policyState?.current?.policy_version).toBe(successor.policy_version)
+    expect(context.value.isQualified()).toBe(false)
+    expect(await context.outbox.read(signal())).toEqual(original)
+    expect(context.transport.write).toHaveBeenCalledOnce()
+    await context.value.finishMatched(true)
+    await context.value.preview('analysis-after-policy-change-0001')
+    expect(context.value.view().preview?.packet.request.policy_version).toBe(successor.policy_version)
+    expect(context.transport.write).toHaveBeenCalledOnce()
+  })
+
+  it('refuses an expired prepared preview before the attempted marker without replacing its original bytes', async () => {
+    const context = await setup(); scheduledPolicy(context)
+    await prepared(context)
+    const original = await context.outbox.read(signal())
+    context.mutable.now = NOW + 20_000
+    await expect(context.value.sendOnce(true)).rejects.toBeDefined()
+    expect(await context.outbox.read(signal())).toEqual(original)
+    expect(original.task?.state).toBe('prepared'); expect(context.transport.write).not.toHaveBeenCalled()
+    await expect(context.value.preview('cannot-replace-old-prepared')).rejects.toBeDefined()
+    expect(await context.outbox.read(signal())).toEqual(original)
+    await context.value.cancelPrepared(true)
+    await context.value.preview('explicit-new-policy-preview-0001')
+    expect(context.value.view().preview?.packet.requestHash).not.toBe(context.fixture.requestHash)
+    expect(context.transport.write).not.toHaveBeenCalled()
+  })
+
+  it('does not renew an old analysis merely by reading Policy versions', async () => {
+    const context = await setup(); await prepared(context); await context.value.sendOnce(true)
+    expect(context.value.isQualified()).toBe(true)
+    const original = await context.outbox.read(signal()), changes = context.sync.changes.mock.calls.length
+    await context.value.reviewPolicy()
+    expect(context.value.isQualified()).toBe(false)
+    expect(context.value.view().result?.run.request_hash).toBe(context.fixture.requestHash)
+    expect(await context.outbox.read(signal())).toEqual(original)
+    expect(context.sync.changes).toHaveBeenCalledTimes(changes)
+    expect(context.transport.write).toHaveBeenCalledOnce(); expect(context.transport.receipt).not.toHaveBeenCalled()
+  })
+
+  it('rejects an observed wall-clock rollback inside the otherwise valid minute, without self-renewal', async () => {
+    const context = await setup(); await prepared(context); await context.value.sendOnce(true)
+    context.mutable.now = NOW + 30_000; expect(context.value.isQualified()).toBe(true)
+    context.mutable.now = NOW + 20_000; expect(context.value.isQualified()).toBe(false)
+    context.mutable.now = NOW + 30_001; expect(context.value.isQualified()).toBe(false)
+    expect(context.value.view().result?.run.request_hash).toBe(context.fixture.requestHash)
+    expect(context.transport.write).toHaveBeenCalledOnce()
+  })
+
+  it('uses monotonic elapsed time to expire even if the wall clock stops advancing', async () => {
+    const context = await setup()
+    const monotonic = vi.spyOn(globalThis.performance, 'now').mockReturnValue(100)
+    await prepared(context)
+    await context.value.sendOnce(true); expect(context.value.isQualified()).toBe(true)
+    monotonic.mockReturnValue(60_100); expect(context.value.isQualified()).toBe(false)
+    expect(context.value.view().result?.run.request_hash).toBe(context.fixture.requestHash)
+    expect(context.transport.write).toHaveBeenCalledOnce()
   })
 })

@@ -51,6 +51,7 @@ export async function withRequestDeadline<T>(
   if (signal?.aborted) forwardAbort()
   else signal?.addEventListener('abort', forwardAbort, { once: true })
   const start = globalThis.performance.now()
+  let last = start
   const timer = globalThis.setTimeout(() => {
     timedOut = true
     controller.abort('timeout')
@@ -59,13 +60,15 @@ export async function withRequestDeadline<T>(
     // Immediate stream/hash continuations may starve timer callbacks. Include
     // their elapsed monotonic time in the same deadline, not a fresh timeout.
     const now = globalThis.performance.now()
-    if (!controller.signal.aborted && (!Number.isFinite(now) || now < start || now - start >= timeoutMs)) {
+    if (!controller.signal.aborted && (!Number.isFinite(start) || !Number.isFinite(timeoutMs) || timeoutMs <= 0
+      || !Number.isFinite(now) || now < last || now - start >= timeoutMs)) {
       timedOut = true
       controller.abort('timeout')
     }
     if (controller.signal.aborted) {
       throw new ApiError(timedOut ? '请求超时，请稍后重试' : '请求已取消', timedOut ? 'timeout' : 'cancelled')
     }
+    last = now
   }
   let rejectOnAbort: (() => void) | undefined
 
