@@ -1,5 +1,5 @@
 import type { V8Action, V8DecisionDiff, V8DecisionResult } from '@/api/client'
-import { V8_STRONG_ACTION_CONFIDENCE_GATE } from '@/utils/v8Decision'
+import { inspectV8Decision, type V8DecisionGateOptions } from '@/utils/v8DecisionGate'
 import { isOverseasLike, type Estimate } from '@/utils/estimate'
 
 export type WatchDecisionLoadKind = 'idle' | 'loading' | 'ready' | 'missing' | 'error' | 'redacted'
@@ -62,7 +62,6 @@ export interface WatchDecisionRow extends WatchDecisionSource {
 }
 
 const V8_ACTIONS = new Set<V8Action>(['buy', 'dca', 'watch', 'add', 'hold', 'reduce', 'sell'])
-const STRONG_ACTIONS = new Set<V8Action>(['buy', 'dca', 'add', 'reduce', 'sell'])
 
 const ACTION_LABELS: Record<V8Action, string> = {
   buy: '买入',
@@ -98,67 +97,6 @@ function firstText(values: unknown): string | null {
   if (!Array.isArray(values)) return null
   const item = values.find(value => typeof value === 'string' && value.trim())
   return typeof item === 'string' ? item.trim() : null
-}
-
-function snapshotIssues(source: WatchDecisionSource): { hard: string[]; soft: string[] } {
-  const result = source.result
-  const hard: string[] = []
-  const soft: string[] = []
-  if (source.load.kind !== 'ready' || !result) return { hard, soft }
-
-  if (result.code !== source.code || result.decision?.fund_code !== source.code || result.evidence?.fund_code !== source.code) {
-    hard.push('快照基金代码不一致')
-  }
-  if (!isAction(result.action) || result.decision?.action !== result.action) hard.push('动作字段不完整')
-  if (!result.decision?.decision_id || !result.evidence?.evidence_id) hard.push('快照标识缺失')
-  if (result.decision?.evidence_id !== result.evidence?.evidence_id) hard.push('决策与证据快照不一致')
-  if (
-    !result.holding?.holding_version
-    || result.decision?.holding_version !== result.holding.holding_version
-    || !result.policy?.policy_version
-    || result.decision?.policy_version !== result.policy.policy_version
-  ) hard.push('决策链不完整')
-  const strength = finitePercent(result.strength)
-  const confidence = finitePercent(result.confidence)
-  if (strength == null || confidence == null) {
-    hard.push('强度或置信度缺失')
-  } else if (isAction(result.action) && STRONG_ACTIONS.has(result.action) && confidence < V8_STRONG_ACTION_CONFIDENCE_GATE) {
-    hard.push(`置信度低于 ${V8_STRONG_ACTION_CONFIDENCE_GATE}，强动作暂停`)
-  }
-  if (result.decision?.strength !== result.strength || result.decision?.confidence !== result.confidence) {
-    hard.push('决策指标与快照不一致')
-  }
-
-  if (
-    !Array.isArray(result.evidence?.stale_fields)
-    || !Array.isArray(result.evidence?.missing_fields)
-    || !Array.isArray(result.evidence?.source_states)
-  ) hard.push('数据状态字段不完整')
-
-  const staleFields = Array.isArray(result.evidence?.stale_fields)
-    ? result.evidence.stale_fields.filter(value => typeof value === 'string' && value.trim())
-    : []
-  const missingFields = Array.isArray(result.evidence?.missing_fields)
-    ? result.evidence.missing_fields.filter(value => typeof value === 'string' && value.trim())
-    : []
-  if (staleFields.length) hard.push(`数据过期：${staleFields.slice(0, 2).join('、')}`)
-  if (missingFields.length) hard.push(`数据缺失：${missingFields.slice(0, 2).join('、')}`)
-
-  const estimateStatus = String(result.evidence?.estimate_status || '')
-  if (estimateStatus === 'stale') hard.push('估值证据已过期')
-  if (estimateStatus === 'unavailable') hard.push('估值证据不可用')
-  if (estimateStatus === 'degraded') soft.push('估值证据已降级')
-
-  const sourceStates = Array.isArray(result.evidence?.source_states) ? result.evidence.source_states : []
-  for (const state of sourceStates) {
-    if (!state || typeof state.source_id !== 'string') continue
-    if (state.stale || state.state === 'stale') hard.push(`${state.source_id} 已过期`)
-    else if (state.state === 'unavailable') hard.push(`${state.source_id} 不可用`)
-    else if (state.state === 'degraded') soft.push(`${state.source_id} 已降级`)
-    else if (state.state === 'unknown') soft.push(`${state.source_id} 状态待确认`)
-  }
-
-  return { hard: [...new Set(hard)], soft: [...new Set(soft)] }
 }
 
 function actionTone(action: V8Action | null, gated: boolean): WatchDecisionRow['actionTone'] {
@@ -197,9 +135,10 @@ function diffText(source: WatchDecisionSource): { label: string; detail: string 
   }
 }
 
-export function buildWatchDecisionRow(source: WatchDecisionSource): WatchDecisionRow {
+export function buildWatchDecisionRow(source: WatchDecisionSource, options?: V8DecisionGateOptions): WatchDecisionRow {
   const result = source.result
-  const { hard, soft } = snapshotIssues(source)
+  const { hard, soft } = source.load.kind === 'ready' && result
+    ? inspectV8Decision(result, { ...options, code: source.code }) : { hard: [], soft: [] }
   const action = result && isAction(result.action) ? result.action : null
   const resultActionLabel = typeof result?.action_label === 'string' ? result.action_label.trim() : ''
   const snapshotActionLabel = action ? (resultActionLabel || ACTION_LABELS[action]) : null
@@ -264,8 +203,9 @@ export function filterAndSortWatchDecisions(
   sources: WatchDecisionSource[],
   filter: WatchDecisionFilter,
   sort: WatchDecisionSort,
+  options?: V8DecisionGateOptions,
 ): WatchDecisionRow[] {
-  const rows = sources.map(buildWatchDecisionRow).filter(row => matchesFilter(row, filter))
+  const rows = sources.map(source => buildWatchDecisionRow(source, options)).filter(row => matchesFilter(row, filter))
   return rows.sort((left, right) => {
     let order = 0
     if (sort === 'confidence') order = nullableDescending(left.confidence, right.confidence)

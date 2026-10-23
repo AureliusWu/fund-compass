@@ -10,6 +10,7 @@ import type { OwnerWorkspace, OwnerWorkspaceGuard, OwnerWorkspaceLocalState, Own
 import type { BuiltOwnerWorkspaceBackup, OwnerWorkspaceBackup, OwnerWorkspaceRestorePreview } from '@/utils/owner-workspace-backup'
 import type { ManagedWatchlistOwner, OwnerWorkspaceSyncFacade } from './owner-workspace-managed-store'
 import type { BuiltOwnerWorkspaceRecoveryBackup } from '@/utils/owner-workspace-recovery'
+import type { OwnerWorkspaceSyncState } from './owner-workspace-types'
 export type { OwnerWorkspaceSyncFacade } from './owner-workspace-managed-store'
 
 const LS = 'sinan_watchlist_v2'
@@ -37,6 +38,14 @@ export interface OwnerSyncWatchSnapshot {
   readonly source: OwnerSyncWatchSource
   readonly memory: string
   readonly generation: number
+}
+export interface OwnerAnalysisLocalSource {
+  readonly targetFingerprint: string
+  readonly state: OwnerWorkspaceSyncState
+  /** Native local preimage only; never reinterpreted as the server source SHA. */
+  readonly preimage: string
+  assertActive(): void
+  verify(signal: AbortSignal): Promise<void>
 }
 const idOf = (entry: Pick<WatchEntry, 'id' | 'code' | 'account'>) => entry.id || entryId(entry.code, entry.account)
 const clone = (entries: LocalWatchEntry[]) => entries.map(entry => ({ ...entry }))
@@ -89,6 +98,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
   const authorityError = ref('')
   const localStorageError = ref(false)
   const externalUnconfirmed = ref(false)
+  const ownerAnalysisEpoch = ref(0)
   let sourceBaseline: OwnerSyncWatchSource | null = null
   // Startup v1 fallback is compatible only before this store has observed v2.
   // Once v2 exists, deleting it cannot revive an older archived v1 ledger.
@@ -135,6 +145,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     setLegacySyncConsent(false) // also aborts in-flight gist.withCloud requests
   }
   function block(cause?: unknown) {
+    ownerAnalysisEpoch.value++
     disableWorkspaceSync()
     authorityState.value = 'blocked'; localStorageError.value = true; cancelPush(); requestGeneration++
     authorityError.value = cause && typeof cause === 'object' && 'code' in cause && typeof cause.code === 'string'
@@ -159,6 +170,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     // cannot bless a changed identity as a new source baseline. Initial adopt
     // and explicit cross-reload recovery have their own locator/file checks.
     if (localState?.metadata.adoption && locatorRecord?.phase === 'active') assertWorkspaceAdoption(state)
+    ownerAnalysisEpoch.value++
     entries.value = localEntries(state); localState = state; localStorageError.value = false; mutationGeneration++
     physicalFormat.value = state.sync ? 'v4' : 'v3'
     if (!fromManaged) syncOwner?.sourceChanged()
@@ -271,6 +283,43 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     if (!localState || canonicalOwnerLocal(entries.value) !== canonicalOwnerLocal(localEntries(localState))) throw new WatchMutationError('conflict')
     await readActiveWorkspace(signal, true)
   }
+  /** The application, not a UI callback, captures the actual current authority.
+   * Reading this source never imports, acknowledges or clears local_pending.
+   */
+  async function captureOwnerAnalysisSource(signal: AbortSignal): Promise<OwnerAnalysisLocalSource> {
+    if (formatInFlight || localWriteInFlight || pendingLocal.value || syncOwner?.isBusy()) throw new WatchMutationError('conflict')
+    await prepareManagedWorkspace(signal)
+    const [{ canonicalOwnerLocal }, { planOwnerWorkspaceCloudIntent }] = await Promise.all([
+      import('@/utils/owner-workspace-backup'), import('@/utils/owner-workspace-sync'),
+    ])
+    if (signal.aborted || !workspace || !localState) throw new WatchMutationError('storage')
+    const handle = workspace, generation = mutationGeneration, epoch = ownerAnalysisEpoch.value
+    const authority = JSON.stringify(locatorRecord), memory = canonicalOwnerLocal(entries.value)
+    const assertActive = () => {
+      if (!alive || lifetime.signal.aborted || authorityState.value !== 'idb'
+        || handle !== workspace || generation !== mutationGeneration || epoch !== ownerAnalysisEpoch.value
+        || authority !== JSON.stringify(locatorRecord) || memory !== canonicalOwnerLocal(entries.value)
+        || formatInFlight || localWriteInFlight || pendingLocal.value || syncOwner?.isBusy()) throw new WatchMutationError('conflict')
+    }
+    const guard = { signal, assertActive() { if (signal.aborted) throw new WatchMutationError('storage'); assertActive() } }
+    const state = await handle.readSyncState(guard)
+    assertActive()
+    if (canonicalOwnerLocal(state.local) !== canonicalOwnerLocal(localState) || state.local.outbox.entry !== null
+      || state.sync.pending !== null || !state.sync.base) throw new WatchMutationError('conflict')
+    assertWorkspaceAdoption(state.local)
+    const intent = planOwnerWorkspaceCloudIntent(state.sync.base, state.local.snapshot)
+    if (intent.issues.length || intent.operations.length) throw new WatchMutationError('conflict')
+    const preimage = canonicalOwnerLocal({ authority: locatorRecord, state })
+    return Object.freeze({ targetFingerprint: handle.targetFingerprint, state, preimage, assertActive,
+      async verify(active: AbortSignal) {
+        assertActive(); if (active.aborted) throw new WatchMutationError('storage')
+        await verifyAuthority('active'); assertActive()
+        const current = await handle.readSyncState({ signal: active, assertActive })
+        assertActive()
+        if (active.aborted || canonicalOwnerLocal({ authority: locatorRecord, state: current }) !== preimage) throw new WatchMutationError('conflict')
+      },
+    })
+  }
   function disableWorkspaceSync() {
     syncEpoch++; syncEnable?.abort(); syncEnable = null; syncOwner?.disable()
   }
@@ -360,6 +409,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     const timer = setTimeout(abort, 12_000)
     const ensure = () => { if (!alive || controller.signal.aborted || lifetime.signal.aborted) throw new WatchMutationError('storage') }
     formatInFlight = true
+    ownerAnalysisEpoch.value++
     try { ensure(); return await Promise.race([work(controller.signal, ensure), stopped]) }
     finally {
       clearTimeout(timer); controller.signal.removeEventListener('abort', rejectAbort)
@@ -462,6 +512,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
   })
   function cancelPush() { if (pushTimer) clearTimeout(pushTimer); pushTimer = null }
   function invalidateExternalState() {
+    ownerAnalysisEpoch.value++
     externalUnconfirmed.value = true
     cancelPush()
     mutationGeneration++
@@ -539,6 +590,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
   const canSync = () => authorityState.value === 'legacy' && getLegacySyncConsent() && gist.hasConfig()
 
   function commit(next: LocalWatchEntry[]) {
+    ownerAnalysisEpoch.value++
     if (localStorageError.value) throw new WatchMutationError('storage')
     const source = assertStorageBaseline()
     const serialized = JSON.stringify(next)
@@ -708,6 +760,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
   async function writeLocal(command: OwnerWorkspaceLocalCommand): Promise<void> {
     if (formatInFlight || localWriteInFlight || syncOwner?.isBusy()) throw new WatchMutationError('conflict')
     localWriteInFlight = true
+    ownerAnalysisEpoch.value++
     try {
       await assertLocalWritable()
       const storage = await import('./owner-workspace')
@@ -747,6 +800,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     if (authorityState.value !== 'idb') throw new WatchMutationError('storage')
     if (formatInFlight || localWriteInFlight || syncOwner?.isBusy()) throw new WatchMutationError('conflict')
     localWriteInFlight = true
+    ownerAnalysisEpoch.value++
     try {
       await assertLocalWritable()
       const module = await import('@/utils/owner-workspace-backup'), backup = await module.restoreOwnerWorkspaceBackup(raw, sha256)
@@ -765,6 +819,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
       || restorePreview.value.conflicts !== 0) throw new WatchMutationError('conflict')
     if (formatInFlight || localWriteInFlight || syncOwner?.isBusy()) throw new WatchMutationError('conflict')
     localWriteInFlight = true
+    ownerAnalysisEpoch.value++
     try {
       await assertLocalWritable()
       const original = restorePreview
@@ -942,6 +997,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     gist.clearConfig(); hasToken.value = false; lastSync.value = ''
   }
   return {
+    captureOwnerAnalysisSource, ownerAnalysisEpoch,
     localSyncFormat, enableWorkspaceSync, disableWorkspaceSync, createSyncRecoveryBackup, upgradeLocalSyncFormat, reconcileLocalSyncUpgrade,
     authorityState, authorityError, initialize, createLocalWorkspaceBackup, activateLocalWorkspace,
     previewLocalWorkspaceRestore, restoreLocalWorkspaceBackup, reconcileLocalWorkspaceEdit, hasPendingLocalWorkspaceEdit,

@@ -74,7 +74,9 @@ describe('自选页 V8 快照契约', () => {
 
   it('本地未确认修改阻断旧决策当前动作而不篡改原快照', () => {
     expect(source).toContain('const localPending = watch.hasLocalChanges()')
-    expect(source).toContain('result: localPending ? null : decisions[item.code] || null')
+    // Runtime form-save coverage below verifies the old snapshot is gated.
+    // A source-bound Owner analysis may separately qualify a current result;
+    // do not lock this contract to the former inline ternary implementation.
     expect(source).toContain('本地持仓尚未确认；旧快照不能作为当前行动')
   })
 })

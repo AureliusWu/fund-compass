@@ -5,7 +5,7 @@ import type {
   V8EvidenceSnapshot,
   V8FundOutcomes,
 } from '@/api/client'
-import { V8_STRONG_ACTION_CONFIDENCE_GATE } from '@/utils/v8Decision'
+import { inspectV8Decision, v8Date, type V8DecisionGateKind, type V8DecisionGateOptions } from '@/utils/v8DecisionGate'
 
 export type V8NoticeTone = 'info' | 'warning' | 'danger'
 
@@ -34,7 +34,7 @@ export interface V8OutcomePending {
   qdiiTargetPending: boolean
 }
 
-export type V8DetailGateKind = 'stale' | 'low_confidence' | null
+export type V8DetailGateKind = V8DecisionGateKind
 
 export interface V8DetailDecisionDisplay {
   gated: boolean
@@ -44,7 +44,7 @@ export interface V8DetailDecisionDisplay {
   displayTone: 'positive' | 'neutral' | 'caution' | 'danger'
   displaySummary: string
   rawActionLabel: string
-  rawActionCode: V8Action
+  rawActionCode: string
   rawSummary: string
   gateReason: string | null
   positionExecutionAllowed: boolean
@@ -83,8 +83,6 @@ const STATE_LABELS: Record<V8EvidenceNode['state'], string> = {
   neutral: '中性',
   missing: '缺失',
 }
-
-const STRONG_ACTIONS = new Set<V8Action>(['buy', 'dca', 'add', 'reduce', 'sell'])
 
 function finiteNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
@@ -128,77 +126,27 @@ export function v8ActionTone(action: V8Action): 'positive' | 'neutral' | 'cautio
   return ACTION_TONES[action]
 }
 
-function hardDataIssues(result: V8DecisionResult): string[] {
-  const issues: string[] = []
-  if (result.evidence.stale_fields.length) {
-    issues.push(`过期字段：${result.evidence.stale_fields.join('、')}`)
-  }
-  if (['stale', 'unavailable'].includes(result.evidence.estimate_status)) {
-    issues.push(result.evidence.estimate_status === 'stale' ? '估值证据已过期' : '估值证据不可用')
-  }
-  for (const source of result.evidence.source_states) {
-    if (source.stale || source.state === 'stale') issues.push(`${source.source_id} 已过期`)
-    else if (source.state === 'unavailable') issues.push(`${source.source_id} 不可用`)
-  }
-  return [...new Set(issues)]
-}
-
 /**
  * Fail strong actions closed for display while retaining the immutable snapshot
  * action and numbers as explicitly-labelled audit evidence.
  */
-export function buildV8DetailDecisionDisplay(result: V8DecisionResult): V8DetailDecisionDisplay {
-  const strong = STRONG_ACTIONS.has(result.action)
-  const issues = hardDataIssues(result)
-  const confidence = typeof result.confidence === 'number' && Number.isFinite(result.confidence)
-    ? result.confidence
-    : null
-
-  if (strong && issues.length) {
-    return {
-      gated: true,
-      gateKind: 'stale',
-      displayActionLabel: '暂停动作',
-      displayActionCode: 'paused',
-      displayTone: 'neutral',
-      displaySummary: '关键证据已过期或不可用，等待新快照后再评估；当前不执行原强动作。',
-      rawActionLabel: result.action_label,
-      rawActionCode: result.action,
-      rawSummary: result.summary,
-      gateReason: issues.join('；'),
-      positionExecutionAllowed: false,
-    }
-  }
-
-  if (strong && (confidence == null || confidence < V8_STRONG_ACTION_CONFIDENCE_GATE)) {
-    const confidenceText = confidence == null ? '未记录' : String(confidence)
-    return {
-      gated: true,
-      gateKind: 'low_confidence',
-      displayActionLabel: '观察',
-      displayActionCode: 'watch',
-      displayTone: 'neutral',
-      displaySummary: `置信度 ${confidenceText} 未达到强动作门槛 ${V8_STRONG_ACTION_CONFIDENCE_GATE}，原动作仅作审计记录。`,
-      rawActionLabel: result.action_label,
-      rawActionCode: result.action,
-      rawSummary: result.summary,
-      gateReason: `置信度门槛 ${V8_STRONG_ACTION_CONFIDENCE_GATE}`,
-      positionExecutionAllowed: false,
-    }
-  }
-
+export function buildV8DetailDecisionDisplay(result: V8DecisionResult, options?: V8DecisionGateOptions): V8DetailDecisionDisplay {
+  const gate = inspectV8Decision(result, options)
+  const rawActionLabel = typeof result?.action_label === 'string' ? result.action_label : '动作未记录'
+  const rawActionCode = typeof result?.action === 'string' ? result.action : '未记录'
+  const rawSummary = typeof result?.summary === 'string' ? result.summary : '摘要未记录'
   return {
-    gated: false,
-    gateKind: null,
-    displayActionLabel: result.action_label,
-    displayActionCode: result.action,
-    displayTone: v8ActionTone(result.action),
-    displaySummary: result.summary,
-    rawActionLabel: result.action_label,
-    rawActionCode: result.action,
-    rawSummary: result.summary,
-    gateReason: null,
-    positionExecutionAllowed: true,
+    gated: gate.gated,
+    gateKind: gate.kind,
+    displayActionLabel: gate.gated ? '暂停动作' : rawActionLabel,
+    displayActionCode: gate.gated ? 'paused' : rawActionCode,
+    displayTone: gate.gated || !gate.action ? 'neutral' : v8ActionTone(gate.action),
+    displaySummary: gate.gated ? '证据或决策链未通过当前核对，原快照只作历史记录，当前动作暂停。' : rawSummary,
+    rawActionLabel,
+    rawActionCode,
+    rawSummary,
+    gateReason: gate.gated ? gate.hard.join('；') : null,
+    positionExecutionAllowed: !gate.gated,
   }
 }
 
@@ -231,10 +179,13 @@ export function v8EstimateAxisLabel(evidence: V8EvidenceSnapshot): string {
  */
 export function buildV8DataNotices(evidence: V8EvidenceSnapshot): V8DataNotice[] {
   const notices: V8DataNotice[] = []
-  const staleSources = evidence.source_states.filter((source) => (
+  if (!evidence || !Array.isArray(evidence.source_states) || !Array.isArray(evidence.stale_fields)
+    || !Array.isArray(evidence.missing_fields)) return [{ key: 'invalid', tone: 'danger', text: '数据状态不完整，当前动作暂停。' }]
+  const sources = evidence.source_states.filter(source => source && typeof source.source_id === 'string')
+  const staleSources = sources.filter((source) => (
     source.stale || source.state === 'stale' || source.state === 'unavailable'
   ))
-  const degradedSources = evidence.source_states.filter((source) => source.state === 'degraded')
+  const degradedSources = sources.filter((source) => source.state === 'degraded')
 
   if (evidence.target_nav_date) {
     notices.push({
@@ -298,13 +249,21 @@ export function pendingForDecision(
   }
 }
 
-function outcomeRow(record: Record<string, unknown>, decisionId: string, index: number): V8OutcomeRow | null {
+function outcomeRow(record: Record<string, unknown>, decisionId: string, index: number, now: number): V8OutcomeRow | null {
   const kind = record.evaluation_kind
   if (kind !== 'horizon' && kind !== 'qdii_target') return null
   const horizon = finiteNumber(record.horizon)
   const baseDate = stringValue(record.base_nav_date) ?? '基准日未记录'
   const evaluationDate = stringValue(record.evaluation_date) ?? '结算日未记录'
   const targetDate = stringValue(record.target_nav_date)
+  const base = v8Date(record.base_nav_date)
+  const evaluated = v8Date(record.evaluation_date)
+  const target = v8Date(record.target_nav_date)
+  const today = Math.floor((now + 8 * 3_600_000) / 86_400_000) * 86_400_000
+  const validAxis = Number.isFinite(now) && base != null && evaluated != null && base < evaluated
+    && (kind !== 'qdii_target' || (target != null && target === evaluated))
+  const settled = validAxis && evaluated! <= today
+  const pendingText = validAxis ? '待正式净值结算' : '结果日期未核对'
   const absoluteReturn = finiteNumber(record.absolute_return)
   const drawdown = finiteNumber(record.max_drawdown)
   const peerExcess = finiteNumber(record.peer_excess)
@@ -320,21 +279,24 @@ function outcomeRow(record: Record<string, unknown>, decisionId: string, index: 
     decisionId,
     title,
     axis: `${baseDate} → ${evaluationDate}`,
-    returnText: formatV8Percent(absoluteReturn),
-    drawdownText: formatV8Percent(drawdown),
-    peerExcessText: peerExcess == null ? null : formatV8Percent(peerExcess),
+    returnText: settled ? formatV8Percent(absoluteReturn) : pendingText,
+    drawdownText: settled ? formatV8Percent(drawdown) : '—',
+    peerExcessText: !settled || peerExcess == null ? null : formatV8Percent(peerExcess),
     predictionText: predictedChange == null ? null : formatV8Percent(predictedChange),
-    predictionErrorText: predictionError == null ? null : formatV8Percent(predictionError),
-    hitText: hit == null ? '命中状态未记录' : (hit ? '方向命中' : '方向未命中'),
+    predictionErrorText: !settled || predictionError == null ? null : formatV8Percent(predictionError),
+    hitText: !settled ? pendingText : hit == null ? '命中状态未记录' : (hit ? '方向命中' : '方向未命中'),
   }
 }
 
-export function collectV8OutcomeRows(outcomes: V8FundOutcomes | null, limit = 8): V8OutcomeRow[] {
-  if (!outcomes) return []
+export function collectV8OutcomeRows(outcomes: V8FundOutcomes | null, limit = 8, options?: V8DecisionGateOptions): V8OutcomeRow[] {
+  if (!outcomes || !Array.isArray(outcomes.items)) return []
+  const now = options?.now instanceof Date ? options.now.getTime() : options?.now ?? Date.now()
   const rows: V8OutcomeRow[] = []
   for (const item of outcomes.items) {
+    if (!item || !Array.isArray(item.outcomes) || typeof item.decision?.decision_id !== 'string') continue
     item.outcomes.forEach((record, index) => {
-      const row = outcomeRow(record, item.decision.decision_id, index)
+      if (!record || typeof record !== 'object' || Array.isArray(record)) return
+      const row = outcomeRow(record, item.decision.decision_id, index, now)
       if (row) rows.push(row)
     })
   }

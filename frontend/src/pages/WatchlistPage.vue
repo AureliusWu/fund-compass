@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch as observe } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, reactive, ref, watch as observe } from 'vue'
 import { useRouter } from 'vue-router'
 import { showConfirmDialog, showToast } from 'vant'
 import {
@@ -12,6 +12,7 @@ import {
   type V8DecisionResult,
 } from '@/api/client'
 import { useWatchlistStore } from '@/stores/watchlist'
+import { useOwnerAnalysisStore } from '@/stores/ownerAnalysis'
 import { fetchEstimates, loadCachedEstimates, type Estimate } from '@/utils/estimate'
 import { colorOf, pct } from '@/utils/format'
 import { getToken } from '@/utils/gist'
@@ -39,6 +40,8 @@ interface Row { name: string; type: string | null }
 
 const router = useRouter()
 const watch = useWatchlistStore()
+const ownerAnalysis = useOwnerAnalysisStore()
+const OwnerAnalysisPanel = defineAsyncComponent(() => import('@/components/OwnerAnalysisPanel.vue'))
 const rows = reactive<Record<string, Row>>({})
 const estimates = reactive<Record<string, Estimate | null>>({})
 const decisions = reactive<Record<string, V8DecisionResult>>({})
@@ -79,15 +82,17 @@ const decisionSources = computed<WatchDecisionSource[]>(() => {
     const estimate = estimates[item.code]
     const typeOrName = rows[item.code]?.type || rows[item.code]?.name || item.name
     // Any account edit may change the shared fund-only denominator.
-    const localPending = watch.hasLocalChanges()
+    const confirmed = ownerAnalysis.resultFor(item.code)
+    const localPending = watch.hasLocalChanges() && !confirmed
     return {
       code: item.code,
       name: rows[item.code]?.name || item.name || item.code,
       type: rows[item.code]?.type || null,
-      result: localPending ? null : decisions[item.code] || null,
-      diff: localPending ? null : decisionDiffs[item.code] || null,
-      load: localPending ? { kind: 'error', message: '本地持仓尚未确认；旧快照不能作为当前行动' } : decisionLoadStates[item.code] || { kind: decisionsLoading.value ? 'loading' : 'idle' },
-      diffLoad: localPending ? { kind: 'error', message: '本地修改未形成确认版本，不比较为当前持仓变化' } : decisionDiffLoadStates[item.code] || { kind: decisionsLoading.value ? 'loading' : 'idle' },
+      result: confirmed ?? (localPending ? null : decisions[item.code] || null),
+      diff: confirmed || localPending ? null : decisionDiffs[item.code] || null,
+      load: confirmed ? { kind: 'ready' } : localPending ? { kind: 'error', message: '本地持仓尚未确认；旧快照不能作为当前行动' } : decisionLoadStates[item.code] || { kind: decisionsLoading.value ? 'loading' : 'idle' },
+      diffLoad: confirmed ? { kind: 'error', message: '本轮分析未提供同来源历史比较，不推断首次或动作未变' }
+        : localPending ? { kind: 'error', message: '本地修改未形成确认版本，不比较为当前持仓变化' } : decisionDiffLoadStates[item.code] || { kind: decisionsLoading.value ? 'loading' : 'idle' },
       change: displayChange(item.code),
       changeCaption: watchEstimateCaption(typeOrName, estimate),
     }
@@ -356,6 +361,7 @@ onMounted(refresh)
         <OwnerSessionPanel />
         <OwnerWorkspacePanel />
         <OwnerSyncPanel />
+        <OwnerAnalysisPanel />
         <p class="local-workcopy" role="status">{{ watch.localStatus }}。现有私人决策基于上次确认的云端状态；本地修改不表示旧快照已更新。</p>
         <p v-if="watch.localStorageError" class="local-storage-error" role="alert">本机记录无法安全读取，编辑已暂停。原存储未覆盖，请先检查浏览器存储或恢复备份。</p>
         <div class="sec">{{ WATCH_SECTIONS[0] }}</div>

@@ -1291,3 +1291,32 @@ ACK 请求绑定原始响应/原包/完整 D/派生预览 hash，重建核封闭
 返回的 `source_current`只表示当前读快照与原完整来源revision+SHA相同，不能表示Policy/策略仍active、行情仍新鲜或当前强动作资格；旧结果始终保留原run。应用仍8.0.0，I19-04整项不勾选；下一步是原id/hash持久任务与实际前端消费/统一门禁、显式Policy版本流程，再接经独立验收的云profile。新profile不被旧代码接纳，不能删表伪造源码降级；当前只在独立合成库测试，回退应保留候选原库/原像，不将代码回退当作数据迁移。
 
 I18实际轮换/停写排空/新保护备份、Free能力与额度/受控迁移、应用写入跨Render重启及独立远端恢复；I19手工资产/历史/机器消费者与多设备；I20自然交易日/周窗口；I21真实浏览器/旧PWA/性能仍未关闭。不读取未确认凭据输入，不绕OAuth/浏览器或PR写403，不改云秘密/套餐/部署/重启/main/Gist，不先改v9版本；本轮只普通推送既有功能分支并观察其自然CI。
+
+### 17ee220 自然 CI 与 I19-04 前端原任务/同源三页（2026-10-23）
+
+前片段已正常推送 `17ee22034e11ee36fb05d4359aea4071a5a9ed11`，tree=`50722ee767f5b3903cda191701306d5f40d55d9c`。[自然CI39891235767](https://github.com/AureliusWu/fund-compass/actions/runs/39891235767) run190/attempt1 success；真实日志后端 **3964 passed/2 warnings/351.73s**、pip check clean，前端 **1988/81文件**、type/build8.23s/PWA7/7，Worker **148/4文件**、check/dry-run114.28KiB/gzip26.58，独立官方audit均通过。实际merge=`3f1b781dace4b7b2adfda799d813026fc27a119a`，GitHub API已核parents=7afc4e6+17ee、同tree。deploy/candidate_smoke/formal_smoke全skipped/0steps；观察CLI EOF后同run正常查询确认成功，不重跑或换认证。原uv Python3.12环境没有pip，`python -m pip check`失败如实保留；正常`uv pip check --python 原路径`核31包兼容，没有借此安装/改环境。上述是上一精确提交，不冒充新前端CI。
+
+新增严格原始分析合同与真实合成SQLite wire fixture、单独Owner analysis闭合四操作、独立strict持久任务、app-owned懒载Store和实际面板。没有业务parser/gate的mock放行。预览读取真实active locator/已采用v4/完整state且B→L无意图，再固定upper完整拉取D和既有Policy/Evidence；原包保存和一次POST各自确认。task只存原raw/hash/contextHash，attempted在POST前真实提交；unknown不能清包或重发，重开只hydrate、手核原回执。任务另有导出，不在工作区备份内，也没有通用导入/丢库恢复证明。来源包含manual/tombstone的原状态，按严格历史log折叠最终每键，不当当前列表去重拒绝合法修订。
+
+三页使用同一run中真实Holding/Evidence/Decision/Policy；本机local_pending保留，只有已核回执且完整D/原本机前像/当前引用一致，才给最多60秒的独立最近核对资格。编辑/会话/端点/恢复焦点撤销，恰60秒/NaN或倒退clock拒绝，未知/陈旧证据仍逐基金金融门禁暂停。未观察的多设备新写不受这个窗口锁定，不称全局实时资格。共用门禁保留真实0/null、7日日期、覆盖70%及既有策略较高置信度；无diff不造首次/动作未变；未来QDII结算不显示已实现收益。面板沿用原页面样式，未更换设计系统。
+
+真实红/绿：最初全量 **2193P/7F** 揭示部分DOM缺事件API、旧源字符串断言、冻结handle不能spy及固定storage异常被统一层误包装；生产加DOM特征检查和ApiError固定code，构造测试改只读port包装、不解冻业务handle，移除旧三元表达式镜像断言而保留真实表单门禁旅程。独立测试又复现端点切换仍露旧preview/slot、60秒等号、NaNclock；统一隐藏/拒绝。独立Store重入用例及只读旧cleanup变异对照证明旧取消continuation会关新enable，现按operation身份清理。另独立真实IDB用例复现合法同key历史不能分析、严格观察head2后仍接旧head1；现Map折叠和独立全变更计数，严格解析后先保留observed下限，invalidate不清。原规则未放宽、预算未调高。
+
+最终直接 `npm run test` **2216 passed/89文件/10.26s**、`npm run type-check` exit0，官方 `npm audit --include=dev --audit-level=moderate --registry=https://registry.npmjs.org` **0**。含新合同81、transport旧链回归120、manager19/outbox18、独立来源审查6、Store重入2、实际面板4及统一三页helper74。实际SFC4项走真实Pinia/watchlist locator/adopt/v4/link和fake-IDB，只合成登录与HTTP；覆盖默认off/登录不启用、UI预览0POST、原fixture ID的真实Store预览后UI独立save/send、实际edit撤资格、关闭重开手动unknown→matched不POST、退出后迟到body隐藏且attempted保留。它不是整页刷新、Chrome下载/落盘、旧PWA、多设备或云证据。本轮后端/Worker源码未改，本地未重复全跑，由本轮自然CI另核。
+
+#### 冻结制品对照（不是实际浏览器性能）
+
+直接 Git archive17ee + 同一node_modules junction，依赖清单LF等价；初诊断生成声明后冻结全部前端输入。A/B/B/A/A/B各三份制品稳定，每次直接npm构建/PWA7/7通过；另一个8.92s并行单测的质量构建单列、不混入时延样本。纯计量helper不启动进程，核实际AST静态闭包和全部precache URL/非null MD5。机器摘要见 `OWNER-ANALYSIS-PERFORMANCE-20261023.json`，完整原始统计仅存本机Temp，未独立封存。计量后仅按git diff --check去掉测试专用wire fixture的额外空白EOF行；摘要current pin对应该纯格式清理前的实际计量树，不冒称字节相同。
+
+| gzip9制品字节（非网络传输） | 17ee基线 | 当前 | 变化 |
+| --- | ---: | ---: | ---: |
+| JS+CSS | 566,240 | 591,943 | +4.54% |
+| workspace单块 | 9,740 | 9,653 | -0.89% |
+| workspace实际静态闭包 | 121,934 | 129,519 | +6.22% |
+| 自选页实际静态闭包 | 149,408 | 156,241 | +4.57% |
+| precache（80→90 URL） | 442,573 | 468,139 | +5.78% |
+| precache/SW/支持文件并集 | 452,245 | 477,946 | +5.68% |
+
+Vite内部秒：基线7.72/8.91/8.02，中位8.02/最差8.91；当前7.59/7.33/7.04，中位7.33/最差7.59。小样本/路径/EOL/宿主缓存不能作用户关键延迟结论。增长主要来自严格分析parser/任务/UI、新OwnerSession固定transport和真实source守卫；可延后启用的模块仍被Workbox预缓存，懒载不等于安装字节减少。统一金融检查复用减少自选页单块，bootstrap增大，不能只报单块缩小。既有更早a519 workspace7787→9653仍 **+23.96% FAIL（20%线不变）**，precache400938→468139 **+16.76% WARN**、安装并集410446→477946 **+16.45% WARN**；该历史基线本轮未重建，不宣称预算债务已消失。request/ownerSession静态/动态提示仍保留，ECharts532397B未变。
+
+本轮继续仅功能分支候选，版本8.0.0。I18实际停写/新保护备份/轮换/Free quota/provider能力与容量/受控迁移、应用跨Render重启读回及独立远端恢复；I19 Policy编辑/手工资产/历史/机器消费者/多设备；I20自然窗口；I21真实三页浏览器/PWA/旧版本和性能债务仍待完成。未读取未确认凭据输入、不绕OAuth/浏览器或PR写403，不改云配置/套餐/部署/重启/main/Gist。本轮自然CI未完成前不将本地PASS称CI/部署通过；代码回退保留v4及原任务，不能删除任务或伪造数据格式降级。

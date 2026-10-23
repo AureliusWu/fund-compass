@@ -21,6 +21,7 @@ declare module 'vue' {
     IndexBar: typeof import('./src/components/IndexBar.vue')['default']
     LocalHoldingGate: typeof import('./src/components/LocalHoldingGate.vue')['default']
     OverseasAccuracyPanel: typeof import('./src/components/OverseasAccuracyPanel.vue')['default']
+    OwnerAnalysisPanel: typeof import('./src/components/OwnerAnalysisPanel.vue')['default']
     OwnerManagedSyncPanel: typeof import('./src/components/OwnerManagedSyncPanel.vue')['default']
     OwnerSessionPanel: typeof import('./src/components/OwnerSessionPanel.vue')['default']
     OwnerSyncPanel: typeof import('./src/components/OwnerSyncPanel.vue')['default']

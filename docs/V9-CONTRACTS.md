@@ -165,4 +165,18 @@ v3 核心与云命令/完整 v4 codec 分离，相关 codec 先于事务加载�
 
 回执读取 `GET /api/v2/owner/analysis/requests/{request_id}` 需 `read_private` 与单一原 `X-Owner-Analysis-Request-Hash`。精确匹配返回 `{state:matched,status:200,result:{run,source_current}}`；缺失404或不可核对503均unknown。历史读取核原始source/请求/响应hash、当时strategy/run_id、实际不可变模型和component映射，不执行今天的策略；策略升级不改旧输出。同id不同hash拒绝；同id/hash只读原结果，无新Holding/Decision；完整来源改变只令source_current=false，新id/旧expected_revision拒绝。
 
-业务源/回执各2MiB、最多100k runs/components，容量满不清历史；30秒总协作预算覆盖校验、授权回调及提交前后，不能硬中断SQLite/任意驱动。commit成功后超时或丢响应、close异常仍可已提交，只保留原id/hash手动核回执；absent不证明回滚、超时不授权重发。当前无浏览器分析请求/outbox/UI、新Policy编辑、实际云profile迁移、受保护恢复或跨Render重启证据；I19-04和v9正式出口继续未通过。
+业务源/回执各2MiB、最多100k runs/components，容量满不清历史；30秒总协作预算覆盖校验、授权回调及提交前后，不能硬中断SQLite/任意驱动。commit成功后超时或丢响应、close异常仍可已提交，只保留原id/hash手动核回执；absent不证明回滚、超时不授权重发。后端切片当时未接前端分析任务，后续接线见下节；新Policy编辑、实际云profile迁移、受保护恢复或跨Render重启证据仍缺，I19-04和v9正式出口继续未通过。
+
+### I19-04 前端原任务与同源三页消费（2026-10-23）
+
+实际自选页新增折叠的“持仓分析”面板。登录/普通页面加载不打开分析任务库或构造网络请求；有 read_private/run_personal_analysis、本轮明确同意及实际 v4 工作区才可启用。enable 只读真实本机前像并打开独立任务库；手动预览才取完整 D、既有 Policy 和 Evidence，分别确认保存原包、单次发送。所有请求走 Owner 内存会话闭合 transport；原同步三操作/12秒合同不扩张，分析四操作/30秒总预算包括导入、摘要、HTTP、流读及严格解析，响应上限2MiB+4096。请求仍仅16KiB引用，不上传浏览器构造的份额/成本。
+
+来源桥由真实 watchlist 持有，绑定原 target、端点原字符串、active locator、已采用 handle、lifetime/generation/epoch、当前内存及完整 IDB state；拒绝本机写/格式变更中、同步 busy、非空 outbox/pending、缺 B 和未同步 B→L 意图。verify 重新读取实际 locator/state，并核完整前像；不接受 UI 传恒真 guard。从 since=0、limit200、固定 upper 的历史 changes 重建 D，按严格 revision/key 次序折叠每键最新记录；跨页历史同 key 合法，重复 cursor 点、倒序或 upper 漂移拒绝。全变更100k/501页/4MiB和30秒预算仍生效；严格解析的已观察高 head 在后续失败前保留，同会话 invalidate 不清下限，不将旧 B 回退当恢复。
+
+任务保存至独立 `fund-compass-owner-analysis-1:<target>`，固定物理1/单槽、无 credential/结果快照，仅原 rawBody/requestHash、完整本机上下文摘要与状态。strict durability 真实 CAS 核全部原槽/计数/schema、完成后确认；不支持或坏结构拒绝，不回退 LS/重建已有库。prepared→attempted 必须提交后才能唯一 POST；丢本机提交确认可能留下 attempted但HTTP0，仍不能回prepared、取消或重发。attempted只允许原回执 matched后推进；404/503保持unknown。取消仅尚未发送原包，结束 matched 还需本 generation 真实匹配证明。刷新/重开只hydrate，不自动 quote/receipt/send；导出原任务不含凭据但属于私人资料。任务文件独立于完整工作区备份，目前没有通用导入/灾难恢复资格。
+
+返回 run 先核原请求与完整引用链。当前显示资格另核 source_current、完整 D/B、原任务contextHash、实际本机前像、源记录数及当前 Policy/Evidence IDs；不在JS重新猜测Python的业务ID/hash数值表示。满足后最多60秒使用，恰到期、坏/回退时钟、真实编辑、会话/URL变化、focus/visibility恢复均暂停或失效；这是最近已核对快照，不认证其他设备在窗口内没有新写入。关闭/退出隐藏私人结果，迟到响应不能恢复；旧 enable 的取消 continuation 只能清自己的操作，不能关闭后来新 enable。
+
+首页、自选、详情通过同一 app-owned store 使用实际 component 的 Holding/Evidence/Decision/Policy；diff=null明确“未提供同来源历史比较”，不猜首次或动作未变。保留工作区 local_pending，只给本轮已核对分析的独立消费资格；过期即恢复旧行动阻断。共用金融门禁核真实模型链/代码/0-null语义、坏/未来日期、七日行情与净值、评分70%及模型覆盖70%、缺失状态和既有动作/Policy较高置信度；不凭本轮生成时间给陈旧源续期，不把合法下一净值目标当已实现收益。未来/坏QDII结算轴仅保留历史条目，不展示已实现收益/命中。
+
+本地验证使用实际 Vue SFC、Pinia、watchlist locator/adopt/v4/link、fake-IDB strict事务与真实后端合成 wire fixture；HTTP/登录仍为合成，不能认证 Chrome下载/落盘、整页reload、旧PWA、跨设备、实际市场数据、云schema/权限/耐久/独立恢复或v9发布。

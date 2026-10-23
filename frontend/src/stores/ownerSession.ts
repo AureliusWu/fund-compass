@@ -1,6 +1,7 @@
 import { readonly, shallowRef } from 'vue'
 import { ApiError, assertOwnerApiTransport, ownerApiTarget, request, withRequestDeadline } from '@/api/request'
 import type { BuiltOwnerSyncRequest, OwnerSyncCursor } from '@/utils/ownerSyncContract'
+import type { BuiltOwnerAnalysisRequest } from '@/utils/ownerAnalysisContract'
 
 export interface OwnerSessionMetadata {
   token_type: 'Bearer'
@@ -289,8 +290,13 @@ export function getOwnerSyncTargetFingerprint(): Promise<string> {
 }
 
 async function readSyncBody(response: Response, signal: AbortSignal, ensureActive: () => void): Promise<string> {
+  return readOwnerBody(response, signal, ensureActive, SYNC_RESPONSE_MAX_BYTES, '同步')
+}
+
+async function readOwnerBody(response: Response, signal: AbortSignal, ensureActive: () => void,
+  maxBytes: number, label: '同步' | '分析'): Promise<string> {
   const reader = response.body?.getReader()
-  if (!reader) throw new ApiError('同步响应契约无效', 'http', 502)
+  if (!reader) throw new ApiError(`${label}响应契约无效`, 'http', 502)
   let completed = false, cancelled = false
   const cancel = () => {
     if (cancelled) return
@@ -302,7 +308,7 @@ async function readSyncBody(response: Response, signal: AbortSignal, ensureActiv
     ensureActive()
     const length = response.headers.get('content-length')
     if (length !== null && (!/^(?:0|[1-9][0-9]*)$/.test(length)
-      || length.length > 10 || Number(length) > SYNC_RESPONSE_MAX_BYTES)) throw new Error('response_limit')
+      || length.length > 10 || Number(length) > maxBytes)) throw new Error('response_limit')
     if (response.headers.get('content-type')?.split(';', 1)[0].trim().toLowerCase() !== 'application/json') {
       throw new Error('response_type')
     }
@@ -318,7 +324,7 @@ async function readSyncBody(response: Response, signal: AbortSignal, ensureActiv
       if (next.done) break
       if (!(next.value instanceof Uint8Array) || ++chunks > 32_768) throw new Error('response_type')
       total += next.value.byteLength
-      if (total > SYNC_RESPONSE_MAX_BYTES) throw new Error('response_limit')
+      if (total > maxBytes) throw new Error('response_limit')
       parts.push(decoder.decode(next.value, { stream: true }))
     }
     parts.push(decoder.decode())
@@ -329,13 +335,42 @@ async function readSyncBody(response: Response, signal: AbortSignal, ensureActiv
     return raw
   } catch (error) {
     if (error instanceof ApiError) throw error
-    throw new ApiError('同步响应契约无效', 'http', 502)
+    throw new ApiError(`${label}响应契约无效`, 'http', 502)
   } finally {
     signal.removeEventListener('abort', cancel)
     if (!completed) cancel()
     try { reader.releaseLock() } catch {
-      if (completed) throw new ApiError('同步响应契约无效', 'http', 502)
+      if (completed) throw new ApiError(`${label}响应契约无效`, 'http', 502)
     }
+  }
+}
+
+/** Only callers which have constructed a closed operation reach this kernel. */
+async function sendOwnerHttpResponse(input: Pick<SyncHttpRequest, 'path' | 'method' | 'headers' | 'statuses' | 'body'>,
+  target: string, token: string, signal: AbortSignal, check: () => void,
+  readBody: (response: Response, signal: AbortSignal, check: () => void) => Promise<string>,
+  label: '同步' | '分析'): Promise<OwnerSyncHttpResponse> {
+  check()
+  const response = await fetch(target + input.path, {
+    method: input.method, headers: { ...input.headers, Authorization: `Bearer ${token}` },
+    ...(input.body === undefined ? {} : { body: input.body }), signal,
+    cache: 'no-store', credentials: 'omit', redirect: 'error',
+  })
+  try {
+    check()
+    if (!Number.isInteger(response.status) || response.status < 100 || response.status > 599) {
+      throw new ApiError(`${label}响应契约无效`, 'http', 502)
+    }
+    if (response.status === 401) throw new ApiError('私人会话已失效，请重新登录', 'redacted', 401)
+    if (!input.statuses.includes(response.status)) throw new ApiError(`HTTP ${response.status}`, 'http', response.status)
+    const rawBody = await readBody(response, signal, check)
+    check()
+    return Object.freeze({ status: response.status, rawBody })
+  } catch (error) {
+    // A rejected status or late completion never exposes a private error body.
+    // Cancellation is local cleanup, not rollback or another HTTP operation.
+    try { void response.body?.cancel().catch(() => {}) } catch { /* A locked/failed body stays unavailable. */ }
+    throw error
   }
 }
 
@@ -364,35 +399,116 @@ export async function requestOwnerSync(operation: OwnerSyncHttpOperation, signal
       if (!sessionIsActive()) throw new ApiError('私人会话已过期', 'redacted', 401)
       if (!metadata.value!.scopes.includes(input.scope)) throw new ApiError('私人会话无权同步', 'redacted', 403)
       if (ownerApiTarget() !== target) return invalidSyncRequest()
-      // No arbitrary URL, method or headers cross this boundary. POST keeps
-      // the exact restored body; there is no retry or automatic reconciliation.
-      const response = await fetch(target + input.path, {
-        method: input.method, headers: { ...input.headers, Authorization: `Bearer ${accessToken!}` },
-        ...(input.body === undefined ? {} : { body: input.body }), signal: active,
-        cache: 'no-store', credentials: 'omit', redirect: 'error',
-      })
-      try {
+      return sendOwnerHttpResponse(input, target, accessToken!, active, () => {
         ensureActive()
         assertGeneration(expected)
         if (!sessionIsActive()) throw new ApiError('私人会话已过期', 'redacted', 401)
-        if (!Number.isInteger(response.status) || response.status < 100 || response.status > 599) {
-          throw new ApiError('同步响应契约无效', 'http', 502)
-        }
-        if (response.status === 401) throw new ApiError('私人会话已失效，请重新登录', 'redacted', 401)
-        if (!input.statuses.includes(response.status)) throw new ApiError(`HTTP ${response.status}`, 'http', response.status)
-        const rawBody = await readSyncBody(response, active, ensureActive)
-        ensureActive()
-        assertGeneration(expected)
-        if (!sessionIsActive()) throw new ApiError('私人会话已过期', 'redacted', 401)
-        return Object.freeze({ status: response.status, rawBody })
-      } catch (error) {
-        // Includes rejected HTTP statuses and late fetch completions, before
-        // a reader exists. Cancel local body delivery without reading private
-        // error text, waiting on cleanup, changing the error or issuing HTTP.
-        try { void response.body?.cancel().catch(() => {}) } catch { /* A locked/failed body stays unavailable. */ }
-        throw error
-      }
+      }, readSyncBody, '同步')
     }, controller.signal)
+  } catch (error) {
+    assertGeneration(expected)
+    if (error instanceof ApiError && error.status === 401) {
+      clearOwnerSession()
+      throw new ApiError('私人会话已失效，请重新登录', 'redacted', 401)
+    }
+    throw error
+  } finally {
+    pending.delete(controller)
+    signal.removeEventListener('abort', forward)
+  }
+}
+
+export interface OwnerAnalysisHttpResponse { readonly status: number; readonly rawBody: string }
+export type OwnerAnalysisHttpOperation =
+  | { readonly kind: 'write'; readonly packet: BuiltOwnerAnalysisRequest }
+  | { readonly kind: 'receipt'; readonly packet: BuiltOwnerAnalysisRequest }
+  | { readonly kind: 'policy' }
+  | { readonly kind: 'evidence'; readonly code: string }
+
+const ANALYSIS_RESPONSE_MAX_BYTES = 2 * 1024 * 1024 + 4096
+const ANALYSIS_TIMEOUT_MS = 30_000
+function invalidAnalysisRequest(): never { throw new ApiError('分析请求契约无效', 'http', 400) }
+
+/** A separate Owner capability; never grants holdings writes or machine work.
+ * The original packet is required for both sending and receipt verification. */
+export async function requestOwnerAnalysis(operation: OwnerAnalysisHttpOperation, signal: AbortSignal,
+  expectedTargetFingerprint: string): Promise<OwnerAnalysisHttpResponse> {
+  if (!(signal instanceof AbortSignal) || !syncHash(expectedTargetFingerprint)) return invalidAnalysisRequest()
+  assertOwnerApiTransport()
+  if (!sessionIsActive()) throw new ApiError('请先登录私人会话', 'redacted', 401)
+  const expected = generation.value, target = ownerApiTarget(), token = accessToken!
+  const controller = new AbortController()
+  const forward = () => controller.abort(signal.reason)
+  if (signal.aborted) forward()
+  else signal.addEventListener('abort', forward, { once: true })
+  pending.add(controller)
+  try {
+    return await withRequestDeadline(async (active, ensureActive) => {
+      let requiredScope: 'read_private' | 'run_personal_analysis' | null = null
+      const check = () => {
+        ensureActive()
+        assertGeneration(expected)
+        if (!sessionIsActive()) throw new ApiError('私人会话已过期', 'redacted', 401)
+        if (ownerApiTarget() !== target) return invalidAnalysisRequest()
+        if (requiredScope !== null && !metadata.value!.scopes.includes(requiredScope)) {
+          throw new ApiError('私人会话无权分析', 'redacted', 403)
+        }
+      }
+      check()
+      let values: Record<string, unknown>, supplied: Record<string, unknown> | null = null
+      try {
+        values = syncObject(operation, ['kind'], ['packet', 'code'])
+        if (values.kind === 'write' || values.kind === 'receipt') {
+          syncObject(values, ['kind', 'packet'])
+          supplied = syncObject(values.packet, ['request', 'rawBody', 'requestHash', 'byteLength'])
+        } else if (values.kind === 'policy') syncObject(values, ['kind'])
+        else if (values.kind === 'evidence') {
+          syncObject(values, ['kind', 'code'])
+          if (typeof values.code !== 'string' || !/^[0-9]{6}(?![\s\S])/.test(values.code)) return invalidAnalysisRequest()
+        } else return invalidAnalysisRequest()
+      } catch { return invalidAnalysisRequest() }
+      requiredScope = values.kind === 'write' ? 'run_personal_analysis' : 'read_private'
+      check()
+      const contract = await import('@/utils/ownerAnalysisContract')
+      check()
+      let original: BuiltOwnerAnalysisRequest | null = null
+      if (supplied !== null) try {
+        if (typeof supplied.rawBody !== 'string' || !syncHash(supplied.requestHash)) return invalidAnalysisRequest()
+        original = await contract.restoreOwnerAnalysisRequest(supplied.rawBody, supplied.requestHash)
+        check()
+        const reconstructed = await contract.buildOwnerAnalysisRequest(supplied.request)
+        check()
+        if (supplied.byteLength !== original.byteLength || reconstructed.rawBody !== original.rawBody
+          || reconstructed.requestHash !== original.requestHash) return invalidAnalysisRequest()
+      } catch (error) {
+        if (error instanceof ApiError) throw error
+        return invalidAnalysisRequest()
+      }
+      const fingerprint = await syncTargetDigest(target, check)
+      check()
+      if (fingerprint !== expectedTargetFingerprint) return invalidAnalysisRequest()
+      const input: Pick<SyncHttpRequest, 'path' | 'method' | 'headers' | 'statuses' | 'body'> = values.kind === 'write'
+        ? { path: '/v2/owner/analysis', method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Owner-Analysis-Consent': 'owner-analysis-v1' },
+          statuses: [200, 400, 403, 408, 409, 413, 415, 422, 429, 503], body: original!.rawBody }
+        : values.kind === 'receipt'
+          ? { path: '/v2/owner/analysis/requests/' + encodeURIComponent(original!.request.request_id), method: 'GET',
+            headers: { 'X-Owner-Analysis-Request-Hash': original!.requestHash }, statuses: [200, 404, 503] }
+          : { path: values.kind === 'policy' ? '/v2/private/portfolio/policy'
+            : '/v2/private/fund/' + encodeURIComponent(values.code as string) + '/evidence', method: 'GET',
+          headers: {}, statuses: [200] }
+      const response = await sendOwnerHttpResponse(input, target, token, active, check,
+        (reply, stopped, guarded) => readOwnerBody(reply, stopped, guarded, ANALYSIS_RESPONSE_MAX_BYTES, '分析'), '分析')
+      check()
+      try {
+        if (values.kind === 'write') contract.parseOwnerAnalysisWriteResponse(response.status, response.rawBody, original!)
+        else if (values.kind === 'receipt') contract.parseOwnerAnalysisReceiptResponse(response.status, response.rawBody, original!)
+        else if (values.kind === 'policy') contract.parseOwnerAnalysisPolicy(response.rawBody)
+        else contract.parseOwnerAnalysisEvidence(response.rawBody, values.code as string)
+      } catch { throw new ApiError('分析响应契约无效', 'http', 502) }
+      check()
+      return response
+    }, controller.signal, ANALYSIS_TIMEOUT_MS)
   } catch (error) {
     assertGeneration(expected)
     if (error instanceof ApiError && error.status === 401) {

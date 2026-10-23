@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch as observe } from 'vue'
 import { ApiError, getHealth, getV8Decision, type SignalResp, type V8DecisionResult } from '@/api/client'
 import { useAppStore } from '@/stores/app'
 import { useWatchlistStore } from '@/stores/watchlist'
+import { useOwnerAnalysisStore } from '@/stores/ownerAnalysis'
 import { ownerSession, ownerSessionGeneration } from '@/stores/ownerSession'
 import { useFundsStore } from '@/stores/funds'
 import IndexBar from '@/components/IndexBar.vue'
@@ -19,6 +20,7 @@ import { temperatureLabel, TEMPERATURE_DEFINITION } from '@/utils/terminology'
 
 const app = useAppStore()
 const watch = useWatchlistStore()
+const ownerAnalysis = useOwnerAnalysisStore()
 const funds = useFundsStore()
 const backendOk = ref<boolean | null>(null)
 const healthText = ref('检查中')
@@ -245,12 +247,12 @@ onMounted(() => { void refreshHome(false) })
 
     <van-pull-refresh v-model="refreshing" @refresh="refreshHome(true)">
       <div class="page-body">
-        <LocalHoldingGate :pending="watch.hasLocalChanges()">
+        <LocalHoldingGate :pending="watch.hasLocalChanges() && !ownerAnalysis.qualified">
           <HomeActionCenter
-            :decisions="v8Decisions"
-            :errors="v8Errors"
-            :requested="v8Requested"
-            :loading="v8Loading"
+            :decisions="ownerAnalysis.qualified ? ownerAnalysis.results : v8Decisions"
+            :errors="ownerAnalysis.qualified ? [] : v8Errors"
+            :requested="ownerAnalysis.qualified ? ownerAnalysis.results.length : v8Requested"
+            :loading="ownerAnalysis.qualified ? false : v8Loading"
           />
         </LocalHoldingGate>
 

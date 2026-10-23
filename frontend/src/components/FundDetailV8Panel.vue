@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { ownerSession, ownerSessionGeneration } from '@/stores/ownerSession'
+import { useOwnerAnalysisStore } from '@/stores/ownerAnalysis'
 import LocalHoldingGate from './LocalHoldingGate.vue'
 import {
   ApiError,
@@ -31,7 +32,10 @@ const props = defineProps<{
 type LoadState = 'loading' | 'ready' | 'missing' | 'error' | 'redacted'
 
 const state = ref<LoadState>('loading')
-const result = ref<V8DecisionResult | null>(null)
+const legacyResult = ref<V8DecisionResult | null>(null)
+const ownerAnalysis = useOwnerAnalysisStore()
+const confirmed = computed(() => ownerAnalysis.resultFor(props.code))
+const result = computed(() => confirmed.value ?? legacyResult.value)
 const outcomes = ref<V8FundOutcomes | null>(null)
 const outcomeLoading = ref(false)
 const outcomeError = ref(false)
@@ -55,7 +59,7 @@ function shortId(value: string | null | undefined): string {
 async function load() {
   const generation = ++loadGeneration
   state.value = 'loading'
-  result.value = null
+  legacyResult.value = null
   outcomes.value = null
   outcomeLoading.value = true
   outcomeError.value = false
@@ -71,7 +75,7 @@ async function load() {
   try {
     const value = await getV8Decision(props.code)
     if (generation !== loadGeneration) return
-    result.value = value
+    legacyResult.value = value
     state.value = 'ready'
   } catch (error) {
     if (generation !== loadGeneration) return
@@ -83,7 +87,7 @@ async function load() {
 watch(() => props.code, load, { immediate: true })
 watch(ownerSessionGeneration, () => {
   loadGeneration++
-  result.value = null
+  legacyResult.value = null
   outcomes.value = null
   state.value = 'redacted'
   outcomeLoading.value = false
@@ -102,26 +106,26 @@ watch(ownerSessionGeneration, () => {
       <span class="readonly-mark">只读快照</span>
     </header>
 
-    <LocalHoldingGate :pending="localHoldingPending">
-    <div v-if="state === 'loading'" class="ledger-state" aria-live="polite">
+    <LocalHoldingGate :pending="localHoldingPending && !confirmed">
+    <div v-if="!confirmed && state === 'loading'" class="ledger-state" aria-live="polite">
       <span class="loading-rule" />
       <strong>正在读取 V8 决策链</strong>
       <p>旧版基金详情会继续正常加载。</p>
     </div>
 
-    <div v-else-if="state === 'redacted'" class="ledger-state missing-state" aria-live="polite">
+    <div v-else-if="!confirmed && state === 'redacted'" class="ledger-state missing-state" aria-live="polite">
       <span class="state-seal">未公开</span>
       <strong>私人决策快照不对匿名请求公开</strong>
       <p>这不表示没有记录，也不表示持仓或收益为 0。下方公开基金分析仍可查看。</p>
     </div>
 
-    <div v-else-if="state === 'missing'" class="ledger-state missing-state" aria-live="polite">
+    <div v-else-if="!confirmed && state === 'missing'" class="ledger-state missing-state" aria-live="polite">
       <span class="state-seal">待生成</span>
       <strong>这只基金尚无 V8 决策快照</strong>
       <p>404 表示“还没有生成记录”，不代表基金数据为 0，也不代表后端故障。下方旧版详情仍可查看。</p>
     </div>
 
-    <div v-else-if="state === 'error'" class="ledger-state error-state" aria-live="polite">
+    <div v-else-if="!confirmed && state === 'error'" class="ledger-state error-state" aria-live="polite">
       <span class="state-seal">暂不可读</span>
       <strong>V8 决策链本次请求失败</strong>
       <p>不使用缓存或推算数据冒充快照；下方旧版详情不受影响。</p>
@@ -177,7 +181,7 @@ watch(ownerSessionGeneration, () => {
         </div>
       </article>
 
-      <article class="ledger-layer" data-layer="decision-diff">
+      <article v-if="result.diff" class="ledger-layer" data-layer="decision-diff">
         <div class="layer-index"><span>02</span><em>DIFF</em></div>
         <div class="layer-content">
           <div class="layer-title">
@@ -205,6 +209,7 @@ watch(ownerSessionGeneration, () => {
           </div>
         </div>
       </article>
+      <p v-else class="quiet-explanation">本轮持仓分析未提供同来源历史比较；不推断这是首份记录或动作未变。</p>
 
       <article class="ledger-layer" data-layer="position-guidance">
         <div class="layer-index"><span>03</span><em>POSITION</em></div>

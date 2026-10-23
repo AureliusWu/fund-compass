@@ -512,7 +512,7 @@ export interface V8DecisionResult {
   evidence: V8EvidenceSnapshot
   holding: V8HoldingVersion
   policy: V8PortfolioPolicy
-  diff: V8DecisionDiff
+  diff: V8DecisionDiff | null
 }
 
 export interface V8DecisionItem {
