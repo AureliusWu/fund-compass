@@ -22,6 +22,8 @@ declare module 'vue' {
     LocalHoldingGate: typeof import('./src/components/LocalHoldingGate.vue')['default']
     OverseasAccuracyPanel: typeof import('./src/components/OverseasAccuracyPanel.vue')['default']
     OwnerAnalysisPanel: typeof import('./src/components/OwnerAnalysisPanel.vue')['default']
+    OwnerFullSyncPacketPanel: typeof import('./src/components/OwnerFullSyncPacketPanel.vue')['default']
+    OwnerFullSyncPanel: typeof import('./src/components/OwnerFullSyncPanel.vue')['default']
     OwnerManagedSyncPanel: typeof import('./src/components/OwnerManagedSyncPanel.vue')['default']
     OwnerPolicyVersions: typeof import('./src/components/OwnerPolicyVersions.vue')['default']
     OwnerPortfolioMigrationPanel: typeof import('./src/components/OwnerPortfolioMigrationPanel.vue')['default']

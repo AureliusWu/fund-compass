@@ -7,6 +7,11 @@ import type { ownerSyncOutboxStorage } from './ownerSyncOutbox'
 import type { OwnerWorkspaceSyncMetadata } from '@/utils/owner-workspace-sync-metadata'
 import type { OwnerPortfolioLocal, OwnerPortfolioCommand } from '@/utils/ownerPortfolioLocal'
 import type { OwnerPortfolioUpgradeIntent } from '@/utils/owner-portfolio-upgrade-intent'
+import type { OwnerPortfolioSyncMetadata, OwnerPortfolioSyncMetadataContext } from '@/utils/owner-portfolio-sync'
+import type { OwnerPortfolioSyncUpgradeIntent } from '@/utils/owner-portfolio-sync-intent'
+import type { OwnerPortfolioInitialMergeResolution } from '@/utils/owner-portfolio-merge'
+import type { OwnerWorkspaceAckRawMatched } from '@/utils/owner-workspace-ack'
+import type { OwnerSyncBaseline } from './ownerSyncCandidate'
 import type { OwnerWorkspaceDeliveryRequest, OwnerWorkspaceAckCloudRequest } from './owner-workspace-delivery'
 export type { OwnerWorkspaceDeliveryRequest, OwnerWorkspaceAckCloudRequest } from './owner-workspace-delivery'
 export type { OwnerWorkspaceEntry, OwnerWorkspaceLegacy, OwnerWorkspaceSnapshot } from '@/utils/owner-cloud-import'
@@ -57,7 +62,38 @@ export interface OwnerWorkspaceLocalState {
   /** Physical v5 only. Part of every exact local preimage, never legacy LS. */
   readonly portfolio?: OwnerPortfolioLocal
   readonly portfolioUpgrade?: OwnerPortfolioUpgradeIntent
+  /** Physical v6 only; sync above remains the immutable historical v4 base. */
+  readonly fullSync?: OwnerPortfolioSyncMetadata
+  readonly fullSyncUpgrade?: OwnerPortfolioSyncUpgradeIntent
 }
+export interface OwnerWorkspaceFullSyncState {
+  readonly local: OwnerWorkspaceLocalState
+  readonly fullSync: OwnerPortfolioSyncMetadata
+}
+export interface OwnerWorkspaceFullSyncLinkRequest {
+  readonly id: string; readonly hash: string; readonly expected: OwnerWorkspaceFullSyncState
+  readonly base: OwnerSyncBaseline; readonly minimumObservedRevision: number
+  readonly resolutions: readonly OwnerPortfolioInitialMergeResolution[]
+}
+export interface OwnerWorkspaceFullSyncPrepareRequest {
+  readonly id: string; readonly hash: string; readonly expected: OwnerWorkspaceFullSyncState
+  readonly packet: BuiltOwnerSyncRequest
+}
+export interface OwnerWorkspaceFullSyncCancelRequest {
+  readonly id: string; readonly hash: string; readonly expected: OwnerWorkspaceFullSyncState
+  readonly requestId: string; readonly requestHash: string
+}
+export interface OwnerWorkspaceFullSyncDeliveryRequest {
+  readonly expected: OwnerWorkspaceFullSyncState
+  readonly requestId: string; readonly requestHash: string; readonly preparationHash: string
+  readonly nextState: Exclude<NonNullable<SlotRow['entry']>['state'], 'prepared'>
+}
+export interface OwnerWorkspaceFullSyncAckInput {
+  readonly id: string; readonly expected: OwnerWorkspaceFullSyncState
+  readonly matchedResult: OwnerWorkspaceAckRawMatched; readonly completeBaseline: OwnerSyncBaseline
+  readonly minimumObservedRevision: number; readonly resolutions: readonly OwnerPortfolioInitialMergeResolution[]
+}
+export interface OwnerWorkspaceFullSyncAckRequest extends OwnerWorkspaceFullSyncAckInput { readonly hash: string }
 export interface OwnerWorkspaceEditPortfolioRequest {
   readonly id: string; readonly hash: string; readonly expected: OwnerWorkspaceLocalState; readonly command: OwnerPortfolioCommand
 }
@@ -96,6 +132,14 @@ export interface OwnerWorkspace {
   adoptLocal(request: OwnerWorkspaceAdoptLocalRequest, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceLocalState>
   editLocal(request: OwnerWorkspaceEditLocalRequest, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceLocalState>
   editPortfolio(request: OwnerWorkspaceEditPortfolioRequest, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceLocalState>
+  readFullSyncState(guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceFullSyncState>
+  linkFullSyncBase(request: OwnerWorkspaceFullSyncLinkRequest, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceFullSyncState>
+  prepareFullSync(request: OwnerWorkspaceFullSyncPrepareRequest, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceFullSyncState>
+  cancelPreparedFullSync(request: OwnerWorkspaceFullSyncCancelRequest, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceFullSyncState>
+  transitionFullSyncDelivery(request: OwnerWorkspaceFullSyncDeliveryRequest, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceFullSyncState>
+  ackFullSync(request: OwnerWorkspaceFullSyncAckRequest, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceFullSyncState>
+  fullSyncReceipt(id: string, hash: string, guard: OwnerWorkspaceGuard): Promise<Readonly<{ state: 'unknown' }>
+    | Readonly<{ state: 'matched'; value: OwnerWorkspaceFullSyncState }>>
   restoreLocal(request: OwnerWorkspaceRestoreLocalRequest, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceLocalState>
   /** Explicit physical-v4 primitives only. No HTTP, implicit upgrade, or cloud confirmation. */
   readSyncState(guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceSyncState>
@@ -130,7 +174,8 @@ export interface StoredReceipt {
 export type SlotRow = ReturnType<typeof ownerSyncOutboxStorage.rowShape>
 export interface Image { slot: SlotRow; working: WorkingRow; metadata: OwnerWorkspaceLocalMetadata; sync: OwnerWorkspaceSyncMetadata | null;
   receipt: StoredReceipt | null; original: StoredReceipt | null; receiptCount: number; portfolio?: OwnerPortfolioLocal | null;
-  portfolioUpgrade?: OwnerPortfolioUpgradeIntent | null }
+  portfolioUpgrade?: OwnerPortfolioUpgradeIntent | null; fullSync?: OwnerPortfolioSyncMetadata | null;
+  fullSyncUpgrade?: OwnerPortfolioSyncUpgradeIntent | null }
 
 export type LocalStateValidator = (input: unknown) => OwnerWorkspaceLocalState
 export interface CloudPostimage {
@@ -148,6 +193,32 @@ export interface CloudWorkspaceHost {
   validateLocalState: LocalStateValidator
   commitCloud(expected: OwnerWorkspaceSyncState, baseline: Image, post: CloudPostimage,
     mode: CloudCommitMode, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceSyncState>
+  assertActive(guard: OwnerWorkspaceGuard): void
+}
+export interface FullSyncPostimage {
+  readonly outbox: OwnerWorkspaceLocalState['outbox']
+  readonly fullSync: OwnerPortfolioSyncMetadata
+  readonly snapshot?: OwnerWorkspaceSnapshot
+  readonly metadata?: OwnerWorkspaceLocalMetadata
+  readonly portfolio?: OwnerPortfolioLocal
+}
+export interface FullSyncLinkPostimage extends FullSyncPostimage {
+  readonly snapshot: OwnerWorkspaceSnapshot
+  readonly metadata: OwnerWorkspaceLocalMetadata
+  readonly portfolio: OwnerPortfolioLocal
+}
+export type FullSyncCommitMode = 'prepare' | 'cancel' | 'delivery' | 'ack'
+/** Private core-created capability only. UI/open options cannot supply codecs
+ * or transactions; the fixed loaded codec and actual CAS remain in the core. */
+export interface FullSyncWorkspaceHost {
+  readonly target: string
+  readImage(guard: OwnerWorkspaceGuard): Promise<Image>
+  toFullSyncState(image: Image): OwnerWorkspaceFullSyncState
+  validateFullSyncMetadata(input: unknown, context: OwnerPortfolioSyncMetadataContext): OwnerPortfolioSyncMetadata
+  commitFull(expected: OwnerWorkspaceFullSyncState, baseline: Image, post: FullSyncPostimage,
+    mode: FullSyncCommitMode, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceFullSyncState>
+  commitFullLink(expected: OwnerWorkspaceFullSyncState, baseline: Image, post: FullSyncLinkPostimage,
+    guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceFullSyncState>
   assertActive(guard: OwnerWorkspaceGuard): void
 }
 export interface CloudUpgradeHost {

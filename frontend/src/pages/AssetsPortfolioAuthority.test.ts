@@ -124,6 +124,20 @@ describe('Assets authority-first portfolio UI', () => {
     expect(chart.series.map((row: any) => row.name)).not.toContain('盈亏')
     expect(mocks.snapDaily).not.toHaveBeenCalled(); expect(mocks.snapManual).not.toHaveBeenCalled(); expect(businessReads).toEqual([])
   })
+  it('keeps actual v6 portfolio rows, local editing and original history visible without reading legacy storage', async () => {
+    useV5(await portfolio()); mocks.store.localSyncFormat = 'v6'
+    const root = await mount(); expect(businessReads).toEqual([]); expect(output(root)).toContain('UTC 旧档')
+    expect(output(root)).not.toContain('还没有持仓')
+    expect(output(root)).toContain('手工资产 · 共同工作区副本')
+    expect(output(root)).toContain('上传和 ACK 需单独确认')
+    expect(output(root)).not.toContain('当前尚未接入云确认')
+    await click(find(root, 'test-button', '新增')); field(root, '名称', 'v6 本机现金'); field(root, '市值', '0')
+    expect(await confirmManual(root)).toBe(true); expect(mocks.store.portfolioState.manual.some((row: any) => row.values.name === 'v6 本机现金')).toBe(true)
+    expect(output(root)).toContain('余额观察只留本机')
+    const record = find(root, 'test-button', '记录余额观察'); expect(record.props.disabled).toBe(false); await click(record)
+    expect(mocks.store.portfolioState.history).toHaveLength(3); expect(mocks.store.portfolioState.history[0].calendar).toBe('legacy-utc')
+    expect(mocks.snapDaily).not.toHaveBeenCalled(); expect(mocks.snapManual).not.toHaveBeenCalled(); expect(fetch).not.toHaveBeenCalled()
+  })
   it('exports original negative zero without JSON.stringify coercion and labels legacy cost as its original convention', async () => {
     const source = await previewOwnerPortfolioMigration({ manualRaw: null,
       snapshotsRaw: '[{"date":"2026-10-01","value":-0,"cost":-0},{"date":"2026-10-02","value":2,"cost":1}]' })

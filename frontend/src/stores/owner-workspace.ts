@@ -16,7 +16,7 @@ import {
 } from '@/utils/owner-workspace-backup'
 import type { OwnerWorkspaceSyncMetadata } from '@/utils/owner-workspace-sync-metadata'
 import {
-  WORKING, RECEIPTS, METADATA, CURRENT, STORES, SYNC, PORTFOLIO, SCHEMA, RECEIPT_SCHEMA, HASH, ID, MAX_RECEIPTS,
+  WORKING, RECEIPTS, METADATA, CURRENT, STORES, SYNC, PORTFOLIO, FULL_SYNC, SCHEMA, RECEIPT_SCHEMA, HASH, ID, MAX_RECEIPTS,
   OwnerWorkspaceError, fail, code, closed, counter, increment, canonical, digest, assertGuard, localId,
 } from './owner-workspace-shared'
 import type {
@@ -25,17 +25,34 @@ import type {
   OwnerWorkspaceEditLocalRequest, OwnerWorkspaceRestoreLocalRequest, OwnerWorkspaceSyncState,
   OwnerWorkspaceLinkCloudRequest, OwnerWorkspacePrepareCloudRequest, OwnerWorkspaceCancelCloudRequest,
   OwnerWorkspace, WorkingRow, StoredReceipt, SlotRow, Image, CloudWorkspaceHost, OwnerWorkspaceEditPortfolioRequest,
+  OwnerWorkspaceFullSyncState, OwnerWorkspaceFullSyncLinkRequest,
+  OwnerWorkspaceFullSyncPrepareRequest, OwnerWorkspaceFullSyncCancelRequest, OwnerWorkspaceFullSyncDeliveryRequest,
+  OwnerWorkspaceFullSyncAckInput, OwnerWorkspaceFullSyncAckRequest,
+  FullSyncWorkspaceHost, FullSyncPostimage, FullSyncLinkPostimage, FullSyncCommitMode,
 } from './owner-workspace-types'
 import type { OwnerPortfolioLocal } from '@/utils/ownerPortfolioLocal'
 import type { OwnerPortfolioUpgradeIntent } from '@/utils/owner-portfolio-upgrade-intent'
+import type { OwnerPortfolioSyncMetadata } from '@/utils/owner-portfolio-sync'
+import type { OwnerPortfolioSyncUpgradeIntent } from '@/utils/owner-portfolio-sync-intent'
+import { copyOwnerFullSyncInput } from '@/utils/owner-full-sync-input'
+import type { OwnerWorkspaceFullSyncUpgradeRequest } from './owner-workspace-full-sync-upgrade'
 import type { OwnerWorkspacePortfolioUpgradeRequest, OwnerWorkspacePortfolioUpgradeSource } from './owner-workspace-portfolio-upgrade'
 export type * from './owner-workspace-types'
 export { OwnerWorkspaceError } from './owner-workspace-shared'
 type SyncCodec = typeof import('@/utils/owner-workspace-sync-codec')
 type CloudCommands = typeof import('./owner-workspace-cloud')
+type FullSyncCommands = typeof import('./owner-workspace-full-sync-commands')
+type FullSyncCommandName = 'prepareFullSync' | 'cancelPreparedFullSync' | 'transitionFullSyncDelivery' | 'ackFullSync' | 'linkFullSyncBase'
 type PortfolioCodec = typeof import('@/utils/ownerPortfolioLocal') & typeof import('@/utils/owner-portfolio-upgrade-intent')
+type FullSyncCodec = typeof import('@/utils/owner-portfolio-sync') & typeof import('@/utils/owner-portfolio-sync-intent')
 let syncCodecPromise: Promise<SyncCodec> | null = null, cloudCommandsPromise: Promise<CloudCommands> | null = null
 let portfolioCodecPromise: Promise<PortfolioCodec> | null = null
+let fullSyncCodecPromise: Promise<FullSyncCodec> | null = null
+let fullSyncCommandsPromise: Promise<FullSyncCommands> | null = null
+function loadFullSyncCodec(): Promise<FullSyncCodec> {
+  return fullSyncCodecPromise ??= Promise.all([import('@/utils/owner-portfolio-sync'), import('@/utils/owner-portfolio-sync-intent')])
+    .then(([sync, intent]) => ({ ...sync, ...intent })).catch(() => fail('workspace_unavailable'))
+}
 function loadPortfolioCodec(): Promise<PortfolioCodec> {
   return portfolioCodecPromise ??= Promise.all([import('@/utils/ownerPortfolioLocal'), import('@/utils/owner-portfolio-upgrade-intent')])
     .then(([portfolio, intent]) => ({ ...portfolio, ...intent })).catch(() => fail('workspace_unavailable'))
@@ -45,6 +62,9 @@ function loadSyncCodec(): Promise<SyncCodec> {
 }
 function loadCloudCommands(): Promise<CloudCommands> {
   return cloudCommandsPromise ??= import('./owner-workspace-cloud').catch(() => fail('workspace_unavailable'))
+}
+function loadFullSyncCommands(): Promise<FullSyncCommands> {
+  return fullSyncCommandsPromise ??= import('./owner-workspace-full-sync-commands').catch(() => fail('workspace_unavailable'))
 }
 function waitForImport<T>(pending: Promise<T>, signal: AbortSignal, problem: () => OwnerWorkspaceErrorCode): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -64,6 +84,13 @@ function waitForImport<T>(pending: Promise<T>, signal: AbortSignal, problem: () 
 function timedImport<T>(pending: Promise<T>): Promise<T> {
   const controller = new AbortController(), timer = setTimeout(() => controller.abort(), OWNER_SYNC_OUTBOX_TIMEOUT_MS)
   return waitForImport(pending, controller.signal, () => 'workspace_timeout').finally(() => clearTimeout(timer))
+}
+function timedOwnedCall<T>(input: unknown, work: (owned: unknown) => Promise<T>): Promise<T> {
+  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), OWNER_SYNC_OUTBOX_TIMEOUT_MS)
+  try {
+    const owned = copyOwnerFullSyncInput(input)
+    return waitForImport(work(owned), controller.signal, () => 'workspace_timeout').finally(() => clearTimeout(timer))
+  } catch (error) { clearTimeout(timer); return Promise.reject(new OwnerWorkspaceError(code(error, 'workspace_invalid_input'))) }
 }
 async function stateCodec(value: unknown): Promise<SyncCodec | null> {
   return value && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, 'sync')
@@ -162,10 +189,13 @@ export async function buildOwnerWorkspaceRollbackRequest(target: string, input: 
   return Object.freeze({ ...copy, hash: await digest(rollbackEnvelope(target, copy)) })
 }
 
-function localState(value: unknown, target: string, codec: SyncCodec | null = null, portfolioCodec: PortfolioCodec | null = null): OwnerWorkspaceLocalState {
+function localState(value: unknown, target: string, codec: SyncCodec | null = null, portfolioCodec: PortfolioCodec | null = null,
+  fullCodec: FullSyncCodec | null = null): OwnerWorkspaceLocalState {
   const hasSync = !!value && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, 'sync')
   const hasPortfolio = !!value && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, 'portfolio')
-  if (!closed(value, ['snapshot', 'outbox', 'metadata', 'receiptCount', ...(hasSync ? ['sync'] : []), ...(hasPortfolio ? ['portfolio', 'portfolioUpgrade'] : [])])
+  const hasFullSync = !!value && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, 'fullSync')
+  if (!closed(value, ['snapshot', 'outbox', 'metadata', 'receiptCount', ...(hasSync ? ['sync'] : []), ...(hasPortfolio ? ['portfolio', 'portfolioUpgrade'] : []),
+    ...(hasFullSync ? ['fullSync', 'fullSyncUpgrade'] : [])])
     || !closed(value.outbox, ['version', 'entry'])) fail('workspace_invalid_input')
   if (value.outbox.entry !== null && !closed(value.outbox.entry, ['schema', 'state', 'rawBody', 'requestHash'])) fail('workspace_invalid_input')
   const copy = snapshot(value.snapshot), slot = ownerSyncOutboxStorage.rowShape({ ...value.outbox, resourceFingerprint: target }, target)
@@ -174,13 +204,22 @@ function localState(value: unknown, target: string, codec: SyncCodec | null = nu
   const metadata = validateOwnerWorkspaceLocalMetadata(value.metadata, copy)
   if (hasSync && !codec) fail('workspace_invalid_input')
   const sync = hasSync ? codec!.validateOwnerWorkspaceSyncMetadata(value.sync, target, { snapshot: copy, metadata,
-    outbox: { version: slot.version, entry: slot.entry } }) : null
+    outbox: { version: slot.version, entry: hasFullSync ? null : slot.entry } }) : null
   if (hasPortfolio && (!sync || !portfolioCodec)) fail('workspace_invalid_input')
   const portfolio = hasPortfolio ? portfolioCodec!.validateOwnerPortfolioLocal(value.portfolio) : null
   const portfolioUpgrade = portfolio ? portfolioCodec!.validateOwnerPortfolioUpgradeIntent(value.portfolioUpgrade, target, portfolio.migration.sourceSha256) : null
-  if (portfolio && (slot.entry !== null || sync?.pending !== null || !metadata.adoption || receiptCount !== 0)) fail('workspace_invalid_input')
+  if (portfolio && (slot.entry !== null && !hasFullSync || sync?.pending !== null || !metadata.adoption || receiptCount !== 0)) fail('workspace_invalid_input')
+  if (hasFullSync && (!portfolio || !sync || !fullCodec)) fail('workspace_invalid_input')
+  const fullSync = hasFullSync ? fullCodec!.validateOwnerPortfolioSyncMetadata(value.fullSync, target,
+    { snapshot: copy, metadata, outbox: { version: slot.version, entry: slot.entry } }) : null
+  const fullSyncUpgrade = fullSync ? fullCodec!.validateOwnerPortfolioSyncUpgradeIntent(value.fullSyncUpgrade, target) : null
+  if (fullSync?.base && portfolio) {
+    const keys = new Set([...copy.entries.map(row => row.key), ...portfolio.manual.map(row => row.key)])
+    if (fullSync.base.records.some(row => !keys.has(row.key))) fail('workspace_invalid_input')
+  }
   const result = Object.freeze({ snapshot: copy, outbox: Object.freeze({ version: slot.version, entry: slot.entry }),
-    metadata, receiptCount, ...(sync ? { sync } : {}), ...(portfolio ? { portfolio, portfolioUpgrade: portfolioUpgrade! } : {}) })
+    metadata, receiptCount, ...(sync ? { sync } : {}), ...(portfolio ? { portfolio, portfolioUpgrade: portfolioUpgrade! } : {}),
+    ...(fullSync ? { fullSync, fullSyncUpgrade: fullSyncUpgrade! } : {}) })
   assertPortfolioRecoveryCapacity(target, result)
   return result
 }
@@ -188,7 +227,8 @@ function localState(value: unknown, target: string, codec: SyncCodec | null = nu
  * limit, including escaped original raw sources, not separate per-store caps. */
 function assertPortfolioRecoveryCapacity(target: string, state: OwnerWorkspaceLocalState): void {
   if (!state.portfolio) return
-  const raw = canonicalOwnerLocal({ format: 'sinan-owner-workspace-recovery-2', physicalVersion: 5, targetFingerprint: target, local: state })
+  const raw = canonicalOwnerLocal({ format: state.fullSync ? 'sinan-owner-workspace-recovery-3' : 'sinan-owner-workspace-recovery-2',
+    physicalVersion: state.fullSync ? 6 : 5, targetFingerprint: target, local: state })
   if (raw.length > OWNER_WORKSPACE_BACKUP_MAX_BYTES || new TextEncoder().encode(raw).byteLength > OWNER_WORKSPACE_BACKUP_MAX_BYTES) fail('workspace_capacity')
 }
 /** Pure full-image validation for explicit recovery files, never an IDB open.
@@ -198,22 +238,33 @@ export async function validateOwnerWorkspaceLocalState(target: string, input: un
   localId(target, 'workspace-image-validation')
   const codec = await stateCodec(input)
   const portfolioCodec = input && typeof input === 'object' && Object.prototype.hasOwnProperty.call(input, 'portfolio') ? await timedImport(loadPortfolioCodec()) : null
-  const copy = localState(input, target, codec, portfolioCodec)
+  const fullCodec = input && typeof input === 'object' && Object.prototype.hasOwnProperty.call(input, 'fullSync') ? await timedImport(loadFullSyncCodec()) : null
+  const copy = localState(input, target, codec, portfolioCodec, fullCodec)
   if (copy.portfolio) {
     await portfolioCodec!.verifyOwnerPortfolioMigration(copy.portfolio)
     await portfolioCodec!.verifyOwnerPortfolioUpgradeIntent(copy.portfolioUpgrade, target, copy.portfolio.migration.sourceSha256)
+  }
+  if (copy.fullSync) await fullCodec!.verifyOwnerPortfolioSyncUpgradeIntent(copy.fullSyncUpgrade, target)
+  if (copy.fullSync?.pending) {
+    const pending = await timedImport(import('@/utils/owner-portfolio-pending'))
+    await pending.verifyOwnerPortfolioPending({ slot: { ...copy.outbox, resourceFingerprint: target },
+      working: { schema: SCHEMA, targetFingerprint: target, snapshot: copy.snapshot }, metadata: copy.metadata,
+      receiptCount: copy.receiptCount, sync: copy.sync ?? null, portfolio: copy.portfolio, portfolioUpgrade: copy.portfolioUpgrade,
+      fullSync: copy.fullSync, fullSyncUpgrade: copy.fullSyncUpgrade, receipt: null, original: null }, target,
+    value => localState(value, target, codec, portfolioCodec, fullCodec))
   }
   if (copy.sync && codec) await codec.verifyPending({
     slot: { ...copy.outbox, resourceFingerprint: target },
     working: { schema: SCHEMA, targetFingerprint: target, snapshot: copy.snapshot },
     metadata: copy.metadata, sync: copy.sync, receiptCount: copy.receiptCount, receipt: null, original: null, portfolio: copy.portfolio, portfolioUpgrade: copy.portfolioUpgrade,
-  }, target, value => localState(value, target, codec, portfolioCodec))
+  }, target, value => localState(value, target, codec, portfolioCodec, fullCodec))
   return copy
 }
 function stateOf(image: Image): OwnerWorkspaceLocalState {
   return Object.freeze({ snapshot: image.working.snapshot, outbox: Object.freeze({ version: image.slot.version, entry: image.slot.entry }),
     metadata: image.metadata, receiptCount: image.receiptCount, ...(image.sync ? { sync: image.sync } : {}),
-    ...(image.portfolio ? { portfolio: image.portfolio, portfolioUpgrade: image.portfolioUpgrade! } : {}) })
+    ...(image.portfolio ? { portfolio: image.portfolio, portfolioUpgrade: image.portfolioUpgrade! } : {}),
+    ...(image.fullSync ? { fullSync: image.fullSync, fullSyncUpgrade: image.fullSyncUpgrade! } : {}) })
 }
 function command(input: unknown): OwnerWorkspaceLocalCommand {
   if (closed(input, ['type', 'input', 'expectedEntry', 'confirmed']) && input.type === 'save' && typeof input.confirmed === 'boolean') {
@@ -275,12 +326,17 @@ function syncStateOf(image: Image): OwnerWorkspaceSyncState {
   if (!image.sync || image.portfolio) fail('workspace_invalid_database')
   return Object.freeze({ local: stateOf(image), sync: image.sync })
 }
+function fullSyncStateOf(image: Image): OwnerWorkspaceFullSyncState {
+  if (!image.fullSync || !image.fullSyncUpgrade || !image.portfolio) fail('workspace_invalid_database')
+  return Object.freeze({ local: stateOf(image), fullSync: image.fullSync })
+}
 // Excludes mutable delivery state, but binds every local row/archive/receipt
 // count and the exact complete common base. Hashes are not source authentication.
 function makeWorkspace(db: IDBDatabase, target: string, codec: SyncCodec | null = null,
-  portfolioCodec: PortfolioCodec | null = null): OwnerWorkspace {
-  if (db.version >= 4 && !codec || db.version === 5 && !portfolioCodec) fail('workspace_invalid_database')
-  const storesForVersion = db.version === 5 ? [...STORES, SYNC, PORTFOLIO] : db.version === 4 ? [...STORES, SYNC] : STORES
+  portfolioCodec: PortfolioCodec | null = null, fullCodec: FullSyncCodec | null = null): OwnerWorkspace {
+  if (db.version >= 4 && !codec || db.version >= 5 && !portfolioCodec || db.version === 6 && !fullCodec) fail('workspace_invalid_database')
+  const storesForVersion = db.version === 6 ? [...STORES, SYNC, PORTFOLIO, FULL_SYNC]
+    : db.version === 5 ? [...STORES, SYNC, PORTFOLIO] : db.version === 4 ? [...STORES, SYNC] : STORES
   let closedHandle = false
   const inFlight = new Set<(value: OwnerWorkspaceErrorCode) => void>()
   let observedLocal: OwnerWorkspaceSnapshot | null = null, observedSlot: SlotRow | null = null
@@ -288,11 +344,13 @@ function makeWorkspace(db: IDBDatabase, target: string, codec: SyncCodec | null 
   let observedSync: OwnerWorkspaceSyncMetadata | null = null
   let observedPortfolio: OwnerPortfolioLocal | null = null
   let observedPortfolioUpgrade: OwnerPortfolioUpgradeIntent | null = null
+  let observedFullSync: OwnerPortfolioSyncMetadata | null = null, observedFullSyncUpgrade: OwnerPortfolioSyncUpgradeIntent | null = null
   const ensureOpen = () => { if (closedHandle) fail('workspace_closed') }
   const close = () => {
     if (closedHandle) return
     closedHandle = true
     observedLocal = null; observedSlot = null; observedMetadata = null; observedSync = null; observedPortfolio = null; observedPortfolioUpgrade = null
+    observedFullSync = null; observedFullSyncUpgrade = null
     for (const cancel of [...inFlight]) cancel('workspace_closed')
     try { db.close() } catch { /* disposal has no driver details */ }
   }
@@ -309,9 +367,14 @@ function makeWorkspace(db: IDBDatabase, target: string, codec: SyncCodec | null 
     if (observedSync && (!image.sync || image.sync.epoch < observedSync.epoch
         || image.sync.epoch === observedSync.epoch && canonical(image.sync) !== canonical(observedSync))) fail('workspace_invalid_database')
     if (observedPortfolioUpgrade && canonical(image.portfolioUpgrade) !== canonical(observedPortfolioUpgrade)) fail('workspace_invalid_database')
+    if (observedFullSync && (!image.fullSync || image.fullSync.epoch < observedFullSync.epoch
+      || image.fullSync.epoch === observedFullSync.epoch && canonical(image.fullSync) !== canonical(observedFullSync))) fail('workspace_invalid_database')
+    if (observedFullSyncUpgrade && canonical(image.fullSyncUpgrade) !== canonical(observedFullSyncUpgrade)) fail('workspace_invalid_database')
+    if (db.version === 6 && observedSync && canonical(image.sync) !== canonical(observedSync)) fail('workspace_invalid_database')
     observedLocal = next; observedSlot = image.slot; observedMetadata = image.metadata; observedSync = image.sync
     observedPortfolio = image.portfolio ?? null
     observedPortfolioUpgrade = image.portfolioUpgrade ?? null
+    observedFullSync = image.fullSync ?? null; observedFullSyncUpgrade = image.fullSyncUpgrade ?? null
   }
   function bounded<T>(guard: OwnerWorkspaceGuard, work: () => Promise<T>): Promise<T> {
     return new Promise((resolve, reject) => {
@@ -383,7 +446,8 @@ function makeWorkspace(db: IDBDatabase, target: string, codec: SyncCodec | null 
         workings: stores[WORKING].count(), receipts: stores[RECEIPTS].count(),
         metadata: stores[METADATA].get(CURRENT), metadatas: stores[METADATA].count(),
         ...(db.version >= 4 ? { sync: stores[SYNC].get(CURRENT), syncs: stores[SYNC].count() } : {}),
-        ...(db.version === 5 ? { portfolio: stores[PORTFOLIO].get(CURRENT), portfolios: stores[PORTFOLIO].count(), portfolioUpgrade: stores[PORTFOLIO].get('intent') } : {}),
+        ...(db.version >= 5 ? { portfolio: stores[PORTFOLIO].get(CURRENT), portfolios: stores[PORTFOLIO].count(), portfolioUpgrade: stores[PORTFOLIO].get('intent') } : {}),
+        ...(db.version === 6 ? { fullSync: stores[FULL_SYNC].get(CURRENT), fullSyncs: stores[FULL_SYNC].count(), fullSyncUpgrade: stores[FULL_SYNC].get('intent') } : {}),
         ...(id ? { receipt: stores[RECEIPTS].get(id) } : {}),
         ...(originalId ? { original: stores[RECEIPTS].get(originalId) } : {}),
       }
@@ -402,23 +466,36 @@ function makeWorkspace(db: IDBDatabase, target: string, codec: SyncCodec | null 
           let sync: OwnerWorkspaceSyncMetadata | null = null
           if (db.version >= 4) {
             try { sync = codec!.validateOwnerWorkspaceSyncMetadata(requests.sync.result, target, { snapshot: currentWorking.snapshot, metadata,
-              outbox: { version: slot.version, entry: slot.entry } }) }
+              outbox: { version: slot.version, entry: db.version === 6 ? null : slot.entry } }) }
             catch { fail('workspace_invalid_database') }
           }
           let portfolio: OwnerPortfolioLocal | null = null
           let portfolioUpgrade: OwnerPortfolioUpgradeIntent | null = null
-          if (db.version === 5) {
+          if (db.version >= 5) {
             const row = requests.portfolio.result
             if (requests.portfolios.result !== 2 || !closed(row, ['schema', 'targetFingerprint', 'portfolio'])
               || row.schema !== 'owner-workspace-portfolio-1' || row.targetFingerprint !== target) fail('workspace_invalid_database')
             try {
               portfolio = portfolioCodec!.validateOwnerPortfolioLocal(row.portfolio)
               portfolioUpgrade = portfolioCodec!.validateOwnerPortfolioUpgradeIntent(requests.portfolioUpgrade.result, target, portfolio.migration.sourceSha256)
-              if (slot.entry !== null || sync?.pending !== null || !metadata.adoption || requests.receipts.result !== 0) fail('workspace_invalid_database')
+              if (slot.entry !== null && db.version !== 6 || sync?.pending !== null || !metadata.adoption || requests.receipts.result !== 0) fail('workspace_invalid_database')
+            } catch { fail('workspace_invalid_database') }
+          }
+          let fullSync: OwnerPortfolioSyncMetadata | null = null, fullSyncUpgrade: OwnerPortfolioSyncUpgradeIntent | null = null
+          if (db.version === 6) {
+            if (requests.fullSyncs.result !== 2) fail('workspace_invalid_database')
+            try {
+              fullSync = fullCodec!.validateOwnerPortfolioSyncMetadata(requests.fullSync.result, target,
+                { snapshot: currentWorking.snapshot, metadata, outbox: { version: slot.version, entry: slot.entry } })
+              fullSyncUpgrade = fullCodec!.validateOwnerPortfolioSyncUpgradeIntent(requests.fullSyncUpgrade.result, target)
+              if (fullSync.base) {
+                const keys = new Set([...currentWorking.snapshot.entries.map(row => row.key), ...portfolio!.manual.map(row => row.key)])
+                if (fullSync.base.records.some(row => !keys.has(row.key))) fail('workspace_invalid_database')
+              }
             } catch { fail('workspace_invalid_database') }
           }
           let current: Image = { slot, working: currentWorking, sync,
-            metadata, portfolio, portfolioUpgrade,
+            metadata, portfolio, portfolioUpgrade, fullSync, fullSyncUpgrade,
             receipt: id && requests.receipt.result !== undefined ? storedReceipt(requests.receipt.result, target) : null,
             original: originalId && requests.original.result !== undefined ? storedReceipt(requests.original.result, target) : null,
             receiptCount: requests.receipts.result }
@@ -439,8 +516,13 @@ function makeWorkspace(db: IDBDatabase, target: string, codec: SyncCodec | null 
       await portfolioCodec!.verifyOwnerPortfolioMigration(result.portfolio)
       await portfolioCodec!.verifyOwnerPortfolioUpgradeIntent(result.portfolioUpgrade, target, result.portfolio.migration.sourceSha256)
     }
+    if (result.fullSync) await fullCodec!.verifyOwnerPortfolioSyncUpgradeIntent(result.fullSyncUpgrade, target)
+    if (result.fullSync?.pending) {
+      const pending = await import('@/utils/owner-portfolio-pending')
+      await pending.verifyOwnerPortfolioPending(result, target, value => localState(value, target, codec, portfolioCodec, fullCodec))
+    }
     await ownerSyncOutboxStorage.validateEntry(result.slot.entry, 'outbox_invalid_database')
-    if (result.sync?.pending) await codec!.verifyPending(result, target, value => localState(value, target, codec, portfolioCodec))
+    if (result.sync?.pending) await codec!.verifyPending(result, target, value => localState(value, target, codec, portfolioCodec, fullCodec))
 
     for (const receipt of [result.receipt, result.original]) if (receipt) await verifyReceipt(receipt)
     ensureOpen(); assertGuard(guard)
@@ -540,6 +622,51 @@ function makeWorkspace(db: IDBDatabase, target: string, codec: SyncCodec | null 
     ensureOpen(); assertGuard(guard); observe(committed)
     return stateOf(committed)
   }
+  async function commitFull(expected: OwnerWorkspaceFullSyncState, baseline: Image, post: FullSyncPostimage,
+    mode: FullSyncCommitMode, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceFullSyncState> {
+    if (db.version !== 6 || !fullCodec) fail('workspace_invalid_database')
+    // The same fixed module was loaded by the explicit public entry. Resolve
+    // it before any transaction; only its synchronous invariant runs inside.
+    const commands = await loadFullSyncCommands()
+    ensureOpen(); assertGuard(guard)
+    // Crypto and full export capacity finish outside the strict transaction.
+    const local = await validateOwnerWorkspaceLocalState(target, { ...stateOf(baseline), ...post })
+    ensureOpen(); assertGuard(guard)
+    const committed = await image('readwrite', guard, undefined, undefined, (current, stores) => {
+      if (canonical(fullSyncStateOf(current)) !== canonical(expected) || canonical(current) !== canonical(baseline)
+        || post.outbox.version !== increment(current.slot.version)) fail('workspace_conflict')
+      commands.assertFullSyncTransition(current, post, mode)
+      const checked = localState(local, target, codec, portfolioCodec, fullCodec)
+      const slot = ownerSyncOutboxStorage.rowShape({ ...checked.outbox, resourceFingerprint: target }, target)
+      const workingRow: WorkingRow = { schema: SCHEMA, targetFingerprint: target, snapshot: checked.snapshot }
+      stores.slot.put(slot, CURRENT)
+      if (post.snapshot !== undefined) stores[WORKING].put(workingRow, CURRENT)
+      if (post.metadata !== undefined) stores[METADATA].put(checked.metadata, CURRENT)
+      if (post.portfolio !== undefined) stores[PORTFOLIO].put({ schema: 'owner-workspace-portfolio-1', targetFingerprint: target, portfolio: checked.portfolio }, CURRENT)
+      if (mode !== 'delivery') stores[FULL_SYNC].put(checked.fullSync, CURRENT)
+      return { ...current, slot, working: workingRow, metadata: checked.metadata,
+        portfolio: checked.portfolio!, fullSync: checked.fullSync! }
+    })
+    ensureOpen(); assertGuard(guard); observe(committed)
+    return fullSyncStateOf(committed)
+  }
+  async function commitFullLink(expected: OwnerWorkspaceFullSyncState, baseline: Image, proposed: FullSyncLinkPostimage,
+    guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceFullSyncState> {
+    if (db.version !== 6 || !fullCodec) fail('workspace_invalid_database')
+    const post = await validateOwnerWorkspaceLocalState(target, { ...stateOf(baseline), ...proposed })
+    ensureOpen(); assertGuard(guard)
+    const committed = await image('readwrite', guard, undefined, undefined, (latest, stores) => {
+      expectedImage(latest, expected.local)
+      writable(latest, baseline, expected.local.snapshot.localVersion, expected.local.outbox.version)
+      const slot = advanceEmptySlot(latest, stores), workingRow: WorkingRow = { schema: SCHEMA, targetFingerprint: target, snapshot: post.snapshot }
+      stores[WORKING].put(workingRow, CURRENT); stores[METADATA].put(post.metadata, CURRENT)
+      stores[PORTFOLIO].put({ schema: 'owner-workspace-portfolio-1', targetFingerprint: target, portfolio: post.portfolio }, CURRENT)
+      stores[FULL_SYNC].put(post.fullSync, CURRENT)
+      return { ...latest, slot, working: workingRow, metadata: post.metadata, portfolio: post.portfolio!, fullSync: post.fullSync! }
+    })
+    ensureOpen(); assertGuard(guard); observe(committed)
+    return fullSyncStateOf(committed)
+  }
   function editPostimage(before: OwnerWorkspaceSnapshot, input: OwnerWorkspaceLocalCommand): { snapshot: OwnerWorkspaceSnapshot; changedKeys: readonly string[] } {
     const list = [...before.entries], changedKeys: string[] = []
     if (input.type === 'save') {
@@ -572,11 +699,11 @@ function makeWorkspace(db: IDBDatabase, target: string, codec: SyncCodec | null 
   }
   const cloudHost: CloudWorkspaceHost = {
     target, readImage, toSyncState: syncStateOf,
-    validateLocalState: value => localState(value, target, codec, portfolioCodec),
+    validateLocalState: value => localState(value, target, codec, portfolioCodec, fullCodec),
     assertActive(guard) { ensureOpen(); assertGuard(guard) },
     async commitCloud(expected, baseline, post, mode, guard) {
       if (!codec) fail('workspace_invalid_database')
-      if (db.version === 5) fail('workspace_invalid_database')
+      if (db.version >= 5) fail('workspace_invalid_database')
       ensureOpen(); assertGuard(guard)
       const committed = await image('readwrite', guard, undefined, undefined,
         (current, stores) => codec.commitCloudImage(target, current, baseline, expected, post, mode, stores))
@@ -588,11 +715,30 @@ function makeWorkspace(db: IDBDatabase, target: string, codec: SyncCodec | null 
     args: unknown[], guard: OwnerWorkspaceGuard): Promise<T> {
     return bounded(guard, async () => {
       if (!codec) fail('workspace_invalid_database')
-      if (db.version === 5) fail('workspace_invalid_database')
+      if (db.version >= 5) fail('workspace_invalid_database')
       const commands = await loadCloudCommands()
       ensureOpen(); assertGuard(guard)
       const call = commands[name] as (...args: unknown[]) => Promise<T>
       return call(cloudHost, ...args, guard)
+    })
+  }
+  const fullHost: FullSyncWorkspaceHost = {
+    target, readImage, toFullSyncState: fullSyncStateOf, commitFull, commitFullLink,
+    validateFullSyncMetadata(input, expected) {
+      if (!fullCodec) fail('workspace_invalid_database')
+      return fullCodec.validateOwnerPortfolioSyncMetadata(input, target, expected)
+    },
+    assertActive(guard) { ensureOpen(); assertGuard(guard) },
+  }
+  function fullCall(name: FullSyncCommandName, received: unknown, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceFullSyncState> {
+    return bounded(guard, async () => {
+      if (name !== 'linkFullSyncBase' && (db.version !== 6 || !fullCodec)) fail('workspace_invalid_database')
+      // Own before the first await, inside the original total bounded window.
+      const input = copyOwnerFullSyncInput(received)
+      if (name === 'linkFullSyncBase' && (db.version !== 6 || !fullCodec)) fail('workspace_invalid_input')
+      const commands = await loadFullSyncCommands()
+      ensureOpen(); assertGuard(guard)
+      return commands[name](fullHost, input, guard)
     })
   }
   const api: OwnerWorkspace = {
@@ -647,7 +793,7 @@ function makeWorkspace(db: IDBDatabase, target: string, codec: SyncCodec | null 
       return commitLocal(baseline, request.expected, next.snapshot, metadata, guard)
     }) },
     editPortfolio(input, guard) { return bounded(guard, async () => {
-      if (db.version !== 5 || !portfolioCodec || !closed(input, ['id', 'hash', 'expected', 'command'])) fail('workspace_invalid_input')
+      if (db.version < 5 || !portfolioCodec || !closed(input, ['id', 'hash', 'expected', 'command'])) fail('workspace_invalid_input')
       const request = await buildOwnerWorkspaceEditPortfolioRequest(target, { id: input.id, expected: input.expected, command: input.command })
       if (request.hash !== input.hash) fail('workspace_invalid_input')
       const baseline = await readImage(guard)
@@ -661,6 +807,25 @@ function makeWorkspace(db: IDBDatabase, target: string, codec: SyncCodec | null 
         recentEdit: { id: request.id, hash: request.hash, beforeLocalVersion: baseline.working.snapshot.localVersion,
           localVersion: next.localVersion, outboxVersion: increment(baseline.slot.version) } }
       return commitLocal(baseline, request.expected, next, metadata, guard, applied.portfolio)
+    }) },
+    readFullSyncState(guard) { return bounded(guard, async () => fullSyncStateOf(await readImage(guard))) },
+    prepareFullSync(received, guard) { return fullCall('prepareFullSync', received, guard) },
+    cancelPreparedFullSync(received, guard) { return fullCall('cancelPreparedFullSync', received, guard) },
+    transitionFullSyncDelivery(received, guard) { return fullCall('transitionFullSyncDelivery', received, guard) },
+    ackFullSync(received, guard) { return fullCall('ackFullSync', received, guard) },
+    linkFullSyncBase(received, guard) { return fullCall('linkFullSyncBase', received, guard) },
+    fullSyncReceipt(id, hash, guard) { return bounded(guard, async () => {
+      localId(target, id)
+      if (typeof hash !== 'string' || !HASH.test(hash)) fail('workspace_invalid_input')
+      const current = fullSyncStateOf(await readImage(guard)), receipt = current.fullSync.recentReceipt
+      if (current.fullSync.pending?.requestId === id) {
+        if (current.fullSync.pending.preparationHash !== hash) fail('workspace_idempotency_conflict')
+        return Object.freeze({ state: 'matched' as const, value: current })
+      }
+      if (receipt?.id !== id) return Object.freeze({ state: 'unknown' as const })
+      if (receipt.hash !== hash) fail('workspace_idempotency_conflict')
+      return receipt.localVersion === current.local.snapshot.localVersion && receipt.outboxVersion === current.local.outbox.version
+        ? Object.freeze({ state: 'matched' as const, value: current }) : Object.freeze({ state: 'unknown' as const })
     }) },
     restoreLocal(input, guard) { return bounded(guard, async () => {
       if (!closed(input, ['id', 'hash', 'expected', 'backup'])) fail('workspace_invalid_input')
@@ -867,7 +1032,7 @@ async function openWorkspace(factory: IDBFactory, target: string, signal: AbortS
       request.onsuccess = () => {
         db = request.result
         if (settled) { db.close(); return }
-        if (![3, 4, 5].includes(db.version) || !isOwnerSyncOutboxDatabase(db)) { finish('workspace_invalid_database'); return }
+        if (![3, 4, 5, 6].includes(db.version) || !isOwnerSyncOutboxDatabase(db)) { finish('workspace_invalid_database'); return }
         db.onversionchange = () => { handle?.close(); db?.close(); finish('workspace_closed') }
         try {
           // Versionchange exposes no strict durability option. All new data
@@ -932,18 +1097,20 @@ function openExistingWorkspace(factory: IDBFactory, target: string, signal: Abor
       request.onsuccess = () => {
         db = request.result
         if (settled) { db.close(); return }
-        if (![3, 4, 5].includes(db.version) || !isOwnerSyncOutboxDatabase(db)) { finish('workspace_invalid_database'); return }
+        if (![3, 4, 5, 6].includes(db.version) || !isOwnerSyncOutboxDatabase(db)) { finish('workspace_invalid_database'); return }
         db.onversionchange = () => finish('workspace_closed')
         db.onclose = () => finish('workspace_closed')
-        const ready = (codec: SyncCodec | null, portfolioCodec: PortfolioCodec | null = null) => {
+        const ready = (codec: SyncCodec | null, portfolioCodec: PortfolioCodec | null = null, fullCodec: FullSyncCodec | null = null) => {
           if (settled || signal.aborted) { db?.close(); return }
           try {
-            handle = makeWorkspace(db!, target, codec, portfolioCodec)
+            handle = makeWorkspace(db!, target, codec, portfolioCodec, fullCodec)
             handle.readLocalState({ signal, assertActive() { if (signal.aborted) fail('workspace_timeout') } })
               .then(() => finish(), error => finish(code(error)))
           } catch (error) { finish(code(error)) }
         }
-        if (db.version === 5) Promise.all([loadSyncCodec(), loadPortfolioCodec()]).then(([sync, portfolio]) => ready(sync, portfolio), () => finish('workspace_unavailable'))
+        if (db.version === 6) Promise.all([loadSyncCodec(), loadPortfolioCodec(), loadFullSyncCodec()])
+          .then(([sync, portfolio, full]) => ready(sync, portfolio, full), () => finish('workspace_unavailable'))
+        else if (db.version === 5) Promise.all([loadSyncCodec(), loadPortfolioCodec()]).then(([sync, portfolio]) => ready(sync, portfolio), () => finish('workspace_unavailable'))
         else if (db.version === 4) loadSyncCodec().then(ready, () => finish('workspace_unavailable'))
         else ready(null)
       }
@@ -1015,10 +1182,20 @@ export function buildOwnerWorkspacePortfolioUpgradeBackup(target: string, expect
 export function buildOwnerWorkspacePortfolioUpgradeRequest(target: string, input: Omit<OwnerWorkspacePortfolioUpgradeRequest, 'hash'>) {
   return timedImport(import('./owner-workspace-portfolio-upgrade').then(module => module.buildOwnerWorkspacePortfolioUpgradeRequest(target, input)))
 }
-async function portfolioFormatOperation(factory: IDBFactory, target: string, input: OwnerWorkspacePortfolioUpgradeRequest,
+/** Shared scheduling only. Each fixed profile still owns its independent
+ * request compiler, intent/CAS and codecs; portfolio never loads full code. */
+async function profileFormatOperation(profile: 'portfolio' | 'full', factory: IDBFactory, target: string,
+  received: OwnerWorkspacePortfolioUpgradeRequest | OwnerWorkspaceFullSyncUpgradeRequest,
   guard: OwnerWorkspaceGuard, reconcile: boolean): Promise<OwnerWorkspace> {
-  localId(target, 'workspace-portfolio-upgrade')
+  const full = profile === 'full'
+  localId(target, full ? 'workspace-full-sync-upgrade' : 'workspace-portfolio-upgrade')
   assertGuard(guard)
+  let input = received
+  if (full) {
+    if (!closed(received, ['id', 'hash', 'backupRaw', 'backupSha256'])) fail('workspace_invalid_input')
+    input = Object.freeze({ id: received.id as string, hash: received.hash as string,
+      backupRaw: received.backupRaw as string, backupSha256: received.backupSha256 as string })
+  }
   const controller = new AbortController()
   let timedOut = false
   const revoked = () => controller.abort()
@@ -1030,24 +1207,60 @@ async function portfolioFormatOperation(factory: IDBFactory, target: string, inp
   } }
   const abortCode = (): OwnerWorkspaceErrorCode => timedOut ? 'workspace_timeout' : 'workspace_context_changed'
   try {
-    const [upgrade, codec, portfolioCodec] = await waitForImport(Promise.all([
-      import('./owner-workspace-portfolio-upgrade'), loadSyncCodec(), loadPortfolioCodec(),
+    const operation = full
+      ? import('./owner-workspace-full-sync-upgrade').then(upgrade => reconcile ? upgrade.reconcileOwnerWorkspaceFullSyncUpgrade : upgrade.upgradeOwnerWorkspaceFullSync)
+      : import('./owner-workspace-portfolio-upgrade').then(upgrade => reconcile ? upgrade.reconcileOwnerWorkspacePortfolioUpgrade : upgrade.upgradeOwnerWorkspacePortfolio)
+    const [apply, codec, portfolioCodec, fullCodec] = await waitForImport(Promise.all([
+      operation, loadSyncCodec(), loadPortfolioCodec(), full ? loadFullSyncCodec() : null,
     ]), controller.signal, abortCode)
     assertGuard(activeGuard)
-    const operation = reconcile ? upgrade.reconcileOwnerWorkspacePortfolioUpgrade : upgrade.upgradeOwnerWorkspacePortfolio
-    return await operation({ target, openExistingWorkspace, strictProbe, working, checkedMetadata,
-      localState: value => localState(value, target, codec, portfolioCodec),
-      makeWorkspace: db => makeWorkspace(db, target, codec, portfolioCodec) }, factory, input, activeGuard, controller.signal, abortCode)
+    return await apply({ target, openExistingWorkspace, strictProbe, working, checkedMetadata,
+      localState: value => localState(value, target, codec, portfolioCodec, fullCodec),
+      makeWorkspace: db => makeWorkspace(db, target, codec, portfolioCodec, fullCodec) }, factory, input, activeGuard, controller.signal, abortCode)
   } catch (error) { throw new OwnerWorkspaceError(timedOut ? 'workspace_timeout' : code(error)) }
   finally { clearTimeout(timer); guard.signal.removeEventListener('abort', revoked) }
 }
 export function upgradeOwnerWorkspacePortfolio(factory: IDBFactory, target: string, input: OwnerWorkspacePortfolioUpgradeRequest,
   guard: OwnerWorkspaceGuard): Promise<OwnerWorkspace> {
-  return portfolioFormatOperation(factory, target, input, guard, false)
+  return profileFormatOperation('portfolio', factory, target, input, guard, false)
 }
 export function reconcileOwnerWorkspacePortfolioUpgrade(factory: IDBFactory, target: string, input: OwnerWorkspacePortfolioUpgradeRequest,
   guard: OwnerWorkspaceGuard): Promise<OwnerWorkspace> {
-  return portfolioFormatOperation(factory, target, input, guard, true)
+  return profileFormatOperation('portfolio', factory, target, input, guard, true)
+}
+
+export function buildOwnerWorkspaceFullSyncLinkRequest(target: string, input: Omit<OwnerWorkspaceFullSyncLinkRequest, 'hash'>) {
+  return timedOwnedCall(input, owned => import('./owner-workspace-full-sync')
+    .then(module => module.buildOwnerWorkspaceFullSyncLinkRequest(target, owned as Omit<OwnerWorkspaceFullSyncLinkRequest, 'hash'>)))
+}
+export function buildOwnerWorkspaceFullSyncPrepareRequest(target: string, input: Pick<OwnerWorkspaceFullSyncPrepareRequest, 'id' | 'expected'>) {
+  return timedOwnedCall(input, owned => import('./owner-workspace-full-sync')
+    .then(module => module.buildOwnerWorkspaceFullSyncPrepareRequest(target, owned as Pick<OwnerWorkspaceFullSyncPrepareRequest, 'id' | 'expected'>)))
+}
+export function buildOwnerWorkspaceFullSyncCancelRequest(target: string, input: Omit<OwnerWorkspaceFullSyncCancelRequest, 'hash'>) {
+  return timedOwnedCall(input, owned => import('./owner-workspace-full-sync')
+    .then(module => module.buildOwnerWorkspaceFullSyncCancelRequest(target, owned as Omit<OwnerWorkspaceFullSyncCancelRequest, 'hash'>)))
+}
+export function previewOwnerWorkspaceFullSyncAck(target: string, input: OwnerWorkspaceFullSyncAckInput) {
+  return timedOwnedCall(input, owned => import('./owner-workspace-full-sync-ack')
+    .then(module => module.previewOwnerWorkspaceFullSyncAck(target, owned as OwnerWorkspaceFullSyncAckInput)))
+}
+export function buildOwnerWorkspaceFullSyncAckRequest(target: string, input: OwnerWorkspaceFullSyncAckInput) {
+  return timedOwnedCall(input, owned => import('./owner-workspace-full-sync-ack')
+    .then(module => module.buildOwnerWorkspaceFullSyncAckRequest(target, owned as OwnerWorkspaceFullSyncAckInput)))
+}
+export function buildOwnerWorkspaceFullSyncUpgradeRequest(target: string, input: Omit<OwnerWorkspaceFullSyncUpgradeRequest, 'hash'>) {
+  if (!closed(input, ['id', 'backupRaw', 'backupSha256'])) return Promise.reject(new OwnerWorkspaceError('workspace_invalid_input'))
+  const owned = Object.freeze({ id: input.id as string, backupRaw: input.backupRaw as string, backupSha256: input.backupSha256 as string })
+  return timedImport(import('./owner-workspace-full-sync-upgrade').then(module => module.buildOwnerWorkspaceFullSyncUpgradeRequest(target, owned)))
+}
+export function upgradeOwnerWorkspaceFullSync(factory: IDBFactory, target: string, input: OwnerWorkspaceFullSyncUpgradeRequest,
+  guard: OwnerWorkspaceGuard): Promise<OwnerWorkspace> {
+  return profileFormatOperation('full', factory, target, input, guard, false)
+}
+export function reconcileOwnerWorkspaceFullSyncUpgrade(factory: IDBFactory, target: string, input: OwnerWorkspaceFullSyncUpgradeRequest,
+  guard: OwnerWorkspaceGuard): Promise<OwnerWorkspace> {
+  return profileFormatOperation('full', factory, target, input, guard, true)
 }
 
 /** v1/v2->v3 adds only stores/independent metadata; one budget covers every phase. */

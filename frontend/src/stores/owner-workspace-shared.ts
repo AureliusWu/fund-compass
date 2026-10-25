@@ -3,11 +3,13 @@ import { OwnerCloudImportError } from '@/utils/owner-cloud-import'
 import { OwnerWorkspaceBackupError } from '@/utils/owner-workspace-backup'
 import { OwnerSyncOutboxError } from './ownerSyncOutbox'
 import { OwnerWorkspaceSyncError, OwnerWorkspaceSyncMetadataError } from '@/utils/owner-workspace-sync-errors'
+import { OwnerFullSyncInputError } from '@/utils/owner-full-sync-input'
 import type { OwnerWorkspaceErrorCode, OwnerWorkspaceGuard } from './owner-workspace-types'
 export const WORKING = 'working_copy', RECEIPTS = 'import_receipts', METADATA = 'local_metadata', CURRENT = 'current'
 export const STORES = ['slot', WORKING, RECEIPTS, METADATA]
 export const SYNC = 'sync_metadata'
 export const PORTFOLIO = 'portfolio_metadata'
+export const FULL_SYNC = 'portfolio_sync_metadata'
 export const SCHEMA = 'owner-workspace-1'
 export const RECEIPT_SCHEMA = 'owner-workspace-receipt-1'
 export const HASH = /^[0-9a-f]{64}(?![\s\S])/
@@ -23,6 +25,7 @@ export class OwnerWorkspaceError extends Error {
 export function fail(code: OwnerWorkspaceErrorCode): never { throw new OwnerWorkspaceError(code) }
 export function code(error: unknown, fallback: OwnerWorkspaceErrorCode = 'workspace_unavailable'): OwnerWorkspaceErrorCode {
   if (error instanceof OwnerWorkspaceError) return error.code
+  if (error instanceof OwnerFullSyncInputError) return error.code === 'capacity_exceeded' ? 'workspace_capacity' : 'workspace_invalid_input'
   if (error instanceof OwnerCloudImportError) return error.code === 'capacity_exceeded' ? 'workspace_capacity' : 'workspace_invalid_input'
   if (error instanceof OwnerWorkspaceBackupError) return error.code === 'capacity_exceeded' ? 'workspace_capacity' : 'workspace_invalid_input'
   if (error instanceof OwnerWorkspaceSyncMetadataError) return error.code === 'capacity_exceeded' ? 'workspace_capacity' : 'workspace_invalid_input'

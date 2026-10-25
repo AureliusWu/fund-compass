@@ -111,7 +111,8 @@ export function isOwnerSyncOutboxDatabase(db: IDBDatabase): boolean {
     ? [STORE, 'working_copy', 'import_receipts'] : db.version === 3
       ? [STORE, 'working_copy', 'import_receipts', 'local_metadata'] : db.version === 4
         ? [STORE, 'working_copy', 'import_receipts', 'local_metadata', 'sync_metadata'] : db.version === 5
-          ? [STORE, 'working_copy', 'import_receipts', 'local_metadata', 'sync_metadata', 'portfolio_metadata'] : []
+          ? [STORE, 'working_copy', 'import_receipts', 'local_metadata', 'sync_metadata', 'portfolio_metadata'] : db.version === 6
+            ? [STORE, 'working_copy', 'import_receipts', 'local_metadata', 'sync_metadata', 'portfolio_metadata', 'portfolio_sync_metadata'] : []
   return stores.length > 0 && db.objectStoreNames.length === stores.length
     && stores.every(name => db.objectStoreNames.contains(name))
 }

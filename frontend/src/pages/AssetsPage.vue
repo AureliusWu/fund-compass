@@ -24,6 +24,8 @@ const router = useRouter()
 const watch = useWatchlistStore()
 const funds = useFundsStore()
 const OwnerPortfolioMigrationPanel = defineAsyncComponent(() => import('@/components/OwnerPortfolioMigrationPanel.vue'))
+const OwnerFullSyncPanel = defineAsyncComponent(() => import('@/components/OwnerFullSyncPanel.vue'))
+const fullSyncPanelOpen = ref(false)
 
 const meta = reactive<Record<string, {
   nav: number | null
@@ -43,7 +45,7 @@ const legacyManualAssets = ref<ManualAsset[]>([])
 const legacySnaps = ref<ReturnType<typeof loadSnapshots>>([])
 const isLegacy = computed(() => localAuthorityKnown.value && localAuthorityReady.value && watch.authorityState === 'legacy')
 const isPortfolio = computed(() => localAuthorityKnown.value && localAuthorityReady.value && watch.authorityState === 'idb'
-  && watch.localSyncFormat === 'v5' && watch.portfolioState != null)
+  && ['v5', 'v6'].includes(watch.localSyncFormat ?? '') && watch.portfolioState != null)
 const manualAssets = computed(() => isPortfolio.value
   ? watch.portfolioState!.manual.filter(row => !row.deleted).map(row => ({ id: row.key, name: row.values.name,
     cls: row.values.cls, value: row.values.value, note: row.values.note ?? undefined, updated_at: row.updated_at }))
@@ -573,17 +575,21 @@ onMounted(refresh)
     </van-nav-bar>
     <div class="page-body">
       <OwnerPortfolioMigrationPanel v-if="watch.authorityState !== 'legacy' && localAuthorityKnown || watch.authorityState === 'blocked'" />
+      <template v-if="['v5', 'v6'].includes(watch.localSyncFormat ?? '') || watch.authorityState === 'blocked'">
+        <van-button size="small" plain data-action="open-full-sync" @click="fullSyncPanelOpen = !fullSyncPanelOpen">{{ fullSyncPanelOpen ? '关闭共同基线协调' : '完整基金与手工资产协调' }}</van-button>
+        <OwnerFullSyncPanel v-if="fullSyncPanelOpen" />
+      </template>
       <div v-if="isLegacy && (manualStorageStatus === 'invalid' || manualStorageStatus === 'storage-error')" class="coverage-warning" role="alert">手工资产本地读取或保存失败；原始存储未被清空，也未同步。请先保留备份并修复本地记录。</div>
       <section class="card manual-card">
         <div class="manual-head">
-          <span>手工资产 · 本机输入</span>
+          <span>{{ isPortfolio && watch.localSyncFormat === 'v6' ? '手工资产 · 共同工作区副本' : '手工资产 · 本机输入' }}</span>
           <div class="manual-actions">
             <van-button v-if="isLegacy" size="mini" plain icon="down" :disabled="!watch.hasToken || !legacySyncEnabled" :loading="manualSyncing" @click="downloadManual">下载合并</van-button>
             <van-button v-if="isLegacy" size="mini" plain icon="upgrade" :disabled="!watch.hasToken || !legacySyncEnabled" :loading="manualSyncing" @click="uploadManual">上传</van-button>
             <van-button size="mini" plain icon="plus" :disabled="!canEditManual || manualSaving" @click="openManual()">新增</van-button>
           </div>
         </div>
-        <div class="class-ref" role="status">{{ manualStatus }}。<template v-if="isLegacy">旧版云同步需在自选页单独明确开启，保存 Token 不代表同意上传。</template><template v-else-if="isPortfolio">手工资产与余额观察只写共同工作区；当前尚未接入云确认，不写旧存储或 Gist。</template><template v-else>资产来源尚未核定，不把独立旧存储的未知金额按 0 展示。</template></div>
+        <div class="class-ref" role="status">{{ isPortfolio && watch.localSyncFormat === 'v6' ? '完整共同工作区副本；保存仅改本机，上传和 ACK 需单独确认' : manualStatus }}。<template v-if="isLegacy">旧版云同步需在自选页单独明确开启，保存 Token 不代表同意上传。</template><template v-else-if="isPortfolio && watch.localSyncFormat === 'v6'">基金与手工资产可在完整同步面板显式核对；余额观察只留本机，不写旧存储或 Gist，不授予分析资格。</template><template v-else-if="isPortfolio">手工资产与余额观察只写共同工作区；当前尚未接入云确认，不写旧存储或 Gist。</template><template v-else>资产来源尚未核定，不把独立旧存储的未知金额按 0 展示。</template></div>
         <div class="manual-row" v-for="a in manualAssets" :key="a.id">
           <span class="manual-name">{{ a.name }}<em>{{ a.cls }}</em></span>
           <span class="manual-value">{{ num(a.value, 2) }}</span>

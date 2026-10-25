@@ -1407,3 +1407,46 @@ Render MCP本轮可正常只读访问：已明确使用用户确认的My Workspa
 修复后重新冻结并直接构建三次10.90/9.06/9.63s，全部PWA7/7、制品完全稳定；基线沿用前述final-v2已完成的三个f010制品及同一pin/安全补丁安装，不冒称本次又交错重建基线。新摘要 `OWNER-PORTFOLIO-CI-FIX-20261025.json` 单列当前pin/原始helper/SHA与证据边界；原性能文件明确绑定5b0失败候选，不当作修复的精确制品。当前gzip9 JS+CSS619247（f010+3.79%），workspace10897（+12.89% WARN）/闭包132098，资产页17769（+21.66% FAIL）/闭包325548，precache495336（+4.76%）、安装并集505253（+4.69%）；历史a519预算债务继续FAIL/WARN，不能用fixture提速洗掉包体回退。无实际浏览器/API/云/耐久或正式发布资格，应用仍8.0.0。
 
 下一步仍是完整manual初始共同基线/profile、同库原包/三方ACK与实际UI/分析；不能以旧B中存在manual就当作已应用L，不能用新C重置基金本机意图，也不把history上传成Owner资产。新模块尚未创建、无未提交规划源码；本次先普通推送这个真实CI修复并核其自然CI，完整v9目标和所有未过门禁保持不变。
+
+### 519848f 精确自然 CI 与 I19 完整基金/手工资产同步候选（2026-10-25）
+
+前一修复已普通推送 `519848fbf8d9f3ff433f8fded8aa68202d65f678`，tree=`58066ad2346c8435b524d7c6cc800e465a174c82`。[自然CI40170791262](https://github.com/AureliusWu/fund-compass/actions/runs/40170791262) 已终态 success：backend **4088 passed/2 warnings/291.54s**、pip check clean；frontend Node20.20.2 **2534/102文件**、type/build5.79s/PWA7/7/官方audit0，原2000行用例1009ms；Worker **148/4文件**、check/dry-run114.28KiB/gzip26.58/官方audit0。实际 checkout merge=`3f21903e7a3e70a1b9a6d174acfe71faad27dce7`，正常fetch核 parents=fc37965+519848f、tree等于feature。原5b0失败run保留，不重跑洗绿；deploy/candidate_smoke/formal_smoke仍skipped，不是部署或v9发布。本轮再次正常fetch确认main仍fc37965、远端feature仍519848f，不绕PR写403或改认证。
+
+#### 完整本机 profile 与实际 UI
+
+显式 v5→v6：旧六store和原全部数据/intent保留，新增 `portfolio_sync_metadata` 恰intent/current两行。活动 `owner-portfolio-sync-1` / `fund-manual-1` 不以改旧schema标签冒充兼容；旧sync保持历史，普通启动不升级、缺项不补。先下载本轮完整v5文件再选回同SHA确认；versionchange意图与strict初始化两次提交，中断只核原文件/原id/hash/完全相同初始像，不创建丢库或覆盖后续编辑。`sinan-owner-workspace-recovery-3` 含完整v6及合法五态原pending/原字节、两份intent/历史/原档案；旧recovery-2只认v5，24MiB不提高。解码/下载不是灾难restore、降级、认证或云耐久证明。
+
+初始基金按旧B/L/C实际三方协调，manual旧B未曾应用则明确bootstrap选择；并发/ABA、同值收敛、生命周期/墓碑及更名整组均显式处理。完整固定upper C与全部选择后才strict同时应用L/B=C，保留旧B/intent/原文、manual原时间或null/-0及历史，不发假POST/ACK，不清local_pending。随后独立同意、预览实际完整B→L、确认严格同库保存原包、再确认唯一POST。原200项/128KiB拒超不裁切；pending绑定全部基金、portfolio/历史/旧sync/intent/版本，重读重算原raw与完整新envelope SHA。先attempted后POST；unknown不取消/重制/重发，prepared才可确认取消。
+
+当前会话实际原write/receipt响应绑定同id/hash，加since=0固定upper完整D，才能预览完整B/L/D ACK；全部manual字段、生命周期和更名整组选择变化失效旧确认。strict最终全像CAS一起更新L/B/本机版本/slot/full epoch/回执并清原包。真实后置hydrate/reset和Pinia同步发布完成前，未知本机tuple不丢；prepare核fullSyncReceipt，不错用没有prepare记录的localReceipt。退出/端点/来源变化清私人视图，迟到回调不写/不清新流程，关闭不关共享handle。初始分页已观察更高head在进入新sender后仍是防回退下限，部分页不冒充C/D。
+
+实际资产页v6仍同工作区编辑/观察，不读写旧LS/Gist，文案区分“共同工作区副本/逐批显式核对”与v5尚未接云入口。历史观察只留本机，不上传为资产或现金流收益。v6持仓分析继续暂停，不能因完整同步内核落地直接开放旧fund-only分析来源。操作与故障保全见 `OWNER-PORTFOLIO-FULL-SYNC.md`；README及旧交接顶部提供当前日志入口，保留原历史审计不改写。
+
+#### 审查中的真实修复
+
+实际回归发现领域错误被HTTP deadline层重包为network，及单调时钟刚越12s同步abort被误标context_changed：以内部outcome保留领域类，再在helper末尾预算复核后外抛，timeout来源同步标记，不把真正撤销误判timeout。另将session/真实guard捕获、descriptor-safe拥有输入全部纳入原12s起点；facade同步复制前捕获起点，仅给后续timer剩余预算，首个host.prepare前核坏/回退/耗尽时钟。未增超时；真实attempted后超时仍0POST且原包不变。两位独立复核当前全像/原响应/tuple/UI边界未见未解决P0/P1；判定仅本机代码与合成IDB/HTTP conditionally trusted，不提升真实浏览器或云认证。
+
+#### 最终验证与仍失败的资源门禁
+
+本轮全部直接npm，不启动launcher/supervisor或换浏览器/凭据。最终完整前端 **3127 passed/116文件/25.10s**、type-check exit0（相对519848f新增593项）；后端本机Python3.14.4 **4088 passed/1211 warnings/668.45s**，pip check clean。1211项为pathlib.is_reserved弃用1209、Starlette/httpx弃用1及原inf故障fixture的Pydantic警告1，未隐藏；不可冒充Python3.12 CI的2 warnings。Worker **148/4文件/4.78s**、check/dry-run114.28KiB/gzip26.58通过。最后再次直接官方audit（include=dev、moderate、fetch-retries=0）前端/Worker均0；无新依赖或锁变更。以上本机证据不代替新commit自然CI。
+
+为减少v3基础块，v6命令按操作懒载：private core host保持固定codec、真实strict事务/完整expected+baseline+slot最终CAS和全部store写；原四mode纯规则来自事务前已加载的固定同步函数，事务内无await或UI注入validator。普通read/recovery不加载写模块，实际模块故障/超时/撤销迟到后0写；共享格式预算框架不合并两profile compiler/intent。每次机械拆分均独立只读复核及真实核心/界面回归，未放宽任何guard或5000ms用例限。
+
+初始warm诊断workspace14829/10893 **+36.13% FAIL**；第一固定命令拆分三对13609 **+24.93% FAIL**，第二固定规则拆分三对13314 **+22.23% FAIL**，均保留原证据且不混入最终样本。第三次只共享重复格式预算/收尾后raw变小但gzip13341略增，未据可读性去重宣称性能改善。最终再次freeze固定src/public/tools/config/package输入，同一exact519 Git archive、完全相同package/lock和实际node_modules junction，A/B/B/A/A/B各3份fresh build/PWA7/7，完整库存完全稳定，核JS静态import/export图及precache URL/非null MD5。详见 `OWNER-FULL-SYNC-PERFORMANCE-20261025.json`；原始helper/三对/中间样本仅本机Temp、未独立封存。
+
+| gzip9字节（不是网络传输或用户时延） | 新鲜重建519基线 | 最终v6候选 | 差异/门禁 |
+| --- | ---: | ---: | --- |
+| JS+CSS | 619148 | 667554 | +7.82% |
+| workspace单块 / JS静态闭包 | 10893 / 132086 | 13341 / 135942 | **+22.47% FAIL** / +2.92% |
+| 自选页JS静态闭包 | 157673 | 159236 | +0.99% |
+| Assets单块 / JS静态闭包 | 17769 / 325513 | 18061 / 327206 | +1.64% / +0.52% |
+| precache（98→113 URL） | 495225 | 543447 | +9.74% |
+| precache/SW/支持并集 | 505153 | 553558 | +9.58% |
+
+最终Vite基线7.17/7.24/7.42s，当前7.36/7.41/7.43s，仅构建记录，不作warm/cold浏览器结论；提交前纯尾部格式修正后重新type/全量/freeze及fresh三对，制品完整库存与修正前完全相同，源码pin和最后样本独立记录，不混用。JS静态闭包不含动态块和CSS preload映射，整体JS+CSS/预缓存另计完整CSS。新模块仍被Workbox预缓存，不能称安装优化。相对历史a519 workspace7787→13341 **+71.32% FAIL**，f010 Assets14605→18061 **+23.66% FAIL**；precache/安装相对a519仍+35.54%/+34.87% WARN，旧Policy局部债务继续开放。历史基线本次未重建；不靠换基线洗掉FAIL、不提高20%、不假设用户豁免。resourceBudget=false，当前只普通推原feature候选，不合main或正式发布。
+
+#### 下一道必要业务门禁
+
+只读再确认实际缺口：已有完整B、空槽且本机无意图时，云端另一设备变化没有可应用的完整B/L/D refresh入口。prepare真实零操作拒绝，ACK需原pending/真实回执；不能假空POST/假receipt或将初次manual bootstrap用于旧B。须另建显式无POST、完整来源/全像CAS的真三方刷新，再收口v6分析来源资格。累计历史拉取/折叠过程也仍只有单响应、100000条历史计数及12s限制，未有跨页字节内存预算；最终B的2MiB校验不是过程上限，须独立补预算/故障与大历史验证。
+
+因此不称整个I19完成。应用仍8.0.0；v6分析、策略写流程、机器消费者、真实Chrome/旧PWA/跨设备、资源FAIL、I18停写/新保护备份/配额/provider能力/迁移/远端耐久及独立恢复、I20自然窗口仍未过。未读未确认秘密输入、未绕PR403/浏览器/OAuth、不改任何云配置/套餐/秘密/重启/main/tag/Gist；新自然CI待精确新SHA核，不用旧519 CI或本机PASS代替部署/发布。

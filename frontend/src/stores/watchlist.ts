@@ -13,6 +13,10 @@ import type { BuiltOwnerWorkspaceRecoveryBackup } from '@/utils/owner-workspace-
 import type { OwnerWorkspaceSyncState } from './owner-workspace-types'
 import type { OwnerPortfolioLocal, OwnerPortfolioCommand, OwnerPortfolioMigrationSource } from '@/utils/ownerPortfolioLocal'
 import type { BuiltOwnerWorkspacePortfolioUpgradeBackup } from './owner-workspace-portfolio-upgrade'
+import type { ManagedFullSyncOwner, OwnerFullSyncFacade, OwnerFullSyncPacketFacade } from './owner-workspace-full-sync-managed'
+import type { BuiltOwnerPortfolioRecoveryBackup } from '@/utils/owner-portfolio-recovery'
+export type { OwnerFullSyncFacade } from './owner-workspace-full-sync-managed'
+export type { OwnerFullSyncPacketFacade } from './owner-workspace-full-sync-managed'
 export type { OwnerWorkspaceSyncFacade } from './owner-workspace-managed-store'
 
 const LS = 'sinan_watchlist_v2'
@@ -118,21 +122,25 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     : '本地工作副本；尚未同步至新版私人存储，不代表已确认持仓版本')
   let locator: OwnerAuthority | null = null, locatorRecord: OwnerAuthorityRecord | null = null
   let workspace: OwnerWorkspace | null = null, localState: OwnerWorkspaceLocalState | null = null
-  const physicalFormat = ref<'v3' | 'v4' | 'v5' | null>(null)
+  const physicalFormat = ref<'v3' | 'v4' | 'v5' | 'v6' | null>(null)
   const portfolioState = shallowRef<OwnerPortfolioLocal | null>(null)
   const localSyncFormat = computed(() => authorityState.value === 'idb' ? physicalFormat.value : null)
   let syncOwner: ManagedWatchlistOwner | null = null, syncEnable: AbortController | null = null
   let syncEpoch = 0
+  let fullSyncOwner: ManagedFullSyncOwner | null = null, fullSyncEnabling = false
+  const fullSyncViewEpoch = ref(0)
+  const fullSyncLocalPending = shallowRef<Readonly<{ id: string; hash: string }> | null>(null)
   let formatInFlight = false
   let syncRecovery: { value: BuiltOwnerWorkspaceRecoveryBackup; expected: OwnerWorkspaceLocalState; generation: number } | null = null
   let portfolioExport: { value: BuiltOwnerWorkspacePortfolioUpgradeBackup; generation: number; sourceGeneration: number } | null = null
+  let fullSyncExport: { value: BuiltOwnerPortfolioRecoveryBackup; generation: number } | null = null
   let portfolioSourceGeneration = 0
   let initialization: Promise<void> | null = null, alive = true
   const lifetime = new AbortController()
   let exported: { value: LocalWorkspaceBackup; legacy: OwnerSyncWatchSnapshot | null } | null = null
   let restorePreview: { raw: string; sha256: string; backup: OwnerWorkspaceBackup; expected: OwnerWorkspaceLocalState; value: LocalWorkspaceRestorePreview } | null = null
   const pendingLocal = shallowRef<{ id: string; hash: string } | null>(null)
-  const hasPendingLocalWorkspaceEdit = computed(() => pendingLocal.value !== null)
+  const hasPendingLocalWorkspaceEdit = computed(() => pendingLocal.value !== null || fullSyncLocalPending.value !== null)
   let localWriteInFlight = false
   let pushTimer: ReturnType<typeof setTimeout> | null = null
   let mutationGeneration = 0
@@ -152,6 +160,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
   function block(cause?: unknown) {
     ownerAnalysisEpoch.value++
     disableWorkspaceSync()
+    disableFullSync()
     authorityState.value = 'blocked'; localStorageError.value = true; cancelPush(); requestGeneration++
     authorityError.value = cause && typeof cause === 'object' && 'code' in cause && typeof cause.code === 'string'
       ? cause.code : '本机权威存储无法安全核对'
@@ -169,7 +178,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
         ...(row.local_pending ? { local_pending: true as const } : {}) }
     })
   }
-  function acceptLocal(state: OwnerWorkspaceLocalState, fromManaged = false) {
+  function acceptLocal(state: OwnerWorkspaceLocalState, fromManaged = false, fromFullSync = false) {
     if (!alive) throw new WatchMutationError('storage')
     // Once an active adoption has been observed, refresh/export/receipt paths
     // cannot bless a changed identity as a new source baseline. Initial adopt
@@ -177,9 +186,11 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     if (localState?.metadata.adoption && locatorRecord?.phase === 'active') assertWorkspaceAdoption(state)
     ownerAnalysisEpoch.value++
     entries.value = localEntries(state); localState = state; localStorageError.value = false; mutationGeneration++
-    physicalFormat.value = state.portfolio ? 'v5' : state.sync ? 'v4' : 'v3'
+    physicalFormat.value = state.fullSync ? 'v6' : state.portfolio ? 'v5' : state.sync ? 'v4' : 'v3'
     portfolioState.value = state.portfolio ?? null
     if (!fromManaged) syncOwner?.sourceChanged()
+    if (!fromFullSync) fullSyncOwner?.sourceChanged()
+    fullSyncExport = null
     exported = null; restorePreview = null
   }
   async function verifyAuthority(phase: 'legacy' | 'active') {
@@ -406,7 +417,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     }
   }
   async function formatOperation<T>(work: (signal: AbortSignal, ensure: () => void) => Promise<T>): Promise<T> {
-    if (formatInFlight || localWriteInFlight || syncOwner?.isBusy()) throw new WatchMutationError('conflict')
+    if (formatInFlight || localWriteInFlight || syncOwner?.isBusy() || fullSyncOwner?.isRunning()) throw new WatchMutationError('conflict')
     const controller = new AbortController(), abort = () => controller.abort()
     lifetime.signal.addEventListener('abort', abort, { once: true })
     let rejectAbort!: () => void
@@ -607,15 +618,172 @@ export const useWatchlistStore = defineStore('watchlist', () => {
   async function reconcilePortfolioUpgrade(raw: string, sha256: string, confirmed: true) { return changePortfolioFormat(raw, sha256, confirmed, true) }
   async function createPortfolioRecoveryBackup() {
     return formatOperation(async (signal, ensure) => {
-      const [codec, { canonicalOwnerLocal }] = await Promise.all([import('@/utils/owner-portfolio-recovery'), import('@/utils/owner-workspace-backup')])
+      const { canonicalOwnerLocal } = await import('@/utils/owner-workspace-backup')
       const state = await readActiveWorkspace(signal, true)
       if (!state.portfolio) throw new WatchMutationError('storage')
-      const value = await codec.buildOwnerPortfolioRecoveryBackup(workspace!.targetFingerprint, state)
+      const value = state.fullSync
+        ? await (await import('@/utils/owner-full-sync-recovery')).buildOwnerFullSyncRecoveryBackup(workspace!.targetFingerprint, state)
+        : await (await import('@/utils/owner-portfolio-recovery')).buildOwnerPortfolioRecoveryBackup(workspace!.targetFingerprint, state)
       ensure()
       const current = await readActiveWorkspace(signal, true)
       if (canonicalOwnerLocal(current) !== canonicalOwnerLocal(state)) throw new WatchMutationError('conflict')
       ensure(); return value
     })
+  }
+  async function createFullSyncUpgradeBackup(): Promise<BuiltOwnerPortfolioRecoveryBackup> {
+    return formatOperation(async (signal, ensure) => {
+      const [codec, { canonicalOwnerLocal }] = await Promise.all([import('@/utils/owner-portfolio-recovery'), import('@/utils/owner-workspace-backup')])
+      const state = await readActiveWorkspace(signal, true)
+      if (!state.portfolio || state.fullSync) throw new WatchMutationError('storage')
+      const value = await codec.buildOwnerPortfolioRecoveryBackup(workspace!.targetFingerprint, state)
+      ensure()
+      const current = await readActiveWorkspace(signal, true)
+      if (canonicalOwnerLocal(current) !== canonicalOwnerLocal(state)) throw new WatchMutationError('conflict')
+      acceptLocal(state); fullSyncExport = { value, generation: mutationGeneration }
+      return value
+    })
+  }
+  async function previewFullSyncUpgrade(raw: string, sha256: string) {
+    return formatOperation(async (_signal, ensure) => {
+      const codec = await import('@/utils/owner-portfolio-recovery')
+      const backup = await codec.restoreOwnerPortfolioRecoveryBackup(raw, sha256)
+      ensure()
+      if (authorityState.value === 'unresolved') { try { await initialize() } catch { /* only the original locator may qualify */ } }
+      await verifyAuthority('active'); ensure()
+      const adoption = backup.local.metadata.adoption
+      if (!adoption || locatorRecord?.targetFingerprint !== backup.targetFingerprint || locatorRecord.activationId !== adoption.id
+        || locatorRecord.backupSha256 !== adoption.backupSha256) throw new WatchMutationError('conflict')
+      return backup
+    })
+  }
+  async function changeFullSyncFormat(raw: string, sha256: string, confirmed: true, reconcile: boolean): Promise<void> {
+    if (confirmed !== true) throw new WatchMutationError('requires-confirmation')
+    return formatOperation(async (signal, ensure) => {
+      const [codec, storage, { canonicalOwnerLocal }, sessionModule, requestModule] = await Promise.all([
+        import('@/utils/owner-portfolio-recovery'), import('./owner-workspace'), import('@/utils/owner-workspace-backup'),
+        import('./ownerSession'), import('@/api/request'),
+      ])
+      const targetUrl = requestModule.ownerApiTarget(), backup = await codec.restoreOwnerPortfolioRecoveryBackup(raw, sha256)
+      ensure()
+      if (reconcile) {
+        if (authorityState.value === 'unresolved') { try { await initialize() } catch { /* a missing/bad original database is never replaced */ } }
+        await verifyAuthority('active')
+      } else {
+        await ready()
+        if (authorityState.value !== 'idb' || !fullSyncExport || fullSyncExport.value.raw !== raw
+          || fullSyncExport.value.sha256 !== sha256 || fullSyncExport.generation !== mutationGeneration) throw new WatchMutationError('conflict')
+      }
+      const pointer = locatorRecord!, adoption = backup.local.metadata.adoption
+      if (pointer.phase !== 'active' || !adoption || backup.targetFingerprint !== pointer.targetFingerprint
+        || adoption.id !== pointer.activationId || adoption.backupSha256 !== pointer.backupSha256
+        || await sessionModule.getOwnerSyncTargetFingerprint() !== pointer.targetFingerprint) throw new WatchMutationError('conflict')
+      ensure()
+      const generation = mutationGeneration, memory = canonicalOwnerLocal({ entries: entries.value, portfolio: portfolioState.value }), authority = JSON.stringify(pointer)
+      const guard: OwnerWorkspaceGuard = { signal, assertActive() {
+        ensure()
+        if (generation !== mutationGeneration || canonicalOwnerLocal({ entries: entries.value, portfolio: portfolioState.value }) !== memory
+          || JSON.stringify(locatorRecord) !== authority || requestModule.ownerApiTarget() !== targetUrl
+          || !['idb', 'blocked'].includes(authorityState.value)) throw new WatchMutationError('conflict')
+      } }
+      const request = await storage.buildOwnerWorkspaceFullSyncUpgradeRequest(pointer.targetFingerprint!, {
+        id: 'portfolio-sync-upgrade-' + sha256, backupRaw: raw, backupSha256: sha256,
+      })
+      guard.assertActive()
+      let replacement: OwnerWorkspace | null = null
+      try {
+        if (!reconcile) {
+          const current = await readActiveWorkspace(signal, true)
+          if (canonicalOwnerLocal(current) !== canonicalOwnerLocal(backup.local)) throw new WatchMutationError('conflict')
+        }
+        await verifyAuthority('active'); guard.assertActive(); disableWorkspaceSync(); disableFullSync()
+        replacement = await (reconcile ? storage.reconcileOwnerWorkspaceFullSyncUpgrade : storage.upgradeOwnerWorkspaceFullSync)(
+          globalThis.indexedDB, pointer.targetFingerprint!, request, guard)
+        guard.assertActive()
+        const next = await replacement.readLocalState(guard)
+        await verifyAuthority('active'); guard.assertActive()
+        if (!next.fullSync || next.fullSyncUpgrade?.id !== request.id || next.fullSyncUpgrade.hash !== request.hash
+          || canonicalOwnerLocal(next.metadata.adoption) !== canonicalOwnerLocal(adoption)) throw new WatchMutationError('conflict')
+        workspace?.close(); workspace = replacement; replacement = null
+        acceptLocal(next); pendingLocal.value = null; authorityState.value = 'idb'; authorityError.value = ''; loaded.value = true
+        fullSyncExport = null; portfolioExport = null; syncRecovery = null; notifyAuthority()
+      } catch (cause) { replacement?.close(); block(cause); throw cause }
+    })
+  }
+  async function upgradeFullSyncFormat(raw: string, sha256: string, confirmed: true) { return changeFullSyncFormat(raw, sha256, confirmed, false) }
+  async function reconcileFullSyncUpgrade(raw: string, sha256: string, confirmed: true) { return changeFullSyncFormat(raw, sha256, confirmed, true) }
+  function disableFullSync() { fullSyncOwner?.disable() }
+  async function enableFullSync(consent: true): Promise<OwnerFullSyncFacade> {
+    if (consent !== true || fullSyncEnabling) throw new WatchMutationError('conflict')
+    return formatOperation(async (signal, ensure) => {
+      fullSyncEnabling = true
+      try {
+        const { canonicalOwnerLocal } = await import('@/utils/owner-workspace-backup')
+        const target = locatorRecord?.targetFingerprint
+        if (!target) throw new WatchMutationError('storage')
+        const prepare = async (active: AbortSignal, allowUnknown: boolean) => {
+          if (formatInFlight && !fullSyncEnabling || localWriteInFlight || pendingLocal.value
+            || canonicalOwnerLocal(entries.value) !== canonicalOwnerLocal(localState ? localEntries(localState) : null)
+            || canonicalOwnerLocal(portfolioState.value) !== canonicalOwnerLocal(localState?.portfolio ?? null)) throw new WatchMutationError('conflict')
+          const state = await readActiveWorkspace(active, true)
+          const deliveryOnly = !!localState?.outbox.entry && !!state.outbox.entry
+            && state.outbox.entry.requestHash === localState.outbox.entry.requestHash && state.outbox.entry.rawBody === localState.outbox.entry.rawBody
+            && state.outbox.version >= localState.outbox.version
+            && canonicalOwnerLocal({ ...state, outbox: localState.outbox }) === canonicalOwnerLocal(localState)
+          if (!state.fullSync || !state.fullSyncUpgrade || !state.portfolio
+            || !allowUnknown && !deliveryOnly && canonicalOwnerLocal(state) !== canonicalOwnerLocal(localState)) throw new WatchMutationError('conflict')
+          return Object.freeze({ local: state, fullSync: state.fullSync })
+        }
+        await prepare(signal, fullSyncLocalPending.value !== null); ensure()
+        if (!fullSyncOwner) {
+          const module = await import('./owner-workspace-full-sync-managed'); ensure()
+          const checked = async (guard: OwnerWorkspaceGuard) => { await verifyAuthority('active'); guard.assertActive() }
+          fullSyncOwner = await module.createManagedFullSyncOwner({ target, lifetime: lifetime.signal,
+            prepare,
+            assertActive() {
+              if (!alive || authorityState.value !== 'idb' || locatorRecord?.targetFingerprint !== target) throw new WatchMutationError('storage')
+            },
+            capture(active, canonical) {
+              const generation = mutationGeneration, memory = canonical({ entries: entries.value, portfolio: portfolioState.value }),
+                original = canonical(localState), authority = JSON.stringify(locatorRecord), handle = workspace
+              return { signal: active, assertActive() {
+                if (active.aborted || !alive || authorityState.value !== 'idb' || localWriteInFlight || formatInFlight
+                  || workspace !== handle || generation !== mutationGeneration || canonical(localState) !== original
+                  || canonical({ entries: entries.value, portfolio: portfolioState.value }) !== memory
+                  || JSON.stringify(locatorRecord) !== authority) throw new WatchMutationError('conflict')
+              } }
+            },
+            port: {
+              async readFullSyncState(guard) { await checked(guard); const value = await workspace!.readFullSyncState(guard); assertWorkspaceAdoption(value.local); return value },
+              async linkFullSyncBase(request, guard) { await checked(guard); return workspace!.linkFullSyncBase(request, guard) },
+              async prepareFullSync(request, guard) { await checked(guard); return workspace!.prepareFullSync(request, guard) },
+              async cancelPreparedFullSync(request, guard) { await checked(guard); return workspace!.cancelPreparedFullSync(request, guard) },
+              async transitionFullSyncDelivery(request, guard) { await checked(guard); return workspace!.transitionFullSyncDelivery(request, guard) },
+              async ackFullSync(request, guard) { await checked(guard); return workspace!.ackFullSync(request, guard) },
+              async fullSyncReceipt(id, hash, guard) { await checked(guard); return workspace!.fullSyncReceipt(id, hash, guard) },
+            },
+            pending(value) { fullSyncLocalPending.value = value },
+            hidden() { fullSyncViewEpoch.value++ },
+            accept(state) {
+              const generation = mutationGeneration
+              acceptLocal(state, false, true)
+              if (!alive || mutationGeneration !== generation + 1 || canonicalOwnerLocal(entries.value) !== canonicalOwnerLocal(localEntries(state))
+                || canonicalOwnerLocal(portfolioState.value) !== canonicalOwnerLocal(state.portfolio ?? null)
+                || canonicalOwnerLocal(localState) !== canonicalOwnerLocal(state)) throw new WatchMutationError('conflict')
+            },
+          })
+          ensure()
+        }
+        return await fullSyncOwner.enable(true, signal)
+      } finally { fullSyncEnabling = false }
+    })
+  }
+  async function reconcileFullSyncLocal() {
+    if (!fullSyncOwner || !fullSyncLocalPending.value) throw new WatchMutationError('storage')
+    return fullSyncOwner.facade.reconcileLocal()
+  }
+  async function enableFullSyncPackets(consent: true): Promise<OwnerFullSyncPacketFacade> {
+    if (consent !== true || !fullSyncOwner || authorityState.value !== 'idb') throw new WatchMutationError('conflict')
+    return fullSyncOwner.facade.enablePackets(consent)
   }
   if (eventChannel) eventChannel.onmessage = () => {
     if (alive && locatorRecord) void verifyAuthority(locatorRecord.phase === 'legacy' ? 'legacy' : 'active').catch(() => {})
@@ -705,7 +873,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
   const storageWindow = typeof window === 'undefined' ? null : window
   storageWindow?.addEventListener('storage', storageChanged)
   onScopeDispose(() => {
-    disableWorkspaceSync(); syncOwner?.close()
+    disableWorkspaceSync(); syncOwner?.close(); disableFullSync(); fullSyncOwner?.close()
     alive = false; lifetime.abort(); cancelPush(); unsubscribe(); requestGeneration++
     workspace?.close(); locator?.close(); eventChannel?.close()
     storageWindow?.removeEventListener('storage', storageChanged)
@@ -883,7 +1051,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     }
   }
   async function writeLocal(command: OwnerWorkspaceLocalCommand): Promise<void> {
-    if (formatInFlight || localWriteInFlight || syncOwner?.isBusy()) throw new WatchMutationError('conflict')
+    if (formatInFlight || localWriteInFlight || syncOwner?.isBusy() || fullSyncOwner?.isBusy()) throw new WatchMutationError('conflict')
     localWriteInFlight = true
     ownerAnalysisEpoch.value++
     try {
@@ -908,7 +1076,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     } finally { localWriteInFlight = false }
   }
   async function editPortfolio(command: OwnerPortfolioCommand): Promise<void> {
-    if (formatInFlight || localWriteInFlight || syncOwner?.isBusy() || pendingLocal.value) throw new WatchMutationError('conflict')
+    if (formatInFlight || localWriteInFlight || syncOwner?.isBusy() || fullSyncOwner?.isBusy() || pendingLocal.value) throw new WatchMutationError('conflict')
     localWriteInFlight = true
     ownerAnalysisEpoch.value++
     try {
@@ -934,6 +1102,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     } finally { localWriteInFlight = false }
   }
   async function reconcileLocalWorkspaceEdit(): Promise<void> {
+    if (fullSyncLocalPending.value) { await reconcileFullSyncLocal(); return }
     if (authorityState.value !== 'blocked' || !pendingLocal.value || !locatorRecord) throw new WatchMutationError('storage')
     await verifyAuthority('active')
     const original = pendingLocal.value, storage = await import('./owner-workspace')
@@ -950,7 +1119,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
   async function previewLocalWorkspaceRestore(raw: string, sha256: string): Promise<LocalWorkspaceRestorePreview> {
     await ready()
     if (authorityState.value !== 'idb') throw new WatchMutationError('storage')
-    if (formatInFlight || localWriteInFlight || syncOwner?.isBusy()) throw new WatchMutationError('conflict')
+    if (formatInFlight || localWriteInFlight || syncOwner?.isBusy() || fullSyncOwner?.isBusy()) throw new WatchMutationError('conflict')
     localWriteInFlight = true
     ownerAnalysisEpoch.value++
     try {
@@ -969,7 +1138,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     await ready()
     if (authorityState.value !== 'idb' || !restorePreview || restorePreview.raw !== raw || restorePreview.sha256 !== sha256
       || restorePreview.value.conflicts !== 0) throw new WatchMutationError('conflict')
-    if (formatInFlight || localWriteInFlight || syncOwner?.isBusy()) throw new WatchMutationError('conflict')
+    if (formatInFlight || localWriteInFlight || syncOwner?.isBusy() || fullSyncOwner?.isBusy()) throw new WatchMutationError('conflict')
     localWriteInFlight = true
     ownerAnalysisEpoch.value++
     try {
@@ -1056,10 +1225,10 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     await initialize()
     await ready()
     if (authorityState.value === 'idb') {
-      if (localWriteInFlight || formatInFlight || pendingLocal.value) return
+      if (localWriteInFlight || formatInFlight || pendingLocal.value || fullSyncOwner?.isBusy()) return
       const generation = mutationGeneration, handle = workspace!
       const superseded = () => !alive || generation !== mutationGeneration || handle !== workspace
-        || authorityState.value !== 'idb' || localWriteInFlight || formatInFlight || pendingLocal.value !== null
+        || authorityState.value !== 'idb' || localWriteInFlight || formatInFlight || pendingLocal.value !== null || fullSyncOwner?.isBusy()
       try {
         const state = await handle.readLocalState(activeGuard())
         // A read can finish after a newer local writer has committed/published.
@@ -1158,6 +1327,8 @@ export const useWatchlistStore = defineStore('watchlist', () => {
   return {
     captureOwnerAnalysisSource, ownerAnalysisEpoch,
     portfolioState, createPortfolioUpgradeBackup, previewPortfolioUpgrade, upgradePortfolioFormat, reconcilePortfolioUpgrade, editPortfolio, createPortfolioRecoveryBackup,
+    createFullSyncUpgradeBackup, previewFullSyncUpgrade, upgradeFullSyncFormat, reconcileFullSyncUpgrade,
+    enableFullSync, enableFullSyncPackets, disableFullSync, reconcileFullSyncLocal, fullSyncLocalPending, fullSyncViewEpoch,
     localSyncFormat, enableWorkspaceSync, disableWorkspaceSync, createSyncRecoveryBackup, upgradeLocalSyncFormat, reconcileLocalSyncUpgrade,
     authorityState, authorityError, initialize, createLocalWorkspaceBackup, activateLocalWorkspace,
     previewLocalWorkspaceRestore, restoreLocalWorkspaceBackup, reconcileLocalWorkspaceEdit, hasPendingLocalWorkspaceEdit,

@@ -1,5 +1,7 @@
 # 司南基金迭代交接与代码审查基线
 
+> 后续实施入口（2026-10-25）：下文为 2026-08-29 的冻结审计，版本、SHA、CI 和线上结论不是当前证据。v9 升级工作在独立 feature 分支推进，应用仍为 8.0.0，尚未完成正式 v9 发布。请先读 [v9 执行日志](docs/V9-EXECUTION-LOG.md)、[升级方案](docs/V9.0.0-UPGRADE-PLAN.md) 与 [完整基金/手工资产同步候选说明](docs/OWNER-PORTFOLIO-FULL-SYNC.md)，再核当前 Git、exact SHA CI 和真实部署；不要据本历史表重置已实现的本机工作区或重试未知云写。
+
 > 生成日期：2026-08-29（Asia/Shanghai）
 >
 > 审计基线：main / d0772acf4a423946dfcfd22779fd2bc72c76e609

@@ -11,7 +11,7 @@ const currentBackupSha = ref(''), mappingsOpen = ref(false)
 const selected = shallowRef<{ raw: string; preview: OwnerPortfolioMigrationPreview } | null>(null)
 let alive = true, epoch = 0, reading: AbortController | null = null
 const ready = computed(() => store.authorityState === 'idb' && !store.localStorageError && store.localSyncFormat === 'v4')
-const recoveryReady = computed(() => store.authorityState === 'idb' && !store.localStorageError && store.localSyncFormat === 'v5')
+const recoveryReady = computed(() => store.authorityState === 'idb' && !store.localStorageError && ['v5', 'v6'].includes(store.localSyncFormat ?? ''))
 const canUpgrade = computed(() => ready.value && !busy.value && confirmed.value && !!selected.value?.preview.portfolio
   && selected.value.preview.issues.length === 0 && exportedSha.value !== '' && exportedSha.value === verifiedSha.value)
 const canReconcile = computed(() => !busy.value && reconcileConfirmed.value && !!selected.value?.preview.portfolio
@@ -36,7 +36,7 @@ async function exportCurrentBackup() {
     const result = await store.createPortfolioRecoveryBackup()
     if (!current(context)) return
     download(result.raw, result.sha256, true); currentBackupSha.value = result.sha256
-    message.value = '已发起当前 v5 完整文件下载，包含当前基金、手工资产、历史与同步意图。请确认已保留；这不是丢库恢复、耐久或云端备份证明。'
+    message.value = `已发起当前 ${store.localSyncFormat} 完整文件下载，包含当前基金、手工资产、历史与同步意图。请确认已保留；这不是丢库恢复、耐久或云端备份证明。`
   } catch { if (current(context)) message.value = '当前完整文件导出未完成；原工作区未清空，请保留此前原文件。' }
   finally { if (current(context)) busy.value = false }
 }
@@ -125,15 +125,16 @@ const issueText: Record<string, string> = { invalid_raw: '原文格式无效', c
 <template>
   <section class="portfolio-migration card" aria-label="手工资产与组合历史迁移">
     <h3>资产与历史共同工作区</h3>
-    <p v-if="store.localSyncFormat === 'v5'">当前 v5：手工资产、删除标记与余额观察均保存在共同工作区。仍是本机待确认状态，不代表云端已同步。</p>
+    <p v-if="['v5', 'v6'].includes(store.localSyncFormat ?? '')">当前 {{ store.localSyncFormat }}：手工资产、删除标记与余额观察均保存在共同工作区。仍是本机待确认状态，不代表云端已同步。</p>
     <p v-else>当前 {{ store.localSyncFormat ?? '未核定' }}：手工资产与组合历史尚未并入共同工作区。旧资产编辑、旧 Gist 和快照写入已暂停；未知金额不按零处理。</p>
     <p>这份迁移原文件包含完整 v4 工作区及独立手工资产、历史快照的原始字节，可能含私人信息。只保存到自己的设备；下载或 SHA 校验不是来源认证或云备份。</p>
     <p>旧 UTC 日期、重复日期、旧持仓不透明标识完整保留；超长旧资产标识使用明确映射，不截断、不丢行。新余额观察使用上海日期；余额变化不等于现金流调整收益。</p>
-    <template v-if="store.localSyncFormat === 'v5'">
+    <template v-if="['v5', 'v6'].includes(store.localSyncFormat ?? '')">
       <p>升级原文件只保留升级前快照，不含后来编辑。当前完整文件另外包含当前基金、手工资产、历史和同步意图；不包含登录凭据，也不能据此重放未知请求或认定丢库可恢复。</p>
       <button type="button" data-action="export-portfolio-current" :disabled="busy || !recoveryReady" @click="exportCurrentBackup">下载当前资产历史完整备份</button>
       <p v-if="currentBackupSha">当前完整文件 SHA256：<code>{{ currentBackupSha }}</code></p>
     </template>
+    <template v-if="store.localSyncFormat !== 'v6'">
     <p v-if="store.localSyncFormat === 'v3'">请先到自选页完成 v3 → v4 的显式完整格式升级，再在这里迁移资产历史。</p>
     <button type="button" data-action="export-portfolio-upgrade" :disabled="busy || !ready" @click="exportBackup">下载资产历史迁移原文件</button>
     <p v-if="exportedSha">本轮原文件 SHA256：<code>{{ exportedSha }}</code></p>
@@ -152,6 +153,8 @@ const issueText: Record<string, string> = { invalid_raw: '原文格式无效', c
       <label class="portfolio-check"><input name="owner-portfolio-reconcile-confirm" type="checkbox" :checked="reconcileConfirmed" :disabled="busy" @change="reconcileConfirmed = ($event.target as HTMLInputElement).checked" />我选择的是原升级前文件，只手动核对那一次升级。</label>
       <button type="button" data-action="reconcile-portfolio-upgrade" :disabled="!canReconcile" @click="reconcile">核对原资产历史升级</button>
     </div>
+    </template>
+    <p v-else>当前 v6 的旧资产历史迁移入口已关闭。完整基金与手工资产共同基线请使用下方独立协调入口；仍不是云确认。</p>
   </section>
 </template>
 

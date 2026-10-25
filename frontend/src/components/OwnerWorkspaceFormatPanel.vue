@@ -9,11 +9,11 @@ const busy = ref(false), message = ref(''), sha = ref(''), exportedSha = ref('')
 const confirmed = ref(false), recoveryConfirmed = ref(false)
 const selected = shallowRef<{ raw: string; envelope: OwnerWorkspaceRecoveryBackup } | null>(null)
 let alive = true, epoch = 0, reading: AbortController | null = null
-const ready = computed(() => store.authorityState === 'idb' && !store.localStorageError && store.localSyncFormat !== 'v5')
+const ready = computed(() => store.authorityState === 'idb' && !store.localStorageError && !['v5', 'v6'].includes(store.localSyncFormat ?? ''))
 const canUpgrade = computed(() => ready.value && store.localSyncFormat === 'v3' && !busy.value && confirmed.value
   && selected.value?.envelope.physicalVersion === 3 && exportedSha.value !== '' && exportedSha.value === verifiedSha.value)
 const canReconcile = computed(() => !busy.value && recoveryConfirmed.value && selected.value?.envelope.physicalVersion === 3
-  && store.localSyncFormat !== 'v5' && ['idb', 'blocked'].includes(store.authorityState))
+  && !['v5', 'v6'].includes(store.localSyncFormat ?? '') && ['idb', 'blocked'].includes(store.authorityState))
 const manualCount = computed(() => selected.value?.envelope.local.sync?.base?.records.filter(row => row.kind === 'manual_asset').length ?? 0)
 function invalidate() {
   epoch++; reading?.abort(); reading = null; busy.value = false
@@ -112,9 +112,9 @@ const valueText = (value: unknown) => value === null ? '未知（null）' : Obje
   <section class="format-panel" aria-label="本机同步格式与完整备份">
     <h3>同步格式与完整备份</h3>
     <p>当前格式：{{ store.localSyncFormat === 'v5' ? 'v5 · 资产历史共同工作区已核定' : store.localSyncFormat === 'v4' ? 'v4 · 可单独启用私人同步' : store.localSyncFormat === 'v3' ? 'v3 · 仅本机编辑' : '尚未核定' }}。</p>
-    <template v-if="store.localSyncFormat === 'v5'">
+    <template v-if="['v5', 'v6'].includes(store.localSyncFormat ?? '')">
       <p>当前基金、手工资产与历史已使用共同工作区。请到资产页“下载当前资产历史完整备份”，包含后来编辑与原升级记录；升级前文件不是当前完整备份，也不证明丢库恢复或云端耐久。</p>
-      <p>旧 v3/v4 文件的导出、选回与格式升级入口已关闭，不能降级或覆盖当前 v5。当前 v5 私人上传与持仓分析暂未开放，请保留本机待确认状态。</p>
+      <p>旧 v3/v4 文件的导出、选回与格式升级入口已关闭，不能降级或覆盖当前 {{ store.localSyncFormat }}。v6 只可使用独立完整原包入口逐批确认；持仓分析仍暂停，请保留本机待确认状态。</p>
       <a href="#/assets">前往资产页完整备份</a>
     </template>
     <template v-else>

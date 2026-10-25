@@ -97,7 +97,7 @@ export async function validateOwnerPortfolioRecoveryBackup(input: unknown): Prom
     || typeof row.targetFingerprint !== 'string' || !HASH.test(row.targetFingerprint)) fail()
   let local: OwnerWorkspaceLocalState
   try { local = await validateOwnerWorkspaceLocalState(row.targetFingerprint, row.local) } catch { return fail() }
-  if (!local.sync || !local.portfolio || !local.portfolioUpgrade || !local.metadata.adoption || local.receiptCount !== 0
+  if (local.fullSync || local.fullSyncUpgrade || !local.sync || !local.portfolio || !local.portfolioUpgrade || !local.metadata.adoption || local.receiptCount !== 0
     || local.outbox.entry !== null || local.sync.pending !== null) fail()
   const original = await buildOwnerLegacyWorkspaceBackup(local.metadata.adoption.sourceArchive)
   if (original.sha256 !== local.metadata.adoption.backupSha256) fail()

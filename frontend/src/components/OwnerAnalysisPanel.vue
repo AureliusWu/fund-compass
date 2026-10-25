@@ -58,6 +58,7 @@ function exportTask() {
     <div class="analysis-body">
       <p>仅分析已同步并应用的完整持仓。默认不发送；不会执行交易、通知，也不会临时生成策略或行情。</p>
       <p v-if="workspace.localSyncFormat === 'v5'" role="status">当前 v5 持仓分析暂未开放。完整手工资产同步与确认链仍在实现，本机基金、手工资产和余额观察不能当作云端已确认来源；请先保留资产页完整文件。</p>
+      <p v-else-if="workspace.localSyncFormat === 'v6'" role="status">当前 v6 持仓分析仍暂停。本机共同基线协调不等于完整云端来源已确认，也不授予分析资格。</p>
       <p v-else-if="!authenticated" role="status">请先登录私人会话。登录本身不会启用分析。</p>
       <p v-else-if="workspace.localSyncFormat !== 'v4'">请先启用本机工作区、升级同步格式，完成同步及完整核对；未同步编辑不能当作确认持仓。</p>
       <template v-else-if="!analysis.enabled">
