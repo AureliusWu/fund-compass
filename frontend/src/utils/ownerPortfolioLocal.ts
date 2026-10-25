@@ -12,6 +12,10 @@ export const OWNER_PORTFOLIO_MAX_MANUAL = 2000
 const HASH = /^[0-9a-f]{64}(?![\s\S])/
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}(?![\s\S])/
 const encoder = new TextEncoder()
+// Trust only values this codec has copied, fully checked and recursively frozen.
+// Fresh IDB clones/caller-frozen objects still take the complete validation path;
+// this weak identity cache retains no raw-source key or cloud/hash qualification.
+const ownedPortfolios = new WeakSet<OwnerPortfolioLocal>()
 export type OwnerPortfolioManualClass = '现金' | '权益' | '商品'
 export interface OwnerPortfolioManualValues {
   readonly name: string
@@ -292,22 +296,24 @@ function migration(value: unknown): { migration: OwnerPortfolioMigration; initia
  * It deliberately does not claim to recompute SHA-256 inside an IDB transaction. */
 export function validateOwnerPortfolioLocal(input: unknown): OwnerPortfolioLocal {
   try {
+    if (input !== null && typeof input === 'object' && ownedPortfolios.has(input as OwnerPortfolioLocal)) return input as OwnerPortfolioLocal
     const row = fields(input, ['schema', 'manual', 'history', 'migration'])
     if (row.schema !== OWNER_PORTFOLIO_LOCAL_SCHEMA) fail()
+    const sourceManual = list(row.manual, OWNER_PORTFOLIO_MAX_MANUAL)
+    const sourceHistory = list(row.history, OWNER_PORTFOLIO_MAX_HISTORY)
     const origin = migration(row.migration)
     let used = encoder.encode(canonicalOwnerLocal({ schema: OWNER_PORTFOLIO_LOCAL_SCHEMA, manual: [], history: [], migration: origin.migration })).byteLength
     const charge = (value: unknown, index: number) => {
       used += encoder.encode(canonicalOwnerLocal(value)).byteLength + (index ? 1 : 0)
       if (used > OWNER_PORTFOLIO_MAX_BYTES) fail('capacity_exceeded')
     }
-    const manualRows = list(row.manual, OWNER_PORTFOLIO_MAX_MANUAL).map((value, index) => { const checked = manual(value); charge(checked, index); return checked })
+    const manualRows = sourceManual.map((value, index) => { const checked = manual(value); charge(checked, index); return checked })
     const manualByKey = new Map(manualRows.map(item => [item.key, item]))
     if (manualByKey.size !== manualRows.length) fail()
     if (!Number.isFinite(manualRows.reduce((sum, item) => sum + (item.deleted ? 0 : item.values.value), 0))) fail()
     const origins = new Map(origin.migration.idMappings.map(item => [item.key, item.legacyId]))
     if (origin.migration.idMappings.some(item => manualByKey.get(item.key)?.legacyId !== item.legacyId)
       || manualRows.some(item => item.legacyId === null ? origins.has(item.key) : origins.get(item.key) !== item.legacyId)) fail()
-    const sourceHistory = list(row.history, OWNER_PORTFOLIO_MAX_HISTORY)
     if (sourceHistory.length < origin.history.length) fail()
     const history: OwnerPortfolioHistory[] = sourceHistory.map((item, index) => {
       if (index < origin.history.length) {
@@ -320,9 +326,11 @@ export function validateOwnerPortfolioLocal(input: unknown): OwnerPortfolioLocal
       const checked = observation(item); charge(checked, index); return checked
     })
     if (new Set(history.map(item => item.id)).size !== history.length) fail()
-    const result = { schema: OWNER_PORTFOLIO_LOCAL_SCHEMA, manual: manualRows, history, migration: origin.migration }
+    const result: OwnerPortfolioLocal = { schema: OWNER_PORTFOLIO_LOCAL_SCHEMA, manual: manualRows, history, migration: origin.migration }
     bounded(canonicalOwnerLocal(result), OWNER_PORTFOLIO_MAX_BYTES)
-    return frozen(result)
+    frozen(result)
+    ownedPortfolios.add(result)
+    return result
   } catch (error) {
     if (error instanceof OwnerPortfolioLocalError) throw error
     return fail()

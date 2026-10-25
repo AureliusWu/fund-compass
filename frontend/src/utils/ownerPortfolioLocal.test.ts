@@ -30,6 +30,41 @@ const observation = (patch: Partial<OwnerPortfolioObservation> = {}): OwnerPortf
 afterEach(() => vi.restoreAllMocks())
 
 describe('explicit local portfolio migration codec', () => {
+  it('reuses only owned deep-frozen values, never caller-frozen objects or fresh IDB clones', async () => {
+    const checked = await portfolio(source([legacy], [{ date: '2026-10-22', value: 1, cost: 0 }]))
+    expect(validateOwnerPortfolioLocal(checked)).toBe(checked)
+    for (const value of [checked, checked.manual, checked.manual[0], checked.manual[0].values, checked.history,
+      checked.history[0], checked.migration, checked.migration.idMappings, checked.migration.idMappings[0]]) expect(Object.isFrozen(value)).toBe(true)
+    const fresh = structuredClone(checked), copied = validateOwnerPortfolioLocal(Object.freeze(fresh))
+    expect(copied).not.toBe(fresh); expect(copied).toEqual(checked)
+    // Freezing the outer object cannot certify or retain a mutable child alias.
+    expect(Reflect.set(fresh.manual[0].values, 'value', -1)).toBe(true)
+    expect(copied.manual[0].values.value).toBe(0)
+    expect(() => validateOwnerPortfolioLocal(fresh)).toThrow()
+    const changed = structuredClone(checked)
+    expect(Reflect.set(changed.migration, 'manualRaw', '[]')).toBe(true)
+    expect(() => validateOwnerPortfolioLocal(Object.freeze(changed))).toThrow()
+    const history = structuredClone(checked)
+    expect(Reflect.set(history.history[0], 'value', 99)).toBe(true)
+    expect(() => validateOwnerPortfolioLocal(Object.freeze(history))).toThrow()
+  })
+
+  it('does not memoize SHA verification even for an owned immutable portfolio', async () => {
+    const checked = await portfolio(), digest = vi.spyOn(crypto.subtle, 'digest')
+    await verifyOwnerPortfolioMigration(checked); await verifyOwnerPortfolioMigration(checked)
+    expect(digest).toHaveBeenCalledTimes(2)
+    digest.mockRejectedValueOnce(new Error('synthetic digest unavailable'))
+    await expect(verifyOwnerPortfolioMigration(checked)).rejects.toMatchObject({ code: 'hash_unavailable' })
+  })
+
+  it('rejects an excessive current collection before decoding its old origin, without trimming', async () => {
+    const checked = await portfolio(), getter = vi.fn()
+    const migration = Object.defineProperty({}, 'manualRaw', { enumerable: true, get: getter })
+    expect(() => validateOwnerPortfolioLocal({ ...checked, manual: Array.from({ length: 2001 }, () => checked.manual[0]), migration }))
+      .toThrowError(expect.objectContaining({ code: 'capacity_exceeded' }))
+    expect(getter).not.toHaveBeenCalled(); expect(checked.manual).toHaveLength(1)
+  })
+
   it('retains exact raw bytes, known zero, empty note, original timestamp and opaque legacy history', async () => {
     const input = { manualRaw: ' \n' + canonicalOwnerLocal([{ ...legacy, value: -0 }]) + '\r\n',
       snapshotsRaw: '[{"date":"2026-10-22","value":-0,"cost":0,"holdings":[' + canonicalOwnerLocal(oldHolding) + ']}]' }

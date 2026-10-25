@@ -1,0 +1,139 @@
+{
+  "schema": "fc-owner-portfolio-ci-performance-fix-1",
+  "failedCandidate": "5b0a3bd047415d7923019932350677d1289fcc67",
+  "failedRun": {
+    "id": 40169955425,
+    "frontend": {
+      "node": "20.20.2",
+      "passed": 2530,
+      "failed": 1,
+      "fixture": "real 2000-manual portfolio capacity",
+      "timeoutMs": 5000
+    },
+    "backend": {
+      "passed": 4088,
+      "warnings": 2,
+      "seconds": 358.01
+    },
+    "worker": {
+      "passed": 148,
+      "files": 4
+    },
+    "deploy": "SKIPPED"
+  },
+  "fix": "Private weak identity membership only for this codec's fully validated/deep-copied/recursively frozen output. Fresh IDB clones and caller-frozen objects still validate completely. SHA and mapping digests always recomputed; no cloud or source qualification cached. Check current collection bounds before decoding immutable old raw. Original fixture/count/5000ms deadline unchanged.",
+  "targetedFixtureSeconds": {
+    "before": [
+      2.82,
+      2.88,
+      2.63
+    ],
+    "after": [
+      1.04,
+      1.19,
+      1.25
+    ],
+    "beforeMedian": 2.82,
+    "beforeWorst": 2.88,
+    "afterMedian": 1.19,
+    "afterWorst": 1.25,
+    "medianDeltaPercent": -57.8,
+    "method": "Three independent direct npm targeted invocations per side on local Windows/Node24.14.0. Same original test and real v3->v4->v5 2000-row setup. Other16 tests are filtered out only for these diagnostic samples; final default full suite executes all tests."
+  },
+  "localVerification": {
+    "tests": 2534,
+    "files": 102,
+    "durationSeconds": 17.6,
+    "typeCheck": "EXIT0",
+    "frozenBuilds": 3,
+    "pwaChecksPerBuild": "7/7",
+    "independentCodeReview": "NO_CONFIRMED_P0_P1"
+  },
+  "artifactMethod": "Three fresh current builds and exact stable inventories. Baseline samples are the already completed final-v2 three f010 builds, not rebuilt/interleaved after this CPU fix; same baseline pin, patched dependency junction, actual static graph and precache revision checks. No build/runtime latency verdict.",
+  "frontendPins": {
+    "baseline": "f7a66acdaf05c587c62ac17572423211647db0855388bb0b7dffd13b8dd54aed",
+    "current": "9460f459f6cf6068249f628f77a84d73a3275fb532743fd527208e2ab0f55bb5"
+  },
+  "viteCurrentBuildSeconds": [
+    10.9,
+    9.06,
+    9.63
+  ],
+  "gzip9Bytes": {
+    "jsCss": {
+      "baseline": 596634,
+      "current": 619247,
+      "deltaPercent": 3.79
+    },
+    "workspaceChunk": {
+      "baseline": 9653,
+      "current": 10897,
+      "deltaPercent": 12.89,
+      "verdict": "WARN"
+    },
+    "workspaceStaticClosure": {
+      "baseline": 129660,
+      "current": 132098,
+      "deltaPercent": 1.88
+    },
+    "assetsChunk": {
+      "baseline": 14605,
+      "current": 17769,
+      "deltaPercent": 21.66,
+      "thresholdPercent": 20,
+      "verdict": "FAIL"
+    },
+    "assetsStaticClosure": {
+      "baseline": 321195,
+      "current": 325548,
+      "deltaPercent": 1.36
+    },
+    "watchlistStaticClosure": {
+      "baseline": 156382,
+      "current": 157704,
+      "deltaPercent": 0.85
+    },
+    "precache": {
+      "baseline": 472822,
+      "current": 495336,
+      "deltaPercent": 4.76
+    },
+    "installationUnion": {
+      "baseline": 482639,
+      "current": 505253,
+      "deltaPercent": 4.69
+    }
+  },
+  "historicalBudgetDebt": {
+    "workspace": {
+      "baseline": 7787,
+      "current": 10897,
+      "deltaPercent": 39.94,
+      "verdict": "FAIL"
+    },
+    "precache": {
+      "baseline": 400938,
+      "current": 495336,
+      "deltaPercent": 23.54,
+      "verdict": "WARN"
+    },
+    "installationUnion": {
+      "baseline": 410446,
+      "current": 505253,
+      "deltaPercent": 23.1,
+      "verdict": "WARN"
+    }
+  },
+  "rawEvidence": {
+    "localTempDirectory": "fc-portfolio-perf-863c3a6ddce14d03adc64c0981b62e43/ci-fix",
+    "helperSha256": "a704785bfb6f0c75337576c84b9dfc7bf76ed4a04f34084e7f63a26bd060b0b3",
+    "summarySha256": "c6fc6f1c4b720a29c28082fbd67b20dcca375da6480ae581fda85f6823345ee3",
+    "independentlyArchived": false
+  },
+  "limitations": [
+    "The failed original run remains failure; the fix needs its own natural CI, not a retry promoted to old-source success.",
+    "Local Node24 and fake-IDB do not prove Node20/Linux CI, Chrome, PWA, multi-device, cloud persistence or recovery.",
+    "Artifact CPU-fix delta is tiny and does not close Assets or historical FAIL/WARN. No deadline or regression budget raised.",
+    "Original final-v2 measurements stay source-bound to the failed 5b0 candidate and are not claimed as this fix's exact artifacts. No v9 release qualification."
+  ]
+}

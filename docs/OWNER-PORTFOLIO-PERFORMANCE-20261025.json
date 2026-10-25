@@ -1,5 +1,6 @@
 {
   "schema": "fc-owner-portfolio-artifact-comparison-1",
+  "measuredCandidateCommit": "5b0a3bd047415d7923019932350677d1289fcc67",
   "baselineCommit": "f010c8b5fa9ecd805163e5a8fb08d22483aced14",
   "mergedMainCommit": "fc37965ce04d7281cb53618d3d7bbd7ac4554146",
   "baselineArchiveSha256": "dd7756db7a3271fc6d9a21b32134ddece97407f34aee2804a1051056b73d6896",

@@ -1395,3 +1395,15 @@ Render MCP本轮可正常只读访问：已明确使用用户确认的My Workspa
 新迁移面板4826B、按点击观察builder887B；拆分减少资产页静态闭包增量，但新增完整来源守卫/历史展示仍令单块超20%线，明确保留FAIL，不提高门槛。两个懒块仍Workbox预缓存，不称安装网络优化。Vite基线11.14/10.84/11.04（中位11.04/最差11.14），当前8.81/10.69/9.69（中位9.69/最差10.69）；无已知npm并行负载，但宿主缓存/路径/EOL未控，不作实际延迟结论。更早a519 workspace7787→10896仍+39.93% FAIL；precache400938→495220 +23.52% WARN、安装410446→505134 +23.07% WARN；另原Policy局部债务不因新基线消失。request/ownerSession重复导入提示、ECharts532397B仍保留；真实大历史交互/cold/warm/旧PWA/API性能未验收。
 
 应用仍8.0.0，物理v5不是v9发布。I18实际轮换、停写/排空、新保护备份/Free配额/provider能力与容量/受控迁移、应用跨Render重启及独立远端恢复；I19完整manual同步/策略写流程/机器消费者/多设备；I20自然交易日/周窗口；I21真实浏览器/PWA与性能债务仍待完成。未读取未确认凭据输入、不绕OAuth/浏览器或PR写403，不改云秘密/套餐/部署/重启/main/tag/Gist；代码回退须保全v5和原任务，不删库伪造降级。新自然CI未完成前不以本机PASS或旧CI给本轮源码放行，更不声明已部署或正式发布。
+
+### 5b0a3bd 自然 CI 真实失败与 2000 行重校验修复（2026-10-25）
+
+本机切片已普通推送 `5b0a3bd047415d7923019932350677d1289fcc67`，tree=`38b5d248b4474cd8570d8a02b755b28e2e4cde1b`，当时本地/远端一致且干净。[自然CI40169955425](https://github.com/AureliusWu/fund-compass/actions/runs/40169955425) 已终态：backend **4088 passed/2 warnings/358.01s**、pip check clean；Worker **148/4文件**、check/dry-run114.28KiB/gzip26.58及独立audit成功；frontend type通过，但Node **20.20.2** 的全量 **2530 passed/1 failed/102文件/25.14s**，真实2000-manual容量用例超过原5000ms。build/audit后续未执行，deploy/candidate_smoke/formal_smoke skipped。未重跑失败run或隐去失败。实际checkout merge=`2726029575285680e45442fedca6f75246bc3ecc`，正常fetch该SHA核parents=fc37965+5b0、tree等于上述feature；CI不是另一份源码。本机2531 PASS不能替代这个Linux失败。
+
+只读定位确认同一已自有deep-frozen portfolio在preview、verify、全state与实际升级/读回链反复解原raw并重核数千DTO，identity映射fixture并非大量SHA瓶颈。现使用模块私有WeakSet，仅登记本codec完整校验、重建全部子对象并递归冻结后的结果；同一精确对象复用shape核，外部Object.freeze、Proxy、IDB新clone仍完整验证。每次verify继续重算原raw及映射SHA，不memo身份/权限/远端资格；未改core完整canonical/CAS。当前manual/history数量先核，再解旧raw，明显2001超限立即拒绝、不截断。独立只读复审未发现P0/P1。新三例证明深冻结无caller可变别名、外冻/clone篡改仍拒、摘要重复核及crypto失效仍拒；旧反向用例全部保留。
+
+同一原fixture/原5000ms、真实v3→v4→v5/2000条setup的三次独立直接npm诊断：修前2.82/2.88/2.63秒（中位2.82/最差2.88），修后1.04/1.19/1.25秒（中位1.19/最差1.25，约-57.8%）。诊断使用test-name过滤，另16条仅在这六次诊断未选中；最终默认全量没有filter/skip，**2534 passed/102文件/17.60s**，type-check exit0。CPU复用不是提高timeout或移setup出test，原并发上限和所有fixture不变。该本机Node24结果仍须新精确源码的自然CI重验，不先称Linux修复已通过。
+
+修复后重新冻结并直接构建三次10.90/9.06/9.63s，全部PWA7/7、制品完全稳定；基线沿用前述final-v2已完成的三个f010制品及同一pin/安全补丁安装，不冒称本次又交错重建基线。新摘要 `OWNER-PORTFOLIO-CI-FIX-20261025.json` 单列当前pin/原始helper/SHA与证据边界；原性能文件明确绑定5b0失败候选，不当作修复的精确制品。当前gzip9 JS+CSS619247（f010+3.79%），workspace10897（+12.89% WARN）/闭包132098，资产页17769（+21.66% FAIL）/闭包325548，precache495336（+4.76%）、安装并集505253（+4.69%）；历史a519预算债务继续FAIL/WARN，不能用fixture提速洗掉包体回退。无实际浏览器/API/云/耐久或正式发布资格，应用仍8.0.0。
+
+下一步仍是完整manual初始共同基线/profile、同库原包/三方ACK与实际UI/分析；不能以旧B中存在manual就当作已应用L，不能用新C重置基金本机意图，也不把history上传成Owner资产。新模块尚未创建、无未提交规划源码；本次先普通推送这个真实CI修复并核其自然CI，完整v9目标和所有未过门禁保持不变。
