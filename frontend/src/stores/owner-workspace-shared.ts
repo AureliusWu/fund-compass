@@ -7,6 +7,7 @@ import type { OwnerWorkspaceErrorCode, OwnerWorkspaceGuard } from './owner-works
 export const WORKING = 'working_copy', RECEIPTS = 'import_receipts', METADATA = 'local_metadata', CURRENT = 'current'
 export const STORES = ['slot', WORKING, RECEIPTS, METADATA]
 export const SYNC = 'sync_metadata'
+export const PORTFOLIO = 'portfolio_metadata'
 export const SCHEMA = 'owner-workspace-1'
 export const RECEIPT_SCHEMA = 'owner-workspace-receipt-1'
 export const HASH = /^[0-9a-f]{64}(?![\s\S])/

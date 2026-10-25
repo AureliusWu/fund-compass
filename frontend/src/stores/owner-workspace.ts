@@ -11,12 +11,12 @@ import { normalizeOwnerSyncKey } from '@/utils/ownerSyncContract'
 import {
   validateOwnerWorkspaceLocalMetadata, emptyOwnerWorkspaceLocalMetadata, validateOwnerWorkspaceSourceArchive,
   decodeOwnerWorkspaceSourceArchive, buildOwnerLegacyWorkspaceBackup, buildOwnerWorkspaceBackup, validateOwnerWorkspaceBackup,
-  previewOwnerWorkspaceRestore, canonicalOwnerLocal, OWNER_WORKSPACE_MAX_ARCHIVES,
+  previewOwnerWorkspaceRestore, canonicalOwnerLocal, OWNER_WORKSPACE_MAX_ARCHIVES, OWNER_WORKSPACE_BACKUP_MAX_BYTES,
   type OwnerWorkspaceLocalMetadata,
 } from '@/utils/owner-workspace-backup'
 import type { OwnerWorkspaceSyncMetadata } from '@/utils/owner-workspace-sync-metadata'
 import {
-  WORKING, RECEIPTS, METADATA, CURRENT, STORES, SYNC, SCHEMA, RECEIPT_SCHEMA, HASH, ID, MAX_RECEIPTS,
+  WORKING, RECEIPTS, METADATA, CURRENT, STORES, SYNC, PORTFOLIO, SCHEMA, RECEIPT_SCHEMA, HASH, ID, MAX_RECEIPTS,
   OwnerWorkspaceError, fail, code, closed, counter, increment, canonical, digest, assertGuard, localId,
 } from './owner-workspace-shared'
 import type {
@@ -24,13 +24,22 @@ import type {
   OwnerWorkspaceReceipt, OwnerWorkspaceLocalState, OwnerWorkspaceLocalCommand, OwnerWorkspaceAdoptLocalRequest,
   OwnerWorkspaceEditLocalRequest, OwnerWorkspaceRestoreLocalRequest, OwnerWorkspaceSyncState,
   OwnerWorkspaceLinkCloudRequest, OwnerWorkspacePrepareCloudRequest, OwnerWorkspaceCancelCloudRequest,
-  OwnerWorkspace, WorkingRow, StoredReceipt, SlotRow, Image, CloudWorkspaceHost,
+  OwnerWorkspace, WorkingRow, StoredReceipt, SlotRow, Image, CloudWorkspaceHost, OwnerWorkspaceEditPortfolioRequest,
 } from './owner-workspace-types'
+import type { OwnerPortfolioLocal } from '@/utils/ownerPortfolioLocal'
+import type { OwnerPortfolioUpgradeIntent } from '@/utils/owner-portfolio-upgrade-intent'
+import type { OwnerWorkspacePortfolioUpgradeRequest, OwnerWorkspacePortfolioUpgradeSource } from './owner-workspace-portfolio-upgrade'
 export type * from './owner-workspace-types'
 export { OwnerWorkspaceError } from './owner-workspace-shared'
 type SyncCodec = typeof import('@/utils/owner-workspace-sync-codec')
 type CloudCommands = typeof import('./owner-workspace-cloud')
+type PortfolioCodec = typeof import('@/utils/ownerPortfolioLocal') & typeof import('@/utils/owner-portfolio-upgrade-intent')
 let syncCodecPromise: Promise<SyncCodec> | null = null, cloudCommandsPromise: Promise<CloudCommands> | null = null
+let portfolioCodecPromise: Promise<PortfolioCodec> | null = null
+function loadPortfolioCodec(): Promise<PortfolioCodec> {
+  return portfolioCodecPromise ??= Promise.all([import('@/utils/ownerPortfolioLocal'), import('@/utils/owner-portfolio-upgrade-intent')])
+    .then(([portfolio, intent]) => ({ ...portfolio, ...intent })).catch(() => fail('workspace_unavailable'))
+}
 function loadSyncCodec(): Promise<SyncCodec> {
   return syncCodecPromise ??= import('@/utils/owner-workspace-sync-codec').catch(() => fail('workspace_unavailable'))
 }
@@ -153,9 +162,10 @@ export async function buildOwnerWorkspaceRollbackRequest(target: string, input: 
   return Object.freeze({ ...copy, hash: await digest(rollbackEnvelope(target, copy)) })
 }
 
-function localState(value: unknown, target: string, codec: SyncCodec | null = null): OwnerWorkspaceLocalState {
+function localState(value: unknown, target: string, codec: SyncCodec | null = null, portfolioCodec: PortfolioCodec | null = null): OwnerWorkspaceLocalState {
   const hasSync = !!value && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, 'sync')
-  if (!closed(value, ['snapshot', 'outbox', 'metadata', 'receiptCount', ...(hasSync ? ['sync'] : [])])
+  const hasPortfolio = !!value && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, 'portfolio')
+  if (!closed(value, ['snapshot', 'outbox', 'metadata', 'receiptCount', ...(hasSync ? ['sync'] : []), ...(hasPortfolio ? ['portfolio', 'portfolioUpgrade'] : [])])
     || !closed(value.outbox, ['version', 'entry'])) fail('workspace_invalid_input')
   if (value.outbox.entry !== null && !closed(value.outbox.entry, ['schema', 'state', 'rawBody', 'requestHash'])) fail('workspace_invalid_input')
   const copy = snapshot(value.snapshot), slot = ownerSyncOutboxStorage.rowShape({ ...value.outbox, resourceFingerprint: target }, target)
@@ -165,25 +175,45 @@ function localState(value: unknown, target: string, codec: SyncCodec | null = nu
   if (hasSync && !codec) fail('workspace_invalid_input')
   const sync = hasSync ? codec!.validateOwnerWorkspaceSyncMetadata(value.sync, target, { snapshot: copy, metadata,
     outbox: { version: slot.version, entry: slot.entry } }) : null
-  return Object.freeze({ snapshot: copy, outbox: Object.freeze({ version: slot.version, entry: slot.entry }),
-    metadata, receiptCount, ...(sync ? { sync } : {}) })
+  if (hasPortfolio && (!sync || !portfolioCodec)) fail('workspace_invalid_input')
+  const portfolio = hasPortfolio ? portfolioCodec!.validateOwnerPortfolioLocal(value.portfolio) : null
+  const portfolioUpgrade = portfolio ? portfolioCodec!.validateOwnerPortfolioUpgradeIntent(value.portfolioUpgrade, target, portfolio.migration.sourceSha256) : null
+  if (portfolio && (slot.entry !== null || sync?.pending !== null || !metadata.adoption || receiptCount !== 0)) fail('workspace_invalid_input')
+  const result = Object.freeze({ snapshot: copy, outbox: Object.freeze({ version: slot.version, entry: slot.entry }),
+    metadata, receiptCount, ...(sync ? { sync } : {}), ...(portfolio ? { portfolio, portfolioUpgrade: portfolioUpgrade! } : {}) })
+  assertPortfolioRecoveryCapacity(target, result)
+  return result
+}
+/** The same complete envelope is used by v5 export. Capacity is a whole-image
+ * limit, including escaped original raw sources, not separate per-store caps. */
+function assertPortfolioRecoveryCapacity(target: string, state: OwnerWorkspaceLocalState): void {
+  if (!state.portfolio) return
+  const raw = canonicalOwnerLocal({ format: 'sinan-owner-workspace-recovery-2', physicalVersion: 5, targetFingerprint: target, local: state })
+  if (raw.length > OWNER_WORKSPACE_BACKUP_MAX_BYTES || new TextEncoder().encode(raw).byteLength > OWNER_WORKSPACE_BACKUP_MAX_BYTES) fail('workspace_capacity')
 }
 /** Pure full-image validation for explicit recovery files, never an IDB open.
  * Pending packets retain their original bytes and must pass the same hashes as
  * a normal v4 reopen. Callers cannot provide an alternative codec. */
 export async function validateOwnerWorkspaceLocalState(target: string, input: unknown): Promise<OwnerWorkspaceLocalState> {
   localId(target, 'workspace-image-validation')
-  const codec = await stateCodec(input), copy = localState(input, target, codec)
+  const codec = await stateCodec(input)
+  const portfolioCodec = input && typeof input === 'object' && Object.prototype.hasOwnProperty.call(input, 'portfolio') ? await timedImport(loadPortfolioCodec()) : null
+  const copy = localState(input, target, codec, portfolioCodec)
+  if (copy.portfolio) {
+    await portfolioCodec!.verifyOwnerPortfolioMigration(copy.portfolio)
+    await portfolioCodec!.verifyOwnerPortfolioUpgradeIntent(copy.portfolioUpgrade, target, copy.portfolio.migration.sourceSha256)
+  }
   if (copy.sync && codec) await codec.verifyPending({
     slot: { ...copy.outbox, resourceFingerprint: target },
     working: { schema: SCHEMA, targetFingerprint: target, snapshot: copy.snapshot },
-    metadata: copy.metadata, sync: copy.sync, receiptCount: copy.receiptCount, receipt: null, original: null,
-  }, target, value => localState(value, target, codec))
+    metadata: copy.metadata, sync: copy.sync, receiptCount: copy.receiptCount, receipt: null, original: null, portfolio: copy.portfolio, portfolioUpgrade: copy.portfolioUpgrade,
+  }, target, value => localState(value, target, codec, portfolioCodec))
   return copy
 }
 function stateOf(image: Image): OwnerWorkspaceLocalState {
   return Object.freeze({ snapshot: image.working.snapshot, outbox: Object.freeze({ version: image.slot.version, entry: image.slot.entry }),
-    metadata: image.metadata, receiptCount: image.receiptCount, ...(image.sync ? { sync: image.sync } : {}) })
+    metadata: image.metadata, receiptCount: image.receiptCount, ...(image.sync ? { sync: image.sync } : {}),
+    ...(image.portfolio ? { portfolio: image.portfolio, portfolioUpgrade: image.portfolioUpgrade! } : {}) })
 }
 function command(input: unknown): OwnerWorkspaceLocalCommand {
   if (closed(input, ['type', 'input', 'expectedEntry', 'confirmed']) && input.type === 'save' && typeof input.confirmed === 'boolean') {
@@ -216,37 +246,53 @@ export async function buildOwnerWorkspaceAdoptLocalRequest(target: string, input
 export async function buildOwnerWorkspaceEditLocalRequest(target: string, input: Omit<OwnerWorkspaceEditLocalRequest, 'hash'>): Promise<OwnerWorkspaceEditLocalRequest> {
   if (!closed(input, ['id', 'expected', 'command'])) fail('workspace_invalid_input')
   localId(target, input.id)
-  const codec = await stateCodec(input.expected)
-  const copy = { id: input.id, expected: localState(input.expected, target, codec), command: command(input.command) }
+  const copy = { id: input.id, expected: await validateOwnerWorkspaceLocalState(target, input.expected), command: command(input.command) }
   return Object.freeze({ ...copy, hash: await digest(canonical({ operation: 'local-edit-1', target, ...copy })) })
+}
+export async function buildOwnerWorkspaceEditPortfolioRequest(target: string,
+  input: Omit<OwnerWorkspaceEditPortfolioRequest, 'hash'>): Promise<OwnerWorkspaceEditPortfolioRequest> {
+  if (!closed(input, ['id', 'expected', 'command'])) fail('workspace_invalid_input')
+  localId(target, input.id)
+  const expected = await validateOwnerWorkspaceLocalState(target, input.expected)
+  const portfolioCodec = await timedImport(loadPortfolioCodec())
+  if (!expected.portfolio || !expected.sync || expected.outbox.entry !== null) fail('workspace_pending')
+  const command = portfolioCodec.validateOwnerPortfolioCommand(input.command)
+  // Validate the complete postimage before binding any caller data.
+  portfolioCodec.applyOwnerPortfolioCommand(expected.portfolio, command)
+  const copy = { id: input.id, expected, command }
+  return Object.freeze({ ...copy, hash: await digest(canonical({ operation: 'portfolio-edit-1', target, ...copy })) })
 }
 export async function buildOwnerWorkspaceRestoreLocalRequest(target: string, input: Omit<OwnerWorkspaceRestoreLocalRequest, 'hash'>): Promise<OwnerWorkspaceRestoreLocalRequest> {
   if (!closed(input, ['id', 'expected', 'backup'])) fail('workspace_invalid_input')
   localId(target, input.id)
-  const codec = await stateCodec(input.expected)
-  const copy = { id: input.id, expected: localState(input.expected, target, codec), backup: await validateOwnerWorkspaceBackup(input.backup) }
+  const copy = { id: input.id, expected: await validateOwnerWorkspaceLocalState(target, input.expected), backup: await validateOwnerWorkspaceBackup(input.backup) }
   return Object.freeze({ ...copy, hash: await digest(canonical({ operation: 'local-restore-1', target, ...copy })) })
 }
 
 function syncStateOf(image: Image): OwnerWorkspaceSyncState {
-  if (!image.sync) fail('workspace_invalid_database')
+  // v5 cloud packets need the full manual-asset intent/ACK profile. Until that
+  // profile is wired, never use the old fund-only planner and silently omit it.
+  if (!image.sync || image.portfolio) fail('workspace_invalid_database')
   return Object.freeze({ local: stateOf(image), sync: image.sync })
 }
 // Excludes mutable delivery state, but binds every local row/archive/receipt
 // count and the exact complete common base. Hashes are not source authentication.
-function makeWorkspace(db: IDBDatabase, target: string, codec: SyncCodec | null = null): OwnerWorkspace {
-  if (db.version === 4 && !codec) fail('workspace_invalid_database')
-  const storesForVersion = db.version === 4 ? [...STORES, SYNC] : STORES
+function makeWorkspace(db: IDBDatabase, target: string, codec: SyncCodec | null = null,
+  portfolioCodec: PortfolioCodec | null = null): OwnerWorkspace {
+  if (db.version >= 4 && !codec || db.version === 5 && !portfolioCodec) fail('workspace_invalid_database')
+  const storesForVersion = db.version === 5 ? [...STORES, SYNC, PORTFOLIO] : db.version === 4 ? [...STORES, SYNC] : STORES
   let closedHandle = false
   const inFlight = new Set<(value: OwnerWorkspaceErrorCode) => void>()
   let observedLocal: OwnerWorkspaceSnapshot | null = null, observedSlot: SlotRow | null = null
   let observedMetadata: OwnerWorkspaceLocalMetadata | null = null
   let observedSync: OwnerWorkspaceSyncMetadata | null = null
+  let observedPortfolio: OwnerPortfolioLocal | null = null
+  let observedPortfolioUpgrade: OwnerPortfolioUpgradeIntent | null = null
   const ensureOpen = () => { if (closedHandle) fail('workspace_closed') }
   const close = () => {
     if (closedHandle) return
     closedHandle = true
-    observedLocal = null; observedSlot = null; observedMetadata = null; observedSync = null
+    observedLocal = null; observedSlot = null; observedMetadata = null; observedSync = null; observedPortfolio = null; observedPortfolioUpgrade = null
     for (const cancel of [...inFlight]) cancel('workspace_closed')
     try { db.close() } catch { /* disposal has no driver details */ }
   }
@@ -256,12 +302,16 @@ function makeWorkspace(db: IDBDatabase, target: string, codec: SyncCodec | null 
     const next = image.working.snapshot
     if (observedLocal && (next.localVersion < observedLocal.localVersion
         || (next.localVersion === observedLocal.localVersion && (canonical(next) !== canonical(observedLocal)
-          || canonical(image.metadata) !== canonical(observedMetadata))))) fail('workspace_invalid_database')
+          || canonical(image.metadata) !== canonical(observedMetadata)
+          || canonical(image.portfolio ?? null) !== canonical(observedPortfolio))))) fail('workspace_invalid_database')
     if (observedSlot && (image.slot.version < observedSlot.version
         || (image.slot.version === observedSlot.version && !ownerSyncOutboxStorage.sameRow(image.slot, observedSlot)))) fail('workspace_invalid_database')
     if (observedSync && (!image.sync || image.sync.epoch < observedSync.epoch
         || image.sync.epoch === observedSync.epoch && canonical(image.sync) !== canonical(observedSync))) fail('workspace_invalid_database')
+    if (observedPortfolioUpgrade && canonical(image.portfolioUpgrade) !== canonical(observedPortfolioUpgrade)) fail('workspace_invalid_database')
     observedLocal = next; observedSlot = image.slot; observedMetadata = image.metadata; observedSync = image.sync
+    observedPortfolio = image.portfolio ?? null
+    observedPortfolioUpgrade = image.portfolioUpgrade ?? null
   }
   function bounded<T>(guard: OwnerWorkspaceGuard, work: () => Promise<T>): Promise<T> {
     return new Promise((resolve, reject) => {
@@ -332,7 +382,8 @@ function makeWorkspace(db: IDBDatabase, target: string, codec: SyncCodec | null 
         slot: stores.slot.get(CURRENT), slots: stores.slot.count(), working: stores[WORKING].get(CURRENT),
         workings: stores[WORKING].count(), receipts: stores[RECEIPTS].count(),
         metadata: stores[METADATA].get(CURRENT), metadatas: stores[METADATA].count(),
-        ...(db.version === 4 ? { sync: stores[SYNC].get(CURRENT), syncs: stores[SYNC].count() } : {}),
+        ...(db.version >= 4 ? { sync: stores[SYNC].get(CURRENT), syncs: stores[SYNC].count() } : {}),
+        ...(db.version === 5 ? { portfolio: stores[PORTFOLIO].get(CURRENT), portfolios: stores[PORTFOLIO].count(), portfolioUpgrade: stores[PORTFOLIO].get('intent') } : {}),
         ...(id ? { receipt: stores[RECEIPTS].get(id) } : {}),
         ...(originalId ? { original: stores[RECEIPTS].get(originalId) } : {}),
       }
@@ -347,19 +398,32 @@ function makeWorkspace(db: IDBDatabase, target: string, codec: SyncCodec | null 
           const currentWorking = working(requests.working.result, target)
           const slot = ownerSyncOutboxStorage.rowShape(requests.slot.result, target)
           const metadata = checkedMetadata(requests.metadata.result, currentWorking.snapshot)
-          if (db.version === 4 && requests.syncs.result !== 1) fail('workspace_invalid_database')
+          if (db.version >= 4 && requests.syncs.result !== 1) fail('workspace_invalid_database')
           let sync: OwnerWorkspaceSyncMetadata | null = null
-          if (db.version === 4) {
+          if (db.version >= 4) {
             try { sync = codec!.validateOwnerWorkspaceSyncMetadata(requests.sync.result, target, { snapshot: currentWorking.snapshot, metadata,
               outbox: { version: slot.version, entry: slot.entry } }) }
             catch { fail('workspace_invalid_database') }
           }
+          let portfolio: OwnerPortfolioLocal | null = null
+          let portfolioUpgrade: OwnerPortfolioUpgradeIntent | null = null
+          if (db.version === 5) {
+            const row = requests.portfolio.result
+            if (requests.portfolios.result !== 2 || !closed(row, ['schema', 'targetFingerprint', 'portfolio'])
+              || row.schema !== 'owner-workspace-portfolio-1' || row.targetFingerprint !== target) fail('workspace_invalid_database')
+            try {
+              portfolio = portfolioCodec!.validateOwnerPortfolioLocal(row.portfolio)
+              portfolioUpgrade = portfolioCodec!.validateOwnerPortfolioUpgradeIntent(requests.portfolioUpgrade.result, target, portfolio.migration.sourceSha256)
+              if (slot.entry !== null || sync?.pending !== null || !metadata.adoption || requests.receipts.result !== 0) fail('workspace_invalid_database')
+            } catch { fail('workspace_invalid_database') }
+          }
           let current: Image = { slot, working: currentWorking, sync,
-            metadata,
+            metadata, portfolio, portfolioUpgrade,
             receipt: id && requests.receipt.result !== undefined ? storedReceipt(requests.receipt.result, target) : null,
             original: originalId && requests.original.result !== undefined ? storedReceipt(requests.original.result, target) : null,
             receiptCount: requests.receipts.result }
           observe(current)
+          assertPortfolioRecoveryCapacity(target, stateOf(current))
           if (current.metadata.recentEdit && current.metadata.recentEdit.outboxVersion > current.slot.version) fail('workspace_invalid_database')
           if (current.receipt && current.receipt.receipt.id !== id) fail('workspace_invalid_database')
           if (current.original && current.original.receipt.id !== originalId) fail('workspace_invalid_database')
@@ -371,8 +435,12 @@ function makeWorkspace(db: IDBDatabase, target: string, codec: SyncCodec | null 
   }
   async function readImage(guard: OwnerWorkspaceGuard, id?: string, originalId?: string): Promise<Image> {
     const result = await image('readonly', guard, id, originalId)
+    if (result.portfolio) {
+      await portfolioCodec!.verifyOwnerPortfolioMigration(result.portfolio)
+      await portfolioCodec!.verifyOwnerPortfolioUpgradeIntent(result.portfolioUpgrade, target, result.portfolio.migration.sourceSha256)
+    }
     await ownerSyncOutboxStorage.validateEntry(result.slot.entry, 'outbox_invalid_database')
-    if (result.sync?.pending) await codec!.verifyPending(result, target, value => localState(value, target, codec))
+    if (result.sync?.pending) await codec!.verifyPending(result, target, value => localState(value, target, codec, portfolioCodec))
 
     for (const receipt of [result.receipt, result.original]) if (receipt) await verifyReceipt(receipt)
     ensureOpen(); assertGuard(guard)
@@ -383,6 +451,8 @@ function makeWorkspace(db: IDBDatabase, target: string, codec: SyncCodec | null 
     if (current.slot.version !== expectedOutbox || current.working.snapshot.localVersion !== expectedLocal) fail('workspace_conflict')
     if (!ownerSyncOutboxStorage.sameRow(current.slot, baseline.slot) || canonical(current.working) !== canonical(baseline.working)
       || canonical(current.metadata) !== canonical(baseline.metadata) || canonical(current.sync) !== canonical(baseline.sync)
+      || canonical(current.portfolio ?? null) !== canonical(baseline.portfolio ?? null)
+      || canonical(current.portfolioUpgrade ?? null) !== canonical(baseline.portfolioUpgrade ?? null)
       || current.receiptCount !== baseline.receiptCount) fail('workspace_conflict')
   }
   function advanceEmptySlot(current: Image, stores: Record<string, IDBObjectStore>): SlotRow {
@@ -445,10 +515,14 @@ function makeWorkspace(db: IDBDatabase, target: string, codec: SyncCodec | null 
     return receipt.localVersion === image.working.snapshot.localVersion && receipt.outboxVersion === image.slot.version
   }
   async function commitLocal(baseline: Image, expected: OwnerWorkspaceLocalState, next: OwnerWorkspaceSnapshot,
-    metadata: OwnerWorkspaceLocalMetadata, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceLocalState> {
+    metadata: OwnerWorkspaceLocalMetadata, guard: OwnerWorkspaceGuard,
+    portfolio: OwnerPortfolioLocal | null = baseline.portfolio ?? null): Promise<OwnerWorkspaceLocalState> {
     // Refuse a state which cannot be exported under the same complete UTF-8
     // budget, including escaped raw archives. Never discard older archives.
     await buildOwnerWorkspaceBackup({ snapshot: next, metadata })
+    if (portfolio) await portfolioCodec!.verifyOwnerPortfolioMigration(portfolio)
+    assertPortfolioRecoveryCapacity(target, { ...stateOf(baseline), snapshot: next, metadata,
+      outbox: { version: increment(baseline.slot.version), entry: null }, ...(portfolio ? { portfolio } : {}) })
     ensureOpen(); assertGuard(guard)
     const committed = await image('readwrite', guard, undefined, undefined, (current, stores) => {
       expectedImage(current, expected)
@@ -456,8 +530,12 @@ function makeWorkspace(db: IDBDatabase, target: string, codec: SyncCodec | null 
       const slot = advanceEmptySlot(current, stores)
       const nextWorking = working({ schema: SCHEMA, targetFingerprint: target, snapshot: next }, target)
       const nextMetadata = validateOwnerWorkspaceLocalMetadata(metadata, next)
+      if (portfolio) {
+        const value = portfolioCodec!.validateOwnerPortfolioLocal(portfolio)
+        stores[PORTFOLIO].put({ schema: 'owner-workspace-portfolio-1', targetFingerprint: target, portfolio: value }, CURRENT)
+      }
       stores[WORKING].put(nextWorking, CURRENT); stores[METADATA].put(nextMetadata, CURRENT)
-      return { ...current, slot, working: nextWorking, metadata: nextMetadata }
+      return { ...current, slot, working: nextWorking, metadata: nextMetadata, portfolio }
     })
     ensureOpen(); assertGuard(guard); observe(committed)
     return stateOf(committed)
@@ -494,10 +572,11 @@ function makeWorkspace(db: IDBDatabase, target: string, codec: SyncCodec | null 
   }
   const cloudHost: CloudWorkspaceHost = {
     target, readImage, toSyncState: syncStateOf,
-    validateLocalState: value => localState(value, target, codec),
+    validateLocalState: value => localState(value, target, codec, portfolioCodec),
     assertActive(guard) { ensureOpen(); assertGuard(guard) },
     async commitCloud(expected, baseline, post, mode, guard) {
       if (!codec) fail('workspace_invalid_database')
+      if (db.version === 5) fail('workspace_invalid_database')
       ensureOpen(); assertGuard(guard)
       const committed = await image('readwrite', guard, undefined, undefined,
         (current, stores) => codec.commitCloudImage(target, current, baseline, expected, post, mode, stores))
@@ -509,6 +588,7 @@ function makeWorkspace(db: IDBDatabase, target: string, codec: SyncCodec | null 
     args: unknown[], guard: OwnerWorkspaceGuard): Promise<T> {
     return bounded(guard, async () => {
       if (!codec) fail('workspace_invalid_database')
+      if (db.version === 5) fail('workspace_invalid_database')
       const commands = await loadCloudCommands()
       ensureOpen(); assertGuard(guard)
       const call = commands[name] as (...args: unknown[]) => Promise<T>
@@ -565,6 +645,22 @@ function makeWorkspace(db: IDBDatabase, target: string, codec: SyncCodec | null 
         recentEdit: { id: request.id, hash: request.hash, beforeLocalVersion: baseline.working.snapshot.localVersion,
           localVersion: next.snapshot.localVersion, outboxVersion: increment(baseline.slot.version) } }
       return commitLocal(baseline, request.expected, next.snapshot, metadata, guard)
+    }) },
+    editPortfolio(input, guard) { return bounded(guard, async () => {
+      if (db.version !== 5 || !portfolioCodec || !closed(input, ['id', 'hash', 'expected', 'command'])) fail('workspace_invalid_input')
+      const request = await buildOwnerWorkspaceEditPortfolioRequest(target, { id: input.id, expected: input.expected, command: input.command })
+      if (request.hash !== input.hash) fail('workspace_invalid_input')
+      const baseline = await readImage(guard)
+      if (matchingLocal(baseline, request.id, request.hash)) return stateOf(baseline)
+      expectedImage(baseline, request.expected)
+      if (!baseline.portfolio || !baseline.metadata.adoption || baseline.metadata.adoption.id === request.id) fail('workspace_conflict')
+      const applied = portfolioCodec.applyOwnerPortfolioCommand(baseline.portfolio, request.command)
+      if (canonical(applied.portfolio) === canonical(baseline.portfolio)) return stateOf(baseline)
+      const next = snapshot({ ...baseline.working.snapshot, localVersion: increment(baseline.working.snapshot.localVersion) })
+      const metadata: OwnerWorkspaceLocalMetadata = { ...baseline.metadata,
+        recentEdit: { id: request.id, hash: request.hash, beforeLocalVersion: baseline.working.snapshot.localVersion,
+          localVersion: next.localVersion, outboxVersion: increment(baseline.slot.version) } }
+      return commitLocal(baseline, request.expected, next, metadata, guard, applied.portfolio)
     }) },
     restoreLocal(input, guard) { return bounded(guard, async () => {
       if (!closed(input, ['id', 'hash', 'expected', 'backup'])) fail('workspace_invalid_input')
@@ -714,7 +810,7 @@ async function openWorkspace(factory: IDBFactory, target: string, signal: AbortS
   if (signal.aborted) fail('workspace_timeout')
   const physicalVersion = await strictProbe(factory, target, baseline, signal)
   if (signal.aborted) fail('workspace_timeout')
-  if (physicalVersion === 4) return openExistingWorkspace(factory, target, signal)
+  if (physicalVersion >= 4) return openExistingWorkspace(factory, target, signal)
   return new Promise((resolve, reject) => {
     let settled = false, upgraded = false, fromVersion = 0
     let db: IDBDatabase | undefined, handle: OwnerWorkspace | undefined
@@ -771,7 +867,7 @@ async function openWorkspace(factory: IDBFactory, target: string, signal: AbortS
       request.onsuccess = () => {
         db = request.result
         if (settled) { db.close(); return }
-        if (![3, 4].includes(db.version) || !isOwnerSyncOutboxDatabase(db)) { finish('workspace_invalid_database'); return }
+        if (![3, 4, 5].includes(db.version) || !isOwnerSyncOutboxDatabase(db)) { finish('workspace_invalid_database'); return }
         db.onversionchange = () => { handle?.close(); db?.close(); finish('workspace_closed') }
         try {
           // Versionchange exposes no strict durability option. All new data
@@ -836,18 +932,19 @@ function openExistingWorkspace(factory: IDBFactory, target: string, signal: Abor
       request.onsuccess = () => {
         db = request.result
         if (settled) { db.close(); return }
-        if (![3, 4].includes(db.version) || !isOwnerSyncOutboxDatabase(db)) { finish('workspace_invalid_database'); return }
+        if (![3, 4, 5].includes(db.version) || !isOwnerSyncOutboxDatabase(db)) { finish('workspace_invalid_database'); return }
         db.onversionchange = () => finish('workspace_closed')
         db.onclose = () => finish('workspace_closed')
-        const ready = (codec: SyncCodec | null) => {
+        const ready = (codec: SyncCodec | null, portfolioCodec: PortfolioCodec | null = null) => {
           if (settled || signal.aborted) { db?.close(); return }
           try {
-            handle = makeWorkspace(db!, target, codec)
+            handle = makeWorkspace(db!, target, codec, portfolioCodec)
             handle.readLocalState({ signal, assertActive() { if (signal.aborted) fail('workspace_timeout') } })
               .then(() => finish(), error => finish(code(error)))
           } catch (error) { finish(code(error)) }
         }
-        if (db.version === 4) loadSyncCodec().then(ready, () => finish('workspace_unavailable'))
+        if (db.version === 5) Promise.all([loadSyncCodec(), loadPortfolioCodec()]).then(([sync, portfolio]) => ready(sync, portfolio), () => finish('workspace_unavailable'))
+        else if (db.version === 4) loadSyncCodec().then(ready, () => finish('workspace_unavailable'))
         else ready(null)
       }
     } catch (error) { finish(code(error)) }
@@ -909,6 +1006,48 @@ export async function reconcileOwnerWorkspaceSyncUpgrade(factory: IDBFactory, ta
     factory, expected, activeGuard, controller.signal, abortCode)
   } catch (error) { throw new OwnerWorkspaceError(timedOut ? 'workspace_timeout' : code(error)) }
   finally { clearTimeout(timer); guard.signal.removeEventListener('abort', revoked) }
+}
+
+export function buildOwnerWorkspacePortfolioUpgradeBackup(target: string, expected: OwnerWorkspaceLocalState,
+  source: OwnerWorkspacePortfolioUpgradeSource) {
+  return timedImport(import('./owner-workspace-portfolio-upgrade').then(module => module.buildOwnerWorkspacePortfolioUpgradeBackup(target, expected, source)))
+}
+export function buildOwnerWorkspacePortfolioUpgradeRequest(target: string, input: Omit<OwnerWorkspacePortfolioUpgradeRequest, 'hash'>) {
+  return timedImport(import('./owner-workspace-portfolio-upgrade').then(module => module.buildOwnerWorkspacePortfolioUpgradeRequest(target, input)))
+}
+async function portfolioFormatOperation(factory: IDBFactory, target: string, input: OwnerWorkspacePortfolioUpgradeRequest,
+  guard: OwnerWorkspaceGuard, reconcile: boolean): Promise<OwnerWorkspace> {
+  localId(target, 'workspace-portfolio-upgrade')
+  assertGuard(guard)
+  const controller = new AbortController()
+  let timedOut = false
+  const revoked = () => controller.abort()
+  guard.signal.addEventListener('abort', revoked, { once: true })
+  const timer = setTimeout(() => { timedOut = true; controller.abort() }, OWNER_SYNC_OUTBOX_TIMEOUT_MS)
+  const activeGuard: OwnerWorkspaceGuard = { signal: controller.signal, assertActive() {
+    if (timedOut) fail('workspace_timeout')
+    assertGuard(guard)
+  } }
+  const abortCode = (): OwnerWorkspaceErrorCode => timedOut ? 'workspace_timeout' : 'workspace_context_changed'
+  try {
+    const [upgrade, codec, portfolioCodec] = await waitForImport(Promise.all([
+      import('./owner-workspace-portfolio-upgrade'), loadSyncCodec(), loadPortfolioCodec(),
+    ]), controller.signal, abortCode)
+    assertGuard(activeGuard)
+    const operation = reconcile ? upgrade.reconcileOwnerWorkspacePortfolioUpgrade : upgrade.upgradeOwnerWorkspacePortfolio
+    return await operation({ target, openExistingWorkspace, strictProbe, working, checkedMetadata,
+      localState: value => localState(value, target, codec, portfolioCodec),
+      makeWorkspace: db => makeWorkspace(db, target, codec, portfolioCodec) }, factory, input, activeGuard, controller.signal, abortCode)
+  } catch (error) { throw new OwnerWorkspaceError(timedOut ? 'workspace_timeout' : code(error)) }
+  finally { clearTimeout(timer); guard.signal.removeEventListener('abort', revoked) }
+}
+export function upgradeOwnerWorkspacePortfolio(factory: IDBFactory, target: string, input: OwnerWorkspacePortfolioUpgradeRequest,
+  guard: OwnerWorkspaceGuard): Promise<OwnerWorkspace> {
+  return portfolioFormatOperation(factory, target, input, guard, false)
+}
+export function reconcileOwnerWorkspacePortfolioUpgrade(factory: IDBFactory, target: string, input: OwnerWorkspacePortfolioUpgradeRequest,
+  guard: OwnerWorkspaceGuard): Promise<OwnerWorkspace> {
+  return portfolioFormatOperation(factory, target, input, guard, true)
 }
 
 /** v1/v2->v3 adds only stores/independent metadata; one budget covers every phase. */

@@ -5,6 +5,8 @@ import type { OwnerWorkspaceLocalMetadata, OwnerWorkspaceSourceArchive, OwnerWor
 import type { BuiltOwnerSyncRequest } from '@/utils/ownerSyncContract'
 import type { ownerSyncOutboxStorage } from './ownerSyncOutbox'
 import type { OwnerWorkspaceSyncMetadata } from '@/utils/owner-workspace-sync-metadata'
+import type { OwnerPortfolioLocal, OwnerPortfolioCommand } from '@/utils/ownerPortfolioLocal'
+import type { OwnerPortfolioUpgradeIntent } from '@/utils/owner-portfolio-upgrade-intent'
 import type { OwnerWorkspaceDeliveryRequest, OwnerWorkspaceAckCloudRequest } from './owner-workspace-delivery'
 export type { OwnerWorkspaceDeliveryRequest, OwnerWorkspaceAckCloudRequest } from './owner-workspace-delivery'
 export type { OwnerWorkspaceEntry, OwnerWorkspaceLegacy, OwnerWorkspaceSnapshot } from '@/utils/owner-cloud-import'
@@ -50,8 +52,14 @@ export interface OwnerWorkspaceLocalState {
   readonly outbox: Readonly<{ version: number; entry: SlotRow['entry'] }>
   readonly metadata: OwnerWorkspaceLocalMetadata
   readonly receiptCount: number
-  /** Present only in physical v4, including the entire common base and epoch. */
+  /** Physical v4/v5, including the entire common base and epoch. */
   readonly sync?: OwnerWorkspaceSyncMetadata
+  /** Physical v5 only. Part of every exact local preimage, never legacy LS. */
+  readonly portfolio?: OwnerPortfolioLocal
+  readonly portfolioUpgrade?: OwnerPortfolioUpgradeIntent
+}
+export interface OwnerWorkspaceEditPortfolioRequest {
+  readonly id: string; readonly hash: string; readonly expected: OwnerWorkspaceLocalState; readonly command: OwnerPortfolioCommand
 }
 export type OwnerWorkspaceLocalCommand = Readonly<{ type: 'save'; input: HoldingInput; expectedEntry: OwnerWorkspaceEntry | null; confirmed: boolean }>
   | Readonly<{ type: 'remove'; keys: readonly string[]; expectedEntries: readonly OwnerWorkspaceEntry[]; confirmed: boolean }>
@@ -87,6 +95,7 @@ export interface OwnerWorkspace {
   readLocalState(guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceLocalState>
   adoptLocal(request: OwnerWorkspaceAdoptLocalRequest, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceLocalState>
   editLocal(request: OwnerWorkspaceEditLocalRequest, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceLocalState>
+  editPortfolio(request: OwnerWorkspaceEditPortfolioRequest, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceLocalState>
   restoreLocal(request: OwnerWorkspaceRestoreLocalRequest, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceLocalState>
   /** Explicit physical-v4 primitives only. No HTTP, implicit upgrade, or cloud confirmation. */
   readSyncState(guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceSyncState>
@@ -120,7 +129,8 @@ export interface StoredReceipt {
 }
 export type SlotRow = ReturnType<typeof ownerSyncOutboxStorage.rowShape>
 export interface Image { slot: SlotRow; working: WorkingRow; metadata: OwnerWorkspaceLocalMetadata; sync: OwnerWorkspaceSyncMetadata | null;
-  receipt: StoredReceipt | null; original: StoredReceipt | null; receiptCount: number }
+  receipt: StoredReceipt | null; original: StoredReceipt | null; receiptCount: number; portfolio?: OwnerPortfolioLocal | null;
+  portfolioUpgrade?: OwnerPortfolioUpgradeIntent | null }
 
 export type LocalStateValidator = (input: unknown) => OwnerWorkspaceLocalState
 export interface CloudPostimage {

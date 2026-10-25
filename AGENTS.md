@@ -91,6 +91,10 @@ uvicorn main:app --reload --port 8000
 
 ## I19 本机格式与实际同步界面约束
 
+- 物理 v5 为显式资产/历史共同工作区，与应用版本独立；普通 v3/v4 启动不升级。迁移先保护导出完整 v4 与独立手工资产/历史 raw，选回同 SHA、显示全部问题/ID 映射后确认。旧 UTC 日期、重复日期、不透明历史 ID、0/null/负零与原文保留，坏源整批拒绝；超长资产 ID 使用显式 SHA 映射不截断。versionchange 写固定 intent，strict 初始化 current，两行及原 id/hash/source SHA 必须匹配；中断只手核原文件，缺库/无 intent/后续编辑不重建或覆盖。应用请求 id 从原文件 SHA 确定生成，跨重载保持同一请求。
+- v5 全部本机 writer 同一 strict 事务绑定基金、portfolio、原升级 intent、完整 B/slot/metadata 前像，统一推进独立 localVersion/空槽 epoch/最近本机回执；同值同时间 no-op 不推进。旧刷新响应不得覆盖较新 writer 的已发布状态。资产墓碑不可静默复活，原历史前缀不可变，新观察显式追加且保留零份账户身份，manual 成本未知用 null，余额变化不冒充现金流调整收益。v5 不再读取/双写旧业务 LS/Gist；现阶段完整 manual link/intent/ACK 尚未接入，私人上传/分析入口明确暂停，不移除 fund-only 守卫冒充完成。
+- `sinan-owner-workspace-recovery-2` 只含物理 v5 完整本机状态，包括 portfolio/intent、完整 B 与原档案；统一 24 MiB 可导出上限在升级/写入前核，禁止丢档换成功。旧 recovery-1 严格只认 v3/v4。v5 完整导出、升级前保护文件和历史查看导出各自用途明确；文件解码/fake-IDB/SFC 通过均不证明丢库恢复、真实 Chrome/PWA 或远端耐久。
+
 - `POST /api/v2/owner/analysis` 是独立 `run_personal_analysis` Owner scope 与 `owner-analysis-v1` 同意的本地候选链，不复用 Admin/Worker 或 write_holdings。只收 expected_revision、原请求标识、已有 production Evidence 与显式 Policy 引用；完整服务端来源（含所有账户/manual/tombstone）在同一 BEGIN IMMEDIATE 核验，跨账户 fund_only 聚合后真实 Holding/Decision/来源/回执一起追加。不完整定价不构造部分分母；0份仍 held，未知仍 null。完整原始来源保留 int/float/负零，V8 业务模型沿用自身 canonical_json；不能把两种合同混用。
 - 分析扩展 `owner-analysis-schema-1` 只显式本地候选 provision；正常 startup/factory 不补 DDL，旧 Owner-only 公共 verifier 和 Turso profile 仍封闭。已配置本地工厂仅兼容固定的 Owner-only/完整 analysis 两种 inventory，不能放宽路径、远端或 schema8 拒绝。原 id/hash 回执仅核原历史模型/引用/映射，不用当前策略重算；`source_current` 只表明该读事务中的完整来源 revision+SHA 相同，不认证 active Policy/策略、行情新鲜或当前动作资格。超时/commit或close异常后只能手核原回执，不从缺失推断回滚或自动重发；30秒为协作预算，授权回调及提交前后均重核，不能声称硬中断 SQLite。
 - 前端持仓分析默认关闭并按操作懒载；只从实际 active locator、已采用 v4 handle、完整本机前像与已应用 B 读取，空同步槽且 B→L 无意图后再从0读取固定 upper 的全部 changes，以有序历史折叠最新每键重建 D。合法观察 head 跨本会话失败/失效保留防回退；它不是完整 D，也不声称跨刷新持久。独立分析任务库保存原 raw/hash/contextHash，显式保存与发送分开，strict CAS attempted 必须先于唯一 POST；unknown 只能手核原 id/hash、导出或关闭，不能取消或重发。分析任务不在工作区格式备份内，不证明丢库恢复。

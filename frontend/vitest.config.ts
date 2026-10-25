@@ -1,6 +1,7 @@
 import { defineConfig } from 'vitest/config'
 import vue from '@vitejs/plugin-vue'
 import { fileURLToPath, URL } from 'node:url'
+import { availableParallelism } from 'node:os'
 
 const vuePlugin = vue()
 const transformVue = vuePlugin.transform
@@ -22,6 +23,9 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
+    // Large real-IDB migration fixtures share CPU/crypto with other suites.
+    // Bound contention on many-core hosts; keep every test and its 5s deadline.
+    maxWorkers: Math.min(4, availableParallelism()),
     include: ['src/**/*.test.ts'],
   },
 })

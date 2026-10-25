@@ -60,7 +60,7 @@ export async function validateOwnerWorkspaceRecoveryBackup(input: unknown): Prom
   try { local = await validateOwnerWorkspaceLocalState(row.targetFingerprint, row.local) } catch { return fail() }
   // All application adoptions start with zero legacy import receipts and never
   // add them. Refuse unsupported history instead of exporting only its count.
-  if (!local.metadata.adoption || local.receiptCount !== 0 || (local.sync ? 4 : 3) !== row.physicalVersion
+  if (local.portfolio || local.portfolioUpgrade || !local.metadata.adoption || local.receiptCount !== 0 || (local.sync ? 4 : 3) !== row.physicalVersion
     || row.physicalVersion === 3 && local.outbox.entry !== null) fail()
   const original = await buildOwnerLegacyWorkspaceBackup(local.metadata.adoption.sourceArchive)
   if (original.sha256 !== local.metadata.adoption.backupSha256) fail()

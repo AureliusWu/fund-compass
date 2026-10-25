@@ -11,6 +11,8 @@ import type { BuiltOwnerWorkspaceBackup, OwnerWorkspaceBackup, OwnerWorkspaceRes
 import type { ManagedWatchlistOwner, OwnerWorkspaceSyncFacade } from './owner-workspace-managed-store'
 import type { BuiltOwnerWorkspaceRecoveryBackup } from '@/utils/owner-workspace-recovery'
 import type { OwnerWorkspaceSyncState } from './owner-workspace-types'
+import type { OwnerPortfolioLocal, OwnerPortfolioCommand, OwnerPortfolioMigrationSource } from '@/utils/ownerPortfolioLocal'
+import type { BuiltOwnerWorkspacePortfolioUpgradeBackup } from './owner-workspace-portfolio-upgrade'
 export type { OwnerWorkspaceSyncFacade } from './owner-workspace-managed-store'
 
 const LS = 'sinan_watchlist_v2'
@@ -116,12 +118,15 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     : '本地工作副本；尚未同步至新版私人存储，不代表已确认持仓版本')
   let locator: OwnerAuthority | null = null, locatorRecord: OwnerAuthorityRecord | null = null
   let workspace: OwnerWorkspace | null = null, localState: OwnerWorkspaceLocalState | null = null
-  const physicalFormat = ref<'v3' | 'v4' | null>(null)
+  const physicalFormat = ref<'v3' | 'v4' | 'v5' | null>(null)
+  const portfolioState = shallowRef<OwnerPortfolioLocal | null>(null)
   const localSyncFormat = computed(() => authorityState.value === 'idb' ? physicalFormat.value : null)
   let syncOwner: ManagedWatchlistOwner | null = null, syncEnable: AbortController | null = null
   let syncEpoch = 0
   let formatInFlight = false
   let syncRecovery: { value: BuiltOwnerWorkspaceRecoveryBackup; expected: OwnerWorkspaceLocalState; generation: number } | null = null
+  let portfolioExport: { value: BuiltOwnerWorkspacePortfolioUpgradeBackup; generation: number; sourceGeneration: number } | null = null
+  let portfolioSourceGeneration = 0
   let initialization: Promise<void> | null = null, alive = true
   const lifetime = new AbortController()
   let exported: { value: LocalWorkspaceBackup; legacy: OwnerSyncWatchSnapshot | null } | null = null
@@ -172,7 +177,8 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     if (localState?.metadata.adoption && locatorRecord?.phase === 'active') assertWorkspaceAdoption(state)
     ownerAnalysisEpoch.value++
     entries.value = localEntries(state); localState = state; localStorageError.value = false; mutationGeneration++
-    physicalFormat.value = state.sync ? 'v4' : 'v3'
+    physicalFormat.value = state.portfolio ? 'v5' : state.sync ? 'v4' : 'v3'
+    portfolioState.value = state.portfolio ?? null
     if (!fromManaged) syncOwner?.sourceChanged()
     exported = null; restorePreview = null
   }
@@ -282,6 +288,8 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     const { canonicalOwnerLocal } = await import('@/utils/owner-workspace-backup')
     if (!localState || canonicalOwnerLocal(entries.value) !== canonicalOwnerLocal(localEntries(localState))) throw new WatchMutationError('conflict')
     await readActiveWorkspace(signal, true)
+    // The v4 cloud planner cannot represent v5 manual edits yet.
+    if (localState?.portfolio) throw new WatchMutationError('storage')
   }
   /** The application, not a UI callback, captures the actual current authority.
    * Reading this source never imports, acknowledges or clears local_pending.
@@ -497,6 +505,118 @@ export const useWatchlistStore = defineStore('watchlist', () => {
   async function reconcileLocalSyncUpgrade(raw: string, sha256: string, confirmed: true) {
     return changeSyncFormat(raw, sha256, confirmed, true)
   }
+  function readPortfolioSources(): OwnerPortfolioMigrationSource {
+    // Called only after active locator validation, never during store setup.
+    return Object.freeze({ manualRaw: localStorage.getItem('sinan_manual_assets_v1'), snapshotsRaw: localStorage.getItem('sinan_snapshots') })
+  }
+  function assertPortfolioSources(source: OwnerPortfolioMigrationSource, generation: number) {
+    const current = readPortfolioSources()
+    if (generation !== portfolioSourceGeneration || current.manualRaw !== source.manualRaw || current.snapshotsRaw !== source.snapshotsRaw) throw new WatchMutationError('conflict')
+  }
+  async function createPortfolioUpgradeBackup(): Promise<BuiltOwnerWorkspacePortfolioUpgradeBackup> {
+    return formatOperation(async (signal, ensure) => {
+      const [storage, { canonicalOwnerLocal }] = await Promise.all([import('./owner-workspace'), import('@/utils/owner-workspace-backup')])
+      const state = await readActiveWorkspace(signal, true)
+      if (state.portfolio) throw new WatchMutationError('conflict')
+      const source = readPortfolioSources(), sourceGeneration = portfolioSourceGeneration
+      const value = await storage.buildOwnerWorkspacePortfolioUpgradeBackup(workspace!.targetFingerprint, state, source)
+      ensure(); assertPortfolioSources(source, sourceGeneration)
+      const current = await readActiveWorkspace(signal, true)
+      ensure(); assertPortfolioSources(source, sourceGeneration)
+      if (canonicalOwnerLocal(current) !== canonicalOwnerLocal(state)) throw new WatchMutationError('conflict')
+      acceptLocal(state)
+      portfolioExport = { value, generation: mutationGeneration, sourceGeneration }
+      return value
+    })
+  }
+  async function previewPortfolioUpgrade(raw: string, sha256: string) {
+    return formatOperation(async (_signal, ensure) => {
+      const [upgrade, codec] = await Promise.all([import('./owner-workspace-portfolio-upgrade'), import('@/utils/ownerPortfolioLocal')])
+      const backup = await upgrade.restoreOwnerWorkspacePortfolioUpgradeBackup(raw, sha256)
+      ensure()
+      if (authorityState.value === 'unresolved') { try { await initialize() } catch { /* allow only the already observed active locator below */ } }
+      await verifyAuthority('active'); ensure()
+      const adoption = backup.workspace.local.metadata.adoption
+      if (!adoption || locatorRecord?.targetFingerprint !== backup.targetFingerprint || locatorRecord?.activationId !== adoption.id
+        || locatorRecord?.backupSha256 !== adoption.backupSha256) throw new WatchMutationError('conflict')
+      const preview = await codec.previewOwnerPortfolioMigration(backup.source)
+      ensure(); return preview
+    })
+  }
+  async function changePortfolioFormat(raw: string, sha256: string, confirmed: true, reconcile: boolean): Promise<void> {
+    if (confirmed !== true) throw new WatchMutationError('requires-confirmation')
+    return formatOperation(async (signal, ensure) => {
+      const [upgrade, storage, { canonicalOwnerLocal }, sessionModule, requestModule] = await Promise.all([
+        import('./owner-workspace-portfolio-upgrade'), import('./owner-workspace'), import('@/utils/owner-workspace-backup'),
+        import('./ownerSession'), import('@/api/request'),
+      ])
+      const targetUrl = requestModule.ownerApiTarget()
+      const backup = await upgrade.restoreOwnerWorkspacePortfolioUpgradeBackup(raw, sha256)
+      ensure()
+      if (reconcile) {
+        if (authorityState.value === 'unresolved') { try { await initialize() } catch { /* original active locator required */ } }
+        await verifyAuthority('active')
+      } else {
+        await ready()
+        if (authorityState.value !== 'idb' || !portfolioExport || portfolioExport.value.raw !== raw
+          || portfolioExport.value.sha256 !== sha256 || portfolioExport.generation !== mutationGeneration
+          || portfolioExport.sourceGeneration !== portfolioSourceGeneration) throw new WatchMutationError('conflict')
+      }
+      ensure()
+      const pointer = locatorRecord!, adoption = backup.workspace.local.metadata.adoption
+      if (pointer.phase !== 'active' || !adoption || backup.targetFingerprint !== pointer.targetFingerprint
+        || adoption.id !== pointer.activationId || adoption.backupSha256 !== pointer.backupSha256
+        || await sessionModule.getOwnerSyncTargetFingerprint() !== pointer.targetFingerprint) throw new WatchMutationError('conflict')
+      ensure()
+      const generation = mutationGeneration, sourceGeneration = portfolioSourceGeneration
+      const memory = canonicalOwnerLocal({ entries: entries.value, portfolio: portfolioState.value }), authority = JSON.stringify(pointer)
+      const guard: OwnerWorkspaceGuard = { signal, assertActive() {
+        ensure(); assertPortfolioSources(backup.source, sourceGeneration)
+        if (generation !== mutationGeneration || canonicalOwnerLocal({ entries: entries.value, portfolio: portfolioState.value }) !== memory
+          || JSON.stringify(locatorRecord) !== authority || requestModule.ownerApiTarget() !== targetUrl
+          || !['idb', 'blocked'].includes(authorityState.value)) throw new WatchMutationError('conflict')
+      } }
+      guard.assertActive()
+      // Deterministic from the original complete file: reload reconstructs the
+      // same id/hash, never invents a new id to finish an uncertain upgrade.
+      const request = await storage.buildOwnerWorkspacePortfolioUpgradeRequest(pointer.targetFingerprint!, {
+        id: 'portfolio-upgrade-' + sha256, backupRaw: raw, backupSha256: sha256,
+      })
+      guard.assertActive()
+      let replacement: OwnerWorkspace | null = null
+      try {
+        if (!reconcile) {
+          const current = await readActiveWorkspace(signal, true)
+          if (canonicalOwnerLocal(current) !== canonicalOwnerLocal(backup.workspace.local)) throw new WatchMutationError('conflict')
+        }
+        await verifyAuthority('active'); guard.assertActive(); disableWorkspaceSync()
+        replacement = await (reconcile ? storage.reconcileOwnerWorkspacePortfolioUpgrade : storage.upgradeOwnerWorkspacePortfolio)(
+          globalThis.indexedDB, pointer.targetFingerprint!, request, guard)
+        guard.assertActive()
+        const next = await replacement.readLocalState(guard)
+        await verifyAuthority('active'); guard.assertActive()
+        if (!next.portfolio || next.portfolioUpgrade?.id !== request.id || next.portfolioUpgrade?.hash !== request.hash
+          || canonicalOwnerLocal(next.metadata.adoption) !== canonicalOwnerLocal(adoption)) throw new WatchMutationError('conflict')
+        workspace?.close(); workspace = replacement; replacement = null
+        acceptLocal(next); pendingLocal.value = null; authorityState.value = 'idb'; authorityError.value = ''; loaded.value = true
+        portfolioExport = null; syncRecovery = null; notifyAuthority()
+      } catch (cause) { replacement?.close(); block(cause); throw cause }
+    })
+  }
+  async function upgradePortfolioFormat(raw: string, sha256: string, confirmed: true) { return changePortfolioFormat(raw, sha256, confirmed, false) }
+  async function reconcilePortfolioUpgrade(raw: string, sha256: string, confirmed: true) { return changePortfolioFormat(raw, sha256, confirmed, true) }
+  async function createPortfolioRecoveryBackup() {
+    return formatOperation(async (signal, ensure) => {
+      const [codec, { canonicalOwnerLocal }] = await Promise.all([import('@/utils/owner-portfolio-recovery'), import('@/utils/owner-workspace-backup')])
+      const state = await readActiveWorkspace(signal, true)
+      if (!state.portfolio) throw new WatchMutationError('storage')
+      const value = await codec.buildOwnerPortfolioRecoveryBackup(workspace!.targetFingerprint, state)
+      ensure()
+      const current = await readActiveWorkspace(signal, true)
+      if (canonicalOwnerLocal(current) !== canonicalOwnerLocal(state)) throw new WatchMutationError('conflict')
+      ensure(); return value
+    })
+  }
   if (eventChannel) eventChannel.onmessage = () => {
     if (alive && locatorRecord) void verifyAuthority(locatorRecord.phase === 'legacy' ? 'legacy' : 'active').catch(() => {})
   }
@@ -541,6 +661,9 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     return current
   }
   function storageChanged(event: StorageEvent) {
+    if (event.key === null || event.key === 'sinan_manual_assets_v1' || event.key === 'sinan_snapshots') {
+      if (!event.storageArea || event.storageArea === localStorage) portfolioSourceGeneration++
+    }
     if (event.key === OWNER_AUTHORITY_SEEN_HINT) {
       if (locatorRecord) void verifyAuthority(locatorRecord.phase === 'legacy' ? 'legacy' : 'active').catch(() => {})
       return
@@ -753,7 +876,9 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     // Refuse BEFORE allocating a new id/hash or setting pendingLocal.
     if (current.outbox.entry !== null) throw new WatchMutationError('conflict')
     const { canonicalOwnerLocal } = await import('@/utils/owner-workspace-backup')
-    if (generation !== mutationGeneration || canonicalOwnerLocal(current) !== canonicalOwnerLocal(localState)) {
+    if (generation !== mutationGeneration || canonicalOwnerLocal(current) !== canonicalOwnerLocal(localState)
+      || canonicalOwnerLocal(entries.value) !== canonicalOwnerLocal(localEntries(localState!))
+      || canonicalOwnerLocal(portfolioState.value) !== canonicalOwnerLocal(localState?.portfolio ?? null)) {
       block(new WatchMutationError('conflict')); throw new WatchMutationError('conflict')
     }
   }
@@ -768,10 +893,37 @@ export const useWatchlistStore = defineStore('watchlist', () => {
       const request = await storage.buildOwnerWorkspaceEditLocalRequest(workspace!.targetFingerprint,
         { id: 'local-edit-' + crypto.randomUUID(), expected, command })
       pendingLocal.value = { id: request.id, hash: request.hash }
-      const generation = mutationGeneration, memory = JSON.stringify(entries.value)
+      const generation = mutationGeneration, memory = JSON.stringify(entries.value), portfolio = portfolioState.value
       try {
         const state = await workspace!.editLocal(request, activeGuard(() => {
-          if (authorityState.value !== 'idb' || generation !== mutationGeneration || JSON.stringify(entries.value) !== memory) throw new WatchMutationError('conflict')
+          if (authorityState.value !== 'idb' || generation !== mutationGeneration || JSON.stringify(entries.value) !== memory
+            || portfolioState.value !== portfolio) throw new WatchMutationError('conflict')
+        }))
+        acceptLocal(state); pendingLocal.value = null
+      } catch (cause) {
+        if (isPrewriteRefusal(cause, storage)) pendingLocal.value = null
+        if (!isPendingRefusal(cause, storage)) block(cause)
+        throw cause
+      }
+    } finally { localWriteInFlight = false }
+  }
+  async function editPortfolio(command: OwnerPortfolioCommand): Promise<void> {
+    if (formatInFlight || localWriteInFlight || syncOwner?.isBusy() || pendingLocal.value) throw new WatchMutationError('conflict')
+    localWriteInFlight = true
+    ownerAnalysisEpoch.value++
+    try {
+      await assertLocalWritable()
+      const [storage, { canonicalOwnerLocal }] = await Promise.all([import('./owner-workspace'), import('@/utils/owner-workspace-backup')])
+      if (!localState?.portfolio || canonicalOwnerLocal(portfolioState.value) !== canonicalOwnerLocal(localState.portfolio)) throw new WatchMutationError('conflict')
+      const request = await storage.buildOwnerWorkspaceEditPortfolioRequest(workspace!.targetFingerprint, {
+        id: 'portfolio-edit-' + crypto.randomUUID(), expected: localState, command,
+      })
+      pendingLocal.value = { id: request.id, hash: request.hash }
+      const generation = mutationGeneration, memory = canonicalOwnerLocal({ entries: entries.value, portfolio: portfolioState.value })
+      try {
+        const state = await workspace!.editPortfolio(request, activeGuard(() => {
+          if (authorityState.value !== 'idb' || generation !== mutationGeneration
+            || canonicalOwnerLocal({ entries: entries.value, portfolio: portfolioState.value }) !== memory) throw new WatchMutationError('conflict')
         }))
         acceptLocal(state); pendingLocal.value = null
       } catch (cause) {
@@ -904,10 +1056,17 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     await initialize()
     await ready()
     if (authorityState.value === 'idb') {
+      if (localWriteInFlight || formatInFlight || pendingLocal.value) return
+      const generation = mutationGeneration, handle = workspace!
+      const superseded = () => !alive || generation !== mutationGeneration || handle !== workspace
+        || authorityState.value !== 'idb' || localWriteInFlight || formatInFlight || pendingLocal.value !== null
       try {
-        const state = await workspace!.readLocalState(activeGuard())
+        const state = await handle.readLocalState(activeGuard())
+        // A read can finish after a newer local writer has committed/published.
+        // Discard this obsolete refresh without invalidating that newer result.
+        if (superseded()) return
         acceptLocal(state); loaded.value = true; return
-      } catch (cause) { if (alive) block(cause); throw cause }
+      } catch (cause) { if (superseded()) return; block(cause); throw cause }
     }
     if (loaded.value && !force) return
     // No confirmed revision exists yet: pruning unsynced tombstones could let an
@@ -998,6 +1157,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
   }
   return {
     captureOwnerAnalysisSource, ownerAnalysisEpoch,
+    portfolioState, createPortfolioUpgradeBackup, previewPortfolioUpgrade, upgradePortfolioFormat, reconcilePortfolioUpgrade, editPortfolio, createPortfolioRecoveryBackup,
     localSyncFormat, enableWorkspaceSync, disableWorkspaceSync, createSyncRecoveryBackup, upgradeLocalSyncFormat, reconcileLocalSyncUpgrade,
     authorityState, authorityError, initialize, createLocalWorkspaceBackup, activateLocalWorkspace,
     previewLocalWorkspaceRestore, restoreLocalWorkspaceBackup, reconcileLocalWorkspaceEdit, hasPendingLocalWorkspaceEdit,

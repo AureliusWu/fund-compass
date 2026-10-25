@@ -1,0 +1,155 @@
+{
+  "schema": "fc-owner-portfolio-artifact-comparison-1",
+  "baselineCommit": "f010c8b5fa9ecd805163e5a8fb08d22483aced14",
+  "mergedMainCommit": "fc37965ce04d7281cb53618d3d7bbd7ac4554146",
+  "baselineArchiveSha256": "dd7756db7a3271fc6d9a21b32134ddece97407f34aee2804a1051056b73d6896",
+  "frontendTreePins": {
+    "baseline": "f7a66acdaf05c587c62ac17572423211647db0855388bb0b7dffd13b8dd54aed",
+    "current": "a91f0853177f30700e80e78ebd0436d99e3fdb5ad41f5dd721c81a42774c1843"
+  },
+  "method": "Three samples per side in A/B/B/A/A/B order, each a direct npm run build plus PWA7/7. Same installed node_modules junction, package.json LF-equivalent. Original baseline lock retained; only fast-uri3.1.8->3.1.9 and serialize-javascript7.0.6->7.1.4 differ, both builds use the same patched installation and all other lock nodes must be identical. All frontend inputs except node_modules/dist frozen after diagnostic declaration generation. Actual emitted JS import/export AST closure and every precache URL/non-null MD5 checked. gzip9 sums are not browser transfer or interaction measurements.",
+  "environment": {
+    "node": "24.14.0",
+    "npm": "11.9.0",
+    "logicalCpuCount": 12,
+    "os": "Windows",
+    "workload": "No known test/build process overlapped the six final builds. Host load, caches and path/EOL differences uncontrolled; build times are observations only."
+  },
+  "samplesPerSide": 3,
+  "artifactStable": true,
+  "viteBuildSeconds": {
+    "baseline": [
+      11.14,
+      10.84,
+      11.04
+    ],
+    "current": [
+      8.81,
+      10.69,
+      9.69
+    ],
+    "baselineMedian": 11.04,
+    "baselineWorst": 11.14,
+    "currentMedian": 9.69,
+    "currentWorst": 10.69,
+    "latencyVerdict": "NOT_EVALUATED_NO_REAL_INTERACTION"
+  },
+  "gzip9Bytes": {
+    "jsCss": {
+      "baseline": 596634,
+      "current": 619129,
+      "deltaPercent": 3.77,
+      "thresholdPercent": 20,
+      "verdict": "PASS"
+    },
+    "workspaceChunk": {
+      "baseline": 9653,
+      "current": 10896,
+      "deltaPercent": 12.88,
+      "thresholdPercent": 20,
+      "verdict": "WARN"
+    },
+    "workspaceStaticClosure": {
+      "baseline": 129660,
+      "current": 132102,
+      "deltaPercent": 1.88,
+      "thresholdPercent": 20,
+      "verdict": "PASS"
+    },
+    "watchlistStaticClosure": {
+      "baseline": 156382,
+      "current": 157686,
+      "deltaPercent": 0.83,
+      "thresholdPercent": 20,
+      "verdict": "PASS"
+    },
+    "assetsChunk": {
+      "baseline": 14605,
+      "current": 17770,
+      "deltaPercent": 21.67,
+      "thresholdPercent": 20,
+      "verdict": "FAIL"
+    },
+    "assetsStaticClosure": {
+      "baseline": 321195,
+      "current": 325526,
+      "deltaPercent": 1.35,
+      "thresholdPercent": 20,
+      "verdict": "PASS"
+    },
+    "analysisPanelChunk": {
+      "baseline": 6073,
+      "current": 6192,
+      "deltaPercent": 1.96,
+      "thresholdPercent": 20,
+      "verdict": "PASS"
+    },
+    "precache": {
+      "baseline": 472822,
+      "current": 495220,
+      "deltaPercent": 4.74,
+      "thresholdPercent": 20,
+      "verdict": "PASS"
+    },
+    "precacheAndWorkerSupportUnion": {
+      "baseline": 482639,
+      "current": 505134,
+      "deltaPercent": 4.66,
+      "thresholdPercent": 20,
+      "verdict": "PASS"
+    },
+    "newMigrationPanelChunk": {
+      "baseline": null,
+      "current": 4826,
+      "verdict": "NEW_FEATURE_NO_BASELINE"
+    },
+    "newObservationChunk": {
+      "baseline": null,
+      "current": 887,
+      "verdict": "NEW_FEATURE_NO_BASELINE"
+    }
+  },
+  "precacheUrlCount": {
+    "baseline": 91,
+    "current": 98
+  },
+  "historicalBudgetDebt": {
+    "reference": "a51940d separately measured prior baseline, not rebuilt here; Policy chunk/manager debt also remains in OWNER-POLICY-PERFORMANCE-20261023.json",
+    "workspaceChunkGzip9": {
+      "baseline": 7787,
+      "current": 10896,
+      "deltaPercent": 39.93,
+      "thresholdPercent": 20,
+      "verdict": "FAIL"
+    },
+    "precacheGzip9": {
+      "baseline": 400938,
+      "current": 495220,
+      "deltaPercent": 23.52,
+      "thresholdPercent": 10,
+      "verdict": "WARN"
+    },
+    "installationUnionGzip9": {
+      "baseline": 410446,
+      "current": 505134,
+      "deltaPercent": 23.07,
+      "thresholdPercent": 10,
+      "verdict": "WARN"
+    }
+  },
+  "rawEvidence": {
+    "localTempDirectory": "fc-portfolio-perf-863c3a6ddce14d03adc64c0981b62e43/final-v2",
+    "helperSha256": "2339184f81d985a2d685658427069e381247dbaa5ba003f77b5554b8507be7c3",
+    "summarySha256": "a6f580b761b947ce3bc4c79dc6b56a043bbd83ab0d83d5ab2abbbf29845acf13",
+    "freezeSha256": "038c38469296914811859052ab952ddc1ccdff9c82bcb4a0ba8ee746b071bd82",
+    "independentlyArchived": false
+  },
+  "limitations": [
+    "The initial six-sample cbbd39dd tree is superseded and excluded from final comparison. It showed Assets gzip9 17852 (+22.23%). The final tree includes operation-only lazy construction/export, source guards and zero-only/history-only UI fixes.",
+    "Final Assets gzip9 is 17770 (+21.67% FAIL). Smaller total/closure growth and the reduced single chunk do not erase this local failure or historical budget debt; no budget was raised.",
+    "Operation-only observation code is dynamically imported and the migration panel is async, but both remain Workbox precached. No PWA installation-byte reduction is claimed.",
+    "Original baseline lock security nodes differ from the shared patched installation by the two explicitly verified patches. This isolates source changes on one toolchain; it does not prove byte equivalence to a previously deployed artifact.",
+    "The full original static dependency closure includes shared bootstrap and ECharts; this measures closure bytes, not which modules have already loaded/cached or actual CSS/network transfer.",
+    "No real Chrome, installed/old/offline PWA, multi-device, large-history interaction, API, provider migration, persistence, restore or formal release qualification follows from these artifacts."
+  ]
+}

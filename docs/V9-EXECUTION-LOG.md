@@ -1356,3 +1356,42 @@ Git archive008 +同node_modules junction，依赖清单LF等价；诊断生成�
 Render MCP本轮可正常只读访问：已明确使用用户确认的My Workspace（tea-d8v0rljtqb8s73f28mh0），不选新工作区或换认证。候选srv-dab7g0n40ujc73a2ma50和旧srv-d8v0t26rnols73fq6beg均Free；候选最新dep-dbcvus6k1f9s73b543ag为main7afc4e6/live/new_commit，仍main分支且autoDeploy=commit。只读metadata不能当健康API/新feature部署、Turso写入或耐久证据，也不能从CI推断平台自动部署受保护；未改任何云配置、秘密、套餐或重启。main只读复核仍7afc4e6，PR4仍OPEN/DRAFT（前次write403不绕过、不更新）。
 
 应用仍8.0.0，完整I18/I19/I20/I21与v9发布继续未通过；Policy只读子链不冒充Owner编辑策略、手工资产/组合历史或机器消费者完成。下一实际实现优先补独立资产/历史进入共同权威与恢复/同步，再将Worker及应急任务脱离Gist并接同源claim，配合既有受控云迁移/远端恢复门禁。只普通提交推送原feature并观察其自然CI，不改main/tag/云/Gist，不把本轮本地PASS或下一CI成功升级为已发布。
+
+### f010c8b5 精确自然 CI 与 I19 资产/历史共同本机工作区（2026-10-25）
+
+前片段 `f010c8b5fa9ecd805163e5a8fb08d22483aced14`、tree=`cc11bcca90863c53f7801bb3cb706dfd0620aa90` 已普通推送。[自然CI39918725445](https://github.com/AureliusWu/fund-compass/actions/runs/39918725445) run192/attempt1 completed/success：实际后端 **4088 passed/2 warnings**，前端 **2342/93文件**、type/build/PWA7/7，Worker **148/4文件**、check/dry-run及独立audit通过。实际merge=`f4426b7d936b7d2c34305c9a337b26a1f17ba654`，原main7afc4e6+feature f010且tree等于feature；deploy/candidate_smoke/formal_smoke均skipped。此次只读check diagnostics再次核旧head和各结论；一次通用GitHub connector读取遭传输错误，未改认证或重跑工作流。以上不冒充本轮新源码CI。
+
+正常fetch发现main已前进至 `fc37965ce04d7281cb53618d3d7bbd7ac4554146`，仅海外公开预测/精度四文件；已在保留本轮未提交资产工作的前提合并，merge=`717af4efd5bd454c989cf399379bee7ab01fe7cf`。本轮仍仅提交推送原 `feat/v9-owner-sync-snapshot-20261003`，不直推main或变更PR权限。
+
+#### 实际业务与恢复边界
+
+物理IDB v5显式把独立manual/历史迁入共同本机权威。迁移前保护文件含真实完整v4及两份原raw，本轮导出后选回同SHA、列全部问题与ID映射并确认，非法源整批拒绝；旧UTC、重复日期、行序、不透明ID与原始数值保留。有效资产ID保留，超长/不合法ID显式SHA映射、不截断。versionchange保存固定intent，独立strict事务核完整旧像+intent写current；正常启动不升级或补缺，原文件确定id/hash可跨刷新手核中断，只接受已有物理5及完全相同初始像，不重建丢库、不覆盖后续编辑。
+
+实际core+watchlist writer同一strict事务绑定基金、portfolio、intent、完整B/slot/metadata，推进独立localVersion/空槽epoch/最近本机回执；同值同时间no-op不推进。真实独立Pinia/fake-IDB红绿用例复现迟到load把已提交资产9回退为1，现按generation、handle及在途writer丢弃旧成功/错误，不阻断较新发布。unknown保留原id/hash，仅手动核最近回执，不自动重放；普通编辑的内存请求标识未承诺跨刷新持久。
+
+资产页先核authority才读旧业务文件；v5仅走实际工作区，不双写LS/Gist，v3/v4暂停独立资产/历史编辑。新余额观察显式追加，上海日期与精确观察时间、类型化账户键、真实0份身份、manual未知成本null保持；不把余额变化当现金流调整收益。实际SFC另复现零份唯一持仓或当前资产全部墓碑时empty分支隐藏历史，已按完整基金来源/历史修复，保留legacy旧行为与未知份额拒绝。按点击动态加载观察/查看导出builder，加载前后核原portfolio、全账户、定价视图及authority/disposed/unknown；真实导出保留负零/UTC/旧ID，迟到或过时来源不下载。
+
+完整 `sinan-owner-workspace-recovery-2` 包含当前v5基金、资产/历史、intent、完整B、旧档案及最近本机回执；原24MiB完整UTF-8容量在升级/编辑前检查，不丢档换成功。严格decoder先own/freeze输入、复核原adoption与真实core/codec，旧recovery-1仍拒绝v5。它是导出/解码，不是丢库restore或远端恢复。操作说明见 `OWNER-PORTFOLIO-WORKSPACE.md`。v4 B虽含manual但从未应用到L，故v5私人上传/分析明确暂停，不能直接解除旧fund-only planner/ACK守卫；完整manual初始link/profile、意图及三方ACK是后续必要工作，不把这个本机切片称整个I19完成。
+
+#### 质量门禁与失败修复
+
+本轮均按用户授权直接npm，没有launcher/supervisor/后台重启。中间全量2510项出现真实2000行容量fixture原5000ms超时；原像匹配O(n²)改为Map线性关系核，3次同fixture由3.59/4.74/4.17秒（中位4.17）降至3.35/3.18/2.95（中位3.18，约-23.7%），不删行/少验证或加超时。完整默认并发仍有一次容量用例超时，保持失败记录；将测试并发限制为min(4, availableParallelism)，同全部用例/原5秒限，原2511项通过。后补真实延迟import与空状态回归，最终默认 `npm run test` **2531 passed/102文件/17.53s**，全前端 `npm run type-check` exit0。真实fake-IDB strict故障、commit后丢响应/原回执、迁移intent/current两阶段、同库前像/导出容量与实际SFC均保留，不用parser/gate mock放行；不是实际Chrome下载/落盘、旧PWA或多设备证据。
+
+初始官方全依赖audit发现fast-uri3.1.8中危及serialize-javascript7.0.6低危。仅直接 `npm update fast-uri serialize-javascript --ignore-scripts --include=dev --registry=https://registry.npmjs.org` 更新两锁节点至3.1.9/7.1.4，package.json不变、不用force/override/省略dev。最终前端和Worker各自直接官方 `npm audit --include=dev --audit-level=moderate --registry=https://registry.npmjs.org` 均 **0 vulnerabilities/exit0**。本轮后端与Worker业务源码未改，本地没有把旧全量计数冒充新跑；推送自然CI再验完整后端/Worker。
+
+#### 最终冻结制品对照（不是浏览器性能）
+
+原feature f010 Git archive、同一已补安全锁的node_modules junction；原baseline锁保留，helper只允许上述两安全节点差异且其它全部节点一致，两个版本使用同一patched安装。诊断生成声明后冻结全部前端输入，final-v2 A/B/B/A/A/B各3份完全稳定，每次直接build/PWA7/7。计量核实际JS import/export AST静态闭包与全部precache URL/非null MD5；详见 `OWNER-PORTFOLIO-PERFORMANCE-20261025.json`。原始helper/freeze/六统计仅存本机Temp，未独立封存。前一cbbd39dd树的六样本（Assets17852/+22.23% FAIL）被最终按点击拆分/空状态修复取代，另列排除，未混用源码pins或挑快样本。
+
+| gzip9制品字节（非网络传输） | f010重建基线 | 当前 | 变化/局部判定 |
+| --- | ---: | ---: | --- |
+| JS+CSS | 596,634 | 619,129 | +3.77% |
+| workspace单块 / 静态闭包 | 9,653 / 129,660 | 10,896 / 132,102 | +12.88% WARN / +1.88% |
+| 自选页静态闭包 | 156,382 | 157,686 | +0.83% |
+| 资产页单块 / 静态闭包 | 14,605 / 321,195 | 17,770 / 325,526 | +21.67% FAIL / +1.35% |
+| precache（91→98 URL） | 472,822 | 495,220 | +4.74% |
+| precache/SW/支持文件并集 | 482,639 | 505,134 | +4.66% |
+
+新迁移面板4826B、按点击观察builder887B；拆分减少资产页静态闭包增量，但新增完整来源守卫/历史展示仍令单块超20%线，明确保留FAIL，不提高门槛。两个懒块仍Workbox预缓存，不称安装网络优化。Vite基线11.14/10.84/11.04（中位11.04/最差11.14），当前8.81/10.69/9.69（中位9.69/最差10.69）；无已知npm并行负载，但宿主缓存/路径/EOL未控，不作实际延迟结论。更早a519 workspace7787→10896仍+39.93% FAIL；precache400938→495220 +23.52% WARN、安装410446→505134 +23.07% WARN；另原Policy局部债务不因新基线消失。request/ownerSession重复导入提示、ECharts532397B仍保留；真实大历史交互/cold/warm/旧PWA/API性能未验收。
+
+应用仍8.0.0，物理v5不是v9发布。I18实际轮换、停写/排空、新保护备份/Free配额/provider能力与容量/受控迁移、应用跨Render重启及独立远端恢复；I19完整manual同步/策略写流程/机器消费者/多设备；I20自然交易日/周窗口；I21真实浏览器/PWA与性能债务仍待完成。未读取未确认凭据输入、不绕OAuth/浏览器或PR写403，不改云秘密/套餐/部署/重启/main/tag/Gist；代码回退须保全v5和原任务，不删库伪造降级。新自然CI未完成前不以本机PASS或旧CI给本轮源码放行，更不声明已部署或正式发布。

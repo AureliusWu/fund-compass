@@ -291,7 +291,8 @@ const checked = (event: Event) => (event.target as HTMLInputElement | null)?.che
       <button v-if="!opened" type="button" class="sync-button" @click="opened = true">查看私人同步</button>
       <button v-else type="button" class="sync-button" @click="dispose(true)">关闭并隐藏</button>
     </header>
-    <OwnerManagedSyncPanel v-if="opened && watchlist.authorityState === 'idb'" @close="dispose(true)" />
+    <p v-if="opened && watchlist.localSyncFormat === 'v5'" class="sync-notice" role="status">当前 v5 私人上传暂未开放，不能继续使用原 v4 同步入口。基金、手工资产与余额观察仍为本机待确认；请在资产页导出当前完整文件，不回退旧 Gist。</p>
+    <OwnerManagedSyncPanel v-else-if="opened && watchlist.authorityState === 'idb'" @close="dispose(true)" />
     <p v-else-if="opened && watchlist.authorityState !== 'legacy'" class="sync-notice" role="status">本机权威尚未准备好。请先在“本机工作区”核对原数据库；不会回退旧版归档或打开旧同步写路径。</p>
     <div v-else-if="opened" class="owner-sync-body">
       <p class="sync-boundary">不含手工资产。只核对当前本机完整自选和账户记录；不读取旧版 Gist，不把云端记录合并到本机。</p>
