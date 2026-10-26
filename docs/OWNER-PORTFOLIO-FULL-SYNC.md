@@ -12,7 +12,7 @@
 6. 初始协调后，另行同意本轮完整原包核对。预览实际 B→L 的基金和手工资产意图，再独立确认保存原包；这一步仍不发送。全量操作受原 **200 项 / 128 KiB** 请求上限约束，不裁切或偷偷拆批。
 7. 检查原包全部字段和删除项，独立确认后仅发送该原始字节一次。必须先严格持久化 `attempted`，才可进入真实 POST 边界。prepared 才能单独确认取消；attempted/unknown 不得取消、重制或重发。
 8. 已决槽或原 POST 的部分记录不是完整确认。当前会话必须拿到实际 write/receipt 原响应，绑定同一原 id/hash，再完整拉取固定 upper 的 D，预览 B/L/D 三方 ACK。冲突含手工资产四字段及账户更名整组，墓碑不得静默复活；选择改变须重新预览并确认。
-9. strict ACK 同时核完整前像、推进本机版本/slot/full-sync epoch、应用新 L/B=D、保存本机回执并清原包。不能以 revision 或 SHA 冒充身份认证、云耐久、HoldingVersion 或金融行动资格。**本阶段 v6 持仓分析仍暂停**，不走旧 fund-only 分析/同步路径。
+9. strict ACK 同时核完整前像、推进本机版本/slot/full-sync epoch、应用新 L/B=D、保存本机回执并清原包。不能以 revision 或 SHA 冒充身份认证、云耐久、HoldingVersion 或金融行动资格。v6 分析须另外核对下述完整来源链，不走旧 fund-only 同步路径。
 
 ## 已链接工作区的完整云端刷新
 
@@ -20,7 +20,17 @@
 
 刷新不发 POST、不核伪造云回执、不借初始 bootstrap 或 ACK 清包；只在同一 strict 事务核完整前像后保存 L'/B=D，并推进独立 localVersion、slot、full epoch 和完整 profile 的 `refresh` 本机回执。旧 v4 receipt codec 不因此扩展。原文、历史、升级 intent、旧 sync、0/null/负零、原时间或未知时间保留，不清 `local_pending`。真正 typed no-op 不写库、不推进版本或伪造回执；任一原包五态均阻断刷新。新 B 下的剩余意图仍须另行制包/发送/ACK。
 
-字段/选项改变使旧刷新请求失效；本机提交后须完成真实后置读取与 Pinia 发布，才释放本轮未知 id/hash。另一 handle 在此期间提交更新，旧结果不能发布覆盖它。最近回执已被后续编辑覆盖时只能保持 unknown，不重放。**v6 分析仍暂停**，不能把这个本机同步出口当作完整分析来源、实际多设备或云耐久验收。
+字段/选项改变使旧刷新请求失效；本机提交后须完成真实后置读取与 Pinia 发布，才释放本轮未知 id/hash。另一 handle 在此期间提交更新，旧结果不能发布覆盖它。最近回执已被后续编辑覆盖时只能保持 unknown，不重放。刷新本身不授予分析资格，也不是实际多设备或云耐久验收。
+
+## 完整格式的独立分析核对
+
+v4 与完整 v6 可显式启用持仓分析，默认仍关闭；v5 不开放。旧基金专用 sender 的 portfolio 拒绝保留。v6 只从实际原 handle 读取 `readFullSyncState()` 的活动 full B，历史 v4 sync 只留档，不驱动分析；基金和手工资产必须在真实完整 planner 中均无待上传意图，slot/pending 为空，且没有未知本机结果或进行中的编辑、格式和同步操作。仅刷新成功、`local_pending=false` 或相同 revision 都不能代替这些核验。
+
+分析 capture 绑定实际 locator/adoption、原 handle、两份内存、基金/portfolio/全部历史原文、升级 intent、历史 sync/full 元数据与全部版本；0/null/负零分别保留。v6 使用独立 profile 前像；v4 原前像字节不改，因此旧任务不被偷偷重制。验证前后重读权威，原 handle 重读全像，第二 handle 尚未发布的新写入也会使旧上下文失败；不会自动刷新接受新状态来延续原预览。同步操作开始即同步撤销已有分析资格，未知 tuple 不能由本机已提交事实洗掉。
+
+再从0读取固定 upper 的真实完整 changes，累计预算与完整 codec 不放宽；D 必须逐记录、字段、生命周期和墓碑等于活动 B。保存、单次发送和原回执仍独立，先实际 strict attempted 再唯一分析 POST；unknown 只能手核原回执、导出或关闭。旧 v4 任务升级后可核历史回执，但上下文失配不晋级、不重新制包。服务端原 source SHA 由其完整原始来源计算，前端同步 JSON 无法区分 `1` 和 `1.0`，不冒称独立重算认证该 SHA；仍须当前 D、本机 context、真实回执 `source_current`、Policy/Evidence 原引用共同通过。
+
+原 Policy proof 的单调时钟、最多60秒/下一生效等号失效和统一金融门禁不变。首页、自选、详情共用同一资格；退出、已观察端点或本机来源变化即撤销，未观察的跨设备变化仍可能存在于短窗口内。分析不清 `local_pending`、不授予策略写或通知权限，也不证明实际部署、真实浏览器/旧PWA、多设备、云端耐久和灾难恢复通过。
 
 ## 保全与未知结果
 
@@ -53,4 +63,4 @@
 
 三个实际 reader（同步 candidate、分析完整来源、v6 初始读取）现在使用同一固定有界折叠器：每页先严格解析，保留合法 upper 防回退，再核全部原始响应累计 **4 MiB**（含空白/重复覆盖历史）、历史 **100000** 项、保留完整像 **2 MiB**；单响应、原总时限和各 caller 的来源/分页守卫不放宽。按每键字节差量核保留像，不在每页重编码整 Map。超量或末页不满足真实完整基线 codec 即整次拒绝、不能发布完整 D；这不是进程堆内存的硬上限，也不是来源认证。
 
-前次 bcdfd9a 已冻结三组制品 workspace 单块相对519基线 **+22.47% / FAIL**，精确证据保留在 `OWNER-FULL-SYNC-PERFORMANCE-20261025.json`。本轮把固定 profile shape、全文件容量及观察约束归入事务前预加载 codec，core 仍保存真实事务/完整前像 CAS/全部 store 写，事务内无 await 或可注入 validator，每次读回原 SHA 仍核。新三组与历史资源债务见执行日志及 `OWNER-FULL-REFRESH-PERFORMANCE-20261026.json`，不能用代码拆分冒称安装优化或真实浏览器性能通过。
+前次 bcdfd9a 已冻结三组制品 workspace 单块相对519基线 **+22.47% / FAIL**，精确证据保留在 `OWNER-FULL-SYNC-PERFORMANCE-20261025.json`。后续完整刷新候选把固定 profile shape、全文件容量及观察约束归入事务前预加载 codec，core 仍保存真实事务/完整前像 CAS/全部 store 写，事务内无 await 或可注入 validator，每次读回原 SHA 仍核。该次三组与历史资源债务见 `OWNER-FULL-REFRESH-PERFORMANCE-20261026.json`；完整来源分析的后续固定输入测量见 `OWNER-FULL-ANALYSIS-PERFORMANCE-20261026.json`。不能用代码拆分冒称安装优化或真实浏览器性能通过，历史资源 FAIL 仍未关闭。

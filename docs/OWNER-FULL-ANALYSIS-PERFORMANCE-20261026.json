@@ -1,0 +1,88 @@
+{
+  "schema": "fc-owner-full-analysis-performance-1",
+  "applicationVersion": "8.0.0",
+  "physicalWorkspaceVersion": 6,
+  "baselineCommit": "519848fbf8d9f3ff433f8fded8aa68202d65f678",
+  "previousCandidate": "8235ca8df9c8bf95830fb6a59a307bf9aab260b8",
+  "implementationCommit": "5f349c1a874b783f726d9affee3812ce1d1d414f",
+  "integratedCommit": "4e212db42ed87bbdaad46bf3b64ce068bba38f81",
+  "integratedMain": "5f8eea4033f0f377673d4ea1c8c83ef5e9c3960a",
+  "sourceIdentity": {
+    "kind": "fixed-build-input-sha256",
+    "baseline": "26147707184efefdcf9187ceff25ab170ea8052e7ef2b62a53f8050622253fa5",
+    "current": "0fac47622ebbf343e22e2c91102e7476057ca4b9895ecb988c8137072cf63ba9",
+    "baselineArchiveSha256": "20c983326fe6843beeaab77ec8841314a03aae519a7f9e7ffce509515d1c583e"
+  },
+  "method": "Reused unchanged pure measurement helper; exact 519 archive, unchanged package/lock and same installed dependency junction. New serial fresh A/B/B/A/A/B builds (three each) after fixture EOF hygiene with final fixed frontend inputs and all PWA7/7. Full artifact inventories identical within each side. Actual TypeScript AST static JS import/export closure, actual Workbox precache URLs and non-null MD5 plus support-file union checked. Dynamic blocks and CSS preload maps are outside JS-only closures but remain in JS+CSS and installation totals. Concurrent local tests and host caches make build durations observational, not user latency. No real browser/device/PWA performance was measured.",
+  "samples": [
+    { "side": "baseline", "sample": 1, "builtSeconds": 7.99, "pwa": "7/7" },
+    { "side": "current", "sample": 1, "builtSeconds": 11.55, "pwa": "7/7" },
+    { "side": "current", "sample": 2, "builtSeconds": 7.42, "pwa": "7/7" },
+    { "side": "baseline", "sample": 2, "builtSeconds": 7.60, "pwa": "7/7" },
+    { "side": "baseline", "sample": 3, "builtSeconds": 8.08, "pwa": "7/7" },
+    { "side": "current", "sample": 3, "builtSeconds": 9.03, "pwa": "7/7" }
+  ],
+  "gzip9Bytes": {
+    "jsCss": { "baseline": 619148, "current": 676183, "deltaPercent": 9.21 },
+    "workspace": { "baseline": 10893, "current": 13039, "deltaPercent": 19.70, "thresholdPercent": 20, "verdict": "WARN" },
+    "workspaceJsStaticClosure": { "baseline": 132086, "current": 135992, "deltaPercent": 2.96 },
+    "watchlistJsStaticClosure": { "baseline": 157673, "current": 159632, "deltaPercent": 1.24 },
+    "assets": { "baseline": 17769, "current": 18060, "deltaPercent": 1.64 },
+    "assetsJsStaticClosure": { "baseline": 325513, "current": 327562, "deltaPercent": 0.63 },
+    "analysisManager": { "baseline": 4292, "current": 4283, "deltaPercent": -0.21 },
+    "analysisManagerJsStaticClosure": { "baseline": 131439, "current": 134213, "deltaPercent": 2.11 },
+    "analysisPanel": { "baseline": 6191, "current": 6342, "deltaPercent": 2.44 },
+    "analysisPanelJsStaticClosure": { "baseline": 113626, "current": 115525, "deltaPercent": 1.67 },
+    "precache": { "baseline": 495225, "current": 552017, "deltaPercent": 11.47, "verdict": "WARN" },
+    "installationUnion": { "baseline": 505153, "current": 562187, "deltaPercent": 11.29, "verdict": "WARN" }
+  },
+  "fileCounts": { "jsCss": [95, 114], "precache": [98, 117], "installationUnion": [100, 119] },
+  "localVerification": {
+    "frontend": { "passed": 3440, "files": 120, "seconds": 43.11, "typeCheck": "EXIT0", "newTestsSincePreviousCandidate": 90 },
+    "backend": { "passed": 4090, "warnings": 1211, "seconds": 666.05, "python": "3.14.4", "scope": "Implementation on pre-merge public data; no backend production source change. After integrating the new universe artifact, count/hash and 15 focused tests passed. Exact final-source CI remains a separate requirement." },
+    "worker": { "passed": 148, "files": 4, "seconds": 4.78, "typeCheck": "EXIT0", "dryRun": "114.28 KiB / gzip 26.58 KiB; not an authenticated deploy" },
+    "officialAudit": { "frontend": 0, "worker": 0, "includeDev": true, "registry": "https://registry.npmjs.org" }
+  },
+  "previousCandidateGzip9": {
+    "source": "OWNER-FULL-REFRESH-PERFORMANCE-20261026.json",
+    "jsCss": { "previous": 675560, "current": 676183, "increaseBytes": 623, "deltaPercent": 0.09 },
+    "precache": { "previous": 551396, "current": 552017, "increaseBytes": 621, "deltaPercent": 0.11 },
+    "installationUnion": { "previous": 561564, "current": 562187, "increaseBytes": 623, "deltaPercent": 0.11 },
+    "inventoryCountsUnchanged": true
+  },
+  "causesAndLimits": [
+    "Actual profile-aware capture, full local-memory/authority binding and synchronous analysis invalidation add a small shared-store cost; existing manager/D/proof/outbox mechanisms are reused.",
+    "Existing layout, typography and consent steps are retained; only supported-profile controls and factual guidance change. No dependency or lock changes, no extra default network requests, and no validator or original v4 sender guard was removed.",
+    "Lazy loading is still not installation-network optimization: Workbox precaches the dynamic blocks. Source/checkpoint hashes are not authentication, cloud durability or formal-release proof."
+  ],
+  "historicalBudgetDebt": {
+    "workspaceFromA519": { "baseline": 7787, "current": 13039, "deltaPercent": 67.45, "verdict": "FAIL", "historicalBaselineRebuilt": false },
+    "assetsFromF010": { "baseline": 14605, "current": 18060, "deltaPercent": 23.66, "thresholdPercent": 20, "verdict": "FAIL", "historicalBaselineRebuilt": false },
+    "precacheFromA519": { "baseline": 400938, "current": 552017, "deltaPercent": 37.68, "verdict": "WARN", "historicalBaselineRebuilt": false },
+    "installationFromA519": { "baseline": 410446, "current": 562187, "deltaPercent": 36.97, "verdict": "WARN", "historicalBaselineRebuilt": false },
+    "priorPolicyPanelRegression": "OPEN; no historical baseline rebuilt or waiver inferred"
+  },
+  "superseded": {
+    "directory": "final-analysis-v6-20261026-v1",
+    "sourcePin": "2940adc923c166da8eb7b0d5df2c636438d447125a0e82cefd67f355bbf8e54b",
+    "retained": true,
+    "usedForFinalSamples": false,
+    "reason": "Complete earlier six-build set before removing a trailing blank line in the test fixture. Final fixed inputs were re-frozen and six fresh builds rerun; emitted inventories and summary SHA remained identical."
+  },
+  "rawEvidence": {
+    "directory": "C:/Users/84046/AppData/Local/Temp/fc-full-sync-perf-20261025-519848f/final-analysis-v6-20261026-v2",
+    "helperSha256": "6ef3e2fc0957a60b30e65eee91ee9cd278d4911a6a16e4f4ece026f169959475",
+    "summarySha256": "0793b93bb3bef8c28fee86ca01d964155aa1e4e477c7a53bccd8efb14eef618b",
+    "contents": "measure.mjs, freeze-qualified.json, baseline-1/2/3.json, current-1/2/3.json, summary.json",
+    "independentlyArchived": false
+  },
+  "qualification": {
+    "currentArtifactComparison": "WARN; no new over20-percent measured artifact FAIL versus the same 519 baseline",
+    "resourceBudget": false,
+    "browserWarmCold": false,
+    "largeHistoryInteraction": false,
+    "realChromeOldPwaMultiDevice": false,
+    "cloudMigrationDurabilityRecovery": false,
+    "formalRelease": false
+  }
+}

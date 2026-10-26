@@ -28,4 +28,3 @@ export interface OwnerAnalysisV6BackendFixture {
 
 /** Each call returns a fresh independent image, preserving JSON signed zero. */
 export function ownerAnalysisV6BackendFixture(): OwnerAnalysisV6BackendFixture { return JSON.parse(raw) }
-
