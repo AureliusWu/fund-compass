@@ -1,0 +1,80 @@
+{
+  "schema": "fc-owner-full-portfolio-refresh-performance-1",
+  "applicationVersion": "8.0.0",
+  "physicalWorkspaceVersion": 6,
+  "baselineCommit": "519848fbf8d9f3ff433f8fded8aa68202d65f678",
+  "codeCommit": "e3bdb04b13812d20396504ef42e34098c591ec60",
+  "integratedCommit": "fc14df898a03a0d1fe3896dd9b1ae575ca814fe0",
+  "integratedMain": "10998bf9a81fb9aac473dbb86362d23fcceb4e56",
+  "sourceIdentity": {
+    "kind": "fixed-build-input-sha256",
+    "baseline": "26147707184efefdcf9187ceff25ab170ea8052e7ef2b62a53f8050622253fa5",
+    "current": "3db2e626c3fab474ae50dcacb76767ec0cd50782a101033345844938d691ad7d",
+    "baselineArchiveSha256": "20c983326fe6843beeaab77ec8841314a03aae519a7f9e7ffce509515d1c583e"
+  },
+  "localVerification": {
+    "frontend": { "passed": 3350, "files": 119, "seconds": 36.12, "typeCheck": "EXIT0", "node": "24.14.0", "npm": "11.9.0" },
+    "officialAudit": { "frontend": 0, "worker": 0, "includeDev": true, "auditLevel": "moderate", "fetchRetries": 0, "registry": "https://registry.npmjs.org" },
+    "backendAndWorkerRuntime": "Not rerun locally this slice; unchanged business code. New exact-source natural CI is separate from earlier bcdfd9a CI.",
+    "intermediateFailure": { "failed": 6, "passed": 3344, "files": 119, "seconds": 44.29, "cause": "Old review complete-page fixture claimed head9/10 but retained record_revision1. Repaired actual name-ABA raw fixture, preserving all original assertions and production codecs." },
+    "independentReview": "No reproducible P0/P1 in reviewed local core, full refresh, bounded readers and facade/UI. Synthetic IDB/HTTP is not cloud authentication, Chrome/PWA or durability proof."
+  },
+  "method": "Exact 519848f frontend Git archive and frozen integrated current fixed src/public/tools/config/package inputs. Identical package/lock after EOL-normalized comparison and the same actual installed node_modules junction. Fresh serial A/B/B/A/A/B builds, three per side, each PWA7/7; full artifact inventory identical within each side. Real TypeScript AST static import/export JS closure, actual Workbox precache URL inventory and non-null MD5 verified. JS closure excludes dynamic blocks and CSS preload maps; total JS+CSS and precache/support unions count CSS separately. Build times are observational only: host cache, paths and EOL not controlled for runtime latency claims.",
+  "samples": [
+    { "side": "baseline", "sample": 1, "builtSeconds": 9.45, "pwa": "7/7" },
+    { "side": "current", "sample": 1, "builtSeconds": 7.85, "pwa": "7/7" },
+    { "side": "current", "sample": 2, "builtSeconds": 7.98, "pwa": "7/7" },
+    { "side": "baseline", "sample": 2, "builtSeconds": 7.63, "pwa": "7/7" },
+    { "side": "baseline", "sample": 3, "builtSeconds": 7.50, "pwa": "7/7" },
+    { "side": "current", "sample": 3, "builtSeconds": 8.52, "pwa": "7/7" }
+  ],
+  "gzip9Bytes": {
+    "jsCss": { "baseline": 619148, "current": 675560, "deltaPercent": 9.11 },
+    "workspace": { "baseline": 10893, "current": 13040, "deltaPercent": 19.71, "thresholdPercent": 20, "verdict": "WARN", "over20Percent": false },
+    "workspaceJsStaticClosure": { "baseline": 132086, "current": 135666, "deltaPercent": 2.71 },
+    "watchlistJsStaticClosure": { "baseline": 157673, "current": 159295, "deltaPercent": 1.03 },
+    "assets": { "baseline": 17769, "current": 18056, "deltaPercent": 1.62 },
+    "assetsJsStaticClosure": { "baseline": 325513, "current": 327224, "deltaPercent": 0.53 },
+    "precache": { "baseline": 495225, "current": 551396, "deltaPercent": 11.34, "verdict": "WARN" },
+    "installationUnion": { "baseline": 505153, "current": 561564, "deltaPercent": 11.17, "verdict": "WARN" }
+  },
+  "fileCounts": { "jsCss": [95, 114], "precache": [98, 117], "installationUnion": [100, 119] },
+  "newChunksGzip9": {
+    "owner-sync-bounded-fold": 1035,
+    "owner-workspace-full-sync-codec": 825,
+    "owner-workspace-portfolio-codec": 878,
+    "owner-workspace-full-sync-refresh": 4224
+  },
+  "causesAndFixes": [
+    "New real refresh compiler/kernel/UI and full provenance/CAS checks increase emitted bytes and PWA installation inventory; none of the new lazy blocks is an installation-network saving.",
+    "Fixed v5/v6 shape, complete recovery-envelope capacity, full-profile observation invariants and read-only receipt classification moved into the actual preloaded profile codecs. Core keeps the real transaction, complete expected/baseline/slot final CAS and all store writes. v3/v4 never import portfolio/full codecs and v5 never imports full codec.",
+    "Original hashes are still verified on each actual read; no crypto cache, caller validator, budget increase or test timeout increase. Historical Assets/Policy and warm/cold browser performance require further work."
+  ],
+  "superseded": [
+    { "source": "OWNER-FULL-SYNC-PERFORMANCE-20261025.json", "workspaceGzip9": 13341, "deltaPercent": 22.47, "verdict": "FAIL", "retained": true, "usedForCurrentSamples": false },
+    { "source": "final-refresh-20261026-v1", "sourcePin": "c889df0e0276f5787687a32a98b34a745513559536f0669432c0677f5be29050", "workspaceGzip9": 13129, "deltaPercent": 20.53, "verdict": "FAIL", "sampleCountNotQualified": true, "usedForCurrentSamples": false, "reason": "Incomplete preliminary set before read-only receipt extraction and integration of newer main data; not mixed into final six builds." }
+  ],
+  "historicalBudgetDebt": {
+    "workspaceFromA519": { "baseline": 7787, "current": 13040, "deltaPercent": 67.46, "verdict": "FAIL", "historicalBaselineRebuilt": false },
+    "assetsFromF010": { "baseline": 14605, "current": 18056, "deltaPercent": 23.63, "thresholdPercent": 20, "verdict": "FAIL", "historicalBaselineRebuilt": false },
+    "precacheFromA519": { "baseline": 400938, "current": 551396, "deltaPercent": 37.53, "verdict": "WARN", "historicalBaselineRebuilt": false },
+    "installationFromA519": { "baseline": 410446, "current": 561564, "deltaPercent": 36.82, "verdict": "WARN", "historicalBaselineRebuilt": false },
+    "priorPolicyPanelRegression": "OPEN; no new historical baseline rebuilt or waiver inferred"
+  },
+  "rawEvidence": {
+    "directory": "C:/Users/84046/AppData/Local/Temp/fc-full-sync-perf-20261025-519848f/final-refresh-20261026-v2",
+    "helperSha256": "6ef3e2fc0957a60b30e65eee91ee9cd278d4911a6a16e4f4ece026f169959475",
+    "summarySha256": "84a665e2a0eb1726fe79b7a5a3ea78d5b8d884a1dd9168b5d63ee4e5e99d287b",
+    "independentlyArchived": false,
+    "contents": "measure.mjs, freeze-qualified.json, baseline-1/2/3.json, current-1/2/3.json, summary.json"
+  },
+  "qualification": {
+    "currentArtifactComparison": "WARN; no new measured over20-percent FAIL versus the same 519 baseline",
+    "resourceBudget": false,
+    "browserWarmCold": false,
+    "largeHistoryInteraction": false,
+    "realChromeOldPwaMultiDevice": false,
+    "cloudMigrationDurabilityRecovery": false,
+    "formalRelease": false
+  }
+}

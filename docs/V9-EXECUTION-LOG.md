@@ -1450,3 +1450,37 @@ Render MCP本轮可正常只读访问：已明确使用用户确认的My Workspa
 只读再确认实际缺口：已有完整B、空槽且本机无意图时，云端另一设备变化没有可应用的完整B/L/D refresh入口。prepare真实零操作拒绝，ACK需原pending/真实回执；不能假空POST/假receipt或将初次manual bootstrap用于旧B。须另建显式无POST、完整来源/全像CAS的真三方刷新，再收口v6分析来源资格。累计历史拉取/折叠过程也仍只有单响应、100000条历史计数及12s限制，未有跨页字节内存预算；最终B的2MiB校验不是过程上限，须独立补预算/故障与大历史验证。
 
 因此不称整个I19完成。应用仍8.0.0；v6分析、策略写流程、机器消费者、真实Chrome/旧PWA/跨设备、资源FAIL、I18停写/新保护备份/配额/provider能力/迁移/远端耐久及独立恢复、I20自然窗口仍未过。未读未确认秘密输入、未绕PR403/浏览器/OAuth、不改任何云配置/套餐/秘密/重启/main/tag/Gist；新自然CI待精确新SHA核，不用旧519 CI或本机PASS代替部署/发布。
+
+### 完整云刷新、累计分页预算与固定 profile codec（2026-10-26）
+
+#### 前一候选的真实 CI 与本轮 Git 边界
+
+已重新读取 `bcdfd9a2f746cf07cf21c9cd8208005f03716915` 的 [自然CI40180531461](https://github.com/AureliusWu/fund-compass/actions/runs/40180531461)：backend **4088 passed/2 warnings/285.60s**、pip check clean；frontend Node20.20.2 **3127/116文件**、type/build7.13s/PWA7/7/官方全依赖audit0；Worker **148/4文件**、check/dry-run114.28KiB/gzip26.58/官方audit0。actual checkout=`d04d7794466bf1151a6bf67622390cc3169a05bf`（已核父fc37965+bcdf及tree=d92a47d0b523cbfe81fc9e58feec11779359dddd）。resolve成功，deploy/candidate_smoke/formal_smoke仍skipped；这是旧候选精确CI，不是本轮源码或部署证明。
+
+本轮代码提交 `e3bdb04b13812d20396504ef42e34098c591ec60`，tree=`cbda45d8308372b8fc17619d052028775b524dca`；随后正常合入 `origin/main=10998bf9a81fb9aac473dbb86362d23fcceb4e56`，merge=`fc14df898a03a0d1fe3896dd9b1ae575ca814fe0`、tree=`a17ee41c26becf5316fa30b72030a6319ae50124`。主分支新增仅自动富集/经理分片/公开校准数据三个commit；策略 active/history不变，candidate仍rejected、不自动晋级。正常merge保留新旧Git历史和合法新hash分片，未推main或触发部署。以下最终本机全量及制品测量基于合入后源码；文档后续提交不改变固定前端输入。
+
+#### 真正完整 B/L/D 刷新
+
+不再限制成“本机无意图”子集：已有完整B、slot/pending为空时，基金与manual一起按旧B/本机L/实际当前会话固定upper完整D做三方协调。全部字段、ABA/同值收敛、生命周期/永久墓碑及账户更名整组显式选择，保留本机未上传意图；刷新预览同时列L→L'变更和D→L'剩余意图。原manual legacyId/updated_at或null、基金原时间、原文/档案/历史/升级intent/历史sync、0/null/-0均保留，不拿当前C静默重设本机意图。
+
+从实际store-owned facade/SFC显式拉D、预览/选择、独立勾选“仅刷新本机”，原12秒覆盖输入拥有、加载/读/固定源/strict写与后置发布；真实完整前像CAS同库应用L'/B=D，推进独立localVersion/slot/full epoch与full-profile `refresh`本机回执。旧v4 receipt闭集不变。没有假空POST、假云receipt、借ACK清包或重用bootstrap；任一原包五态阻断，typed noop无put/版本推进/新回执。保留local_pending；剩余意图仍另行制真实包、发送、回执/ACK。
+
+所有实际写操作在后置真实hydrate/reset后再次核返回全像；另一handle在严格提交与后读之间成功编辑，旧结果不能继续发布。原未知本机id/hash一直保留到整个hydrate/Pinia发布完成；丢响应只手核fullSyncReceipt，不错用旧localReceipt。最近回执被合法后续writer覆盖仍unknown，不能洗掉tuple或重放。退出/端点/来源/坏时钟/迟到操作不能清新流程或发布旧私人结果。完整备份3可保全刷新后的原完整状态与随后五态pending，但仍不是通用丢库恢复或云耐久资格。
+
+#### 累计读取预算与真实失败记录
+
+同步candidate、分析完整来源、v6初始pull现在共用真实严格parser后的固定fold：全部raw UTF8累计4MiB（重复key/空白也计）、100000历史项、保留完整baseline像2MiB；每页以单record字节差量更新，不反复重编码整个Map，顺序/增量seed合同保留。先strict解析合法页再保留upper，后续容量/最终完整baseline校验失败仍保留防回退floor，但不能发布D或授权制包/分析/POST。未提升单响应/原总时限/原请求容量，逻辑预算不是硬进程堆上限或来源认证。
+
+中间完整全量真实 **6 failed/3344 passed/119文件/44.29s**：旧 `ownerWorkspaceSync-review.test.ts` page(9/10)声称完整D，但唯一记录始终revision1，新真实完整baseline codec正确拒绝，尚未进入原context/floor断言。只修raw fixture为真实名称同值ABA的revision/field stamp，保留全部原并发、防回退及4类假POST不升head断言；不放宽codec或改预期错误洗绿。独立6文件220项PASS后最终两次全量3350均通过，原失败留此记录。
+
+#### 最终质量与后续出口
+
+合入main数据后直接 `npm run test` **3350 passed/119文件/36.12s**，再直接 `npm run type-check` exit0；相对bcdf新增223项，新增3个文件。此前最终源码同一全量3350/46.77s、type-check exit0；另合入前全量3350/35.97s保留为前一状态，不与最终性能样本混用。纯refresh92、boundedfold28、实际core50、coordinator新增15（总56）、实际SFC新增23（总58）、实际reader新增10、fixedlazy新增5（总9），原功能全部保留。前端/Worker再次官方 `npm audit --include=dev --audit-level=moderate --registry=https://registry.npmjs.org --fetch-retries=0` 均0；无依赖/锁改动。后端/Worker业务源码未改，未伪称本轮又本机跑4088/148；新精确候选自然CI须分别重验。
+
+固定v5/v6 shape/原完整文件容量/活动full观察及只读回执分类归入事务前预加载codec。v3/v4不载portfolio、v5不载full，普通read/recovery不载写命令；导入失败/超时/迟到实际0事务，新lazy回归保留。core仍拥有全部真实strict事务、完整expected/baseline/slot最终CAS和全部store写；事务内固定同步函数，无UI validator/crypto缓存。每次原raw/migration/upgrade/pending SHA仍完整重核，未改原5000ms或12s时限。独立只读审查未发现可复现P0/P1，判定仅本机代码/合成IDB/HTTP conditionally trusted，不据此给真实源/多设备/云或金融动作放行。
+
+最终同一exact519 archive+相同依赖junction、合入后固定输入pin=`3db2e626c3fab474ae50dcacb76767ec0cd50782a101033345844938d691ad7d`，A/B/B/A/A/B各3次fresh直接build/PWA7/7，库存完全稳定。完整AST静态JS图、precache URL/非null MD5及support并集均核；详见 `OWNER-FULL-REFRESH-PERFORMANCE-20261026.json`。前三次小提取后不完整v1诊断workspace13129/+20.53% FAIL，保留且不混入最终六次；前bcdf FAIL也不改写。最终workspace13040/10893 **+19.71% WARN**（原20%不提高），其JS静态闭包135666/132086 +2.71%；JS+CSS675560/619148 +9.11%，自选闭包159295/157673 +1.03%，Assets18056/17769 +1.62%及闭包327224/325513 +0.53%。precache98→117 URL、551396/495225 **+11.34% WARN**，安装并集561564/505153 **+11.17% WARN**；新增lazy并非安装优化。旧a519 workspace7787→13040 **+67.46% FAIL**、旧f010 Assets14605→18056 **+23.63% FAIL**、旧Policy局部回退仍开放，历史precache/安装+37.53%/+36.82% WARN，resourceBudget仍false、不假设豁免。历史基线本次未重建；原始helper/冻结/六统计只存Temp未独立封存，summary SHA=`84a665e2a0eb1726fe79b7a5a3ea78d5b8d884a1dd9168b5d63ee4e5e99d287b`。Vite基线9.45/7.63/7.50s、当前7.85/7.98/8.52s仅作构建记录，不作warm/cold用户延迟结论。新源码自然CI和实际部署仍分开；应用保持8.0.0。
+
+下一道必要业务是实际v6分析来源：不能删除旧prepareManagedWorkspace的portfolio守卫（它也服务旧fund-only sender）。须独立profile preflight/capture，真实readFullSyncState/full B与完整fund+manual无意图、空包/未知tuple、portfolio内存/全部intent/history/历史sync前像、固定完整D和原Policy/Evidence proof联动；v5继续关闭，v4原context字节不顺便改变。服务端原source SHA保留int/float/-0，前端同步JSON不能区分1与1.0，不能用其canonical重算冒称独立认证。60秒/策略下一生效等号失效、独立scope/outbox/唯一POST/unknown只receipt及三页同资格均须保留并真实集成测试。
+
+I18实际停写/新保护备份/Free配额/provider能力与容量/迁移/跨重启耐久及独立远端恢复，I19策略写流程/机器消费者/真实浏览器与跨设备，I20自然交易日/周任务窗口，I21旧PWA/交互性能和历史资源债务仍未关闭。未读未确认凭据输入、未绕浏览器/OAuth/PR写403、未改云秘密/套餐/schema/重启/main/tag/Gist；本轮仍为feature候选，不是v9发布。
