@@ -5,7 +5,7 @@
     "applied_at": "2026-08-13T13:46:49+08:00",
     "legacy_records_excluded": 17
   },
-  "updated_at": "2026-10-23T20:02:16+08:00",
+  "updated_at": "2026-10-26T21:30:22+08:00",
   "models": {
     "539002": {
       "name": "建信新兴市场混合(QDII)A",
@@ -79,28 +79,28 @@
         }
       },
       "candidate": {
-        "version": "candidate-20261023",
-        "created_at": "2026-10-23T20:02:16+08:00",
-        "data_fingerprint": "b7e76bd5107dbd8c359e057585924f7d606571e06810a511866ba2d178fc3d2c",
-        "data_effective_at": "2026-10-23T20:01:15+08:00",
+        "version": "candidate-20261026",
+        "created_at": "2026-10-26T21:30:22+08:00",
+        "data_fingerprint": "060be4cfe724054dd9c034a5d21ce40e719bc33d22b991daa0c92eb4cd8e40fb",
+        "data_effective_at": "2026-10-26T21:29:21+08:00",
         "status": "rejected",
-        "samples": 25,
-        "split_date": "2026-09-16",
-        "train_samples": 17,
+        "samples": 26,
+        "split_date": "2026-09-17",
+        "train_samples": 18,
         "validation_samples": 8,
         "baseline": {
           "samples": 8,
-          "mae": 0.9358,
-          "bias": 0.3227,
+          "mae": 0.9,
+          "bias": 0.3921,
           "direction_accuracy": 100.0,
-          "extreme_mae": 1.5408
+          "extreme_mae": 0.8378
         },
         "candidate": {
           "samples": 8,
-          "mae": 1.0645,
-          "bias": 0.7549,
+          "mae": 1.1322,
+          "bias": 0.8403,
           "direction_accuracy": 87.5,
-          "extreme_mae": 2.007
+          "extreme_mae": 1.3097
         },
         "parameters": {
           "scale": 1.0,
@@ -157,9 +157,9 @@
         "min_samples": 20,
         "poor_cycles": 0,
         "drift_evidence": {
-          "samples": 25,
-          "previous_mae": 0.676,
-          "recent_mae": 0.896,
+          "samples": 26,
+          "previous_mae": 0.595,
+          "recent_mae": 0.843,
           "recent_direction_accuracy": 100.0
         },
         "active_change_policy": "explicit_admin_only",
@@ -240,12 +240,12 @@
         }
       },
       "candidate": {
-        "version": "candidate-20261023",
-        "created_at": "2026-10-23T20:02:16+08:00",
-        "data_fingerprint": "e10eb42af9b38c5d1147e25ef0db474faf774275da35ab19e60b6859711a9a51",
-        "data_effective_at": "2026-10-23T20:01:15+08:00",
+        "version": "candidate-20261026",
+        "created_at": "2026-10-26T21:30:22+08:00",
+        "data_fingerprint": "a278e24ae6d105b58c8fed920c8a3e54ad96abf178ba8d4195ddbbf38ea0e4ae",
+        "data_effective_at": "2026-10-26T21:29:21+08:00",
         "status": "collecting",
-        "samples": 18,
+        "samples": 19,
         "required": 20,
         "eligible_for_admin_review": false,
         "admin_review_recommendation": "no_active_change"
@@ -256,7 +256,7 @@
         "min_samples": 20,
         "poor_cycles": 0,
         "drift_evidence": {
-          "samples": 18,
+          "samples": 19,
           "reason": "insufficient"
         },
         "active_change_policy": "explicit_admin_only",
@@ -337,28 +337,28 @@
         }
       },
       "candidate": {
-        "version": "candidate-20261023",
-        "created_at": "2026-10-23T20:02:16+08:00",
-        "data_fingerprint": "d237ef9c770b5aadb3576897345f5522374ee9a9abad748a4d9dac89dd9c64ea",
-        "data_effective_at": "2026-10-23T20:01:15+08:00",
+        "version": "candidate-20261026",
+        "created_at": "2026-10-26T21:30:22+08:00",
+        "data_fingerprint": "aacca338e2eecb29b593cd5dac5fd0678f39398d73e066b47a563a796a319858",
+        "data_effective_at": "2026-10-26T21:29:21+08:00",
         "status": "rejected",
-        "samples": 23,
+        "samples": 24,
         "split_date": "2026-09-16",
         "train_samples": 16,
-        "validation_samples": 7,
+        "validation_samples": 8,
         "baseline": {
-          "samples": 7,
-          "mae": 0.7466,
-          "bias": 0.2607,
+          "samples": 8,
+          "mae": 0.6714,
+          "bias": 0.2462,
           "direction_accuracy": 100.0,
-          "extreme_mae": 0.7183
+          "extreme_mae": 0.4317
         },
         "candidate": {
-          "samples": 7,
-          "mae": 0.8339,
-          "bias": 0.72,
-          "direction_accuracy": 85.7,
-          "extreme_mae": 0.1742
+          "samples": 8,
+          "mae": 0.8182,
+          "bias": 0.7184,
+          "direction_accuracy": 87.5,
+          "extreme_mae": 0.4409
         },
         "parameters": {
           "scale": 1.0,
@@ -415,10 +415,10 @@
         "min_samples": 20,
         "poor_cycles": 0,
         "drift_evidence": {
-          "samples": 23,
-          "previous_mae": 0.763,
-          "recent_mae": 0.741,
-          "recent_direction_accuracy": 90.0
+          "samples": 24,
+          "previous_mae": 0.808,
+          "recent_mae": 0.685,
+          "recent_direction_accuracy": 100.0
         },
         "active_change_policy": "explicit_admin_only",
         "candidate_eligible_for_admin_review": false,
