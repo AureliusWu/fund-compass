@@ -11,9 +11,9 @@ import type { OwnerWorkspaceDeliveryRequest } from './owner-workspace-delivery'
 const TARGET = 'a'.repeat(64), KEY = '000001::synthetic-account'
 beforeEach(() => vi.stubGlobal('crypto', webcrypto))
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers() })
-function record(key = KEY): OwnerSyncRecord {
-  return { key, kind: 'holding', deleted: false, record_revision: 1, lifecycle_revision: 1,
-    field_revisions: { name: 1, shares: 1, cost: 1, target_weight: 1 },
+function record(key = KEY, revision = 1): OwnerSyncRecord {
+  return { key, kind: 'holding', deleted: false, record_revision: revision, lifecycle_revision: 1,
+    field_revisions: { name: revision, shares: 1, cost: 1, target_weight: 1 },
     values: { name: 'synthetic-fund', shares: 0, cost: null, target_weight: null } }
 }
 function linked(): OwnerWorkspaceSyncState {
@@ -28,7 +28,10 @@ function linked(): OwnerWorkspaceSyncState {
       backupSha256: 'c'.repeat(64), sourceArchive: { sourceKey: null, v1Raw: null, v2Raw: null }, localVersion: 7 },
       displayTimes: [{ key: KEY, updated_at: null }], recentEdit: null, restoredArchives: [] } }, sync } as unknown as OwnerWorkspaceSyncState
 }
-function page(upper: number, records = [record()]) {
+// A complete D at a nonzero head must include its latest revision. Advancing
+// the name stamp with the same value represents a real name ABA; merely
+// changing upper while every record stays at revision1 is not a complete D.
+function page(upper: number, records = [record(KEY, upper)]) {
   return { status: 200, rawBody: JSON.stringify({ upper_revision: upper, changes: records, next_cursor: null, complete: true }) }
 }
 function fixture() {

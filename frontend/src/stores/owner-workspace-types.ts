@@ -10,6 +10,7 @@ import type { OwnerPortfolioUpgradeIntent } from '@/utils/owner-portfolio-upgrad
 import type { OwnerPortfolioSyncMetadata, OwnerPortfolioSyncMetadataContext } from '@/utils/owner-portfolio-sync'
 import type { OwnerPortfolioSyncUpgradeIntent } from '@/utils/owner-portfolio-sync-intent'
 import type { OwnerPortfolioInitialMergeResolution } from '@/utils/owner-portfolio-merge'
+import type { OwnerPortfolioRefreshResolution } from '@/utils/owner-portfolio-refresh'
 import type { OwnerWorkspaceAckRawMatched } from '@/utils/owner-workspace-ack'
 import type { OwnerSyncBaseline } from './ownerSyncCandidate'
 import type { OwnerWorkspaceDeliveryRequest, OwnerWorkspaceAckCloudRequest } from './owner-workspace-delivery'
@@ -94,6 +95,12 @@ export interface OwnerWorkspaceFullSyncAckInput {
   readonly minimumObservedRevision: number; readonly resolutions: readonly OwnerPortfolioInitialMergeResolution[]
 }
 export interface OwnerWorkspaceFullSyncAckRequest extends OwnerWorkspaceFullSyncAckInput { readonly hash: string }
+export interface OwnerWorkspaceFullSyncRefreshInput {
+  readonly id: string; readonly expected: OwnerWorkspaceFullSyncState
+  readonly completeBaseline: OwnerSyncBaseline; readonly minimumObservedRevision: number
+  readonly resolutions: readonly OwnerPortfolioRefreshResolution[]
+}
+export interface OwnerWorkspaceFullSyncRefreshRequest extends OwnerWorkspaceFullSyncRefreshInput { readonly hash: string }
 export interface OwnerWorkspaceEditPortfolioRequest {
   readonly id: string; readonly hash: string; readonly expected: OwnerWorkspaceLocalState; readonly command: OwnerPortfolioCommand
 }
@@ -138,6 +145,7 @@ export interface OwnerWorkspace {
   cancelPreparedFullSync(request: OwnerWorkspaceFullSyncCancelRequest, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceFullSyncState>
   transitionFullSyncDelivery(request: OwnerWorkspaceFullSyncDeliveryRequest, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceFullSyncState>
   ackFullSync(request: OwnerWorkspaceFullSyncAckRequest, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceFullSyncState>
+  refreshFullSync(request: OwnerWorkspaceFullSyncRefreshRequest, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceFullSyncState>
   fullSyncReceipt(id: string, hash: string, guard: OwnerWorkspaceGuard): Promise<Readonly<{ state: 'unknown' }>
     | Readonly<{ state: 'matched'; value: OwnerWorkspaceFullSyncState }>>
   restoreLocal(request: OwnerWorkspaceRestoreLocalRequest, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceLocalState>
@@ -207,7 +215,7 @@ export interface FullSyncLinkPostimage extends FullSyncPostimage {
   readonly metadata: OwnerWorkspaceLocalMetadata
   readonly portfolio: OwnerPortfolioLocal
 }
-export type FullSyncCommitMode = 'prepare' | 'cancel' | 'delivery' | 'ack'
+export type FullSyncCommitMode = 'prepare' | 'cancel' | 'delivery' | 'ack' | 'refresh'
 /** Private core-created capability only. UI/open options cannot supply codecs
  * or transactions; the fixed loaded codec and actual CAS remain in the core. */
 export interface FullSyncWorkspaceHost {

@@ -10,7 +10,7 @@ import { openOwnerWorkspace, upgradeOwnerWorkspaceSync, buildOwnerWorkspaceAdopt
 import type { OwnerAnalysisLocalSource } from './watchlist'
 import { buildOwnerLegacyWorkspaceBackup, canonicalOwnerLocal } from '@/utils/owner-workspace-backup'
 import { planOwnerWorkspaceCloudIntent } from '@/utils/owner-workspace-sync'
-import { compareSyncKeys, type OwnerSyncRecord } from '@/utils/ownerSyncContract'
+import { compareSyncKeys, parseSyncChangesPage, OWNER_SYNC_MAX_RESPONSE_BYTES, type OwnerSyncRecord } from '@/utils/ownerSyncContract'
 import { ownerAnalysisBackendFixture } from '@/utils/ownerAnalysisContract.fixtures'
 import type { BuiltOwnerAnalysisRequest } from '@/utils/ownerAnalysisContract'
 import type { OwnerSyncCandidateTransport } from './ownerSyncCandidate'
@@ -40,14 +40,16 @@ function records(extra: boolean): OwnerSyncRecord[] {
     values: { name: '合成墓碑', shares: null, cost: null, target_weight: null } }
   return [fund, ...(extra ? [manual, tombstone] : [])].sort((a, b) => compareSyncKeys(a.key, b.key))
 }
-async function setup(extra = false, additionalManuals = 0) {
+async function setup(extra = false, additionalManuals = 0, sourceRevision = 1) {
   const fixture = ownerAnalysisBackendFixture(), factory = new IDBFactory(), mutable = {
     endpoint: 'https://synthetic-owner.example/api', generation: 1, authenticated: true, sourceEpoch: 0, now: NOW,
     cloud: [...records(extra), ...Array.from({ length: additionalManuals }, (_, index): OwnerSyncRecord => ({
       key: 'asset:extra-' + String(index).padStart(3, '0'), kind: 'manual_asset', deleted: false,
       record_revision: 1, lifecycle_revision: 1, field_revisions: { name: 1, cls: 1, value: 1, note: 1 },
       values: { name: '合成手工资产', cls: '现金', value: 0, note: null },
-    }))].sort((a, b) => compareSyncKeys(a.key, b.key)),
+    }))].map(row => ({ ...row, record_revision: sourceRevision,
+      field_revisions: Object.fromEntries(Object.keys(row.field_revisions).map(field => [field, sourceRevision])) }))
+      .sort((a, b) => compareSyncKeys(a.key, b.key)),
   }
   const guard: OwnerWorkspaceGuard = { signal: signal(), assertActive() {} }
   const legacy = await openOwnerWorkspace(factory, TARGET); handles.push(legacy)
@@ -60,7 +62,7 @@ async function setup(extra = false, additionalManuals = 0) {
   const local = await legacy.adoptLocal(adoption, guard)
   const workspace = await upgradeOwnerWorkspaceSync(factory, TARGET, local, guard); handles.push(workspace)
   await workspace.linkCloudBase(await buildOwnerWorkspaceLinkCloudRequest(TARGET, { id: 'analysis-link-0001',
-    expected: await workspace.readSyncState(guard), base: { pulledRevision: 1, records: mutable.cloud } }), guard)
+    expected: await workspace.readSyncState(guard), base: { pulledRevision: sourceRevision, records: mutable.cloud } }), guard)
   const outbox = await openOwnerAnalysisOutbox(factory, TARGET, signal(), true); handles.push(outbox)
   const source = vi.fn(async (active: AbortSignal): Promise<OwnerAnalysisLocalSource> => {
     const epoch = mutable.sourceEpoch
@@ -93,7 +95,7 @@ async function setup(extra = false, additionalManuals = 0) {
   const sync = { targetFingerprint: TARGET,
     write: vi.fn(async () => { throw new Error('analysis must not write Owner sync') }),
     receipt: vi.fn(async () => { throw new Error('analysis must not read a sync write receipt') }),
-    changes: vi.fn(async (_parameters: Parameters<OwnerSyncCandidateTransport['changes']>[0], _signal: AbortSignal) => ({ status: 200, rawBody: JSON.stringify({ upper_revision: 1,
+    changes: vi.fn(async (_parameters: Parameters<OwnerSyncCandidateTransport['changes']>[0], _signal: AbortSignal) => ({ status: 200, rawBody: JSON.stringify({ upper_revision: sourceRevision,
       changes: mutable.cloud, next_cursor: null, complete: true }) })),
   }
   const changed = vi.fn()
@@ -115,6 +117,18 @@ async function setup(extra = false, additionalManuals = 0) {
   return { fixture, factory, workspace, outbox, mutable, source, transport, sync, manager, value, edit }
 }
 type Setup = Awaited<ReturnType<typeof setup>>
+function historyPage(rows: OwnerSyncRecord[], upper: number, complete = true, paddedBytes?: number) {
+  const tail = rows[rows.length - 1]
+  const raw = JSON.stringify({ upper_revision: upper, changes: rows,
+    next_cursor: complete ? null : [tail.record_revision, tail.key], complete })
+  const bytes = new TextEncoder().encode(raw).byteLength
+  if (paddedBytes !== undefined) expect(bytes).toBeLessThanOrEqual(paddedBytes)
+  return { status: 200, rawBody: raw + ' '.repeat(paddedBytes === undefined ? 0 : paddedBytes - bytes) }
+}
+function historicalRows(rows: OwnerSyncRecord[], revision: number) {
+  return rows.map(row => ({ ...row, record_revision: revision,
+    field_revisions: Object.fromEntries(Object.keys(row.field_revisions).map(field => [field, revision])) }))
+}
 async function prepared(context: Setup) {
   await context.value.hydrate(); await context.value.preview(context.fixture.request.request_id); await context.value.prepare(true)
 }
@@ -252,6 +266,70 @@ describe('real source-bound Owner analysis manager', () => {
     expect(context.value.view().preview!.records).toEqual(rows)
     expect((await context.outbox.read(signal())).task).toBeNull()
     expect(context.transport.write).not.toHaveBeenCalled()
+  })
+
+  it.each(['exactly-four-MiB', 'over-four-MiB'] as const)('accounts all repeated-key raw history before using matching complete analysis inputs (%s)', async size => {
+    // The actual adopted B has the same 200 final records and head as D. A
+    // rejection here cannot be explained away by a B/D business mismatch.
+    const context = await setup(false, 199, 10), cloud = context.mutable.cloud
+    expect(cloud).toHaveLength(200)
+    const revisions = size === 'exactly-four-MiB' ? [1, 10] : [1, 2, 10]
+    const batches = revisions.map(revision => historicalRows(cloud, revision))
+    const responses = batches.map((rows, index) => historyPage(rows, 10, index === batches.length - 1,
+      size === 'exactly-four-MiB' ? OWNER_SYNC_MAX_RESPONSE_BYTES : 1536 * 1024))
+    responses.forEach((response, index) => expect(parseSyncChangesPage(response.rawBody, {
+      sinceRevision: 0, limit: 200, ...(index === 0 ? {} : { upperRevision: 10,
+        cursor: [batches[index - 1][199].record_revision, batches[index - 1][199].key] as const }),
+    }).changes).toHaveLength(200))
+    for (const response of responses) context.sync.changes.mockResolvedValueOnce(response)
+    if (size === 'over-four-MiB') {
+      await expect(context.value.preview(context.fixture.request.request_id)).rejects.toBeDefined()
+      expect(context.value.view().preview).toBeNull(); expect(context.value.isQualified()).toBe(false)
+      expect(context.transport.policyState).not.toHaveBeenCalled(); expect(context.transport.evidence).not.toHaveBeenCalled()
+      expect(context.sync.changes).toHaveBeenCalledTimes(3)
+      // A fresh, small, actual complete D at the same observed head remains
+      // readable; no partial history or failed bounded fold is reused.
+      await context.value.preview(context.fixture.request.request_id)
+    } else await context.value.preview(context.fixture.request.request_id)
+    expect(context.value.view().preview!.records).toEqual(cloud)
+    expect(context.value.view().preview!.packet.request.expected_revision).toBe(10)
+    expect((await context.outbox.read(signal())).task).toBeNull()
+    expect(context.transport.write).not.toHaveBeenCalled(); expect(context.sync.write).not.toHaveBeenCalled()
+    expect(context.sync.receipt).not.toHaveBeenCalled()
+  })
+
+  it.each(['cumulative-bytes', 'retained-image', 'incomplete-head'] as const)('retains the strictly parsed head across %s failure and refuses an otherwise valid older source', async fault => {
+    const context = await setup()
+    const rows = (first: number, revision: number, note: string | null = null): OwnerSyncRecord[] =>
+      Array.from({ length: 200 }, (_, index) => ({ key: 'asset:bounded-' + String(first + index).padStart(3, '0'),
+        kind: 'manual_asset', deleted: false, record_revision: revision, lifecycle_revision: 1,
+        field_revisions: { name: 1, cls: 1, value: revision, note: 1 },
+        values: { name: 'synthetic bounded source', cls: '现金', value: 0, note } }))
+    const batches = fault === 'cumulative-bytes' ? [rows(0, 1), rows(0, 2), rows(0, 10)]
+      : fault === 'retained-image' ? [rows(0, 1, '中'.repeat(2000)), rows(200, 10, '中'.repeat(2000))]
+      : [rows(0, 1).slice(0, 1)]
+    const responses = batches.map((batch, index) => historyPage(batch, 10, index === batches.length - 1,
+      fault === 'cumulative-bytes' ? 1536 * 1024 : undefined))
+    responses.forEach((response, index) => expect(parseSyncChangesPage(response.rawBody, {
+      sinceRevision: 0, limit: 200, ...(index === 0 ? {} : { upperRevision: 10,
+        cursor: [batches[index - 1][199].record_revision, batches[index - 1][199].key] as const }),
+    }).upper_revision).toBe(10))
+    for (const response of responses) context.sync.changes.mockResolvedValueOnce(response)
+    await expect(context.value.preview(context.fixture.request.request_id)).rejects.toBeDefined()
+    expect(context.value.view().preview).toBeNull(); expect(context.value.isQualified()).toBe(false)
+    // The default transport now returns the original real B=head1, which
+    // would be fully eligible without the failed read's observed head10.
+    await context.value.hydrate()
+    await expect(context.value.preview(context.fixture.request.request_id)).rejects.toBeDefined()
+    expect(context.transport.policyState).not.toHaveBeenCalled(); expect(context.transport.evidence).not.toHaveBeenCalled()
+    expect((await context.outbox.read(signal())).task).toBeNull()
+    expect(context.transport.write).not.toHaveBeenCalled(); expect(context.sync.write).not.toHaveBeenCalled()
+    // Separate newly constructed managers do not inherit a fictitious
+    // persistent floor; the very same source is valid in that new context.
+    const separate = context.manager()
+    await separate.preview(context.fixture.request.request_id)
+    expect(separate.view().preview!.records).toEqual(context.mutable.cloud)
+    expect(separate.view().preview!.packet.request.expected_revision).toBe(1)
   })
 
   it.each(['manual', 'tombstone'] as const)('refuses a supposedly complete D missing its actual B %s record', async missing => {

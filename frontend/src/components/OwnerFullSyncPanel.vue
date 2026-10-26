@@ -152,7 +152,7 @@ async function reconcileLocal() {
   if (busy.value || !store.fullSyncLocalPending) return
   busy.value = true
   try { const result = await store.reconcileFullSyncLocal(); message.value = result.state === 'matched' ? '原本机 id/hash 回执已匹配；没有重放。仍不是云端确认。' : '原本机回执未知；保留原标识，不重放。' }
-  catch { message.value = '原本机结果仍未核定；保存/取消/ACK 的原标识请先登录并重新启用完整原包核对，再核原回执。保留原 id/hash，不重新确认或重放。' }
+  catch { message.value = '原本机结果仍未核定；刷新/保存/取消/ACK 的原标识请先登录并重新启用完整同步核对，再核原回执。保留原 id/hash，不重新确认或重放。' }
   finally { busy.value = false; refresh() }
 }
 async function exportCurrent() {
@@ -193,7 +193,7 @@ async function exportCurrent() {
       <button v-if="!enabled" type="button" data-action="full-enable" :disabled="!authenticated || !consent || busy" @click="enable">启用本轮完整读取</button>
       <button v-else type="button" data-action="full-disable" @click="hide">关闭并隐藏私人对照</button>
       <div v-if="privateVisible" class="private-view">
-        <template v-if="status?.linked"><p role="status">本机已有完整共同基线。上传与完整确认须下方独立授权；不重新联结，也不授权分析。</p><OwnerFullSyncPacketPanel /></template>
+        <template v-if="status?.linked"><p role="status">本机已有完整共同基线。可在下方独立授权后只拉取并刷新本机，或另行保存与发送原包；不重新联结，也不授权分析。</p><OwnerFullSyncPacketPanel /></template>
         <template v-else>
           <button type="button" data-action="full-pull" :disabled="busy || !!store.fullSyncLocalPending" @click="pull">拉取完整云端对照</button>
           <button type="button" data-action="full-preview" :disabled="busy || !status?.completeReady || !!store.fullSyncLocalPending" @click="preview">{{ view ? '按当前选择重新预览' : '预览本机共同基线' }}</button>

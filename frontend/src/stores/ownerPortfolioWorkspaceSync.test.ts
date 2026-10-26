@@ -101,6 +101,9 @@ async function fixture(mode: 'linked' | 'prepared' = 'linked') {
     ackFullSync: vi.fn(async (request: Parameters<OwnerWorkspace['ackFullSync']>[0], value: OwnerWorkspaceGuard) => {
       const result = await workspace.ackFullSync(request, value); events.push('ack'); return result
     }),
+    refreshFullSync: vi.fn(async (request: Parameters<OwnerWorkspace['refreshFullSync']>[0], value: OwnerWorkspaceGuard) => {
+      const result = await workspace.refreshFullSync(request, value); events.push('refresh'); return result
+    }),
     fullSyncReceipt: vi.fn((id: string, hash: string, value: OwnerWorkspaceGuard) => workspace.fullSyncReceipt(id, hash, value)),
   } satisfies Port
   let server = [fund(), manual()], session = { authenticated: true, generation: 1 }
@@ -217,6 +220,176 @@ describe('real complete-profile coordinator default-off and one-original-body jo
     expect(state.fullSync.base).toEqual(before.fullSync.base); expect(state.local.snapshot).toEqual(before.local.snapshot)
     expect(state.local.portfolio).toEqual(before.local.portfolio); expect(state.fullSync.pending).toBeNull(); expect(state.local.outbox.entry).toBeNull()
     expect(f.transport.write).not.toHaveBeenCalled(); expect(f.port.cancelPreparedFullSync).toHaveBeenCalledOnce()
+  })
+})
+
+function disjointRefreshRecords(): OwnerSyncRecord[] {
+  const holding = fund(), asset = manual()
+  return [{ ...holding, record_revision: 3, field_revisions: { ...holding.field_revisions, name: 3 },
+    values: { ...holding.values, name: '合成云端名称' } },
+  { ...asset, record_revision: 4, field_revisions: { ...asset.field_revisions, note: 4 },
+    values: { ...asset.values, note: '合成云端备注' } }]
+}
+async function refreshReady() {
+  const f = await fixture(); f.managed.setCloudConsent(true); await f.managed.hydrate()
+  f.setServer(disjointRefreshRecords()); await f.managed.pullComplete(); return f
+}
+
+describe('actual complete B/L/D cloud refresh without packet or POST', () => {
+  it('adopts disjoint cloud changes while retaining all fund/manual unuploaded intent and immutable local history', async () => {
+    const f = await refreshReady(), before = await f.image(), plan = await f.managed.previewRefresh('fullmanaged-refresh-0001')
+    expect(plan.request).not.toBeNull(); expect(plan.preview.conflicts).toEqual([])
+    expect(plan.preview.remainingOperations).toHaveLength(2)
+    const state = await f.managed.commitRefresh(plan.request!, true)
+    expect(state.local.snapshot.entries[0].values).toMatchObject({ name: '合成云端名称', shares: 7, cost: null })
+    expect(state.local.portfolio!.manual[0].values).toMatchObject({ value: 8, note: '合成云端备注' })
+    expect(state.fullSync.base).toEqual(plan.preview.baseD)
+    expect(state.fullSync.recentReceipt).toMatchObject({ id: plan.request!.id, hash: plan.request!.hash, operation: 'refresh' })
+    expect(state.fullSync.pending).toBeNull(); expect(state.local.outbox.entry).toBeNull()
+    expect(state.local.snapshot.localVersion).toBe(before.local.snapshot.localVersion + 1)
+    expect(state.local.outbox.version).toBe(before.local.outbox.version + 1)
+    expect(state.fullSync.epoch).toBe(before.fullSync.epoch + 1)
+    expect(state.local.portfolio!.history).toEqual(before.local.portfolio!.history)
+    expect(state.local.portfolio!.migration).toEqual(before.local.portfolio!.migration)
+    expect(state.local.portfolioUpgrade).toEqual(before.local.portfolioUpgrade)
+    expect(state.local.fullSyncUpgrade).toEqual(before.local.fullSyncUpgrade); expect(state.local.sync).toEqual(before.local.sync)
+    expect(planOwnerPortfolioCloudIntent(state.fullSync.base, state.local.snapshot, state.local.portfolio).operations).toEqual(plan.preview.remainingOperations)
+    expect(f.events).toEqual(['refresh']); expect(f.transport.write).not.toHaveBeenCalled(); expect(f.transport.receipt).not.toHaveBeenCalled()
+    expect(f.managed.status()).toMatchObject({ state: 'idle', completeReady: false, resultReady: false, uncertainLocal: null })
+    const preparation = await f.managed.previewPreparation('fullmanaged-after-refresh-prepare')
+    expect(preparation.packet.request.expected_revision).toBe(4)
+    expect(preparation.packet.request.operations).toEqual(plan.preview.remainingOperations)
+    await f.managed.commitPreparation(preparation, true)
+    expect((await f.image()).fullSync.pending!.requestId).toBe(preparation.id)
+    await f.managed.cancelPrepared('fullmanaged-after-refresh-cancel', true)
+    expect(f.transport.write).not.toHaveBeenCalled(); expect(ambient).not.toHaveBeenCalled()
+  })
+  it('requires the actual fresh complete pull and separately confirmed private preview', async () => {
+    const f = await fixture(); f.managed.setCloudConsent(true); await f.managed.hydrate()
+    await expect(f.managed.previewRefresh('fullmanaged-no-pull')).rejects.toMatchObject({ code: 'managed_pull_required' })
+    await f.managed.hydrate(); f.setServer(disjointRefreshRecords()); await f.managed.pullComplete()
+    const plan = await f.managed.previewRefresh('fullmanaged-refresh-confirm'), before = await f.image()
+    await expect(f.managed.commitRefresh(plan.request!, false as true)).rejects.toMatchObject({ code: 'managed_confirmation_required' })
+    expect(f.port.refreshFullSync).not.toHaveBeenCalled(); expect(await f.image()).toEqual(before)
+    await f.managed.hydrate()
+    await expect(f.managed.commitRefresh(plan.request!, true)).rejects.toMatchObject({ code: 'managed_preview_required' })
+    expect(f.port.refreshFullSync).not.toHaveBeenCalled(); expect(f.transport.write).not.toHaveBeenCalled()
+  })
+  it('exposes a genuine typed no-op without advancing local versions or inventing a receipt even with remaining intent', async () => {
+    const f = await fixture(); f.managed.setCloudConsent(true); await f.managed.hydrate()
+    f.transport.changes.mockResolvedValueOnce({ status: 200, rawBody: canonicalOwnerLocal({ upper_revision: 2,
+      changes: [fund(), manual()], next_cursor: null, complete: true }) })
+    await f.managed.pullComplete(); const before = await f.image(), plan = await f.managed.previewRefresh('fullmanaged-refresh-noop')
+    expect(plan.preview.noop).toBe(true); expect(plan.request).toBeNull(); expect(plan.preview.remainingOperations).toHaveLength(2)
+    expect(await f.image()).toEqual(before); expect(f.port.refreshFullSync).not.toHaveBeenCalled(); expect(f.transport.write).not.toHaveBeenCalled()
+  })
+  it('uses actual full field conflicts and invalidates the previous sealed request after changed choices', async () => {
+    const f = await fixture(); f.managed.setCloudConsent(true); await f.managed.hydrate()
+    f.setServer([fund(3, 12), manual(4, 20)]); await f.managed.pullComplete()
+    const unresolved = await f.managed.previewRefresh('fullmanaged-refresh-conflict')
+    expect(unresolved.request).toBeNull()
+    expect(unresolved.preview.conflicts).toMatchObject([{ key: KEY, field: 'shares' }, { key: ASSET, field: 'value' }])
+    const first = await f.managed.previewRefresh('fullmanaged-refresh-conflict', [
+      { key: KEY, field: 'shares', choice: 'cloud' }, { key: ASSET, field: 'value', choice: 'local' }])
+    const second = await f.managed.previewRefresh('fullmanaged-refresh-conflict', [
+      { key: KEY, field: 'shares', choice: 'local' }, { key: ASSET, field: 'value', choice: 'cloud' }])
+    expect(first.request!.hash).not.toBe(second.request!.hash)
+    await expect(f.managed.commitRefresh(first.request!, true)).rejects.toMatchObject({ code: 'managed_preview_required' })
+    expect(f.port.refreshFullSync).not.toHaveBeenCalled()
+    // Failed old preview invalidates all private read evidence; pull and select again.
+    await f.managed.hydrate(); await f.managed.pullComplete()
+    const selected = await f.managed.previewRefresh('fullmanaged-refresh-conflict', second.request!.resolutions)
+    const state = await f.managed.commitRefresh(selected.request!, true)
+    expect(state.local.snapshot.entries[0].values.shares).toBe(7)
+    expect(state.local.portfolio!.manual[0].values.value).toBe(20)
+    expect(planOwnerPortfolioCloudIntent(state.fullSync.base, state.local.snapshot, state.local.portfolio).operations).toHaveLength(1)
+    expect(f.transport.write).not.toHaveBeenCalled()
+  })
+  it('owns refresh resolutions and the whole sealed request before the first asynchronous boundary', async () => {
+    const f = await fixture(); f.managed.setCloudConsent(true); await f.managed.hydrate()
+    f.setServer([fund(3, 12), manual(4, 20)]); await f.managed.pullComplete()
+    const choices = [{ key: KEY, field: 'shares' as const, choice: 'cloud' as 'local' | 'cloud' },
+      { key: ASSET, field: 'value' as const, choice: 'local' as 'local' | 'cloud' }], work = f.managed.previewRefresh('fullmanaged-owned-refresh', choices)
+    choices[0].choice = 'local'; choices[1].choice = 'cloud'
+    const plan = await work, supplied = copy(plan.request!), commit = f.managed.commitRefresh(supplied, true)
+    Object.assign(supplied, { id: 'tampered-after-invocation', hash: 'e'.repeat(64) })
+    Object.assign(supplied.resolutions[0], { choice: 'local' })
+    const state = await commit
+    expect(state.local.snapshot.entries[0].values.shares).toBe(12); expect(state.local.portfolio!.manual[0].values.value).toBe(8)
+    expect(state.fullSync.recentReceipt!.id).toBe('fullmanaged-owned-refresh')
+  })
+  it.each(['choice', 'request'] as const)('rejects %s getters without executing them or mutating the workspace', async fault => {
+    const f = await refreshReady(), getter = vi.fn(), before = await f.image()
+    if (fault === 'choice') {
+      const bad = [Object.defineProperty({ key: KEY, field: 'shares', choice: 'local' }, 'choice', { enumerable: true, get: getter })]
+      await expect(f.managed.previewRefresh('fullmanaged-refresh-getter', bad as Parameters<typeof f.managed.previewRefresh>[1])).rejects.toBeDefined()
+    } else {
+      const plan = await f.managed.previewRefresh('fullmanaged-refresh-getter')
+      const bad = Object.defineProperty({ ...plan.request! }, 'expected', { enumerable: true, get: getter })
+      await expect(f.managed.commitRefresh(bad, true)).rejects.toBeDefined()
+    }
+    expect(getter).not.toHaveBeenCalled(); expect(await f.image()).toEqual(before)
+    expect(f.port.refreshFullSync).not.toHaveBeenCalled(); expect(f.transport.write).not.toHaveBeenCalled()
+  })
+  it.each(['prepared', 'confirmed', 'unknown'] as const)('cannot refresh through a real %s original packet', async mode => {
+    const f = await prepared()
+    if (mode === 'unknown') f.transport.write.mockRejectedValueOnce(new Error('synthetic unknown write'))
+    if (mode !== 'prepared') await f.managed.sendOnce()
+    await f.managed.pullComplete(); const before = await f.image()
+    await expect(f.managed.previewRefresh('fullmanaged-refresh-pending')).rejects.toMatchObject({ code: 'managed_pending' })
+    expect(await f.image()).toEqual(before); expect(f.port.refreshFullSync).not.toHaveBeenCalled()
+    expect(f.transport.write).toHaveBeenCalledTimes(mode === 'prepared' ? 0 : 1)
+  })
+  it.each(['lost-response', 'lost-hydrate'] as const)('retains the original refresh identifier after %s and releases only by manual full receipt', async fault => {
+    const f = await refreshReady(), plan = await f.managed.previewRefresh('fullmanaged-refresh-lost'), actual = f.port.refreshFullSync.getMockImplementation()!
+    f.port.refreshFullSync.mockImplementationOnce(async (...args) => {
+      const state = await actual(...args)
+      if (fault === 'lost-response') throw new OwnerWorkspaceError('workspace_unavailable')
+      f.port.readFullSyncState.mockRejectedValueOnce(new Error('synthetic post-refresh read lost')); return state
+    })
+    await expect(f.managed.commitRefresh(plan.request!, true)).rejects.toMatchObject({ code: 'managed_unavailable' })
+    expect((await f.image()).fullSync.base!.pulledRevision).toBe(4)
+    expect(f.managed.status()).toMatchObject({ state: 'local_unknown', uncertainLocal: {
+      operation: 'refresh', id: plan.request!.id, hash: plan.request!.hash } })
+    await expect(f.managed.commitRefresh(plan.request!, true)).rejects.toMatchObject({ code: 'managed_local_unknown' })
+    expect((await f.managed.reconcileLocal(plan.request!.id, plan.request!.hash)).state).toBe('matched')
+    expect(f.managed.status()).toMatchObject({ state: 'idle', uncertainLocal: null, completeReady: false, resultReady: false })
+    expect(f.port.refreshFullSync).toHaveBeenCalledOnce(); expect(f.transport.write).not.toHaveBeenCalled(); expect(f.transport.receipt).not.toHaveBeenCalled()
+  })
+  it('rejects publication of an older committed refresh when another handle writes before the real post-hydration read', async () => {
+    const f = await refreshReady(), plan = await f.managed.previewRefresh('fullmanaged-refresh-publication'), handle = await other(f), actual = f.port.refreshFullSync.getMockImplementation()!
+    f.port.refreshFullSync.mockImplementationOnce(async (...args) => {
+      const state = await actual(...args)
+      await handle.editPortfolio(await buildOwnerWorkspaceEditPortfolioRequest(TARGET, { id: 'fullmanaged-newer-than-refresh', expected: state.local,
+        command: { type: 'save_manual', key: ASSET, updated_at: '2026-10-26T00:00:00Z',
+          values: { name: '合成现金', cls: '现金', value: 99, note: '较新编辑' } } }), f.guard)
+      return state
+    })
+    await expect(f.managed.commitRefresh(plan.request!, true)).rejects.toMatchObject({ code: 'managed_context_changed' })
+    expect((await f.image()).local.portfolio!.manual[0].values.value).toBe(99)
+    expect(f.managed.status()).toMatchObject({ state: 'local_unknown', uncertainLocal: { operation: 'refresh', id: plan.request!.id, hash: plan.request!.hash } })
+    // The one recent local receipt was legitimately superseded. Absence cannot
+    // retroactively classify or authorize replay of the older refresh.
+    expect(await f.managed.reconcileLocal(plan.request!.id, plan.request!.hash)).toEqual({ state: 'unknown' })
+    expect(f.managed.status().state).toBe('local_unknown'); expect(f.port.refreshFullSync).toHaveBeenCalledOnce()
+    expect(f.transport.write).not.toHaveBeenCalled()
+  })
+  it.each(['request', 'choices'] as const)('charges %s ownership to the original total 12s refresh budget', async mode => {
+    const f = await refreshReady(), plan = await f.managed.previewRefresh('fullmanaged-refresh-budget'), before = await f.image(),
+      reads = f.port.readFullSyncState.mock.calls.length, encode = TextEncoder.prototype.encode
+    let now = 100, injected = false
+    vi.spyOn(globalThis.performance, 'now').mockImplementation(() => now)
+    const needle = mode === 'request' ? JSON.stringify(plan.request!.id) : '[]'
+    vi.spyOn(TextEncoder.prototype, 'encode').mockImplementation(function (this: TextEncoder, input) {
+      const result = encode.call(this, input)
+      if (!injected && input === needle) { injected = true; now = 12_100 }
+      return result
+    })
+    await expect(mode === 'request' ? f.managed.commitRefresh(plan.request!, true)
+      : f.managed.previewRefresh('fullmanaged-refresh-budget-choices', [])).rejects.toMatchObject({ code: 'managed_timeout' })
+    expect(injected).toBe(true); expect(f.port.readFullSyncState).toHaveBeenCalledTimes(reads)
+    expect(f.port.refreshFullSync).not.toHaveBeenCalled(); expect(f.transport.write).not.toHaveBeenCalled()
+    vi.restoreAllMocks(); expect(await f.image()).toEqual(before)
   })
 })
 

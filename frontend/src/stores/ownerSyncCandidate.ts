@@ -2,13 +2,14 @@
 // watchlist/Gist import, credential persistence or automatic network activity.
 import {
   buildOwnerSyncRequest, restoreOwnerSyncRequest, parseSyncWriteResponse,
-  parseSyncReceiptResponse, parseSyncChangesPage,
+  parseSyncReceiptResponse,
   type BuiltOwnerSyncRequest, type OwnerSyncRecord, type OwnerSyncCursor,
   type OwnerSyncRequestInput,
 } from '@/utils/ownerSyncContract'
 import type {
   OwnerSyncOutbox, OwnerSyncOutboxEntry, OwnerSyncOutboxSnapshot,
 } from '@/stores/ownerSyncOutbox'
+import { createOwnerSyncBoundedFold } from '@/utils/owner-sync-bounded-fold'
 
 export interface OwnerSyncCandidateTransport {
   readonly targetFingerprint: string
@@ -253,10 +254,10 @@ export function createOwnerSyncCandidate(options: {
   async function pull(forceComplete: boolean, captured: { epoch: number; generation: number }): Promise<void> {
     const currentGeneration = context().generation
     const sinceRevision = !forceComplete && baselineGeneration === currentGeneration ? lastCompletePulledRevision ?? 0 : 0
-    const candidate = sinceRevision === 0 ? new Map<string, OwnerSyncRecord>() : new Map(baseline)
+    const fold = createOwnerSyncBoundedFold(sinceRevision === 0 ? undefined
+      : { pulledRevision: sinceRevision, records: [...baseline.values()] })
     let upperRevision: number | undefined
     let cursor: OwnerSyncCursor | undefined
-    let count = 0
     try {
       await deadline(async signal => {
         for (let pages = 0; pages <= MAX_CHANGES; pages++) {
@@ -269,26 +270,27 @@ export function createOwnerSyncCandidate(options: {
           assertActive(captured)
           if (signal.aborted) throw new OwnerSyncCandidateError('sync_context_changed')
           if (response.status !== 200) throw new OwnerSyncCandidateError('sync_unavailable')
-          const page = parseSyncChangesPage(response.rawBody, parameters)
+          const folded = fold.accumulateOwnerSyncPage(response.rawBody, parameters), page = folded.page
           upperRevision = page.upper_revision
           // Even if a later page fails, this strictly parsed page has observed
           // a fixed head. Do not promote it to a complete baseline, or forget
           // its anti-rollback floor on an ordinary failed pull.
           latestObservedHead = Math.max(latestObservedHead ?? 0, page.upper_revision)
-          count += page.changes.length
-          if (count > MAX_CHANGES) throw new OwnerSyncCandidateError('sync_invalid_response')
-          for (const record of page.changes) candidate.set(record.key, record)
-          if (candidate.size > MAX_CHANGES) throw new OwnerSyncCandidateError('sync_invalid_response')
-          if (page.complete) return
+          if (folded.capacityIssue || folded.baselineIssue) throw new OwnerSyncCandidateError('sync_invalid_response')
+          if (page.complete) {
+            if (!folded.completedBaseline) throw new OwnerSyncCandidateError('sync_invalid_response')
+            return
+          }
           cursor = page.next_cursor!
         }
         throw new OwnerSyncCandidateError('sync_invalid_response')
       })
       assertActive(captured)
-      if (upperRevision === undefined || upperRevision < (latestObservedHead ?? 0)) {
+      const resolved = fold.getCompletedBaseline()
+      if (upperRevision === undefined || upperRevision < (latestObservedHead ?? 0) || resolved === null) {
         throw new OwnerSyncCandidateError('sync_invalid_response')
       }
-      baseline = candidate
+      baseline = new Map(resolved.records.map(record => [record.key, record]))
       baselineGeneration = captured.generation
       lastCompletePulledRevision = upperRevision!
       latestObservedHead = Math.max(latestObservedHead ?? 0, upperRevision!)

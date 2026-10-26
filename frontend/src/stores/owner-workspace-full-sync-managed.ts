@@ -10,8 +10,8 @@ import { ownerApiTarget } from '@/api/request'
 import { hasOwnerSession, ownerSession, ownerSessionGeneration, getOwnerSyncTargetFingerprint } from './ownerSession'
 import { canonicalOwnerLocal } from '@/utils/owner-workspace-backup'
 import { copyOwnerFullSyncInput } from '@/utils/owner-full-sync-input'
-import { parseSyncChangesPage, type OwnerSyncCursor, type OwnerSyncRecord } from '@/utils/ownerSyncContract'
-import { validateOwnerWorkspaceCloudBaseline } from '@/utils/owner-workspace-sync-baseline'
+import { parseSyncChangesPage, type OwnerSyncCursor } from '@/utils/ownerSyncContract'
+import { createOwnerSyncBoundedFold } from '@/utils/owner-sync-bounded-fold'
 import { previewOwnerPortfolioInitialMerge, type OwnerPortfolioInitialMergePreview,
   type OwnerPortfolioInitialMergeResolution } from '@/utils/owner-portfolio-merge'
 import { buildOwnerWorkspaceFullSyncLinkRequest, OwnerWorkspaceError } from './owner-workspace'
@@ -20,7 +20,8 @@ import type { OwnerWorkspace, OwnerWorkspaceFullSyncLinkRequest, OwnerWorkspaceF
   OwnerWorkspaceGuard, OwnerWorkspaceLocalState } from './owner-workspace-types'
 import type { createOwnerPortfolioWorkspaceSync } from './ownerPortfolioWorkspaceSync'
 import type { OwnerPortfolioAckResolution } from '@/utils/owner-portfolio-ack'
-import type { OwnerWorkspaceFullSyncPrepareRequest, OwnerWorkspaceFullSyncAckRequest } from './owner-workspace-types'
+import type { OwnerPortfolioRefreshResolution } from '@/utils/owner-portfolio-refresh'
+import type { OwnerWorkspaceFullSyncPrepareRequest, OwnerWorkspaceFullSyncAckRequest, OwnerWorkspaceFullSyncRefreshRequest } from './owner-workspace-types'
 
 type PacketManaged = ReturnType<typeof createOwnerPortfolioWorkspaceSync>
 type PacketMethods = Omit<PacketManaged, 'setCloudConsent' | 'notifySessionChanged' | 'close'>
@@ -41,7 +42,7 @@ export interface FullSyncManagedHost {
   readonly target: string
   readonly lifetime: AbortSignal
   readonly port: Pick<OwnerWorkspace, 'readFullSyncState' | 'linkFullSyncBase' | 'fullSyncReceipt'
-    | 'prepareFullSync' | 'cancelPreparedFullSync' | 'transitionFullSyncDelivery' | 'ackFullSync'>
+    | 'prepareFullSync' | 'cancelPreparedFullSync' | 'transitionFullSyncDelivery' | 'ackFullSync' | 'refreshFullSync'>
   prepare(signal: AbortSignal, allowUnknown: boolean): Promise<OwnerWorkspaceFullSyncState>
   capture(signal: AbortSignal, canonical: (input: unknown) => string): OwnerWorkspaceGuard
   assertActive(): void
@@ -60,7 +61,7 @@ export async function createManagedFullSyncOwner(host: FullSyncManagedHost) {
   let complete: OwnerSyncBaseline | null = null, expected: OwnerWorkspaceFullSyncState | null = null
   let request: OwnerWorkspaceFullSyncLinkRequest | null = null
   let observedHead = 0, linked = false
-  let publication: Readonly<{ operation: 'link' | 'prepare' | 'cancel' | 'ack'; id: string; hash: string }> | null = null
+  let publication: Readonly<{ operation: 'link' | 'prepare' | 'cancel' | 'ack' | 'refresh'; id: string; hash: string }> | null = null
   let packets: PacketManaged | null = null, packetsEnabled = false, packetView: OwnerWorkspaceFullSyncState | null = null
   let packetCleanups: Array<() => void> = []
   const sameTarget = () => { try { return ownerApiTarget() === targetUrl } catch { return false } }
@@ -133,7 +134,7 @@ export async function createManagedFullSyncOwner(host: FullSyncManagedHost) {
     const captured = host.capture(controller.signal, canonicalOwnerLocal)
     return { signal: controller.signal, assertActive() { check(controller.signal); if (!packetsEnabled) fail(); captured.assertActive() } }
   }
-  async function packetMutation(operation: 'prepare' | 'cancel' | 'ack', request: { id: string; hash: string },
+  async function packetMutation(operation: 'prepare' | 'cancel' | 'ack' | 'refresh', request: { id: string; hash: string },
     work: () => Promise<OwnerWorkspaceFullSyncState>) {
     const original = Object.freeze({ operation, id: request.id, hash: request.hash })
     publication = original; host.pending(original)
@@ -240,6 +241,16 @@ export async function createManagedFullSyncOwner(host: FullSyncManagedHost) {
       const owned = copyOwnerFullSyncInput(request) as OwnerWorkspaceFullSyncAckRequest
       return packetRun('commitAcknowledgement', [owned, confirmed], startedAt)
     },
+    previewRefresh: (id: string, resolutions: readonly OwnerPortfolioRefreshResolution[] = []) => {
+      const startedAt = performance.now()
+      const owned = copyOwnerFullSyncInput(resolutions) as readonly OwnerPortfolioRefreshResolution[]
+      return packetRun('previewRefresh', [id, owned], startedAt)
+    },
+    commitRefresh: (request: OwnerWorkspaceFullSyncRefreshRequest, confirmed: true) => {
+      const startedAt = performance.now()
+      const owned = copyOwnerFullSyncInput(request) as OwnerWorkspaceFullSyncRefreshRequest
+      return packetRun('commitRefresh', [owned, confirmed], startedAt)
+    },
     cancelPrepared: (id: string, confirmed: true) => packetRun('cancelPrepared', [id, confirmed]),
     reconcileLocal: (id: string, hash: string) => packetRun('reconcileLocal', [id, hash]), exportPending: () => packetRun('exportPending', []),
   })
@@ -253,8 +264,8 @@ export async function createManagedFullSyncOwner(host: FullSyncManagedHost) {
     pullComplete: () => run(async (signal, guard, state, ensure) => {
       clear()
       if (state.fullSync.base !== null || state.fullSync.pending !== null || state.local.outbox.entry !== null) fail()
-      const folded = new Map<string, OwnerSyncRecord>()
-      let upper: number | undefined, cursor: OwnerSyncCursor | undefined, rawCount = 0
+      const fold = createOwnerSyncBoundedFold()
+      let upper: number | undefined, cursor: OwnerSyncCursor | undefined
       for (let pages = 0; pages <= 100_000; pages++) {
         guard.assertActive()
         const parameters = { sinceRevision: 0, limit: 200,
@@ -262,20 +273,19 @@ export async function createManagedFullSyncOwner(host: FullSyncManagedHost) {
         const response = await transport.changes(parameters, signal)
         guard.assertActive()
         if (response.status !== 200) fail()
-        const page = parseSyncChangesPage(response.rawBody, parameters)
+        const folded = fold.accumulateOwnerSyncPage(response.rawBody, parameters), page = folded.page
         upper = page.upper_revision
         // Retained on later failures, never promoted from a partial page to C.
         observedHead = Math.max(observedHead, upper)
-        rawCount += page.changes.length
-        if (rawCount > 100_000) fail()
-        for (const record of page.changes) folded.set(record.key, record)
+        if (folded.capacityIssue || folded.baselineIssue) fail()
         if (page.complete) {
           if (upper < observedHead) fail()
-          const base = validateOwnerWorkspaceCloudBaseline({ pulledRevision: upper, records: [...folded.values()] })
+          const base = folded.completedBaseline
+          if (!base) fail()
           const current = await host.prepare(signal, false); guard.assertActive(); ensure()
           if (canonicalOwnerLocal(current) !== canonicalOwnerLocal(state)) fail()
           complete = base; expected = state
-          return Object.freeze({ revision: upper, records: folded.size })
+          return Object.freeze({ revision: upper, records: base.records.length })
         }
         cursor = page.next_cursor!
       }
@@ -360,6 +370,7 @@ export async function createManagedFullSyncOwner(host: FullSyncManagedHost) {
               prepareFullSync: (request, active) => packetMutation('prepare', request, () => host.port.prepareFullSync(request, active)),
               cancelPreparedFullSync: (request, active) => packetMutation('cancel', request, () => host.port.cancelPreparedFullSync(request, active)),
               ackFullSync: (request, active) => packetMutation('ack', request, () => host.port.ackFullSync(request, active)),
+              refreshFullSync: (request, active) => packetMutation('refresh', request, () => host.port.refreshFullSync(request, active)),
             }, transport: guardedTransport, session: () => ({ authenticated: signedIn(), generation: ownerSessionGeneration.value }), guard: packetGuard,
           })
         }

@@ -5,8 +5,8 @@ import type { OwnerSyncCandidateTransport, OwnerSyncBaseline } from './ownerSync
 import type { OwnerAnalysisLocalSource } from './watchlist'
 import type { OwnerAnalysisOutbox, OwnerAnalysisTaskSlot } from './owner-analysis-outbox'
 import { canonicalOwnerLocal } from '@/utils/owner-workspace-backup'
-import { validateOwnerWorkspaceCloudBaseline } from '@/utils/owner-workspace-sync-baseline'
-import { compareSyncKeys, parseSyncChangesPage, type OwnerSyncCursor, type OwnerSyncRecord } from '@/utils/ownerSyncContract'
+import { createOwnerSyncBoundedFold } from '@/utils/owner-sync-bounded-fold'
+import { compareSyncKeys, type OwnerSyncCursor, type OwnerSyncRecord } from '@/utils/ownerSyncContract'
 import { buildOwnerAnalysisRequest, restoreOwnerAnalysisRequest, parseOwnerAnalysisWriteResponse,
   parseOwnerAnalysisReceiptResponse, parseOwnerAnalysisEvidence,
   type BuiltOwnerAnalysisRequest, type OwnerAnalysisResult } from '@/utils/ownerAnalysisContract'
@@ -134,25 +134,22 @@ export function createOwnerAnalysisManager(options: {
     return state
   }
   async function complete(signal: AbortSignal, check: () => void, floor: number): Promise<OwnerSyncBaseline> {
-    let upper: number | undefined, cursor: OwnerSyncCursor | undefined, bytes = 0, count = 0
-    const records = new Map<string, OwnerSyncRecord>()
+    let upper: number | undefined, cursor: OwnerSyncCursor | undefined
+    const fold = createOwnerSyncBoundedFold()
     for (let index = 0; index < 501; index++) {
       const parameters = { sinceRevision: 0, limit: 200, ...(upper === undefined ? {} : { upperRevision: upper }),
         ...(cursor === undefined ? {} : { cursor }) }
       check(); const response = await options.sync.changes(parameters, signal); check()
-      bytes += new TextEncoder().encode(response.rawBody).byteLength
-      if (response.status !== 200 || bytes > 4 * 1024 * 1024) fail()
-      const page = parseSyncChangesPage(response.rawBody, parameters)
+      if (response.status !== 200) fail()
+      const folded = fold.accumulateOwnerSyncPage(response.rawBody, parameters), page = folded.page
       if (page.upper_revision < Math.max(floor, latestObservedHead)) fail()
       latestObservedHead = Math.max(latestObservedHead, page.upper_revision)
       upper = page.upper_revision
-      count += page.changes.length
-      if (count > 100_000) fail()
+      if (folded.capacityIssue || folded.baselineIssue) fail()
       // This endpoint is an ordered change log, not a current-record listing.
       // The strict page parser binds revision/key ordering and the fixed upper;
       // later legal revisions replace that key when reconstructing complete D.
-      for (const row of page.changes) records.set(row.key, row)
-      if (page.complete) return validateOwnerWorkspaceCloudBaseline({ pulledRevision: upper, records: [...records.values()] })
+      if (page.complete) return folded.completedBaseline ?? fail()
       cursor = page.next_cursor ?? undefined
       if (!cursor) fail()
     }

@@ -9,6 +9,7 @@ import { useWatchlistStore, type OwnerFullSyncFacade } from '@/stores/watchlist'
 import { clearOwnerSession, loginOwnerSession } from '@/stores/ownerSession'
 import { openOwnerWorkspace, buildOwnerWorkspaceEditPortfolioRequest } from '@/stores/owner-workspace'
 import { getOwnerSyncTargetFingerprint } from '@/stores/ownerSession'
+import { canonicalOwnerLocal } from '@/utils/owner-workspace-backup'
 import type { OwnerSyncRecord } from '@/utils/ownerSyncContract'
 import OwnerFullSyncPanel from './OwnerFullSyncPanel.vue'
 import OwnerFullSyncPacketPanel from './OwnerFullSyncPacketPanel.vue'
@@ -55,7 +56,7 @@ function manual(revision = 2): OwnerSyncRecord {
 }
 function page(records: OwnerSyncRecord[], upper = 2, complete = true) {
   const last = records[records.length - 1]
-  return new Response(JSON.stringify({ upper_revision: upper, changes: records, complete,
+  return new Response(canonicalOwnerLocal({ upper_revision: upper, changes: records, complete,
     next_cursor: complete ? null : [last.record_revision, last.key] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
 }
 function http(changes: (url: URL, init: RequestInit) => Promise<Response> | Response = () => page([fund(), manual()])) {
@@ -120,7 +121,9 @@ function packetServer(mode: 'success' | 'unknown' | 'conflict' | 'rename-conflic
     return baseFetch(input, init)
   })
   vi.stubGlobal('fetch', fetcher)
-  return { cloud, get posts() { return posts }, get receipts() { return receipts }, get raw() { return raw } }
+  return { cloud, advance(...records: OwnerSyncRecord[]) {
+    for (const row of records) { cloud.set(row.key, row); head = Math.max(head, row.record_revision) }
+  }, get posts() { return posts }, get receipts() { return receipts }, get raw() { return raw } }
 }
 async function linkedForPackets(mode: 'success' | 'unknown' | 'conflict' | 'rename-conflict' = 'success') {
   await upgradeSix(); const server = packetServer(mode); await loginOwnerSession('synthetic-password')
@@ -134,6 +137,27 @@ async function openPackets() {
   const mounted = await mount(OwnerFullSyncPacketPanel)
   await check(mounted.root, 'full-packet-consent'); await click(mounted.root, 'full-packet-enable')
   return mounted
+}
+async function linkedForRefresh() {
+  await upgradeSix(); const server = packetServer(); await loginOwnerSession('synthetic-password')
+  const initial = await store.enableFullSync(true); await initial.pullComplete()
+  const first = await initial.previewInitial([])
+  const chosen = await initial.previewInitial(first.preview.conflicts.map(row => ({ key: row.key, field: row.field, choice: 'cloud' })))
+  await initial.commitInitial(chosen.token!, true)
+  return { server }
+}
+function advanceRefresh(server: ReturnType<typeof packetServer>) {
+  const oldFund = server.cloud.get(KEY)!, oldManual = server.cloud.get('asset:synthetic-cash')!
+  server.advance({ ...oldFund, record_revision: 3, field_revisions: { ...oldFund.field_revisions, name: 3 },
+    values: { ...oldFund.values, name: '刷新云基金名称' } },
+  { ...oldManual, record_revision: 4, field_revisions: { ...oldManual.field_revisions, note: 4 },
+    values: { ...oldManual.values, note: '刷新云手工备注' } })
+}
+async function openRefreshPreview() {
+  const linked = await linkedForRefresh(); advanceRefresh(linked.server)
+  const before = JSON.parse((await store.createPortfolioRecoveryBackup()).raw).local
+  const mounted = await openPackets(); await click(mounted.root, 'full-refresh-pull'); await click(mounted.root, 'full-refresh-preview')
+  return { ...linked, ...mounted, before }
 }
 beforeEach(async () => {
   clearOwnerSession()
@@ -579,5 +603,223 @@ describe('real complete fund/manual packet, single delivery and strict ACK UI', 
     await check(root, 'full-packet-consent'); await click(root, 'full-packet-enable')
     expect(all(root).some(row => row.props['data-action'] === 'full-packet-send')).toBe(false)
     await click(root, 'full-packet-receipt'); expect(server.posts).toBe(1)
+  })
+})
+
+describe('real complete B/L/D refresh facade and SFC without a packet or POST', () => {
+  it('pulls and previews a real complete D, requires independent local confirmation and publishes fund/manual together', async () => {
+    const { server, root, before } = await openRefreshPreview()
+    expect(output(root)).toContain('刷新云基金名称'); expect(output(root)).toContain('刷新云手工备注')
+    expect(output(root)).toContain('刷新后剩余待上传意图（0）')
+    expect(find(root, 'data-action', 'full-refresh-commit').props.disabled).toBe(true)
+    expect(server.posts).toBe(0); expect(server.receipts).toBe(0)
+    await check(root, 'full-refresh-confirm'); await click(root, 'full-refresh-commit')
+    const after = JSON.parse((await store.createPortfolioRecoveryBackup()).raw).local
+    expect(after.fullSync.base.pulledRevision).toBe(4); expect(after.fullSync.recentReceipt.operation).toBe('refresh')
+    expect(after.snapshot.entries[0]).toMatchObject({ values: { name: '刷新云基金名称', shares: 0, cost: null, target_weight: 0 }, local_pending: true })
+    expect(store.portfolioState!.manual.find(row => row.key === 'asset:synthetic-cash')!.values.note).toBe('刷新云手工备注')
+    expect(after.fullSync.pending).toBeNull(); expect(after.outbox.entry).toBeNull()
+    expect(after.snapshot.localVersion).toBe(before.snapshot.localVersion + 1)
+    expect(after.outbox.version).toBe(before.outbox.version + 1); expect(after.fullSync.epoch).toBe(before.fullSync.epoch + 1)
+    for (const key of ['sync', 'portfolioUpgrade', 'fullSyncUpgrade']) expect(after[key]).toEqual(before[key])
+    expect(after.portfolio.history).toEqual(before.portfolio.history); expect(after.portfolio.migration).toEqual(before.portfolio.migration)
+    expect(output(root)).toContain('没有 POST，没有清除待上传意图'); expect(server.posts).toBe(0); expect(server.receipts).toBe(0)
+  })
+  it('preserves actual unuploaded fund and manual intent, previews every remainder and can later build the real request from refreshed B', async () => {
+    const { server } = await linkedForRefresh()
+    await store.setHolding('510300', 7, null, '合成零份', '真实合成账户', 0)
+    await store.editPortfolio({ type: 'save_manual', key: 'asset:synthetic-cash', values: { name: '云端现金', cls: '现金', value: 8, note: null }, updated_at: '2026-10-25T00:00:00Z' })
+    advanceRefresh(server); const { root } = await openPackets()
+    await click(root, 'full-refresh-pull'); await click(root, 'full-refresh-preview')
+    expect(output(root)).toContain('刷新后剩余待上传意图（2）'); expect(output(root)).toContain('份额：7'); expect(output(root)).toContain('金额：8')
+    expect(output(root)).toContain('成本：null（未知）')
+    await check(root, 'full-refresh-confirm'); await click(root, 'full-refresh-commit')
+    expect(store.entries[0]).toMatchObject({ shares: 7, name: '刷新云基金名称', local_pending: true })
+    expect(store.portfolioState!.manual.find(row => row.key === 'asset:synthetic-cash')!.values).toMatchObject({ value: 8, note: '刷新云手工备注' })
+    await click(root, 'full-packet-prepare-preview'); expect(output(root)).toContain('2 项操作')
+    await check(root, 'full-packet-prepare-confirm'); await click(root, 'full-packet-prepare-commit')
+    const state = JSON.parse((await store.createPortfolioRecoveryBackup()).raw).local, packet = JSON.parse(state.fullSync.pending.rawBody)
+    expect(packet.expected_revision).toBe(4); expect(packet.operations).toEqual([
+      { key: KEY, kind: 'holding', deleted: false, changes: { shares: 7 }, base_values: { kind: 'holding', deleted: false, shares: 0 } },
+      { key: 'asset:synthetic-cash', kind: 'manual_asset', deleted: false, changes: { value: 8 }, base_values: { kind: 'manual_asset', deleted: false, value: 2 } },
+    ])
+    expect(server.posts).toBe(0); expect(server.receipts).toBe(0)
+  })
+  it('shows a true noop and performs no strict put, version advance or new receipt even with retained local intent', async () => {
+    const { server } = await linkedForPackets(), { root } = await openPackets()
+    await click(root, 'full-refresh-pull')
+    const before = (await store.createPortfolioRecoveryBackup()).raw, put = vi.spyOn(IDBObjectStore.prototype, 'put')
+    await click(root, 'full-refresh-preview')
+    expect(output(root)).toContain('无需应用：完整基线和本机后像均未改变'); expect(output(root)).toContain('刷新后剩余待上传意图（1）')
+    expect(find(root, 'data-action', 'full-refresh-commit').props.disabled).toBe(true)
+    expect(find(root, 'name', 'full-refresh-confirm').props.disabled).toBe(true); expect(put).not.toHaveBeenCalled()
+    vi.restoreAllMocks(); expect((await store.createPortfolioRecoveryBackup()).raw).toBe(before); expect(server.posts).toBe(0)
+  })
+  it('requires all same-field choices, invalidates an old UI request on a changed choice, and keeps an explicitly selected local remainder', async () => {
+    const { server } = await linkedForRefresh()
+    await store.editPortfolio({ type: 'save_manual', key: 'asset:synthetic-cash', values: { name: '云端现金', cls: '现金', value: 8, note: '本机备注' }, updated_at: '2026-10-25T00:00:00Z' })
+    const old = server.cloud.get('asset:synthetic-cash')!
+    server.advance({ ...old, record_revision: 4, field_revisions: { ...old.field_revisions, value: 4, note: 4 }, values: { ...old.values, value: 12, note: '另一设备备注' } })
+    const { root } = await openPackets(); await click(root, 'full-refresh-pull'); await click(root, 'full-refresh-preview')
+    expect(output(root)).toContain('同字段两侧变化'); expect(find(root, 'data-action', 'full-refresh-commit').props.disabled).toBe(true)
+    const radio = (field: string, choice: number) => all(root).filter(row => row.props.type === 'radio' && row.props.name === 'refresh-' + JSON.stringify(['asset:synthetic-cash', field]))[choice]
+    await event(radio('value', 1), 'onChange'); await event(radio('note', 1), 'onChange')
+    await click(root, 'full-refresh-preview'); await check(root, 'full-refresh-confirm')
+    expect(find(root, 'data-action', 'full-refresh-commit').props.disabled).toBe(false)
+    await event(radio('value', 0), 'onChange'); expect(find(root, 'data-action', 'full-refresh-commit').props.disabled).toBe(true)
+    await click(root, 'full-refresh-preview'); expect(output(root)).toContain('刷新后剩余待上传意图（1）')
+    await check(root, 'full-refresh-confirm'); await click(root, 'full-refresh-commit')
+    expect(store.portfolioState!.manual.find(row => row.key === 'asset:synthetic-cash')!.values).toMatchObject({ value: 8, note: '另一设备备注' })
+    expect(server.posts).toBe(0); expect(server.receipts).toBe(0)
+  })
+  it('presents rename as an atomic group and retains the cancelled unuploaded new key as a tombstone', async () => {
+    const { server } = await linkedForRefresh()
+    await store.saveHolding({ code: '510300', account: '刷新更名新账户', name: '本机新账户', position_kind: 'holding', shares: 0, cost: null, target_weight: 0 },
+      { id: KEY, snapshot: store.entrySnapshot(KEY)! }, { confirmed: true })
+    const old = server.cloud.get(KEY)!
+    server.advance({ ...old, record_revision: 3, field_revisions: { ...old.field_revisions, name: 3 }, values: { ...old.values, name: '云端保留旧账户' } })
+    const { root } = await openPackets(); await click(root, 'full-refresh-pull'); await click(root, 'full-refresh-preview')
+    expect(output(root)).toContain('账户更名须整组选择'); expect(output(root)).toContain('刷新更名新账户')
+    const radios = all(root).filter(row => row.props.type === 'radio')
+    for (let at = 1; at < radios.length; at += 2) await event(radios[at], 'onChange')
+    await click(root, 'full-refresh-preview'); await check(root, 'full-refresh-confirm'); await click(root, 'full-refresh-commit')
+    const after = JSON.parse((await store.createPortfolioRecoveryBackup()).raw).local
+    expect(after.snapshot.entries.find((row: { key: string }) => row.key === KEY)).toMatchObject({ deleted: false, values: { name: '云端保留旧账户' } })
+    expect(after.snapshot.entries.find((row: { key: string }) => row.key === '510300::刷新更名新账户')).toMatchObject({ deleted: true, local_pending: true })
+    expect(server.posts).toBe(0)
+  })
+  it.each(['prepared', 'unknown', 'confirmed', 'conflict'] as const)('has no refresh UI and rejects the real facade refresh while %s is pending', async state => {
+    const { server } = await linkedForPackets(state === 'unknown' ? 'unknown' : state === 'conflict' ? 'conflict' : 'success')
+    const packets = await store.enableFullSyncPackets(true), request = await packets.previewPreparation('refresh-forbid-' + state)
+    await packets.commitPreparation(request, true); if (state !== 'prepared') await packets.sendOnce()
+    const { root } = await openPackets(), before = (await store.createPortfolioRecoveryBackup()).raw
+    expect(all(root).some(row => row.props['data-action'] === 'full-refresh-pull')).toBe(false)
+    await expect(packets.previewRefresh('refresh-not-permitted')).rejects.toBeInstanceOf(Error)
+    expect((await store.createPortfolioRecoveryBackup()).raw).toBe(before); expect(server.posts).toBe(state === 'prepared' ? 0 : 1)
+  })
+  it.each(['previewRefresh', 'commitRefresh'] as const)('counts the synchronous %s copy in the original12s before any locator read/write or cloud request', async operation => {
+    const { server } = await linkedForRefresh(); advanceRefresh(server)
+    await store.enableFullSync(true); const packets = await store.enableFullSyncPackets(true); await packets.pullComplete()
+    const ready = await packets.previewRefresh('refresh-copy-budget-0001')
+    const before = (await store.createPortfolioRecoveryBackup()).raw, read = vi.spyOn(IDBObjectStore.prototype, 'get'), put = vi.spyOn(IDBObjectStore.prototype, 'put'), requests = fetcher.mock.calls.length
+    let clock = 1000; vi.spyOn(performance, 'now').mockImplementation(() => clock)
+    const actual = TextEncoder.prototype.encode
+    vi.spyOn(TextEncoder.prototype, 'encode').mockImplementation(function (this: TextEncoder, input?: string) { clock = 13_000; return actual.call(this, input) })
+    await expect(operation === 'previewRefresh' ? packets.previewRefresh('refresh-copy-budget-0001', []) : packets.commitRefresh(ready.request!, true)).rejects.toBeInstanceOf(Error)
+    expect(read).not.toHaveBeenCalled(); expect(put).not.toHaveBeenCalled(); expect(fetcher.mock.calls.length).toBe(requests); expect(server.posts).toBe(0)
+    expect(store.fullSyncLocalPending).toBeNull(); vi.restoreAllMocks(); expect((await store.createPortfolioRecoveryBackup()).raw).toBe(before)
+  })
+  it.each([NaN, Infinity, -1])('rejects a bad/backwards refresh copy clock %s before reading the authority or creating an uncertain operation', async invalidClock => {
+    const { server } = await linkedForRefresh(); advanceRefresh(server)
+    await store.enableFullSync(true); const packets = await store.enableFullSyncPackets(true); await packets.pullComplete()
+    const ready = await packets.previewRefresh('refresh-bad-clock-0001'), before = (await store.createPortfolioRecoveryBackup()).raw
+    const read = vi.spyOn(IDBObjectStore.prototype, 'get'), put = vi.spyOn(IDBObjectStore.prototype, 'put'), requests = fetcher.mock.calls.length
+    let clock = 1000; vi.spyOn(performance, 'now').mockImplementation(() => clock)
+    const actual = TextEncoder.prototype.encode
+    vi.spyOn(TextEncoder.prototype, 'encode').mockImplementation(function (this: TextEncoder, input?: string) { clock = invalidClock; return actual.call(this, input) })
+    await expect(packets.commitRefresh(ready.request!, true)).rejects.toBeInstanceOf(Error)
+    expect(read).not.toHaveBeenCalled(); expect(put).not.toHaveBeenCalled(); expect(store.fullSyncLocalPending).toBeNull()
+    expect(fetcher.mock.calls.length).toBe(requests); vi.restoreAllMocks(); expect((await store.createPortfolioRecoveryBackup()).raw).toBe(before)
+  })
+  it('uses only the refresh deadline remainder after synchronous ownership instead of granting another12s', async () => {
+    const { server } = await linkedForRefresh(); advanceRefresh(server)
+    await store.enableFullSync(true); const packets = await store.enableFullSyncPackets(true); await packets.pullComplete()
+    const ready = await packets.previewRefresh('refresh-remaining-clock-0001')
+    let clock = 1000; vi.spyOn(performance, 'now').mockImplementation(() => clock)
+    const actual = TextEncoder.prototype.encode
+    vi.spyOn(TextEncoder.prototype, 'encode').mockImplementation(function (this: TextEncoder, input?: string) { clock = 5000; return actual.call(this, input) })
+    const timer = vi.spyOn(globalThis, 'setTimeout'); await packets.commitRefresh(ready.request!, true)
+    expect(timer.mock.calls[0][1]).toBe(8000); expect(server.posts).toBe(0)
+  })
+  it('owns refresh resolutions and the sealed refresh request before the actual asynchronous locator preflight', async () => {
+    const { server } = await linkedForRefresh()
+    await store.editPortfolio({ type: 'save_manual', key: 'asset:synthetic-cash', values: { name: '云端现金', cls: '现金', value: 8, note: null }, updated_at: '2026-10-25T00:00:00Z' })
+    const old = server.cloud.get('asset:synthetic-cash')!
+    server.advance({ ...old, record_revision: 4, field_revisions: { ...old.field_revisions, value: 4 }, values: { ...old.values, value: 12 } })
+    await store.enableFullSync(true); const packets = await store.enableFullSyncPackets(true); await packets.pullComplete()
+    const first = await packets.previewRefresh('refresh-owned-0001'), choices = first.preview.conflicts.map(row => ({ key: row.key, field: row.field, choice: 'cloud' as 'local' | 'cloud' }))
+    const actual = IDBObjectStore.prototype.get, observed: string[] = []
+    vi.spyOn(IDBObjectStore.prototype, 'get').mockImplementation(function (this: IDBObjectStore, key) { observed.push(this.name); return actual.call(this, key) })
+    const previewing = packets.previewRefresh('refresh-owned-0001', choices); expect(observed).toContain('authority'); choices.forEach(row => { row.choice = 'local' })
+    const ready = await previewing; expect(ready.preview.conflicts.every(row => row.choice === 'cloud')).toBe(true)
+    const request = structuredClone(ready.request!), committing = packets.commitRefresh(request, true)
+    Object.assign(request, { id: 'refresh-mutated-after-await', resolutions: choices }); await committing; vi.restoreAllMocks()
+    const current = JSON.parse((await store.createPortfolioRecoveryBackup()).raw).local
+    expect(current.fullSync.recentReceipt).toMatchObject({ operation: 'refresh', id: 'refresh-owned-0001', hash: ready.request!.hash })
+    expect(store.portfolioState!.manual.find(row => row.key === 'asset:synthetic-cash')!.values.value).toBe(12); expect(server.posts).toBe(0)
+  })
+  it('rejects hidden/getter refresh inputs without invoking a getter or touching the real authority', async () => {
+    const { server } = await linkedForRefresh(); advanceRefresh(server)
+    await store.enableFullSync(true); const packets = await store.enableFullSyncPackets(true); await packets.pullComplete()
+    const ready = await packets.previewRefresh('refresh-no-getter-0001'), getter = vi.fn(), read = vi.spyOn(IDBObjectStore.prototype, 'get'), put = vi.spyOn(IDBObjectStore.prototype, 'put')
+    const input = Object.defineProperty({ ...ready.request }, 'resolutions', { enumerable: true, get: getter })
+    expect(() => packets.commitRefresh(input as NonNullable<typeof ready.request>, true)).toThrow()
+    expect(() => packets.previewRefresh('refresh-no-getter-0001', Object.defineProperty([], 'private', { get: getter }))).toThrow()
+    expect(getter).not.toHaveBeenCalled(); expect(read).not.toHaveBeenCalled(); expect(put).not.toHaveBeenCalled(); expect(server.posts).toBe(0)
+  })
+  it('retains the original refresh id/hash after actual strict commit response loss and resolves only fullSyncReceipt without replay', async () => {
+    const { server, root } = await openRefreshPreview(), actual = IDBObjectStore.prototype.put
+    let reached = false
+    vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (this: IDBObjectStore, value, key) {
+      const request = actual.call(this, value, key)
+      if (this.name === 'portfolio_sync_metadata' && key === 'current') this.transaction.addEventListener('complete', () => {
+        reached = true; Reflect.apply(forceCloseDatabase, undefined, [this.transaction.db])
+      })
+      return request
+    })
+    await check(root, 'full-refresh-confirm'); await click(root, 'full-refresh-commit')
+    expect(reached).toBe(true); vi.restoreAllMocks(); const original = store.fullSyncLocalPending; expect(original).not.toBeNull()
+    expect(store.hasPendingLocalWorkspaceEdit).toBe(true); expect(all(root).some(row => row.props['data-action'] === 'full-refresh-commit')).toBe(false)
+    const put = vi.spyOn(IDBObjectStore.prototype, 'put'); await click(root, 'full-packet-local-receipt'); expect(put).not.toHaveBeenCalled(); vi.restoreAllMocks()
+    const current = JSON.parse((await store.createPortfolioRecoveryBackup()).raw).local
+    expect(store.fullSyncLocalPending).toBeNull(); expect(current.fullSync.recentReceipt).toMatchObject({ operation: 'refresh', id: original!.id, hash: original!.hash })
+    expect(current.fullSync.base.pulledRevision).toBe(4); expect(server.posts).toBe(0); expect(server.receipts).toBe(0)
+  })
+  it('keeps the refresh tuple when logout occurs during Pinia publication, then only manually reconciles that original tuple', async () => {
+    const { server, root } = await openRefreshPreview(), stop = observe(() => store.portfolioState, () => clearOwnerSession(), { flush: 'sync' })
+    await check(root, 'full-refresh-confirm'); await click(root, 'full-refresh-commit'); stop()
+    const original = store.fullSyncLocalPending; expect(original).not.toBeNull(); expect(output(root)).not.toContain('刷新云手工备注')
+    await loginOwnerSession('synthetic-password'); await store.enableFullSync(true)
+    await check(root, 'full-packet-consent'); await click(root, 'full-packet-enable'); await click(root, 'full-packet-local-receipt')
+    expect(store.fullSyncLocalPending).toBeNull()
+    const after = JSON.parse((await store.createPortfolioRecoveryBackup()).raw).local
+    expect(after.fullSync.recentReceipt).toMatchObject({ operation: 'refresh', id: original!.id, hash: original!.hash }); expect(server.posts).toBe(0)
+  })
+  it('synchronously hides the complete private refresh preview on a real local writer and does not reuse the previous checkbox', async () => {
+    const { server, root } = await openRefreshPreview(); await check(root, 'full-refresh-confirm')
+    expect(output(root)).toContain('刷新云手工备注')
+    await store.editPortfolio({ type: 'save_manual', key: 'asset:synthetic-cash', values: { name: '新的本机修改', cls: '商品', value: 9, note: null }, updated_at: '2026-10-26T00:00:00Z' })
+    await nextTick()
+    expect(output(root)).not.toContain('刷新云手工备注'); expect(all(root).some(row => row.props['data-action'] === 'full-refresh-commit')).toBe(false)
+    expect(store.fullSyncLocalPending).toBeNull(); expect(server.posts).toBe(0)
+  })
+  it('rejects a refresh prepared before a real competing handle writes, without overwriting its complete current state or publishing it as the old preview', async () => {
+    const { server } = await linkedForRefresh(); advanceRefresh(server)
+    await store.enableFullSync(true); const packets = await store.enableFullSyncPackets(true); await packets.pullComplete()
+    const ready = await packets.previewRefresh('refresh-cross-tab-0001'), competing = await openOwnerWorkspace(indexedDB, await getOwnerSyncTargetFingerprint(), { existingOnly: true })
+    const controller = new AbortController(), guard = { signal: controller.signal, assertActive() { if (controller.signal.aborted) throw new Error('synthetic competing guard cancelled') } }
+    try {
+      const expected = await competing.readLocalState(guard)
+      await competing.editPortfolio(await buildOwnerWorkspaceEditPortfolioRequest(competing.targetFingerprint, { id: 'refresh-competing-local-writer', expected,
+        command: { type: 'save_manual', key: 'asset:synthetic-cash', values: { name: '另一标签较新完整状态', cls: '商品', value: 99, note: '' }, updated_at: '2026-10-26T00:00:00Z' } }), guard)
+      const before = await competing.readFullSyncState(guard), put = vi.spyOn(IDBObjectStore.prototype, 'put')
+      await expect(packets.commitRefresh(ready.request!, true)).rejects.toBeInstanceOf(Error)
+      expect(put).not.toHaveBeenCalled(); expect(await competing.readFullSyncState(guard)).toEqual(before)
+      expect(store.portfolioState!.manual.find(row => row.key === 'asset:synthetic-cash')!.values.value).toBe(2)
+      expect(store.fullSyncLocalPending).toBeNull(); expect(server.posts).toBe(0)
+    } finally { controller.abort(); competing.close() }
+  })
+  it.each(['logout', 'endpoint'] as const)('rejects a late complete D after %s and cannot publish a stale refresh preview or mutate the local base', async cause => {
+    const { server } = await linkedForRefresh(); advanceRefresh(server); const { root } = await openPackets(), before = (await store.createPortfolioRecoveryBackup()).raw
+    const actual = fetcher; let release!: () => void, started!: () => void
+    const waiting = new Promise<void>(resolve => { started = resolve }), gate = new Promise<void>(resolve => { release = resolve })
+    vi.stubGlobal('fetch', vi.fn(async (input: string, init: RequestInit) => {
+      const response = await actual(input, init); if (String(input).includes('/sync?')) { started(); await gate }; return response
+    }))
+    const pending = event(find(root, 'data-action', 'full-refresh-pull'), 'onClick'); await waiting
+    if (cause === 'logout') clearOwnerSession(); else vi.stubGlobal('location', { origin: 'https://other.synthetic.example' })
+    release(); await pending
+    expect(output(root)).not.toContain('刷新云手工备注'); expect(all(root).some(row => row.props['data-action'] === 'full-refresh-commit')).toBe(false)
+    expect((await store.createPortfolioRecoveryBackup()).raw).toBe(before); expect(store.fullSyncLocalPending).toBeNull(); expect(server.posts).toBe(0)
   })
 })

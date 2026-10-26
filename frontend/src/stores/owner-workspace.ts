@@ -11,7 +11,7 @@ import { normalizeOwnerSyncKey } from '@/utils/ownerSyncContract'
 import {
   validateOwnerWorkspaceLocalMetadata, emptyOwnerWorkspaceLocalMetadata, validateOwnerWorkspaceSourceArchive,
   decodeOwnerWorkspaceSourceArchive, buildOwnerLegacyWorkspaceBackup, buildOwnerWorkspaceBackup, validateOwnerWorkspaceBackup,
-  previewOwnerWorkspaceRestore, canonicalOwnerLocal, OWNER_WORKSPACE_MAX_ARCHIVES, OWNER_WORKSPACE_BACKUP_MAX_BYTES,
+  previewOwnerWorkspaceRestore, canonicalOwnerLocal, OWNER_WORKSPACE_MAX_ARCHIVES,
   type OwnerWorkspaceLocalMetadata,
 } from '@/utils/owner-workspace-backup'
 import type { OwnerWorkspaceSyncMetadata } from '@/utils/owner-workspace-sync-metadata'
@@ -28,6 +28,7 @@ import type {
   OwnerWorkspaceFullSyncState, OwnerWorkspaceFullSyncLinkRequest,
   OwnerWorkspaceFullSyncPrepareRequest, OwnerWorkspaceFullSyncCancelRequest, OwnerWorkspaceFullSyncDeliveryRequest,
   OwnerWorkspaceFullSyncAckInput, OwnerWorkspaceFullSyncAckRequest,
+  OwnerWorkspaceFullSyncRefreshInput,
   FullSyncWorkspaceHost, FullSyncPostimage, FullSyncLinkPostimage, FullSyncCommitMode,
 } from './owner-workspace-types'
 import type { OwnerPortfolioLocal } from '@/utils/ownerPortfolioLocal'
@@ -42,20 +43,18 @@ export { OwnerWorkspaceError } from './owner-workspace-shared'
 type SyncCodec = typeof import('@/utils/owner-workspace-sync-codec')
 type CloudCommands = typeof import('./owner-workspace-cloud')
 type FullSyncCommands = typeof import('./owner-workspace-full-sync-commands')
-type FullSyncCommandName = 'prepareFullSync' | 'cancelPreparedFullSync' | 'transitionFullSyncDelivery' | 'ackFullSync' | 'linkFullSyncBase'
-type PortfolioCodec = typeof import('@/utils/ownerPortfolioLocal') & typeof import('@/utils/owner-portfolio-upgrade-intent')
-type FullSyncCodec = typeof import('@/utils/owner-portfolio-sync') & typeof import('@/utils/owner-portfolio-sync-intent')
+type FullSyncCommandName = 'prepareFullSync' | 'cancelPreparedFullSync' | 'transitionFullSyncDelivery' | 'ackFullSync' | 'linkFullSyncBase' | 'refreshFullSync'
+type PortfolioCodec = typeof import('./owner-workspace-portfolio-codec')
+type FullSyncCodec = typeof import('./owner-workspace-full-sync-codec')
 let syncCodecPromise: Promise<SyncCodec> | null = null, cloudCommandsPromise: Promise<CloudCommands> | null = null
 let portfolioCodecPromise: Promise<PortfolioCodec> | null = null
 let fullSyncCodecPromise: Promise<FullSyncCodec> | null = null
 let fullSyncCommandsPromise: Promise<FullSyncCommands> | null = null
 function loadFullSyncCodec(): Promise<FullSyncCodec> {
-  return fullSyncCodecPromise ??= Promise.all([import('@/utils/owner-portfolio-sync'), import('@/utils/owner-portfolio-sync-intent')])
-    .then(([sync, intent]) => ({ ...sync, ...intent })).catch(() => fail('workspace_unavailable'))
+  return fullSyncCodecPromise ??= import('./owner-workspace-full-sync-codec').catch(() => fail('workspace_unavailable'))
 }
 function loadPortfolioCodec(): Promise<PortfolioCodec> {
-  return portfolioCodecPromise ??= Promise.all([import('@/utils/ownerPortfolioLocal'), import('@/utils/owner-portfolio-upgrade-intent')])
-    .then(([portfolio, intent]) => ({ ...portfolio, ...intent })).catch(() => fail('workspace_unavailable'))
+  return portfolioCodecPromise ??= import('./owner-workspace-portfolio-codec').catch(() => fail('workspace_unavailable'))
 }
 function loadSyncCodec(): Promise<SyncCodec> {
   return syncCodecPromise ??= import('@/utils/owner-workspace-sync-codec').catch(() => fail('workspace_unavailable'))
@@ -206,30 +205,16 @@ function localState(value: unknown, target: string, codec: SyncCodec | null = nu
   const sync = hasSync ? codec!.validateOwnerWorkspaceSyncMetadata(value.sync, target, { snapshot: copy, metadata,
     outbox: { version: slot.version, entry: hasFullSync ? null : slot.entry } }) : null
   if (hasPortfolio && (!sync || !portfolioCodec)) fail('workspace_invalid_input')
-  const portfolio = hasPortfolio ? portfolioCodec!.validateOwnerPortfolioLocal(value.portfolio) : null
-  const portfolioUpgrade = portfolio ? portfolioCodec!.validateOwnerPortfolioUpgradeIntent(value.portfolioUpgrade, target, portfolio.migration.sourceSha256) : null
-  if (portfolio && (slot.entry !== null && !hasFullSync || sync?.pending !== null || !metadata.adoption || receiptCount !== 0)) fail('workspace_invalid_input')
+  const { portfolio = null, portfolioUpgrade = null } = hasPortfolio ? portfolioCodec!.validatePortfolioState(value.portfolio,
+    value.portfolioUpgrade, target, slot, sync, metadata, receiptCount, hasFullSync) : {}
   if (hasFullSync && (!portfolio || !sync || !fullCodec)) fail('workspace_invalid_input')
-  const fullSync = hasFullSync ? fullCodec!.validateOwnerPortfolioSyncMetadata(value.fullSync, target,
-    { snapshot: copy, metadata, outbox: { version: slot.version, entry: slot.entry } }) : null
-  const fullSyncUpgrade = fullSync ? fullCodec!.validateOwnerPortfolioSyncUpgradeIntent(value.fullSyncUpgrade, target) : null
-  if (fullSync?.base && portfolio) {
-    const keys = new Set([...copy.entries.map(row => row.key), ...portfolio.manual.map(row => row.key)])
-    if (fullSync.base.records.some(row => !keys.has(row.key))) fail('workspace_invalid_input')
-  }
+  const { fullSync = null, fullSyncUpgrade = null } = hasFullSync ? fullCodec!.validateFullSyncImage(value.fullSync,
+    value.fullSyncUpgrade, target, { snapshot: copy, metadata, outbox: { version: slot.version, entry: slot.entry } }, portfolio!) : {}
   const result = Object.freeze({ snapshot: copy, outbox: Object.freeze({ version: slot.version, entry: slot.entry }),
     metadata, receiptCount, ...(sync ? { sync } : {}), ...(portfolio ? { portfolio, portfolioUpgrade: portfolioUpgrade! } : {}),
     ...(fullSync ? { fullSync, fullSyncUpgrade: fullSyncUpgrade! } : {}) })
-  assertPortfolioRecoveryCapacity(target, result)
+  portfolioCodec?.assertPortfolioRecoveryCapacity(target, result)
   return result
-}
-/** The same complete envelope is used by v5 export. Capacity is a whole-image
- * limit, including escaped original raw sources, not separate per-store caps. */
-function assertPortfolioRecoveryCapacity(target: string, state: OwnerWorkspaceLocalState): void {
-  if (!state.portfolio) return
-  const raw = canonicalOwnerLocal({ format: state.fullSync ? 'sinan-owner-workspace-recovery-3' : 'sinan-owner-workspace-recovery-2',
-    physicalVersion: state.fullSync ? 6 : 5, targetFingerprint: target, local: state })
-  if (raw.length > OWNER_WORKSPACE_BACKUP_MAX_BYTES || new TextEncoder().encode(raw).byteLength > OWNER_WORKSPACE_BACKUP_MAX_BYTES) fail('workspace_capacity')
 }
 /** Pure full-image validation for explicit recovery files, never an IDB open.
  * Pending packets retain their original bytes and must pass the same hashes as
@@ -367,10 +352,7 @@ function makeWorkspace(db: IDBDatabase, target: string, codec: SyncCodec | null 
     if (observedSync && (!image.sync || image.sync.epoch < observedSync.epoch
         || image.sync.epoch === observedSync.epoch && canonical(image.sync) !== canonical(observedSync))) fail('workspace_invalid_database')
     if (observedPortfolioUpgrade && canonical(image.portfolioUpgrade) !== canonical(observedPortfolioUpgrade)) fail('workspace_invalid_database')
-    if (observedFullSync && (!image.fullSync || image.fullSync.epoch < observedFullSync.epoch
-      || image.fullSync.epoch === observedFullSync.epoch && canonical(image.fullSync) !== canonical(observedFullSync))) fail('workspace_invalid_database')
-    if (observedFullSyncUpgrade && canonical(image.fullSyncUpgrade) !== canonical(observedFullSyncUpgrade)) fail('workspace_invalid_database')
-    if (db.version === 6 && observedSync && canonical(image.sync) !== canonical(observedSync)) fail('workspace_invalid_database')
+    fullCodec?.assertFullSyncObservation(image, observedFullSync, observedFullSyncUpgrade, observedSync)
     observedLocal = next; observedSlot = image.slot; observedMetadata = image.metadata; observedSync = image.sync
     observedPortfolio = image.portfolio ?? null
     observedPortfolioUpgrade = image.portfolioUpgrade ?? null
@@ -472,26 +454,17 @@ function makeWorkspace(db: IDBDatabase, target: string, codec: SyncCodec | null 
           let portfolio: OwnerPortfolioLocal | null = null
           let portfolioUpgrade: OwnerPortfolioUpgradeIntent | null = null
           if (db.version >= 5) {
-            const row = requests.portfolio.result
-            if (requests.portfolios.result !== 2 || !closed(row, ['schema', 'targetFingerprint', 'portfolio'])
-              || row.schema !== 'owner-workspace-portfolio-1' || row.targetFingerprint !== target) fail('workspace_invalid_database')
             try {
-              portfolio = portfolioCodec!.validateOwnerPortfolioLocal(row.portfolio)
-              portfolioUpgrade = portfolioCodec!.validateOwnerPortfolioUpgradeIntent(requests.portfolioUpgrade.result, target, portfolio.migration.sourceSha256)
-              if (slot.entry !== null && db.version !== 6 || sync?.pending !== null || !metadata.adoption || requests.receipts.result !== 0) fail('workspace_invalid_database')
+              ;({ portfolio, portfolioUpgrade } = portfolioCodec!.validateStoredPortfolio(requests.portfolio.result, requests.portfolios.result,
+                requests.portfolioUpgrade.result, target, slot, sync, metadata, requests.receipts.result, db.version === 6))
             } catch { fail('workspace_invalid_database') }
           }
           let fullSync: OwnerPortfolioSyncMetadata | null = null, fullSyncUpgrade: OwnerPortfolioSyncUpgradeIntent | null = null
           if (db.version === 6) {
             if (requests.fullSyncs.result !== 2) fail('workspace_invalid_database')
             try {
-              fullSync = fullCodec!.validateOwnerPortfolioSyncMetadata(requests.fullSync.result, target,
-                { snapshot: currentWorking.snapshot, metadata, outbox: { version: slot.version, entry: slot.entry } })
-              fullSyncUpgrade = fullCodec!.validateOwnerPortfolioSyncUpgradeIntent(requests.fullSyncUpgrade.result, target)
-              if (fullSync.base) {
-                const keys = new Set([...currentWorking.snapshot.entries.map(row => row.key), ...portfolio!.manual.map(row => row.key)])
-                if (fullSync.base.records.some(row => !keys.has(row.key))) fail('workspace_invalid_database')
-              }
+              ;({ fullSync, fullSyncUpgrade } = fullCodec!.validateFullSyncImage(requests.fullSync.result, requests.fullSyncUpgrade.result, target,
+                { snapshot: currentWorking.snapshot, metadata, outbox: { version: slot.version, entry: slot.entry } }, portfolio!))
             } catch { fail('workspace_invalid_database') }
           }
           let current: Image = { slot, working: currentWorking, sync,
@@ -500,7 +473,7 @@ function makeWorkspace(db: IDBDatabase, target: string, codec: SyncCodec | null 
             original: originalId && requests.original.result !== undefined ? storedReceipt(requests.original.result, target) : null,
             receiptCount: requests.receipts.result }
           observe(current)
-          assertPortfolioRecoveryCapacity(target, stateOf(current))
+          portfolioCodec?.assertPortfolioRecoveryCapacity(target, stateOf(current))
           if (current.metadata.recentEdit && current.metadata.recentEdit.outboxVersion > current.slot.version) fail('workspace_invalid_database')
           if (current.receipt && current.receipt.receipt.id !== id) fail('workspace_invalid_database')
           if (current.original && current.original.receipt.id !== originalId) fail('workspace_invalid_database')
@@ -603,7 +576,7 @@ function makeWorkspace(db: IDBDatabase, target: string, codec: SyncCodec | null 
     // budget, including escaped raw archives. Never discard older archives.
     await buildOwnerWorkspaceBackup({ snapshot: next, metadata })
     if (portfolio) await portfolioCodec!.verifyOwnerPortfolioMigration(portfolio)
-    assertPortfolioRecoveryCapacity(target, { ...stateOf(baseline), snapshot: next, metadata,
+    portfolioCodec?.assertPortfolioRecoveryCapacity(target, { ...stateOf(baseline), snapshot: next, metadata,
       outbox: { version: increment(baseline.slot.version), entry: null }, ...(portfolio ? { portfolio } : {}) })
     ensureOpen(); assertGuard(guard)
     const committed = await image('readwrite', guard, undefined, undefined, (current, stores) => {
@@ -813,19 +786,13 @@ function makeWorkspace(db: IDBDatabase, target: string, codec: SyncCodec | null 
     cancelPreparedFullSync(received, guard) { return fullCall('cancelPreparedFullSync', received, guard) },
     transitionFullSyncDelivery(received, guard) { return fullCall('transitionFullSyncDelivery', received, guard) },
     ackFullSync(received, guard) { return fullCall('ackFullSync', received, guard) },
+    refreshFullSync(received, guard) { return fullCall('refreshFullSync', received, guard) },
     linkFullSyncBase(received, guard) { return fullCall('linkFullSyncBase', received, guard) },
     fullSyncReceipt(id, hash, guard) { return bounded(guard, async () => {
       localId(target, id)
       if (typeof hash !== 'string' || !HASH.test(hash)) fail('workspace_invalid_input')
-      const current = fullSyncStateOf(await readImage(guard)), receipt = current.fullSync.recentReceipt
-      if (current.fullSync.pending?.requestId === id) {
-        if (current.fullSync.pending.preparationHash !== hash) fail('workspace_idempotency_conflict')
-        return Object.freeze({ state: 'matched' as const, value: current })
-      }
-      if (receipt?.id !== id) return Object.freeze({ state: 'unknown' as const })
-      if (receipt.hash !== hash) fail('workspace_idempotency_conflict')
-      return receipt.localVersion === current.local.snapshot.localVersion && receipt.outboxVersion === current.local.outbox.version
-        ? Object.freeze({ state: 'matched' as const, value: current }) : Object.freeze({ state: 'unknown' as const })
+      const current = fullSyncStateOf(await readImage(guard))
+      return fullCodec!.fullSyncReceiptOf(current, id, hash)
     }) },
     restoreLocal(input, guard) { return bounded(guard, async () => {
       if (!closed(input, ['id', 'hash', 'expected', 'backup'])) fail('workspace_invalid_input')
@@ -1248,6 +1215,14 @@ export function previewOwnerWorkspaceFullSyncAck(target: string, input: OwnerWor
 export function buildOwnerWorkspaceFullSyncAckRequest(target: string, input: OwnerWorkspaceFullSyncAckInput) {
   return timedOwnedCall(input, owned => import('./owner-workspace-full-sync-ack')
     .then(module => module.buildOwnerWorkspaceFullSyncAckRequest(target, owned as OwnerWorkspaceFullSyncAckInput)))
+}
+export function previewOwnerWorkspaceFullSyncRefresh(target: string, input: OwnerWorkspaceFullSyncRefreshInput) {
+  return timedOwnedCall(input, owned => import('./owner-workspace-full-sync-refresh')
+    .then(module => module.previewOwnerWorkspaceFullSyncRefresh(target, owned as OwnerWorkspaceFullSyncRefreshInput)))
+}
+export function buildOwnerWorkspaceFullSyncRefreshRequest(target: string, input: OwnerWorkspaceFullSyncRefreshInput) {
+  return timedOwnedCall(input, owned => import('./owner-workspace-full-sync-refresh')
+    .then(module => module.buildOwnerWorkspaceFullSyncRefreshRequest(target, owned as OwnerWorkspaceFullSyncRefreshInput)))
 }
 export function buildOwnerWorkspaceFullSyncUpgradeRequest(target: string, input: Omit<OwnerWorkspaceFullSyncUpgradeRequest, 'hash'>) {
   if (!closed(input, ['id', 'backupRaw', 'backupSha256'])) return Promise.reject(new OwnerWorkspaceError('workspace_invalid_input'))

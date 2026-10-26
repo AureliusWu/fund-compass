@@ -5,22 +5,25 @@
 import { createOwnerSyncCandidate, type OwnerSyncCandidateTransport, type OwnerSyncBaseline, type OwnerSyncBoundResult } from './ownerSyncCandidate'
 import type { OwnerSyncOutbox, OwnerSyncOutboxSnapshot } from './ownerSyncOutbox'
 import { buildOwnerWorkspaceFullSyncPrepareRequest, buildOwnerWorkspaceFullSyncCancelRequest,
-  buildOwnerWorkspaceFullSyncAckRequest, previewOwnerWorkspaceFullSyncAck, OwnerWorkspaceError } from './owner-workspace'
+  buildOwnerWorkspaceFullSyncAckRequest, previewOwnerWorkspaceFullSyncAck,
+  buildOwnerWorkspaceFullSyncRefreshRequest, previewOwnerWorkspaceFullSyncRefresh, OwnerWorkspaceError } from './owner-workspace'
 import type { OwnerWorkspace, OwnerWorkspaceGuard, OwnerWorkspaceFullSyncState, OwnerWorkspaceFullSyncPrepareRequest,
-  OwnerWorkspaceFullSyncDeliveryRequest, OwnerWorkspaceFullSyncAckRequest } from './owner-workspace-types'
+  OwnerWorkspaceFullSyncDeliveryRequest, OwnerWorkspaceFullSyncAckRequest, OwnerWorkspaceFullSyncRefreshRequest } from './owner-workspace-types'
 import { canonicalOwnerLocal } from '@/utils/owner-workspace-backup'
 import { copyOwnerFullSyncInput } from '@/utils/owner-full-sync-input'
 import { parseSyncReceiptResponse, parseSyncWriteResponse, parseSyncChangesPage } from '@/utils/ownerSyncContract'
 import type { OwnerWorkspaceAckRawMatched } from '@/utils/owner-workspace-ack'
 import type { OwnerPortfolioAckResolution } from '@/utils/owner-portfolio-ack'
+import type { OwnerPortfolioRefreshResolution } from '@/utils/owner-portfolio-refresh'
 import { ApiError, withRequestDeadline } from '@/api/request'
 
 type Session = Readonly<{ authenticated: boolean; generation: number }>
-type Operation = 'prepare' | 'cancel' | 'ack'
+type Operation = 'prepare' | 'cancel' | 'ack' | 'refresh'
 type WorkspacePort = Pick<OwnerWorkspace, 'targetFingerprint' | 'readFullSyncState'
   | 'prepareFullSync' | 'cancelPreparedFullSync' | 'fullSyncReceipt'> & {
   transitionFullSyncDelivery(request: OwnerWorkspaceFullSyncDeliveryRequest, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceFullSyncState>
   ackFullSync(request: OwnerWorkspaceFullSyncAckRequest, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceFullSyncState>
+  refreshFullSync(request: OwnerWorkspaceFullSyncRefreshRequest, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceFullSyncState>
 }
 type Binding = Readonly<{ requestId: string; requestHash: string; preparationHash: string;
   adoptionId: string; adoptionHash: string }>
@@ -107,7 +110,8 @@ export function createOwnerPortfolioWorkspaceSync(options: {
   let binding: Binding | null = null, complete: Complete | null = null
   let matched: OwnerWorkspaceAckRawMatched | null = null, observedFloor = 0
   let uncertain: Uncertain | null = null
-  let preview: { operation: 'prepare' | 'ack'; request: OwnerWorkspaceFullSyncPrepareRequest | OwnerWorkspaceFullSyncAckRequest } | null = null
+  let preview: { operation: 'prepare' | 'ack' | 'refresh';
+    request: OwnerWorkspaceFullSyncPrepareRequest | OwnerWorkspaceFullSyncAckRequest | OwnerWorkspaceFullSyncRefreshRequest } | null = null
   const readSession = (): Session => {
     try { return sessionShape(sessionGetter()) } catch { return fail('managed_context_changed') }
   }
@@ -378,7 +382,7 @@ export function createOwnerPortfolioWorkspaceSync(options: {
     matched = bound ? verifyMatched(op, image, bound, op.evidence) : null
     return image
   }
-  function requirePreview(operation: 'prepare' | 'ack', request: unknown, confirmed: true): void {
+  function requirePreview(operation: 'prepare' | 'ack' | 'refresh', request: unknown, confirmed: true): void {
     if (confirmed !== true) fail('managed_confirmation_required')
     try {
       if (!preview || preview.operation !== operation || !nativeData(request) || !same(preview.request, request)) fail('managed_preview_required')
@@ -444,6 +448,7 @@ export function createOwnerPortfolioWorkspaceSync(options: {
         const image = await mutate(op, 'prepare', request, () => workspace.prepareFullSync(request, guard(op)))
         binding = pendingBinding(image); matched = null; complete = null; preview = null
         await candidate.hydratePending(); assertCurrent(op)
+        if (!same(op.image, image)) fail('managed_context_changed')
         return image
       })
     },
@@ -493,7 +498,42 @@ export function createOwnerPortfolioWorkspaceSync(options: {
         // reset cannot replace it, CAS it away, rebase it or send another POST.
         op.allowEmpty = true
         await candidate.resetAfterManagedAcknowledgement(originalHash); assertCurrent(op)
+        if (!same(op.image, result)) fail('managed_context_changed')
         binding = null; matched = null; complete = null; preview = null
+        return result
+      })
+    },
+    previewRefresh(id: string, received: readonly OwnerPortfolioRefreshResolution[] = []) {
+      return run(async op => {
+        const resolutions = copyOwnerFullSyncInput(received) as readonly OwnerPortfolioRefreshResolution[]
+        const image = await read(op)
+        if (image.local.outbox.entry !== null || image.fullSync.pending !== null || !image.fullSync.base) fail('managed_pending')
+        const baseline = completeFor(op, image)
+        const input = { id, expected: image, completeBaseline: baseline,
+          minimumObservedRevision: observedFloor, resolutions }
+        const plan = await previewOwnerWorkspaceFullSyncRefresh(target, input)
+        assertCurrent(op); preview = null
+        if (plan.noop || !plan.nextSnapshot || !plan.nextPortfolio || !plan.baseD) return Object.freeze({ preview: plan, request: null })
+        const request = await buildOwnerWorkspaceFullSyncRefreshRequest(target, input)
+        assertCurrent(op); preview = { operation: 'refresh', request }
+        return Object.freeze({ preview: plan, request })
+      })
+    },
+    commitRefresh(received: OwnerWorkspaceFullSyncRefreshRequest, confirmed: true) {
+      return run(async op => {
+        const request = copyOwnerFullSyncInput(received) as OwnerWorkspaceFullSyncRefreshRequest
+        requirePreview('refresh', request, confirmed)
+        const image = await exact(op, request.expected)
+        if (image.local.outbox.entry !== null || image.fullSync.pending !== null
+          || !same(completeFor(op, image), request.completeBaseline)
+          || request.minimumObservedRevision !== observedFloor) fail('managed_context_changed')
+        const result = await mutate(op, 'refresh', request, () => workspace.refreshFullSync(request, guard(op)))
+        // This is not ACK/resetAfterManagedAcknowledgement: no remote packet
+        // or result exists. Only drop the old read view, then read the real slot.
+        candidate.notifySessionChanged(); binding = null; matched = null; complete = null; preview = null
+        op.allowEmpty = true
+        await candidate.hydratePending(); assertCurrent(op)
+        if (!same(op.image, result)) fail('managed_context_changed')
         return result
       })
     },
@@ -508,6 +548,7 @@ export function createOwnerPortfolioWorkspaceSync(options: {
         const result = await mutate(op, 'cancel', request, () => workspace.cancelPreparedFullSync(request, guard(op)))
         binding = null; matched = null; complete = null; preview = null
         await candidate.hydratePending(); assertCurrent(op)
+        if (!same(op.image, result)) fail('managed_context_changed')
         return result
       })
     },
@@ -523,6 +564,7 @@ export function createOwnerPortfolioWorkspaceSync(options: {
           binding = pendingBinding(result.value); op.image = result.value; op.mutation = uncertain
           observedFloor = Math.max(observedFloor, result.value.fullSync.base?.pulledRevision ?? 0)
           await candidate.hydratePending(); assertCurrent(op)
+          if (!same(op.image, result.value)) fail('managed_context_changed')
         }
         return result
       }, true)

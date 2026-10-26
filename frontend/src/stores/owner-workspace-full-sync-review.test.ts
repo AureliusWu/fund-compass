@@ -97,7 +97,7 @@ describe('whole-operation budget includes actual session and authority capture',
       read = vi.fn((guard: OwnerWorkspaceGuard) => current.v6.readFullSyncState(guard)),
       port = { targetFingerprint: TARGET, readFullSyncState: read, prepareFullSync: current.v6.prepareFullSync,
         cancelPreparedFullSync: current.v6.cancelPreparedFullSync, transitionFullSyncDelivery: current.v6.transitionFullSyncDelivery,
-        ackFullSync: current.v6.ackFullSync, fullSyncReceipt: current.v6.fullSyncReceipt },
+        ackFullSync: current.v6.ackFullSync, refreshFullSync: current.v6.refreshFullSync, fullSyncReceipt: current.v6.fullSyncReceipt },
       managed = createOwnerPortfolioWorkspaceSync({ workspace: port,
         transport: { targetFingerprint: TARGET, write, receipt: vi.fn(), changes: vi.fn() },
         session: () => ({ authenticated: true, generation: 1 }), guard: () => current.guard })

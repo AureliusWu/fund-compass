@@ -14,9 +14,7 @@ import { validateOwnerWorkspaceCloudBaseline } from './owner-workspace-sync-base
 import {
   OwnerWorkspaceSyncError, OwnerWorkspaceSyncMetadataError,
 } from './owner-workspace-sync-errors'
-import type {
-  OwnerWorkspaceSyncPending, OwnerWorkspaceSyncReceipt,
-} from './owner-workspace-sync-metadata'
+import type { OwnerWorkspaceSyncPending } from './owner-workspace-sync-metadata'
 import type { OwnerWorkspaceSyncIssueCode } from './owner-workspace-sync'
 import {
   OwnerPortfolioLocalError, validateOwnerPortfolioLocal, type OwnerPortfolioLocal,
@@ -26,6 +24,16 @@ import {
 } from './ownerSyncContract'
 
 export { OwnerWorkspaceSyncMetadataError as OwnerPortfolioSyncMetadataError } from './owner-workspace-sync-errors'
+/** Full-profile local receipts are independent of the historical v4 codec.
+ * Refresh is a local application of a complete remote image, never a POST ACK. */
+export interface OwnerPortfolioSyncReceipt {
+  readonly id: string
+  readonly hash: string
+  readonly operation: 'link' | 'cancel' | 'ack' | 'refresh'
+  readonly syncEpoch: number
+  readonly outboxVersion: number
+  readonly localVersion: number
+}
 export interface OwnerPortfolioSyncMetadata {
   readonly schema: 'owner-portfolio-sync-1'
   readonly profile: 'fund-manual-1'
@@ -33,7 +41,7 @@ export interface OwnerPortfolioSyncMetadata {
   readonly epoch: number
   readonly base: OwnerSyncBaseline | null
   readonly pending: OwnerWorkspaceSyncPending | null
-  readonly recentReceipt: OwnerWorkspaceSyncReceipt | null
+  readonly recentReceipt: OwnerPortfolioSyncReceipt | null
 }
 export interface OwnerPortfolioSyncMetadataContext {
   readonly snapshot: OwnerWorkspaceSnapshot
@@ -106,11 +114,11 @@ function pending(input: unknown, base: OwnerSyncBaseline | null): OwnerWorkspace
   if (result.baseRevision !== base.pulledRevision) fail()
   return result
 }
-function receipt(input: unknown, epoch: number): OwnerWorkspaceSyncReceipt | null {
+function receipt(input: unknown, epoch: number): OwnerPortfolioSyncReceipt | null {
   if (input === null) return null
   const row = closed(input, ['id', 'hash', 'operation', 'syncEpoch', 'outboxVersion', 'localVersion'])
-  if (row.operation !== 'link' && row.operation !== 'cancel' && row.operation !== 'ack') fail()
-  const result: OwnerWorkspaceSyncReceipt = { id: id(row.id), hash: hash(row.hash), operation: row.operation,
+  if (row.operation !== 'link' && row.operation !== 'cancel' && row.operation !== 'ack' && row.operation !== 'refresh') fail()
+  const result: OwnerPortfolioSyncReceipt = { id: id(row.id), hash: hash(row.hash), operation: row.operation,
     syncEpoch: counter(row.syncEpoch, 1), outboxVersion: counter(row.outboxVersion, 1), localVersion: counter(row.localVersion, 1) }
   if (result.syncEpoch > epoch) fail()
   return result

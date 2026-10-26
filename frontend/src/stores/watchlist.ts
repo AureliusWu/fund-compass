@@ -759,6 +759,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
               async cancelPreparedFullSync(request, guard) { await checked(guard); return workspace!.cancelPreparedFullSync(request, guard) },
               async transitionFullSyncDelivery(request, guard) { await checked(guard); return workspace!.transitionFullSyncDelivery(request, guard) },
               async ackFullSync(request, guard) { await checked(guard); return workspace!.ackFullSync(request, guard) },
+              async refreshFullSync(request, guard) { await checked(guard); return workspace!.refreshFullSync(request, guard) },
               async fullSyncReceipt(id, hash, guard) { await checked(guard); return workspace!.fullSyncReceipt(id, hash, guard) },
             },
             pending(value) { fullSyncLocalPending.value = value },

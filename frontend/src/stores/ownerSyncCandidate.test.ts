@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { IDBFactory } from 'fake-indexeddb'
 import { openOwnerSyncOutbox, type OwnerSyncOutbox } from './ownerSyncOutbox'
 import { createOwnerSyncCandidate, type OwnerSyncCandidateTransport } from './ownerSyncCandidate'
-import { buildOwnerSyncRequest, type BuiltOwnerSyncRequest, type OwnerSyncRecord } from '@/utils/ownerSyncContract'
+import { buildOwnerSyncRequest, parseSyncChangesPage, OWNER_SYNC_MAX_RESPONSE_BYTES,
+  type BuiltOwnerSyncRequest, type OwnerSyncRecord } from '@/utils/ownerSyncContract'
 
 const TARGET = 'a'.repeat(64)
 const DRAFT = { key: 'asset:synthetic-candidate', kind: 'manual_asset' as const, deleted: false,
@@ -16,6 +17,17 @@ function record(key = DRAFT.key, revision = 1): OwnerSyncRecord {
 }
 function page(changes: OwnerSyncRecord[] = [], upper = 0, cursor: readonly [number, string] | null = null) {
   return { status: 200, rawBody: JSON.stringify({ upper_revision: upper, changes, next_cursor: cursor, complete: cursor === null }) }
+}
+function paddedPage(response: ReturnType<typeof page>, bytes: number) {
+  const actual = new TextEncoder().encode(response.rawBody).byteLength
+  expect(actual).toBeLessThanOrEqual(bytes)
+  return { ...response, rawBody: response.rawBody + ' '.repeat(bytes - actual) }
+}
+function repeatedHistory(revision: number, first = 0, note: string | null = null) {
+  return Array.from({ length: 200 }, (_, index) => {
+    const row = record('asset:bounded-' + String(first + index).padStart(3, '0'), revision)
+    return { ...row, values: { ...row.values, note } }
+  })
 }
 function success(original: BuiltOwnerSyncRequest, head = 1) {
   return { status: 200, rawBody: JSON.stringify({ revision: head, records: original.request.operations
@@ -91,6 +103,80 @@ async function resolvedManaged() {
 }
 
 describe('managed candidate full pull, bound observations and memory-only reset', () => {
+  it.each(['incremental', 'full'] as const)('bounds all raw %s history bytes even when every page replaces the same 200 keys', async mode => {
+    const f = await trackedFixture(); f.candidate.setCloudConsent(true)
+    f.transport.changes.mockResolvedValueOnce(page([record('asset:original-seed', 1)], 1))
+    await f.candidate.pullBaseline(); f.transport.changes.mockClear()
+    const since = mode === 'incremental' ? 1 : 0
+    const batches = [2, 3, 10].map(revision => repeatedHistory(revision))
+    const responses = batches.map((rows, index) => paddedPage(page(rows, 10,
+      index === 2 ? null : [rows[199].record_revision, rows[199].key]), 1536 * 1024))
+    // Every raw page is legal and the final unique-key image is only 200 small
+    // rows. It is cumulative transfer, not invalid JSON or retained size, that
+    // must stop this real reader before it publishes a complete D.
+    responses.forEach((response, index) => expect(parseSyncChangesPage(response.rawBody, {
+      sinceRevision: since, limit: 200, ...(index === 0 ? {} : { upperRevision: 10,
+        cursor: [batches[index - 1][199].record_revision, batches[index - 1][199].key] as const }),
+    }).changes).toHaveLength(200))
+    for (const response of responses) f.transport.changes.mockResolvedValueOnce(response)
+    const pull = mode === 'incremental' ? () => f.candidate.pullBaseline() : () => f.candidate.pullCompleteBaseline()
+    await expect(pull()).rejects.toMatchObject({ code: 'sync_unavailable' })
+    expect(f.transport.changes).toHaveBeenCalledTimes(3)
+    expect(f.transport.changes.mock.calls[0][0]).toEqual({ sinceRevision: since, limit: 200 })
+    expect(f.candidate.status()).toMatchObject({ state: 'blocked', latestObservedHead: 10,
+      lastCompletePulledRevision: 1, baselineReady: false })
+    expect(f.candidate.getBaseline()).toBeNull()
+    await expect(f.candidate.prepare('bounded-no-partial-prepare', [DRAFT])).rejects.toMatchObject({ code: 'sync_pull_required' })
+    f.transport.changes.mockResolvedValueOnce(page([record(DRAFT.key, 9)], 9))
+    await expect(f.candidate.pullCompleteBaseline()).rejects.toMatchObject({ code: 'sync_unavailable' })
+    expect(f.candidate.status().latestObservedHead).toBe(10)
+    expect(f.candidate.getBaseline()).toBeNull()
+    expect(f.storage.compareAndSwap).not.toHaveBeenCalled()
+    expect(f.transport.write).not.toHaveBeenCalled(); expect(f.transport.receipt).not.toHaveBeenCalled()
+    // The rejected fold cannot leak any replacement into the original seed.
+    // A subsequent legal complete pull gets a new bounded fold, not a retry
+    // of the failed pages or an implicit write.
+    f.transport.changes.mockResolvedValueOnce(page([record(DRAFT.key, 10)], 10))
+    await f.candidate.pullCompleteBaseline()
+    expect(f.candidate.getBaseline()).toEqual({ pulledRevision: 10, records: [record(DRAFT.key, 10)] })
+  })
+
+  it('accepts exactly four MiB of legal history without dropping repeated-key revisions', async () => {
+    const f = await trackedFixture(); f.candidate.setCloudConsent(true)
+    const first = repeatedHistory(1), last = repeatedHistory(2)
+    f.transport.changes.mockResolvedValueOnce(paddedPage(page(first, 2, [1, first[199].key]), OWNER_SYNC_MAX_RESPONSE_BYTES))
+      .mockResolvedValueOnce(paddedPage(page(last, 2), OWNER_SYNC_MAX_RESPONSE_BYTES))
+    await f.candidate.pullCompleteBaseline()
+    expect(f.transport.changes).toHaveBeenCalledTimes(2)
+    expect(f.candidate.getBaseline()).toEqual({ pulledRevision: 2, records: last })
+    expect(f.candidate.status()).toMatchObject({ baselineReady: true, latestObservedHead: 2, lastCompletePulledRevision: 2 })
+    expect(f.storage.compareAndSwap).not.toHaveBeenCalled(); expect(f.transport.write).not.toHaveBeenCalled()
+  })
+
+  it.each(['retained-image', 'incomplete-head'] as const)('preserves a legal page upper after %s rejection without publishing its partial rows', async fault => {
+    const f = await trackedFixture(); f.candidate.setCloudConsent(true)
+    if (fault === 'retained-image') {
+      const first = repeatedHistory(1, 0, '中'.repeat(2000)), last = repeatedHistory(10, 200, '中'.repeat(2000))
+      const start = page(first, 10, [1, first[199].key]), end = page(last, 10)
+      expect(new TextEncoder().encode(start.rawBody + end.rawBody).byteLength).toBeLessThan(4 * 1024 * 1024)
+      expect(parseSyncChangesPage(start.rawBody, { sinceRevision: 0, limit: 200 }).complete).toBe(false)
+      expect(parseSyncChangesPage(end.rawBody, { sinceRevision: 0, limit: 200, upperRevision: 10,
+        cursor: [1, first[199].key] }).complete).toBe(true)
+      f.transport.changes.mockResolvedValueOnce(start).mockResolvedValueOnce(end)
+    } else {
+      const response = page([record(DRAFT.key, 1)], 10)
+      expect(parseSyncChangesPage(response.rawBody, { sinceRevision: 0, limit: 200 }).upper_revision).toBe(10)
+      f.transport.changes.mockResolvedValueOnce(response)
+    }
+    await expect(f.candidate.pullCompleteBaseline()).rejects.toMatchObject({ code: 'sync_unavailable' })
+    expect(f.candidate.status()).toMatchObject({ latestObservedHead: 10, baselineReady: false, lastCompletePulledRevision: null })
+    expect(f.candidate.getBaseline()).toBeNull()
+    f.transport.changes.mockResolvedValueOnce(page([record(DRAFT.key, 9)], 9))
+    await expect(f.candidate.pullCompleteBaseline()).rejects.toMatchObject({ code: 'sync_unavailable' })
+    expect(f.candidate.status().latestObservedHead).toBe(10)
+    expect(f.storage.compareAndSwap).not.toHaveBeenCalled(); expect(f.transport.write).not.toHaveBeenCalled()
+  })
+
   it.each(['write', 'receipt'] as const)('retains a matched %s head before a failed confirmed CAS', async source => {
     const f = await trackedPrepared()
     const original = await buildOwnerSyncRequest(JSON.parse((await f.outbox.read()).entry!.rawBody))

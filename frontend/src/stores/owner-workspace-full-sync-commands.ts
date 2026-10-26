@@ -8,6 +8,7 @@ import { canonical, closed, code, digest, fail, increment } from './owner-worksp
 import type { OwnerWorkspaceLocalMetadata } from '@/utils/owner-workspace-backup'
 import type { FullSyncWorkspaceHost, Image, OwnerWorkspaceFullSyncState, OwnerWorkspaceGuard,
   OwnerWorkspaceFullSyncLinkRequest, OwnerWorkspaceFullSyncDeliveryRequest, OwnerWorkspaceFullSyncAckRequest,
+  OwnerWorkspaceFullSyncRefreshRequest,
   FullSyncPostimage, FullSyncCommitMode } from './owner-workspace-types'
 
 /** Fixed synchronous transition rules only. Core calls this inside its strict
@@ -35,6 +36,12 @@ export function assertFullSyncTransition(current: Image, post: FullSyncPostimage
       || !post.snapshot || !post.metadata || !post.portfolio || post.snapshot.localVersion !== increment(current.working.snapshot.localVersion)
       || post.fullSync.pending !== null || post.fullSync.epoch !== increment(current.fullSync!.epoch)
       || post.fullSync.recentReceipt?.operation !== 'ack' || !post.fullSync.base || !current.fullSync?.base
+      || post.fullSync.base.pulledRevision < current.fullSync.base.pulledRevision) fail('workspace_conflict')
+  } else if (mode === 'refresh') {
+    if (before !== null || after !== null || current.fullSync?.pending !== null
+      || !post.snapshot || !post.metadata || !post.portfolio || post.snapshot.localVersion !== increment(current.working.snapshot.localVersion)
+      || post.fullSync.pending !== null || post.fullSync.epoch !== increment(current.fullSync!.epoch)
+      || post.fullSync.recentReceipt?.operation !== 'refresh' || !post.fullSync.base || !current.fullSync?.base
       || post.fullSync.base.pulledRevision < current.fullSync.base.pulledRevision) fail('workspace_conflict')
   } else fail('workspace_invalid_input')
 }
@@ -124,6 +131,33 @@ export async function ackFullSync(host: FullSyncWorkspaceHost, input: unknown, g
   { snapshot: next, metadata, outbox: { version, entry: null } })
   return host.commitFull(request.expected, baseline, { snapshot: next, metadata, portfolio: preview.nextPortfolio,
     fullSync, outbox: { version, entry: null } }, 'ack', guard)
+}
+
+export async function refreshFullSync(host: FullSyncWorkspaceHost, input: unknown, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceFullSyncState> {
+  const { rehydrateOwnerWorkspaceFullSyncRefreshRequest } = await import('./owner-workspace-full-sync-refresh')
+  const { request, preview } = await rehydrateOwnerWorkspaceFullSyncRefreshRequest(host.target, input as OwnerWorkspaceFullSyncRefreshRequest)
+  const baseline = await host.readImage(guard), current = host.toFullSyncState(baseline)
+  const original = current.fullSync.recentReceipt
+  if (original?.id === request.id) {
+    if (original.hash !== request.hash || original.operation !== 'refresh') fail('workspace_idempotency_conflict')
+    if (original.localVersion === current.local.snapshot.localVersion && original.outboxVersion === current.local.outbox.version) return current
+  }
+  expectedImage(host, baseline, request.expected)
+  if (baseline.slot.entry !== null || baseline.fullSync?.pending !== null || !baseline.fullSync.base) fail('workspace_pending')
+  if (!preview.nextSnapshot || !preview.nextPortfolio || !preview.baseD || preview.noop) fail('workspace_conflict')
+  const next = snapshot({ ...preview.nextSnapshot, localVersion: increment(baseline.working.snapshot.localVersion) })
+  const version = increment(baseline.slot.version), epoch = increment(baseline.fullSync.epoch)
+  const times = new Map(baseline.metadata.displayTimes.map(row => [row.key, row.updated_at]))
+  const metadata: OwnerWorkspaceLocalMetadata = { ...baseline.metadata,
+    displayTimes: next.entries.map(row => ({ key: row.key, updated_at: times.get(row.key) ?? null })),
+    recentEdit: { id: request.id, hash: request.hash, beforeLocalVersion: baseline.working.snapshot.localVersion,
+      localVersion: next.localVersion, outboxVersion: version } }
+  const fullSync = host.validateFullSyncMetadata({ ...baseline.fullSync, epoch, pending: null, base: preview.baseD,
+    recentReceipt: { id: request.id, hash: request.hash, operation: 'refresh', syncEpoch: epoch,
+      outboxVersion: version, localVersion: next.localVersion } },
+  { snapshot: next, metadata, outbox: { version, entry: null } })
+  return host.commitFull(request.expected, baseline, { snapshot: next, metadata, portfolio: preview.nextPortfolio,
+    fullSync, outbox: { version, entry: null } }, 'refresh', guard)
 }
 
 export async function linkFullSyncBase(host: FullSyncWorkspaceHost, input: unknown, guard: OwnerWorkspaceGuard): Promise<OwnerWorkspaceFullSyncState> {
