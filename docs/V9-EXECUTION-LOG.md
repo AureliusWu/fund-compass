@@ -1516,3 +1516,35 @@ manager只新增显式profile活动B选择，完整D仍从0严格固定upper分�
 最终固定构建输入和六次新制品见 `OWNER-FULL-ANALYSIS-PERFORMANCE-20261026.json`；相同519基线下workspace与precache仍WARN，历史workspace/Assets/Policy回退未关闭。相对8235候选JS+CSS仅增加623gzip字节（0.09%）、precache增加621、安装并集增加623，文件数不变；不把lazy或小增量当作resourceBudget、用户交互、真实浏览器性能通过。测量原始记录仍只在Temp、未独立封存，所有正式/云/设备资格false。
 
 I19本机完整分析出口已实际推进，但显式Policy写治理、机器消费者/推送统一来源与状态、真实浏览器/旧PWA/多设备仍未完；I18实际停写/新备份/Free配额/provider能力/迁移/跨重启耐久及独立远端恢复，I20自然交易日/周窗口，I21交互性能与历史资源债务继续单独验收。不改云配置/秘密/schema/重启/main/tag/Gist，不绕浏览器/OAuth或PR写403；应用保持8.0.0，本轮仍是feature候选而非v9发布。
+
+### 既有 Admin Policy 完整链与双次生效生命周期（2026-10-26）
+
+#### 权限与实际问题
+
+重新按原方案4.1/I19-04核边界：Owner只拥有read_private/write_holdings/run_personal_analysis；“关联Policy版本”不是新增Owner策略写scope。PortfolioPolicy护栏与模型registry active/history晋级是两类治理，不能混为一项。没有新增管理UI、向浏览器下发Admin Token、修改机器/Owner权限或实际云Policy。
+
+旧Admin POST用get_policy取得“当前生效”而非完整tip，A当前/B已排期后再排更晚C会错误supersede A；空Policy库显式发布还会经get_policy暗建system-default。真实本地HTTP/SQLite首轮 **2 failed/1 warning/2.23s**：A/B200、C500，以及空库A200但实际两行system-default/admin。不是线上事故结论，也不是静态字符串推断。
+
+实现commit=`51a39feaaf105825f8b5541564be453c72e8c242`，tree=`acf143e952089f70832fc1cc7f8ef28ef6ef0ea1`，基于原9654候选；本轮已观察origin/main仍5f8eea4，无数据合入或主分支推送，不据此改动本地main。独立只读tip含future、限两行检测歧义；原save_policy的BEGIN IMMEDIATE最终再次核scope/tip/supersedes/effective/created。已知陈旧/时序冲突继承原ValueError并映射HTTP409，普通非法模型422，不重基、不自动重发。显式空库Admin根不初始化默认；legacy bootstrap空链仍可建默认，已有Admin/default根或future不再另补默认，future-only Owner current=null/next=future。仅已知插入前链竞争可再读获胜tip；实际commit/close未知错误不吞、不重复写。新tip观察不是完整DDL/冗余投影/任意raw-SQL损坏认证。
+
+#### 真实生命周期与查询等价
+
+backend新增生命周期 **30 passed/1 warning/11.01s**：实际Admin A/B/C、匿名/错误/Worker/PrivateRead/Owner均不能写且无业务开库、0/null/UTC微秒、future-only、原历史不变、真实独立竞争先提交后原请求409、实际commit后丢返回传播且只写一次、legacy bootstrap兼容。只测原启动helper，不冒称完整main lifespan或重启/云耐久验收。
+
+另新增实际scope查询 **38 passed/2.75s**：15种布局各production/acceptance比较原NOT EXISTS与NULL过滤NOT IN的完整payload multiset，包含NULL根、foreign/unregistered child、cross-scope ancestor、fork、多tip、orphan/cycle/原raw污染行为。实际read_tip/save_policy拒多tip；raw reserved tip仍可能被查询观察到，由实际writer/严格Owner reader拒绝，orphan/cycle等保持原view可见/隐藏行为。只换固定共享查询，不改DDL/index/production view、scope绑定或原最终事务，不把结果等价说成任意损坏的来源认证。
+
+共享fixture由真实Admin HTTP→Owner sync→policy-state→analysis→原receipt捕获，独立新SQLite重复重建封存字节；同v6 D3/Evidence及原source SHA=`cf782bc3cdda80409927184ddafb0bd9d63463de6a6ed6facb77362d3aad8637`，三份真实A/B/C请求/hash/response与历史回执，不篡改旧fixture或伪造Policy ID。后端原+1h/+2h排期用例保留；前端专用三阶段+20s/+40s使两次next边界都处原60秒proof内。manager新增2项（两文件82PASS/10.35s）、SFC新增1项（总29PASS/7.20s）：两次等号撤旧资格，source_current=true的旧receipt仍只历史，须显式finish旧任务→保存/attempted→唯一POST新B/C，原完整D/local/context不变；真实三页共用资格/原定时器，未改前端生产guard或控件。
+
+中间fixture封存真实 **2 failed/24 passed**：外层JS parse/stringify将结构化-0.0归零，被独立重建/原v6 typed比较正确拦住；改为保留Python原外层JSON文本，不改原wire/sourceSHA/断言。SFC中间 **1 failed/28 passed** 是断言把“不会修改策略”错认写控件，改核明确只读文案与无写按钮，未改生产守卫。最初性能harness在同一合成限频桶第31次得到真实429后exit1，独立规模fixture重置本进程合成limiter后每组仍走原30门槛下10次实际鉴权；未提高生产限额或对真实服务换身份重试。以上RED均保留。
+
+#### 全量与性能证据
+
+直接Windows/Python3.14.4后端全量 **4158 passed/1211 warnings/624.54s**、pip check clean；告警仍为1209条is_reserved弃用、1条Starlette/httpx弃用、1条故意非法模型序列化warning。前端直接全量 **3443/120文件/37.34s**、type-check exit0；Worker直接check、**148/4文件/4.43s**、dry-run114.28KiB/gzip26.58通过。frontend/Worker再次官方include-dev audit均0，无依赖/锁变化，不以Wrangler dry-run/audit替代内嵌风险修复或已认证部署。
+
+本轮前端仅两test和独立fixture改变，生产文件未改、fixture只由测试导入。实际固定输入pin=`b053fd329467315de558e2aa309ca9d980944e8293b3a7d16fd92c1fa80d7452`，三次fresh直接build9.94/7.77/8.04s均PWA7/7；全部JS/CSS/静态JS闭包/PWA预缓存及support并集测量库存逐字节统计SHA=`0ffb63c0f6947cc140ea291f5af11830c873d90745042287f8ce714fd5fef1e9`，三份均与9654已冻结库存一致（JS+CSS676183、precache552017、install562187 gzip字节）。这里只核测量范围，不冒称真实浏览器warm/cold、交互或关闭历史workspace/Assets/Policy资源FAIL。原始数据仍在Temp，未独立封存。
+
+可复现工具 `tools/benchmark_admin_policy.py` / `ADMIN-POLICY-PERFORMANCE-20261026.json` 绑定确切9654旧repo/endpoint/tip函数源码与当前三源码前后SHA；同依赖、合成本地schema9 seed/独立backup副本、真实Admin鉴权/HTTP/Pydantic/SQLite，各侧每规模5样本。初阶段1000版旧HTTP2105.56→未优化1922.63ms；相关tip SQL876.53→候选非相关594.71ms。采用NULL过滤NOT IN后最终1000版HTTP中位 **1907.68→1097.62ms/-42.46%**，15/15非空成对完整response相同；legacy默认根+多future有效读取 **1075.18→1080.14ms/+0.46%**，20/20有效Policy相同、非空历史不变。空库Admin POST旧暗建两行/新一行语义不同，不做等价延迟结论；空库legacy两侧均建一默认根，**16.93→19.06ms/+12.60% WARN（+2.1334ms）**如实保留，不提高预算。原production view递归祖先仍昂贵；同机五样本/非TCP ASGI/共享新依赖/合成seed是方向性本地证据，非云API p95、OS网络沙箱或正式resourceBudget。工具自身没有外部请求调用路径，socket.create_connection拦截也不等于通用OS沙箱。初阶段原报告、最终全样本/EXPLAIN/8组语义/原429均保留。
+
+前候选9654的 [自然CI40291296060](https://github.com/AureliusWu/fund-compass/actions/runs/40291296060) 已另核：actual checkout=`d66141dd8fdf106fcc4bb91d4c5f5964f8935140`（5f8+9654父、tree=`7c3114c7ba0fd15dda4c367676a52d95e01a08c4`等于feature）；backend4090/2 warnings/217.95s/pip clean，frontend3440/120/37.16s/type/build6.23s/PWA7/7/audit0，Worker148/4/check/dryrun/audit0，resolve成功。runner仅Ubuntu26迁移notice；deploy/candidate_smoke/formal_smoke全skipped。这是原9654而非本轮新源码的CI，新精确候选须再验，不把本机PASS当部署。
+
+Admin旧POST本身仍无独立持久原请求槽/回执，真实网络或提交未知时不从相似历史或missing推断提交/回滚，不自动重发；真实云Policy仅受保护运维可执行。Owner三scope/机器权限、main Turso/schema8拒绝、Wrangler认证部署阻断均不改。本轮不改云秘密/套餐/schema/重启/main/tag/Gist，不绕浏览器/OAuth/PR写403，应用仍8.0.0。I19机器消费者/持久状态、复盘/实验私人入口、实际Chrome/PWA/多设备，I18迁移/耐久/独立恢复，I20自然窗口、I21历史资源及交互性能仍分别推进，不以此次Admin链修复勾整个I19或宣称v9完成。
