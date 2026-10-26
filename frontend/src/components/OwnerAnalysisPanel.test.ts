@@ -15,6 +15,7 @@ import { openOwnerWorkspace, upgradeOwnerWorkspaceSync, buildOwnerWorkspaceLinkC
 import { openOwnerAnalysisOutbox, type OwnerAnalysisOutbox } from '@/stores/owner-analysis-outbox'
 import { ownerAnalysisBackendFixture } from '@/utils/ownerAnalysisContract.fixtures'
 import { ownerAnalysisV6BackendFixture } from '@/utils/owner-analysis-v6-contract.fixtures'
+import { ownerAdminPolicyLifecycleBackendFixture } from '@/utils/owner-admin-policy-lifecycle.fixtures'
 import { canonicalOwnerLocal } from '@/utils/owner-workspace-backup'
 import { validateOwnerPortfolioCommand, type OwnerPortfolioManualValues } from '@/utils/ownerPortfolioLocal'
 import { ownerPolicyStateBackendWireFixture } from '@/utils/ownerPolicyState.fixtures'
@@ -244,6 +245,7 @@ beforeEach(async () => {
 afterEach(() => {
   apps.splice(0).forEach(unmount => unmount()); stores.splice(0).reverse().forEach(store => store.$dispose())
   handles.splice(0).forEach(handle => handle.close()); clearOwnerSession(); vi.restoreAllMocks(); vi.unstubAllGlobals()
+  vi.useRealTimers()
 })
 
 describe('actual Owner analysis panel and adopted workspace journey', () => {
@@ -552,5 +554,99 @@ describe('actual complete v6 source through the analysis SFC, local authority an
     await nextTick(); expect(analysis.results).toEqual([])
     expect(output(home)).not.toContain(decision.decision_id); expect(output(watch)).not.toContain('本轮分析未提供同来源历史比较')
     expect(all(detail).some(row => row.props.title === decision.decision_id)).toBe(false); expect(mocks.write).toHaveBeenCalledOnce()
+  })
+})
+
+describe('real Admin future Policy chain consumed read-only by the v6 analysis SFC', () => {
+  it('retires A/B at their exact next-effective timers across all three consumers, preserves historical receipts, then explicitly saves and sends new B/C packets', async () => {
+    const lifecycle = ownerAdminPolicyLifecycleBackendFixture(), [a, b, c] = lifecycle.stages
+    vi.useFakeTimers({ toFake: ['Date', 'performance', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
+    vi.setSystemTime(Date.parse(a.now))
+    const original = await completeSix(), loading = vi.spyOn(workspace, 'load')
+    expect(lifecycle.currentRecords).toEqual(original.currentRecords); expect(lifecycle.evidence).toBe(original.evidence)
+    let current = a
+    mocks.policyState.mockImplementation(async () => ({ status: 200, rawBody: current.policyStateRaw }))
+    mocks.evidence.mockResolvedValue({ status: 200, rawBody: lifecycle.evidence })
+    mocks.changes.mockResolvedValue({ status: 200, rawBody: lifecycle.currentChangesRaw })
+    mocks.write.mockImplementation(async packet => {
+      expect(packet.rawBody).toBe(current.rawBody); expect(packet.requestHash).toBe(current.requestHash)
+      expect((await slot()).task?.state).toBe('attempted')
+      return { status: 200, rawBody: current.responseRaw }
+    })
+    mocks.receipt.mockImplementation(async packet => {
+      const key = lifecycle.stages.find(stage => stage.requestHash === packet.requestHash)?.key
+      const rawBody = key === 'a' ? current.priorReceipts.a : key === 'b' ? current.priorReceipts.b : undefined
+      if (!rawBody) throw new Error('actual original receipt required')
+      return { status: 200, rawBody }
+    })
+    const home = await mountConsumer(HomePage), watch = await mountConsumer(WatchlistPage)
+    const detail = await mountConsumer(FundDetailV8Panel, { code: '510300', localHoldingPending: true })
+    await Promise.all(loading.mock.results.map(result => result.value)); await nextTick()
+    const root = await mount(), source = await workspace.captureOwnerAnalysisSource(new AbortController().signal)
+    await enabled(root)
+    const empty = await slot(), reads = mocks.changes.mock.calls.length
+    await click(root, '读取策略版本')
+    await vi.waitFor(() => expect(analysis.view?.policyState?.history).toHaveLength(3)); await nextTick()
+    expect(output(root)).toContain('完整版本 3 份')
+    expect(mocks.changes.mock.calls.length).toBe(reads); expect(mocks.evidence).not.toHaveBeenCalled()
+    expect(mocks.write).not.toHaveBeenCalled(); expect(await slot()).toEqual(empty)
+    const allIds = lifecycle.stages.map(stage => JSON.parse(stage.responseRaw).run.components[0].decision.decision_id as string)
+    const visibleRun = async (id: string | null) => {
+      await nextTick()
+      if (id) {
+        expect(output(home)).toContain(id); expect(output(watch)).toContain('本轮分析未提供同来源历史比较')
+        expect(all(detail).some(row => row.props.title === id)).toBe(true)
+      } else {
+        for (const known of allIds) {
+          expect(output(home)).not.toContain(known); expect(all(detail).some(row => row.props.title === known)).toBe(false)
+        }
+        expect(output(watch)).not.toContain('本轮分析未提供同来源历史比较')
+      }
+    }
+    let contextHash = ''
+    for (const stage of [a, b, c]) {
+      current = stage
+      await analysis.preview(stage.request.request_id); await nextTick()
+      expect(analysis.view?.preview?.packet).toMatchObject({ rawBody: stage.rawBody, requestHash: stage.requestHash })
+      const timeline = analysis.view!.policyState!
+      expect(timeline.history.map(row => row.policy_version)).toEqual([
+        lifecycle.policies.c.policy_version, lifecycle.policies.b.policy_version, lifecycle.policies.a.policy_version,
+      ])
+      expect(timeline.current?.policy_version).toBe(stage.request.policy_version)
+      await check(root, '确认完整来源、策略和证据'); await click(root, '保存原包')
+      await check(root, '确认只发送这个原包一次'); await click(root, '单次生成分析')
+      const matched = await slot(), decision = JSON.parse(stage.responseRaw).run.components[0].decision
+      expect(analysis.qualified).toBe(true); expect(analysis.resultFor('510300')?.decision.decision_id).toBe(decision.decision_id)
+      expect(analysis.view?.result?.run.source).toEqual(JSON.parse(a.responseRaw).run.source)
+      if (stage.key === 'a') contextHash = matched.task!.contextHash
+      expect(matched.task?.contextHash).toBe(contextHash)
+      await visibleRun(decision.decision_id)
+      expect((await workspace.captureOwnerAnalysisSource(new AbortController().signal)).preimage).toBe(source.preimage)
+      if (stage.key === 'c') break
+      const next = stage.key === 'a' ? b : c, deadline = Date.parse(timeline.next_effective_at!)
+      expect(deadline).toBe(Date.parse(next.now)); expect(deadline - Date.now()).toBeLessThan(60_000)
+      await vi.advanceTimersByTimeAsync(deadline - Date.now() - 1); await nextTick()
+      expect(analysis.qualified).toBe(true)
+      await vi.advanceTimersByTimeAsync(1); await nextTick()
+      expect(Date.now()).toBe(deadline); expect(analysis.qualified).toBe(false); expect(analysis.results).toEqual([])
+      expect(output(root)).not.toContain('最近一分钟内已核对')
+      expect(output(root)).toContain('本次核对已过期或已到下一版本生效时刻')
+      await visibleRun(null); expect(await slot()).toEqual(matched)
+      current = next
+      await click(root, '核对原回执与当前来源')
+      expect(analysis.view?.result?.run.request_hash).toBe(stage.requestHash)
+      expect(analysis.view?.result?.source_current).toBe(true); expect(analysis.qualified).toBe(false)
+      expect(analysis.view?.policyState?.current?.policy_version).toBe(next.request.policy_version)
+      expect(await slot()).toEqual(matched)
+      expect(all(root).some(row => row.tag === 'button' && output(row).trim() === '单次生成分析')).toBe(false)
+      await check(root, '确认结束已核对任务'); await click(root, '结束已核对任务')
+      expect((await slot()).task).toBeNull()
+    }
+    expect(mocks.write).toHaveBeenCalledTimes(3); expect(mocks.receipt).toHaveBeenCalledTimes(2)
+    expect(mocks.syncWrite).not.toHaveBeenCalled(); expect(mocks.policy).not.toHaveBeenCalled()
+    expect(analysis.view?.policyState?.next_effective_at).toBeNull()
+    expect(output(root)).toContain('不会修改策略')
+    expect(all(root).some(row => row.tag === 'button' && /修改策略|保存策略|发布策略/.test(output(row)))).toBe(false)
+    expect(analysis.qualified).toBe(true)
   })
 })

@@ -165,9 +165,9 @@ def policy_tips_query(scope: RepositoryScope):
     table = production_table(ROOTS["policy"][0]) if scope == PRODUCTION else ROOTS["policy"][0]
     return (f"SELECT p.payload_json FROM {table} p JOIN {RECORD_TABLE} ps "
             "ON ps.record_kind='policy' AND ps.record_id=p.policy_version "
-            "WHERE ps.scope_key=? AND NOT EXISTS (SELECT 1 FROM portfolio_policy_versions child "
+            "WHERE ps.scope_key=? AND p.policy_version NOT IN (SELECT child.supersedes FROM portfolio_policy_versions child "
             f"JOIN {RECORD_TABLE} cs ON cs.record_kind='policy' AND cs.record_id=child.policy_version "
-            "WHERE child.supersedes=p.policy_version AND cs.scope_key=?)", (scope.key, scope.key))
+            "WHERE child.supersedes IS NOT NULL AND cs.scope_key=?)", (scope.key, scope.key))
 
 
 def schema_errors(conn) -> list[str]:

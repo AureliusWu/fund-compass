@@ -79,9 +79,9 @@ async def lifespan(app: FastAPI):
     _health_summary_cache = None
     # Remote schema is provisioned explicitly; never repair it during startup.
     init_db()
-    # Persist the deterministic default policy during startup so every public
-    # GET remains a genuine read and protected decision writes can reference a
-    # real immutable policy row.
+    # Bootstrap the default only for an empty Policy chain. Explicit Admin
+    # roots/scheduled versions stay untouched; selecting an effective version
+    # remains a separate read, never an implicit fallback or promotion.
     v8_repo.ensure_default_policy()
     repo.ensure_universe_artifact()
     yield
@@ -855,16 +855,21 @@ def v8_post_portfolio_policy(
     request: V8PolicyRequest,
     _role: str = Depends(require_admin),
 ) -> dict:
-    current = v8_repo.get_policy()
-    payload = request.model_dump(mode="python")
-    effective_at = payload.pop("effective_at") or datetime.now(timezone.utc)
-    policy = build_portfolio_policy(
-        **payload,
-        effective_at=effective_at,
-        source="admin",
-        supersedes=current.policy_version,
-    )
-    return v8_repo.save_policy(policy).model_dump(mode="json")
+    try:
+        tip = v8_repo.read_policy_tip()
+        payload = request.model_dump(mode="python")
+        effective_at = payload.pop("effective_at") or datetime.now(timezone.utc)
+        policy = build_portfolio_policy(
+            **payload,
+            effective_at=effective_at,
+            source="admin",
+            supersedes=tip.policy_version if tip is not None else None,
+        )
+        return v8_repo.save_policy(policy).model_dump(mode="json")
+    except (v8_repo.PolicyChainConflictError, v8_repo.SnapshotConflictError) as error:
+        raise HTTPException(status_code=409, detail="策略版本链已变化或生效时间不满足追加条件，请重新核对。") from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail="策略配置不符合发布要求。") from error
 
 
 @app.get("/api/v2/portfolio/policy/history", status_code=403, responses=OWNER_READ_DENIED_RESPONSES)

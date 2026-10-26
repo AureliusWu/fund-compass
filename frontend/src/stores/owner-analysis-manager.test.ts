@@ -18,6 +18,7 @@ import { buildOwnerPortfolioRecoveryBackup } from '@/utils/owner-portfolio-recov
 import { compareSyncKeys, parseSyncChangesPage, OWNER_SYNC_MAX_RESPONSE_BYTES, type OwnerSyncRecord } from '@/utils/ownerSyncContract'
 import { ownerAnalysisBackendFixture } from '@/utils/ownerAnalysisContract.fixtures'
 import { ownerAnalysisV6BackendFixture } from '@/utils/owner-analysis-v6-contract.fixtures'
+import { ownerAdminPolicyLifecycleBackendFixture } from '@/utils/owner-admin-policy-lifecycle.fixtures'
 import type { BuiltOwnerAnalysisRequest } from '@/utils/ownerAnalysisContract'
 import type { OwnerSyncCandidateTransport } from './ownerSyncCandidate'
 
@@ -722,5 +723,92 @@ describe('explicit full-profile analysis source selection and task continuity', 
     expect(context.transport.policyState).toHaveBeenCalledTimes(policyReads)
     await expect(context.value.sendOnce(true)).rejects.toBeDefined()
     expect(context.transport.write).toHaveBeenCalledOnce()
+  })
+})
+
+describe('real Admin HTTP future Policy lifecycle with an unchanged full v6 source', () => {
+  it('expires A and B exactly at the next effective instant, retains original receipts as history, and requires explicit new B/C original packets', async () => {
+    const { context, backend, handle, guard } = await actualFullAnalysis(), lifecycle = ownerAdminPolicyLifecycleBackendFixture()
+    const [a, b, c] = lifecycle.stages
+    expect(lifecycle.stages.map(stage => stage.key)).toEqual(['a', 'b', 'c'])
+    expect(lifecycle.currentRecords).toEqual(backend.currentRecords); expect(lifecycle.evidence).toBe(backend.evidence)
+    let current = a
+    context.mutable.now = Date.parse(a.now)
+    context.transport.policyState.mockImplementation(async () => ({ status: 200, rawBody: current.policyStateRaw }))
+    context.transport.evidence.mockResolvedValue({ status: 200, rawBody: lifecycle.evidence })
+    context.sync.changes.mockResolvedValue({ status: 200, rawBody: lifecycle.currentChangesRaw })
+    context.transport.write.mockImplementation(async packet => {
+      expect(packet.rawBody).toBe(current.rawBody); expect(packet.requestHash).toBe(current.requestHash)
+      expect((await context.outbox.read(signal())).task?.state).toBe('attempted')
+      return { status: 200, rawBody: current.responseRaw }
+    })
+    context.transport.receipt.mockImplementation(async packet => {
+      const key = lifecycle.stages.find(stage => stage.requestHash === packet.requestHash)?.key
+      const rawBody = key === 'a' ? current.priorReceipts.a : key === 'b' ? current.priorReceipts.b : undefined
+      if (!rawBody) throw new Error('actual original stage receipt required')
+      expect(packet.rawBody).toBe(lifecycle.stages.find(stage => stage.key === key)!.rawBody)
+      return { status: 200, rawBody }
+    })
+    const sourceBefore = await handle.readFullSyncState(guard)
+    await context.value.hydrate(); const empty = await context.outbox.read(signal())
+    await context.value.reviewPolicy()
+    expect(context.value.view().policyState?.history.map(row => row.policy_version)).toEqual([
+      lifecycle.policies.c.policy_version, lifecycle.policies.b.policy_version, lifecycle.policies.a.policy_version,
+    ])
+    expect(context.value.view().policyState?.current?.policy_version).toBe(a.request.policy_version)
+    expect(context.source).not.toHaveBeenCalled(); expect(context.sync.changes).not.toHaveBeenCalled()
+    expect(context.transport.evidence).not.toHaveBeenCalled(); expect(context.transport.write).not.toHaveBeenCalled()
+    expect(await context.outbox.read(signal())).toEqual(empty)
+    let sourceSha = '', originalContext = ''
+    for (const stage of [a, b, c]) {
+      current = stage; context.mutable.now = Date.parse(stage.now)
+      await context.value.preview(stage.request.request_id)
+      expect(context.value.view().preview?.packet).toMatchObject({ rawBody: stage.rawBody, requestHash: stage.requestHash })
+      await context.value.prepare(true); await context.value.sendOnce(true)
+      const result = context.value.view().result!, original = await context.outbox.read(signal())
+      expect(result).toEqual(JSON.parse(stage.responseRaw)); expect(context.value.isQualified()).toBe(true)
+      expect(result.run.source).toEqual(JSON.parse(a.responseRaw).run.source)
+      expect(result.run.policy.policy_version).toBe(stage.request.policy_version)
+      if (stage.key === 'a') { sourceSha = result.run.source.sha256; originalContext = original.task!.contextHash }
+      expect(result.run.source.sha256).toBe(sourceSha); expect(original.task!.contextHash).toBe(originalContext)
+      expect(await handle.readFullSyncState(guard)).toEqual(sourceBefore)
+      if (stage.key === 'c') break
+      const next = stage.key === 'a' ? b : c, deadline = Date.parse(JSON.parse(stage.policyStateRaw).next_effective_at)
+      expect(deadline).toBe(Date.parse(next.now)); expect(deadline - Date.parse(stage.now)).toBeLessThan(60_000)
+      expect(context.value.view().qualificationUntil).toBe(deadline)
+      context.mutable.now = deadline - 1; expect(context.value.isQualified()).toBe(true)
+      context.mutable.now = deadline; expect(context.value.isQualified()).toBe(false)
+      expect(await context.outbox.read(signal())).toEqual(original)
+      await expect(context.value.preview('cannot-overwrite-matched-policy-run')).rejects.toBeDefined()
+      current = next
+      await context.value.reconcile()
+      expect(context.value.view().result?.source_current).toBe(true)
+      expect(context.value.view().result?.run.request_hash).toBe(stage.requestHash)
+      expect(context.value.view().result?.run.policy.policy_version).toBe(stage.request.policy_version)
+      expect(context.value.view().policyState?.current?.policy_version).toBe(next.request.policy_version)
+      expect(context.value.isQualified()).toBe(false)
+      expect(await context.outbox.read(signal())).toEqual(original)
+      await context.value.finishMatched(true)
+      expect((await context.outbox.read(signal())).task).toBeNull()
+    }
+    expect(context.transport.write).toHaveBeenCalledTimes(3); expect(context.transport.receipt).toHaveBeenCalledTimes(2)
+    expect(context.transport.policy).not.toHaveBeenCalled(); expect(context.sync.write).not.toHaveBeenCalled()
+    expect(context.value.view().policyState?.current?.policy_version).toBe(c.request.policy_version)
+    expect(context.value.view().policyState?.next_effective_at).toBeNull()
+  })
+
+  it('spends the original real A proof during Evidence work and rejects at B even though C is also scheduled', async () => {
+    const { context } = await actualFullAnalysis(), lifecycle = ownerAdminPolicyLifecycleBackendFixture(), [a, b] = lifecycle.stages
+    context.mutable.now = Date.parse(a.now)
+    context.transport.policyState.mockResolvedValue({ status: 200, rawBody: a.policyStateRaw })
+    let finish!: (value: { status: number; rawBody: string }) => void
+    context.transport.evidence.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const reading = context.value.preview(a.request.request_id), rejected = expect(reading).rejects.toBeDefined()
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+    context.mutable.now = Date.parse(b.now)
+    finish({ status: 200, rawBody: lifecycle.evidence }); await rejected
+    expect(context.value.view().preview).toBeNull(); expect(context.value.isQualified()).toBe(false)
+    expect(context.transport.policyState).toHaveBeenCalledOnce(); expect(context.transport.write).not.toHaveBeenCalled()
+    expect((await context.outbox.read(signal())).task).toBeNull()
   })
 })

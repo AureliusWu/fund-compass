@@ -49,6 +49,10 @@ class SnapshotConflictError(RuntimeError):
     """A deterministic identifier was reused for different immutable data."""
 
 
+class PolicyChainConflictError(ValueError):
+    """A valid Policy cannot append to the observed immutable chain."""
+
+
 @dataclass(frozen=True)
 class NotificationRecordResult:
     """Result of an append-only notification event write.
@@ -351,21 +355,21 @@ def save_policy(policy: PortfolioPolicy, *, scope=scopes.PRODUCTION) -> Portfoli
             if predecessor is not None:
                 _acceptance_guard(conn, "policy", policy, predecessor, scope=scope)
         sql, params = scopes.policy_tips_query(scope)
-        rows = conn.execute(sql, params).fetchall()
+        rows = conn.execute(sql + " LIMIT 2", params).fetchall()
         if not rows:
             if policy.supersedes is not None:
-                raise ValueError("the first policy cannot supersede another version")
+                raise PolicyChainConflictError("the first policy cannot supersede another version")
         else:
             if len(rows) != 1:
                 raise SnapshotConflictError("stored policy history contains multiple chain tips")
             tip = PortfolioPolicy.model_validate_json(rows[0]["payload_json"])
             _acceptance_guard(conn, "policy", policy, tip, scope=scope)
             if policy.supersedes != tip.policy_version:
-                raise ValueError("new policy must supersede the current chain tip")
+                raise PolicyChainConflictError("new policy must supersede the current chain tip")
             if policy.effective_at <= tip.effective_at:
-                raise ValueError("new policy effective_at must be after the superseded policy")
+                raise PolicyChainConflictError("new policy effective_at must be after the superseded policy")
             if policy.created_at < tip.created_at:
-                raise ValueError("new policy cannot be backfilled before its predecessor")
+                raise PolicyChainConflictError("new policy cannot be backfilled before its predecessor")
         conn.execute(*prepare_v8_insert(
             conn, "portfolio_policy_versions",
             (
@@ -380,8 +384,46 @@ def save_policy(policy: PortfolioPolicy, *, scope=scopes.PRODUCTION) -> Portfoli
     return policy
 
 
+def read_policy_tip(*, scope=scopes.PRODUCTION) -> PortfolioPolicy | None:
+    """Observe the unique complete-chain tip, including scheduled versions.
+
+    No initialization or write lock: save_policy rechecks this predecessor in
+    its actual immediate transaction and refuses a stale observation.
+    """
+    conn = db.get_conn()
+    try:
+        sql, params = scopes.policy_tips_query(scope)
+        rows = conn.execute(sql + " LIMIT 2", params).fetchall()
+        if len(rows) > 1:
+            raise SnapshotConflictError("stored policy history contains multiple chain tips")
+        if not rows:
+            return None
+        tip = PortfolioPolicy.model_validate_json(rows[0]["payload_json"])
+        _assert_id(tip.policy_version, stable_id("pol", _policy_identity(tip)), "policy")
+        scopes.assert_record_scope(conn, "policy", tip.policy_version, scope)
+        return tip
+    finally:
+        conn.close()
+
+
 def ensure_default_policy(created_at: datetime | None = None) -> PortfolioPolicy:
-    return save_policy(default_portfolio_policy(created_at))
+    """Legacy bootstrap for an empty chain, never a second Policy root.
+
+    An existing explicit Admin root or scheduled tip is returned unchanged;
+    callers still use read_policy to select an actually effective version.
+    """
+    tip = read_policy_tip()
+    if tip is not None:
+        return tip
+    try:
+        return save_policy(default_portfolio_policy(created_at))
+    except PolicyChainConflictError:
+        # A concurrent first root can win this pre-insert chain check. Read it
+        # without replay; unknown commit/close failures are not caught here.
+        tip = read_policy_tip()
+        if tip is None:
+            raise
+        return tip
 
 
 def get_policy(policy_version: str | None = None, *, at: datetime | None = None) -> PortfolioPolicy:
