@@ -234,12 +234,12 @@ describe('real full initial reconciliation vertical UI', () => {
     expect(fetcher.mock.calls.every(([, init]) => (init as RequestInit).method !== 'POST' || JSON.stringify((init as RequestInit).body).includes('synthetic-password'))).toBe(true)
     expect(fetcher).toHaveBeenCalledTimes(2)
   })
-  it('closes legacy migration/format/analysis entry points for actual v6 without disabling local portfolio edits', async () => {
+  it('closes legacy migration/format entry points and keeps v6 analysis off without explicit source consent', async () => {
     await upgradeSix()
     const migration = await mount(OwnerPortfolioMigrationPanel), format = await mount(OwnerWorkspaceFormatPanel), analysis = await mount(OwnerAnalysisPanel)
     expect(output(migration.root)).toContain('当前 v6'); expect(all(migration.root).some(row => row.props['data-action'] === 'export-portfolio-upgrade')).toBe(false)
     expect(all(format.root).some(row => row.props['data-action'] === 'export-format')).toBe(false)
-    expect(output(analysis.root)).toContain('当前 v6 持仓分析仍暂停')
+    expect(output(analysis.root)).toContain('v6 完整格式可独立核对分析来源')
     const ownerAnalysis = useOwnerAnalysisStore(); apps.push(() => ownerAnalysis.$dispose()); expect(ownerAnalysis.enabled).toBe(false)
     await expect(store.enableWorkspaceSync(true)).rejects.toBeInstanceOf(Error)
     expect(fetcher).not.toHaveBeenCalled()

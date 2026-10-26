@@ -73,7 +73,7 @@ async function setup(baseRevision: 1 | 2, manualCount = 0) {
     const intent = planOwnerWorkspaceCloudIntent(state.sync.base, state.local.snapshot)
     if (intent.operations.length || intent.issues.length) throw new Error('source changed')
     const preimage = canonicalOwnerLocal(state)
-    return Object.freeze({ targetFingerprint: TARGET, state, preimage, assertActive,
+    return Object.freeze({ profile: 'v4' as const, targetFingerprint: TARGET, state, preimage, assertActive,
       async verify(active: AbortSignal) {
         const actual = await workspace.readSyncState({ signal: active, assertActive })
         if (active.aborted || canonicalOwnerLocal(actual) !== preimage) throw new Error('source changed')

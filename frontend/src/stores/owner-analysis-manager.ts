@@ -171,10 +171,15 @@ export function createOwnerAnalysisManager(options: {
   }
   async function source(signal: AbortSignal, check: () => void) {
     const local = await options.source(signal); check(); local.assertActive()
-    if (local.targetFingerprint !== target || !local.state.sync.base) fail()
-    const cloud = await complete(signal, check, local.state.sync.base.pulledRevision)
-    if (cloud.pulledRevision !== local.state.sync.base.pulledRevision
-      || !same(ordered(cloud.records), ordered(local.state.sync.base.records))) fail()
+    if (local.targetFingerprint !== target) fail()
+    // v6 retains v4 sync metadata as history. Only the actually captured
+    // profile selects its active B; a missing full B never falls back to it.
+    const baseline = local.profile === 'v4' ? local.state.sync.base
+      : local.profile === 'v6' ? local.state.fullSync.base : fail()
+    if (!baseline) fail()
+    const cloud = await complete(signal, check, baseline.pulledRevision)
+    if (cloud.pulledRevision !== baseline.pulledRevision
+      || !same(ordered(cloud.records), ordered(baseline.records))) fail()
     await local.verify(signal); check(); local.assertActive()
     return { local, cloud }
   }

@@ -4,14 +4,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { IDBDatabase, IDBFactory } from 'fake-indexeddb'
 import { createOwnerAnalysisManager, type OwnerAnalysisManager } from './owner-analysis-manager'
 import { openOwnerAnalysisOutbox, type OwnerAnalysisOutbox } from './owner-analysis-outbox'
-import { openOwnerWorkspace, upgradeOwnerWorkspaceSync, buildOwnerWorkspaceAdoptLocalRequest,
+import { openOwnerWorkspace, upgradeOwnerWorkspaceSync, upgradeOwnerWorkspacePortfolio, upgradeOwnerWorkspaceFullSync,
+  buildOwnerWorkspacePortfolioUpgradeBackup, buildOwnerWorkspacePortfolioUpgradeRequest,
+  buildOwnerWorkspaceFullSyncUpgradeRequest, buildOwnerWorkspaceFullSyncLinkRequest,
+  buildOwnerWorkspaceFullSyncRefreshRequest, buildOwnerWorkspaceEditPortfolioRequest, buildOwnerWorkspaceAdoptLocalRequest,
   buildOwnerWorkspaceLinkCloudRequest, buildOwnerWorkspaceEditLocalRequest,
   type OwnerWorkspace, type OwnerWorkspaceGuard } from './owner-workspace'
 import type { OwnerAnalysisLocalSource } from './watchlist'
 import { buildOwnerLegacyWorkspaceBackup, canonicalOwnerLocal } from '@/utils/owner-workspace-backup'
 import { planOwnerWorkspaceCloudIntent } from '@/utils/owner-workspace-sync'
+import { planOwnerPortfolioCloudIntent } from '@/utils/owner-portfolio-sync'
+import { buildOwnerPortfolioRecoveryBackup } from '@/utils/owner-portfolio-recovery'
 import { compareSyncKeys, parseSyncChangesPage, OWNER_SYNC_MAX_RESPONSE_BYTES, type OwnerSyncRecord } from '@/utils/ownerSyncContract'
 import { ownerAnalysisBackendFixture } from '@/utils/ownerAnalysisContract.fixtures'
+import { ownerAnalysisV6BackendFixture } from '@/utils/owner-analysis-v6-contract.fixtures'
 import type { BuiltOwnerAnalysisRequest } from '@/utils/ownerAnalysisContract'
 import type { OwnerSyncCandidateTransport } from './ownerSyncCandidate'
 
@@ -40,9 +46,9 @@ function records(extra: boolean): OwnerSyncRecord[] {
     values: { name: '合成墓碑', shares: null, cost: null, target_weight: null } }
   return [fund, ...(extra ? [manual, tombstone] : [])].sort((a, b) => compareSyncKeys(a.key, b.key))
 }
-async function setup(extra = false, additionalManuals = 0, sourceRevision = 1) {
+async function setup(extra = false, additionalManuals = 0, sourceRevision = 1, profile: 'v4' | 'v6' = 'v4') {
   const fixture = ownerAnalysisBackendFixture(), factory = new IDBFactory(), mutable = {
-    endpoint: 'https://synthetic-owner.example/api', generation: 1, authenticated: true, sourceEpoch: 0, now: NOW,
+    endpoint: 'https://synthetic-owner.example/api', generation: 1, authenticated: true, sourceEpoch: 0, now: NOW, cloudRevision: sourceRevision,
     cloud: [...records(extra), ...Array.from({ length: additionalManuals }, (_, index): OwnerSyncRecord => ({
       key: 'asset:extra-' + String(index).padStart(3, '0'), kind: 'manual_asset', deleted: false,
       record_revision: 1, lifecycle_revision: 1, field_revisions: { name: 1, cls: 1, value: 1, note: 1 },
@@ -60,24 +66,52 @@ async function setup(extra = false, additionalManuals = 0, sourceRevision = 1) {
   const adoption = await buildOwnerWorkspaceAdoptLocalRequest(TARGET, { id: 'analysis-adopt-0001',
     expected: await legacy.readLocalState(guard), sourceArchive, backupSha256: backup.sha256 })
   const local = await legacy.adoptLocal(adoption, guard)
-  const workspace = await upgradeOwnerWorkspaceSync(factory, TARGET, local, guard); handles.push(workspace)
+  let workspace = await upgradeOwnerWorkspaceSync(factory, TARGET, local, guard); handles.push(workspace)
   await workspace.linkCloudBase(await buildOwnerWorkspaceLinkCloudRequest(TARGET, { id: 'analysis-link-0001',
     expected: await workspace.readSyncState(guard), base: { pulledRevision: sourceRevision, records: mutable.cloud } }), guard)
+  async function upgradeFull() {
+    const portfolioFile = await buildOwnerWorkspacePortfolioUpgradeBackup(TARGET, await workspace.readLocalState(guard), {
+      manualRaw: canonicalOwnerLocal(mutable.cloud.filter(row => row.kind === 'manual_asset').map(row => ({
+        id: row.key.slice('asset:'.length), name: row.values.name, cls: row.values.cls, value: row.values.value,
+        updated_at: '2026-10-23T00:00:00Z',
+      }))), snapshotsRaw: canonicalOwnerLocal([{ date: '2026-10-23', value: 0, cost: 0 }]),
+    })
+    workspace = await upgradeOwnerWorkspacePortfolio(factory, TARGET, await buildOwnerWorkspacePortfolioUpgradeRequest(TARGET, {
+      id: 'analysis-portfolio-upgrade-0001', backupRaw: portfolioFile.raw, backupSha256: portfolioFile.sha256,
+    }), guard); handles.push(workspace)
+    const fullFile = await buildOwnerPortfolioRecoveryBackup(TARGET, await workspace.readLocalState(guard))
+    workspace = await upgradeOwnerWorkspaceFullSync(factory, TARGET, await buildOwnerWorkspaceFullSyncUpgradeRequest(TARGET, {
+      id: 'analysis-full-upgrade-0001', backupRaw: fullFile.raw, backupSha256: fullFile.sha256,
+    }), guard); handles.push(workspace)
+    await workspace.linkFullSyncBase(await buildOwnerWorkspaceFullSyncLinkRequest(TARGET, {
+      id: 'analysis-full-link-0001', expected: await workspace.readFullSyncState(guard),
+      base: { pulledRevision: sourceRevision, records: mutable.cloud }, minimumObservedRevision: sourceRevision, resolutions: [],
+    }), guard)
+    profile = 'v6'; mutable.sourceEpoch++
+  }
+  if (profile === 'v6') await upgradeFull()
   const outbox = await openOwnerAnalysisOutbox(factory, TARGET, signal(), true); handles.push(outbox)
   const source = vi.fn(async (active: AbortSignal): Promise<OwnerAnalysisLocalSource> => {
     const epoch = mutable.sourceEpoch
     const assertActive = () => { if (epoch !== mutable.sourceEpoch) throw new Error('real source epoch changed') }
     const actualGuard = { signal: active, assertActive }
-    const state = await workspace.readSyncState(actualGuard)
-    if (active.aborted || state.local.outbox.entry || state.sync.pending || !state.sync.base) throw new Error('source not ready')
-    const intent = planOwnerWorkspaceCloudIntent(state.sync.base, state.local.snapshot)
+    const read = async (selected: OwnerWorkspaceGuard) => profile === 'v6'
+      ? { profile: 'v6' as const, state: await workspace.readFullSyncState(selected) }
+      : { profile: 'v4' as const, state: await workspace.readSyncState(selected) }
+    const captured = await read(actualGuard), { state } = captured
+    const metadata = captured.profile === 'v6' ? captured.state.fullSync : captured.state.sync
+    if (active.aborted || state.local.outbox.entry || metadata.pending || !metadata.base) throw new Error('source not ready')
+    const intent = captured.profile === 'v6'
+      ? planOwnerPortfolioCloudIntent(metadata.base, state.local.snapshot, state.local.portfolio!)
+      : planOwnerWorkspaceCloudIntent(metadata.base, state.local.snapshot)
     if (intent.issues.length || intent.operations.length) throw new Error('actual B to L is not unchanged')
-    const preimage = canonicalOwnerLocal(state)
-    return Object.freeze({ targetFingerprint: TARGET, state, preimage, assertActive,
+    const image = (value: typeof captured) => canonicalOwnerLocal(value.profile === 'v4' ? value.state : value)
+    const preimage = image(captured)
+    return Object.freeze({ ...captured, targetFingerprint: TARGET, preimage, assertActive,
       async verify(stopped: AbortSignal) {
         assertActive()
-        const current = await workspace.readSyncState({ signal: stopped, assertActive })
-        if (stopped.aborted || canonicalOwnerLocal(current) !== preimage) throw new Error('actual full IDB preimage changed')
+        const current = await read({ signal: stopped, assertActive })
+        if (stopped.aborted || image(current) !== preimage) throw new Error('actual full IDB preimage changed')
       },
     })
   })
@@ -95,7 +129,7 @@ async function setup(extra = false, additionalManuals = 0, sourceRevision = 1) {
   const sync = { targetFingerprint: TARGET,
     write: vi.fn(async () => { throw new Error('analysis must not write Owner sync') }),
     receipt: vi.fn(async () => { throw new Error('analysis must not read a sync write receipt') }),
-    changes: vi.fn(async (_parameters: Parameters<OwnerSyncCandidateTransport['changes']>[0], _signal: AbortSignal) => ({ status: 200, rawBody: JSON.stringify({ upper_revision: sourceRevision,
+    changes: vi.fn(async (_parameters: Parameters<OwnerSyncCandidateTransport['changes']>[0], _signal: AbortSignal) => ({ status: 200, rawBody: JSON.stringify({ upper_revision: mutable.cloudRevision,
       changes: mutable.cloud, next_cursor: null, complete: true }) })),
   }
   const changed = vi.fn()
@@ -114,7 +148,8 @@ async function setup(extra = false, additionalManuals = 0, sourceRevision = 1) {
       expectedEntry: previous, confirmed: true } }), guard)
     mutable.sourceEpoch++
   }
-  return { fixture, factory, workspace, outbox, mutable, source, transport, sync, manager, value, edit }
+  return { fixture, factory, workspace, outbox, mutable, source, transport, sync, manager, value, edit, upgradeFull,
+    activeWorkspace: () => workspace }
 }
 type Setup = Awaited<ReturnType<typeof setup>>
 function historyPage(rows: OwnerSyncRecord[], upper: number, complete = true, paddedBytes?: number) {
@@ -145,7 +180,34 @@ function scheduledPolicy(context: Setup, delay = 20_000) {
   return future
 }
 
-describe('real source-bound Owner analysis manager', () => {
+/** The server fixture is independently rebuilt from actual SQLite transactions.
+ * No source SHA, Python model ID or financial result is reconstructed here. */
+async function actualFullAnalysis() {
+  const backend = ownerAnalysisV6BackendFixture(), context = await setup(false, 0, 1, 'v6')
+  const handle = context.activeWorkspace(), guard = { signal: signal(), assertActive() {} }
+  context.mutable.cloud = [...backend.currentRecords]; context.mutable.cloudRevision = 3
+  context.mutable.now = Date.parse(backend.now)
+  const before = await handle.readFullSyncState(guard)
+  await handle.refreshFullSync(await buildOwnerWorkspaceFullSyncRefreshRequest(TARGET, {
+    id: 'analysis-full-backend-refresh-0001', expected: before,
+    completeBaseline: { pulledRevision: 3, records: backend.currentRecords }, minimumObservedRevision: 3, resolutions: [],
+  }), guard)
+  context.transport.policyState.mockImplementation(async () => ({ status: 200, rawBody: JSON.stringify({
+    schema_version: 'owner-policy-state-1', observed_at: backend.now,
+    current: JSON.parse(backend.policy), history: [JSON.parse(backend.policy)], next_effective_at: null,
+  }) }))
+  context.transport.evidence.mockResolvedValue({ status: 200, rawBody: backend.evidence })
+  context.transport.write.mockResolvedValue({ status: 200, rawBody: backend.response })
+  context.transport.receipt.mockResolvedValue({ status: 200, rawBody: JSON.stringify({
+    state: 'matched', status: 200, result: JSON.parse(backend.response),
+  }) })
+  context.sync.changes.mockResolvedValue({ status: 200, rawBody: backend.currentChangesRaw })
+  return { context, backend, handle, guard, before }
+}
+
+const setupProfile = setup
+describe.each(['v4', 'v6'] as const)('real source-bound Owner analysis manager (%s)', profile => {
+  const setup = (extra = false, additionalManuals = 0, sourceRevision = 1) => setupProfile(extra, additionalManuals, sourceRevision, profile)
   it('constructs with no task reads, source reads, quote, sync or analysis HTTP', async () => {
     const context = await setup()
     const read = vi.fn(context.outbox.read)
@@ -488,6 +550,177 @@ describe('real source-bound Owner analysis manager', () => {
     await context.value.sendOnce(true); expect(context.value.isQualified()).toBe(true)
     monotonic.mockReturnValue(60_100); expect(context.value.isQualified()).toBe(false)
     expect(context.value.view().result?.run.request_hash).toBe(context.fixture.requestHash)
+    expect(context.transport.write).toHaveBeenCalledOnce()
+  })
+})
+
+describe('explicit full-profile analysis source selection and task continuity', () => {
+  it('previews, prepares, sends once and qualifies the real SQLite v6 run after applying full B3 while historical v4 B1 remains unchanged', async () => {
+    const { context, backend, handle, guard, before } = await actualFullAnalysis()
+    const state = await handle.readFullSyncState(guard)
+    expect(state.local.sync).toEqual(before.local.sync)
+    expect(state.local.sync?.base?.pulledRevision).toBe(1)
+    expect(state.fullSync.base?.pulledRevision).toBe(3)
+    expect(state.local.portfolio!.manual).toHaveLength(2)
+    expect(state.local.portfolio!.manual.some(row => row.deleted)).toBe(true)
+    expect(Object.is(state.local.portfolio!.manual.find(row => !row.deleted)?.values.value, -0)).toBe(true)
+    await context.value.hydrate(); await context.value.preview(backend.request.request_id)
+    const preview = context.value.view().preview!
+    expect(preview.packet).toMatchObject({ rawBody: backend.rawBody, requestHash: backend.requestHash })
+    expect([...preview.records].sort((a, b) => compareSyncKeys(a.key, b.key))).toEqual(backend.currentRecords)
+    expect(preview.packet.request.evidence.map(row => row.code)).toEqual(['510300'])
+    await context.value.prepare(true)
+    context.transport.write.mockImplementationOnce(async packet => {
+      expect(packet.rawBody).toBe(backend.rawBody); expect(packet.requestHash).toBe(backend.requestHash)
+      expect((await context.outbox.read(signal())).task?.state).toBe('attempted')
+      return { status: 200, rawBody: backend.response }
+    })
+    await context.value.sendOnce(true)
+    const response = JSON.parse(backend.response)
+    expect(context.value.view().result).toEqual(response)
+    expect(context.value.view().result?.run.source).toEqual(response.run.source)
+    expect(context.value.view().result?.run.source.record_count).toBe(3)
+    expect(context.value.view().result?.run.components).toHaveLength(1)
+    expect(context.value.view().result?.run.components[0].holding.current_weight).toBe(100)
+    expect(context.value.isQualified()).toBe(true)
+    expect((await context.outbox.read(signal())).task).toMatchObject({ state: 'matched', rawBody: backend.rawBody, requestHash: backend.requestHash })
+    expect(context.transport.write).toHaveBeenCalledOnce(); expect(context.sync.write).not.toHaveBeenCalled()
+    expect((await handle.readFullSyncState(guard)).local).toEqual(state.local)
+  })
+
+  it.each(['missing-deleted-manual', 'zero-sign'] as const)('refuses server source_current as sufficient when full actual D disagrees (%s), preserving only the original task for receipt', async fault => {
+    const { context, backend } = await actualFullAnalysis()
+    await context.value.hydrate(); await context.value.preview(backend.request.request_id); await context.value.prepare(true)
+    const badRecords = backend.currentRecords.filter(row => fault !== 'missing-deleted-manual' || !row.deleted)
+      .map(row => fault === 'zero-sign' && row.kind === 'manual_asset' && !row.deleted
+        ? { ...row, values: { ...row.values, value: 0 } } : row)
+      .sort((a, b) => a.record_revision - b.record_revision || compareSyncKeys(a.key, b.key))
+    const badRaw = canonicalOwnerLocal({ upper_revision: 3, changes: badRecords, next_cursor: null, complete: true })
+    expect(parseSyncChangesPage(badRaw, { sinceRevision: 0, limit: 200 }).upper_revision).toBe(3)
+    context.sync.changes.mockResolvedValueOnce({ status: 200, rawBody: badRaw })
+    await expect(context.value.sendOnce(true)).rejects.toBeDefined()
+    expect(context.value.isQualified()).toBe(false); expect(context.value.view().result).toBeNull()
+    expect((await context.outbox.read(signal())).task).toMatchObject({ state: 'matched', rawBody: backend.rawBody, requestHash: backend.requestHash })
+    await expect(context.value.sendOnce(true)).rejects.toBeDefined()
+    await context.value.reconcile()
+    expect(context.value.isQualified()).toBe(true)
+    expect(context.transport.receipt.mock.calls[0][0]).toMatchObject({ rawBody: backend.rawBody, requestHash: backend.requestHash })
+    expect(context.transport.write).toHaveBeenCalledOnce()
+  })
+
+  it('uses the actually refreshed full B rather than historical v4 B, retaining typed zero/null and every tombstone', async () => {
+    const context = await setup(true, 0, 1, 'v6'), handle = context.activeWorkspace()
+    const guard = { signal: signal(), assertActive() {} }, before = await handle.readFullSyncState(guard)
+    context.mutable.cloud = context.mutable.cloud.map(row => row.kind === 'manual_asset'
+      ? { ...row, record_revision: 2, field_revisions: { ...row.field_revisions, value: 2 }, values: { ...row.values, value: -0 } }
+      : row.key === KEY ? { ...row, record_revision: 3,
+        field_revisions: { ...row.field_revisions, shares: 3, cost: 3, target_weight: 3 },
+        values: { ...row.values, shares: -0, cost: null, target_weight: 0 } } : row)
+    context.mutable.cloudRevision = 3
+    await handle.refreshFullSync(await buildOwnerWorkspaceFullSyncRefreshRequest(TARGET, {
+      id: 'analysis-apply-full-refresh-0001', expected: before,
+      completeBaseline: { pulledRevision: 3, records: context.mutable.cloud }, minimumObservedRevision: 3, resolutions: [],
+    }), guard)
+    const actual = await handle.readFullSyncState(guard)
+    expect(actual.local.sync).toEqual(before.local.sync)
+    expect(actual.local.sync?.base?.pulledRevision).toBe(1)
+    expect(actual.fullSync.base?.pulledRevision).toBe(3)
+    expect(planOwnerPortfolioCloudIntent(actual.fullSync.base, actual.local.snapshot, actual.local.portfolio)).toEqual({ issues: [], operations: [] })
+    const rawBody = canonicalOwnerLocal({ upper_revision: 3,
+      changes: [...context.mutable.cloud].sort((a, b) => a.record_revision - b.record_revision || compareSyncKeys(a.key, b.key)),
+      next_cursor: null, complete: true,
+    })
+    expect(parseSyncChangesPage(rawBody, { sinceRevision: 0, limit: 200 }).changes).toHaveLength(3)
+    context.sync.changes.mockImplementation(async () => ({ status: 200, rawBody }))
+    await context.value.preview('analysis-active-full-base-0001')
+    const preview = context.value.view().preview!
+    expect(preview.packet.request.expected_revision).toBe(3)
+    expect([...preview.records].sort((a, b) => compareSyncKeys(a.key, b.key))).toEqual(context.mutable.cloud)
+    expect(Object.is(preview.records.find(row => row.key === KEY)?.values.shares, -0)).toBe(true)
+    expect(preview.records.find(row => row.key === KEY)?.values.cost).toBeNull()
+    expect(Object.is(preview.records.find(row => row.kind === 'manual_asset')?.values.value, -0)).toBe(true)
+    expect(preview.records.find(row => row.kind === 'manual_asset')?.values.note).toBeNull()
+    expect(preview.records.filter(row => row.deleted)).toHaveLength(1)
+    expect(preview.packet.request.evidence.map(row => row.code)).toEqual(['510300'])
+    expect(context.transport.evidence).toHaveBeenCalledOnce(); expect(context.transport.write).not.toHaveBeenCalled()
+    expect((await context.outbox.read(signal())).task).toBeNull()
+  })
+
+  it.each(['unknown', 'v5', 'missing-full-base'] as const)('refuses %s without falling back to the retained historical v4 base', async fault => {
+    const context = await setup(true, 0, 1, 'v6'), actual = await context.source(signal())
+    if (actual.profile !== 'v6') throw new Error('actual v6 fixture required')
+    expect(actual.state.local.sync?.base?.pulledRevision).toBe(1)
+    context.source.mockResolvedValueOnce(fault === 'missing-full-base'
+      ? { ...actual, state: { ...actual.state, fullSync: { ...actual.state.fullSync, base: null } } }
+      : { ...actual, profile: fault === 'v5' ? 'v5' : undefined } as unknown as OwnerAnalysisLocalSource)
+    await expect(context.value.preview('analysis-explicit-profile-0001')).rejects.toBeDefined()
+    expect(context.sync.changes).not.toHaveBeenCalled(); expect(context.transport.policyState).not.toHaveBeenCalled()
+    expect(context.transport.evidence).not.toHaveBeenCalled(); expect(context.transport.write).not.toHaveBeenCalled()
+    expect((await context.outbox.read(signal())).task).toBeNull()
+  })
+
+  it.each(['name', 'cls', 'value', 'note'] as const)('compares every applied full-B manual field with actual D, not only head and count (%s)', async field => {
+    const context = await setup(true, 0, 1, 'v6')
+    const wrong = field === 'name' ? 'different manual name' : field === 'cls' ? '其他' : field === 'value' ? -0 : ''
+    const cloud = context.mutable.cloud.map(row => row.kind === 'manual_asset'
+      ? { ...row, values: { ...row.values, [field]: wrong } } : row)
+    context.sync.changes.mockResolvedValueOnce({ status: 200, rawBody: canonicalOwnerLocal({
+      upper_revision: 1, changes: cloud, next_cursor: null, complete: true,
+    }) })
+    await expect(context.value.preview('analysis-full-business-diff-0001')).rejects.toBeDefined()
+    expect(context.transport.policyState).not.toHaveBeenCalled(); expect(context.transport.write).not.toHaveBeenCalled()
+    expect(context.value.view().preview).toBeNull(); expect((await context.outbox.read(signal())).task).toBeNull()
+  })
+
+  it('keeps an original v4 prepared task unchanged after actual upgrade, requiring explicit cancellation instead of rebuilding it for v6', async () => {
+    const context = await setup(); await prepared(context)
+    const original = await context.outbox.read(signal())
+    await context.upgradeFull(); context.value.invalidate(); await context.value.hydrate()
+    expect((await context.source(signal())).profile).toBe('v6')
+    await expect(context.value.preview('cannot-rewrite-original-v4-task')).rejects.toBeDefined()
+    expect(await context.outbox.read(signal())).toEqual(original)
+    expect(context.transport.write).not.toHaveBeenCalled()
+    await context.value.cancelPrepared(true)
+    expect((await context.outbox.read(signal())).task).toBeNull()
+  })
+
+  it('rejects a preview after an actual history-only write although fund/manual B to L still has no intent', async () => {
+    const context = await setup(true, 0, 1, 'v6'), handle = context.activeWorkspace()
+    await context.value.preview('analysis-full-history-preimage-0001')
+    const guard = { signal: signal(), assertActive() {} }, before = await handle.readLocalState(guard)
+    await handle.editPortfolio(await buildOwnerWorkspaceEditPortfolioRequest(TARGET, {
+      id: 'analysis-history-write-0001', expected: before, command: { type: 'append_observation', observation: {
+        id: 'analysis-history-observation', kind: 'observation', observed_at: '2026-10-24T02:00:00Z',
+        date: '2026-10-24', calendar: 'Asia/Shanghai', value: 0, cost: null,
+        holdings: [{ kind: 'manual', key: 'asset:synthetic-cash', name: '合成现金', cls: '现金', value: 0, cost: null }],
+      } },
+    }), guard)
+    const after = await handle.readFullSyncState(guard)
+    expect(after.local.portfolio!.history).toHaveLength(before.portfolio!.history.length + 1)
+    expect(planOwnerPortfolioCloudIntent(after.fullSync.base, after.local.snapshot, after.local.portfolio)).toEqual({ issues: [], operations: [] })
+    await expect(context.value.prepare(true)).rejects.toBeDefined()
+    expect((await context.outbox.read(signal())).task).toBeNull(); expect(context.transport.write).not.toHaveBeenCalled()
+    expect((await handle.readLocalState(guard)).portfolio).toEqual(after.local.portfolio)
+  })
+
+  it('reconciles the exact original v4 unknown task after real v6 upgrade as history, without another POST or current qualification', async () => {
+    const context = await setup(); await prepared(context)
+    context.transport.write.mockRejectedValueOnce(new Error('synthetic response lost after submission'))
+    await expect(context.value.sendOnce(true)).rejects.toBeDefined()
+    const original = await context.outbox.read(signal()), policyReads = context.transport.policyState.mock.calls.length
+    await context.upgradeFull(); context.value.invalidate(); await context.value.hydrate()
+    await context.value.reconcile()
+    expect(context.transport.write).toHaveBeenCalledOnce(); expect(context.transport.receipt).toHaveBeenCalledOnce()
+    expect(context.transport.receipt.mock.calls[0][0]).toMatchObject({
+      rawBody: original.task!.rawBody, requestHash: original.task!.requestHash,
+    })
+    expect((await context.outbox.read(signal())).task).toEqual({ ...original.task, state: 'matched' })
+    expect(context.value.view().result?.source_current).toBe(true)
+    expect(context.value.view().result?.run.request_hash).toBe(context.fixture.requestHash)
+    expect(context.value.view().message).toContain('本机或完整持仓来源已变化')
+    expect(context.value.isQualified()).toBe(false)
+    expect(context.transport.policyState).toHaveBeenCalledTimes(policyReads)
+    await expect(context.value.sendOnce(true)).rejects.toBeDefined()
     expect(context.transport.write).toHaveBeenCalledOnce()
   })
 })

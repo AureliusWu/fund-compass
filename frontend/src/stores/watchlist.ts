@@ -10,7 +10,7 @@ import type { OwnerWorkspace, OwnerWorkspaceGuard, OwnerWorkspaceLocalState, Own
 import type { BuiltOwnerWorkspaceBackup, OwnerWorkspaceBackup, OwnerWorkspaceRestorePreview } from '@/utils/owner-workspace-backup'
 import type { ManagedWatchlistOwner, OwnerWorkspaceSyncFacade } from './owner-workspace-managed-store'
 import type { BuiltOwnerWorkspaceRecoveryBackup } from '@/utils/owner-workspace-recovery'
-import type { OwnerWorkspaceSyncState } from './owner-workspace-types'
+import type { OwnerWorkspaceSyncState, OwnerWorkspaceFullSyncState } from './owner-workspace-types'
 import type { OwnerPortfolioLocal, OwnerPortfolioCommand, OwnerPortfolioMigrationSource } from '@/utils/ownerPortfolioLocal'
 import type { BuiltOwnerWorkspacePortfolioUpgradeBackup } from './owner-workspace-portfolio-upgrade'
 import type { ManagedFullSyncOwner, OwnerFullSyncFacade, OwnerFullSyncPacketFacade } from './owner-workspace-full-sync-managed'
@@ -45,14 +45,17 @@ export interface OwnerSyncWatchSnapshot {
   readonly memory: string
   readonly generation: number
 }
-export interface OwnerAnalysisLocalSource {
+interface OwnerAnalysisSourceContext {
   readonly targetFingerprint: string
-  readonly state: OwnerWorkspaceSyncState
   /** Native local preimage only; never reinterpreted as the server source SHA. */
   readonly preimage: string
   assertActive(): void
   verify(signal: AbortSignal): Promise<void>
 }
+export type OwnerAnalysisLocalSource = OwnerAnalysisSourceContext & (
+  Readonly<{ profile: 'v4'; state: OwnerWorkspaceSyncState }>
+  | Readonly<{ profile: 'v6'; state: OwnerWorkspaceFullSyncState }>
+)
 const idOf = (entry: Pick<WatchEntry, 'id' | 'code' | 'account'>) => entry.id || entryId(entry.code, entry.account)
 const clone = (entries: LocalWatchEntry[]) => entries.map(entry => ({ ...entry }))
 
@@ -306,35 +309,77 @@ export const useWatchlistStore = defineStore('watchlist', () => {
    * Reading this source never imports, acknowledges or clears local_pending.
    */
   async function captureOwnerAnalysisSource(signal: AbortSignal): Promise<OwnerAnalysisLocalSource> {
-    if (formatInFlight || localWriteInFlight || pendingLocal.value || syncOwner?.isBusy()) throw new WatchMutationError('conflict')
-    await prepareManagedWorkspace(signal)
-    const [{ canonicalOwnerLocal }, { planOwnerWorkspaceCloudIntent }] = await Promise.all([
-      import('@/utils/owner-workspace-backup'), import('@/utils/owner-workspace-sync'),
-    ])
+    const assertIdle = () => {
+      if (formatInFlight || localWriteInFlight || pendingLocal.value || syncOwner?.isBusy()
+        || fullSyncEnabling || fullSyncLocalPending.value || fullSyncOwner?.isBusy()) throw new WatchMutationError('conflict')
+    }
+    assertIdle()
+    // Analysis has its own profile preflight. The old managed sender remains
+    // fund-only and must keep prepareManagedWorkspace's portfolio rejection.
+    const observed = await readActiveWorkspace(signal)
+    const { canonicalOwnerLocal } = await import('@/utils/owner-workspace-backup')
+    assertIdle()
     if (signal.aborted || !workspace || !localState) throw new WatchMutationError('storage')
     const handle = workspace, generation = mutationGeneration, epoch = ownerAnalysisEpoch.value
-    const authority = JSON.stringify(locatorRecord), memory = canonicalOwnerLocal(entries.value)
+    const authority = JSON.stringify(locatorRecord), original = canonicalOwnerLocal(localState)
+    const memory = canonicalOwnerLocal({ entries: entries.value, portfolio: portfolioState.value })
+    if (canonicalOwnerLocal(observed) !== original
+      || canonicalOwnerLocal(entries.value) !== canonicalOwnerLocal(localEntries(localState))
+      || canonicalOwnerLocal(portfolioState.value) !== canonicalOwnerLocal(localState.portfolio ?? null)) throw new WatchMutationError('conflict')
+    const profile = localState.fullSync ? 'v6' : localState.sync && !localState.portfolio ? 'v4' : null
+    if (profile === null) throw new WatchMutationError('storage')
     const assertActive = () => {
+      assertIdle()
       if (!alive || lifetime.signal.aborted || authorityState.value !== 'idb'
         || handle !== workspace || generation !== mutationGeneration || epoch !== ownerAnalysisEpoch.value
-        || authority !== JSON.stringify(locatorRecord) || memory !== canonicalOwnerLocal(entries.value)
-        || formatInFlight || localWriteInFlight || pendingLocal.value || syncOwner?.isBusy()) throw new WatchMutationError('conflict')
+        || authority !== JSON.stringify(locatorRecord) || original !== canonicalOwnerLocal(localState)
+        || memory !== canonicalOwnerLocal({ entries: entries.value, portfolio: portfolioState.value })) throw new WatchMutationError('conflict')
     }
     const guard = { signal, assertActive() { if (signal.aborted) throw new WatchMutationError('storage'); assertActive() } }
+    if (profile === 'v6') {
+      const state = await handle.readFullSyncState(guard)
+      guard.assertActive()
+      if (canonicalOwnerLocal(state.local) !== original || state.local.outbox.entry !== null
+        || state.fullSync.pending !== null || !state.fullSync.base || !state.local.portfolio
+        || !state.local.fullSyncUpgrade) throw new WatchMutationError('conflict')
+      assertWorkspaceAdoption(state.local)
+      const { planOwnerPortfolioCloudIntent } = await import('@/utils/owner-portfolio-sync')
+      guard.assertActive()
+      const intent = planOwnerPortfolioCloudIntent(state.fullSync.base, state.local.snapshot, state.local.portfolio)
+      if (intent.issues.length || intent.operations.length) throw new WatchMutationError('conflict')
+      await verifyAuthority('active'); guard.assertActive()
+      const preimage = canonicalOwnerLocal({ profile, authority: locatorRecord, state })
+      return Object.freeze({ profile, targetFingerprint: handle.targetFingerprint, state, preimage, assertActive,
+        async verify(active: AbortSignal) {
+          assertActive(); if (active.aborted) throw new WatchMutationError('storage')
+          await verifyAuthority('active'); assertActive()
+          const current = await handle.readFullSyncState({ signal: active, assertActive })
+          assertActive()
+          await verifyAuthority('active'); assertActive()
+          if (active.aborted || canonicalOwnerLocal({ profile, authority: locatorRecord, state: current }) !== preimage) throw new WatchMutationError('conflict')
+        },
+      })
+    }
     const state = await handle.readSyncState(guard)
-    assertActive()
-    if (canonicalOwnerLocal(state.local) !== canonicalOwnerLocal(localState) || state.local.outbox.entry !== null
+    guard.assertActive()
+    if (canonicalOwnerLocal(state.local) !== original || state.local.outbox.entry !== null
       || state.sync.pending !== null || !state.sync.base) throw new WatchMutationError('conflict')
     assertWorkspaceAdoption(state.local)
+    const { planOwnerWorkspaceCloudIntent } = await import('@/utils/owner-workspace-sync')
+    guard.assertActive()
     const intent = planOwnerWorkspaceCloudIntent(state.sync.base, state.local.snapshot)
     if (intent.issues.length || intent.operations.length) throw new WatchMutationError('conflict')
+    await verifyAuthority('active'); guard.assertActive()
+    // Stored v4 analysis tasks bind these exact original bytes. A new profile
+    // discriminator is returned to the manager, not inserted into that seal.
     const preimage = canonicalOwnerLocal({ authority: locatorRecord, state })
-    return Object.freeze({ targetFingerprint: handle.targetFingerprint, state, preimage, assertActive,
+    return Object.freeze({ profile, targetFingerprint: handle.targetFingerprint, state, preimage, assertActive,
       async verify(active: AbortSignal) {
         assertActive(); if (active.aborted) throw new WatchMutationError('storage')
         await verifyAuthority('active'); assertActive()
         const current = await handle.readSyncState({ signal: active, assertActive })
         assertActive()
+        await verifyAuthority('active'); assertActive()
         if (active.aborted || canonicalOwnerLocal({ authority: locatorRecord, state: current }) !== preimage) throw new WatchMutationError('conflict')
       },
     })
@@ -721,6 +766,9 @@ export const useWatchlistStore = defineStore('watchlist', () => {
         const target = locatorRecord?.targetFingerprint
         if (!target) throw new WatchMutationError('storage')
         const prepare = async (active: AbortSignal, allowUnknown: boolean) => {
+          // This synchronous reactive boundary also retires a cached analysis
+          // qualification while a full-profile operation is in flight.
+          ownerAnalysisEpoch.value++
           if (formatInFlight && !fullSyncEnabling || localWriteInFlight || pendingLocal.value
             || canonicalOwnerLocal(entries.value) !== canonicalOwnerLocal(localState ? localEntries(localState) : null)
             || canonicalOwnerLocal(portfolioState.value) !== canonicalOwnerLocal(localState?.portfolio ?? null)) throw new WatchMutationError('conflict')
