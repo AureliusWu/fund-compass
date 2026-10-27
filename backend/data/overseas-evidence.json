@@ -1,6 +1,27 @@
 {
   "alignment_version": "observation-target-v2",
   "models": {
+    "012920": {
+      "accuracy_status": "collecting",
+      "alignment_version": "observation-target-v2",
+      "base_nav": 3.2783,
+      "base_nav_date": "2026-10-23",
+      "code": "012920",
+      "coverage": 33.98,
+      "direction_accuracy": 73.7,
+      "error_p80": 2.802,
+      "mae": 1.619,
+      "market_time": "2026-10-26T16:06:01+08:00",
+      "model_version": "v1-2026q1-style",
+      "name": "易方达全球成长精选混合(QDII)人民币A",
+      "observed_at": "2026-10-27T20:37:26+08:00",
+      "predicted_change": 4.6402,
+      "predicted_nav": 3.4304,
+      "prediction_date": "2026-10-27",
+      "sample_count": 19,
+      "status": "pending",
+      "target_nav_date": "2026-10-26"
+    },
     "018147": {
       "accuracy_status": "healthy",
       "alignment_version": "observation-target-v2",
@@ -19,32 +40,32 @@
       "predicted_nav": 2.1433,
       "prediction_date": "2026-10-20",
       "sample_count": 24,
-      "status": "pending",
+      "status": "stale",
       "target_nav_date": "2026-10-19"
     },
     "539002": {
       "accuracy_status": "healthy",
       "alignment_version": "observation-target-v2",
-      "base_nav": 2.12,
-      "base_nav_date": "2026-10-16",
+      "base_nav": 2.077,
+      "base_nav_date": "2026-10-23",
       "code": "539002",
       "coverage": 64.33,
       "direction_accuracy": 88.5,
       "error_p80": 1.286,
       "mae": 0.78,
-      "market_time": "2026-10-19T16:04:51+08:00",
+      "market_time": "2026-10-26T16:06:01+08:00",
       "model_version": "v1-2026q1-holdings",
       "name": "建信新兴市场混合(QDII)A",
-      "observed_at": "2026-10-20T20:03:16+08:00",
-      "predicted_change": 2.7982,
-      "predicted_nav": 2.1793,
-      "prediction_date": "2026-10-20",
+      "observed_at": "2026-10-27T20:37:26+08:00",
+      "predicted_change": 2.2628,
+      "predicted_nav": 2.124,
+      "prediction_date": "2026-10-27",
       "sample_count": 26,
       "status": "pending",
-      "target_nav_date": "2026-10-19"
+      "target_nav_date": "2026-10-26"
     }
   },
   "schema": 1,
   "source_schema": 2,
-  "source_updated_at": "2026-10-26T21:29:21+08:00"
+  "source_updated_at": "2026-10-27T20:37:26+08:00"
 }
