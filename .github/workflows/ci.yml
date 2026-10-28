@@ -148,7 +148,9 @@ jobs:
         run: npm audit --json --include=dev --audit-level=moderate --registry=https://registry.npmjs.org --fetch-retries=0 --fetch-timeout=20000
 
   deploy:
-    if: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && !(github.event_name == 'workflow_dispatch' && inputs.formal_release) }}
+    # Persistent code-only hold: unset/false also blocks later generated-data
+    # push/dispatch runs. This guards Pages only; pause Render separately.
+    if: ${{ vars.AUTO_DEPLOY_ENABLED == 'true' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && !(github.event_name == 'workflow_dispatch' && inputs.formal_release) }}
     needs: [resolve, backend, frontend, worker]
     uses: ./.github/workflows/deploy.yml
     with:
@@ -159,7 +161,7 @@ jobs:
       id-token: write
 
   candidate_smoke:
-    if: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && !(github.event_name == 'workflow_dispatch' && inputs.formal_release) }}
+    if: ${{ vars.AUTO_DEPLOY_ENABLED == 'true' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && !(github.event_name == 'workflow_dispatch' && inputs.formal_release) }}
     needs: [resolve, deploy]
     uses: ./.github/workflows/post-deploy-smoke.yml
     with:

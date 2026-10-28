@@ -87,6 +87,7 @@ uvicorn main:app --reload --port 8000
 - 中文界面优先使用系统宋体与系统无衬线字体，不依赖 Google Fonts 等国内不稳定的线上字体服务。
 - 不在代码、日志、文档示例中写真实密钥或 Token。
 - npm ci 的漏洞告警不等于安全门禁通过。CI 的前端/Worker安装与审计须显式包含dev依赖；审计是有界、无容错/条件绕过的独立步骤，中危及以上或网络/超时错误阻断受控CI发布链，不用force或省略开发工具换PASS。公共registry审计失败保持未知，镜像NOT_IMPLEMENTED不能记零漏洞；npm JSON不是通用脱敏器。平台自身自动部署设置须另行验收，不能由CI YAML推断已受门禁保护。
+- 2026-10-28 用户授权 PR #4 仅合并代码且先暂停自动部署：Pages 的 AUTO_DEPLOY_ENABLED 未设/false 必须持续挡住 push/dispatch 发布，测试、审计、数据任务不跳过；两个 Render 服务须另行读回 Auto-Deploy Off 后才合并。该授权仅延期合并前的上线验收，不把未完成项记 PASS，不开放云 profile、不升9.0.0、不删Gist或恢复部署。操作和状态边界见 `docs/CODE-ONLY-MERGE-HOLD.md`。
 - Worker 的 Miniflare 外部 Undici scoped override 不会替换 Wrangler 自身 bundle；npm audit 0 也不认证内嵌代码。当前正式 deploy 入口在 Git/CLI 启动前固定阻断已知内嵌风险，无环境或参数绕过；关闭须审查已修可信上游制品、锁与兼容证据后显式改源码，不能扫描版本注释自动放行。dry-run/loopback只作功能证据，不运行带认证的 Wrangler 网络操作，不宣称已修已部署 Worker runtime。
 
 ## I19 本机格式与实际同步界面约束

@@ -2,6 +2,7 @@ import ast
 import re
 from pathlib import Path
 
+import pytest
 import yaml
 
 
@@ -17,6 +18,51 @@ AUTO_COMMIT_WORKFLOWS = (
 
 def workflow(name: str) -> str:
     return (WORKFLOWS / name).read_text(encoding="utf-8")
+
+
+def _ci_job_condition(condition: str, *, enabled: str, event: str, ref: str, formal: bool) -> bool:
+    """Evaluate only the fixed boolean/string subset used by these job guards."""
+    assert condition.startswith("${{ ") and condition.endswith(" }}")
+    context = {
+        "vars.AUTO_DEPLOY_ENABLED": enabled,
+        "github.event_name": event,
+        "github.ref": ref,
+        "inputs.formal_release": formal,
+    }
+    expression = condition[4:-3]
+    expression = re.sub(
+        r"\b(?:vars\.AUTO_DEPLOY_ENABLED|github\.event_name|github\.ref|inputs\.formal_release)\b",
+        # GitHub string equality is case-insensitive; variables are strings,
+        # and a missing repository variable is the empty string.
+        lambda match: repr(context[match[0]].casefold())
+        if isinstance(context[match[0]], str) else repr(context[match[0]]),
+        expression,
+    )
+    expression = re.sub(r"!(?!=)", "not ", expression.replace("&&", " and ").replace("||", " or "))
+    tree = ast.parse(expression.strip(), mode="eval")
+
+    def evaluate(node: ast.AST) -> bool | str:
+        if isinstance(node, ast.Constant) and type(node.value) in (bool, str):
+            return node.value
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+            return not evaluate(node.operand)
+        if isinstance(node, ast.BoolOp):
+            values = [bool(evaluate(value)) for value in node.values]
+            if isinstance(node.op, ast.And):
+                return all(values)
+            if isinstance(node.op, ast.Or):
+                return any(values)
+        if isinstance(node, ast.Compare) and len(node.ops) == len(node.comparators) == 1:
+            left, right = evaluate(node.left), evaluate(node.comparators[0])
+            if isinstance(node.ops[0], ast.Eq):
+                return left == right
+            if isinstance(node.ops[0], ast.NotEq):
+                return left != right
+        raise AssertionError(f"unsupported CI guard expression: {ast.dump(node)}")
+
+    result = evaluate(tree.body)
+    assert type(result) is bool
+    return result
 
 
 def _function(tree: ast.AST, name: str) -> ast.FunctionDef:
@@ -226,6 +272,70 @@ def test_ci_validates_and_checks_out_one_exact_sha() -> None:
     assert "refusing to release a non-HEAD main commit" in ci
     assert ci.count("ref: ${{ needs.resolve.outputs.target_sha }}") == 3
     assert "target_sha: ${{ needs.resolve.outputs.target_sha }}" in ci
+
+
+def test_auto_deployment_hold_is_persistent_and_does_not_skip_quality_or_formal_gates() -> None:
+    jobs = yaml.safe_load(workflow("ci.yml"))["jobs"]
+    candidate_condition = (
+        "${{ vars.AUTO_DEPLOY_ENABLED == 'true' && github.event_name != 'pull_request' "
+        "&& github.ref == 'refs/heads/main' "
+        "&& !(github.event_name == 'workflow_dispatch' && inputs.formal_release) }}"
+    )
+    for name in ("deploy", "candidate_smoke"):
+        assert jobs[name]["if"] == candidate_condition, name
+        assert jobs[name].get("continue-on-error", False) is False, name
+    assert jobs["deploy"]["needs"] == ["resolve", "backend", "frontend", "worker"]
+    assert jobs["candidate_smoke"]["needs"] == ["resolve", "deploy"]
+    assert jobs["candidate_smoke"]["with"]["enforce_persistence"] is False
+    for name in ("resolve", "backend", "frontend", "worker"):
+        assert jobs[name].get("if") is None, name
+        assert jobs[name].get("continue-on-error", False) is False, name
+    assert jobs["formal_smoke"]["if"] == (
+        "${{ github.event_name == 'workflow_dispatch' "
+        "&& github.ref == 'refs/heads/main' && inputs.formal_release }}"
+    )
+    assert jobs["formal_smoke"]["needs"] == ["resolve", "backend", "frontend", "worker"]
+    assert jobs["formal_smoke"]["with"]["enforce_persistence"] is True
+
+
+@pytest.mark.parametrize("job_name", ("deploy", "candidate_smoke"))
+@pytest.mark.parametrize("enabled,opted_in", (
+    ("", False), ("false", False), ("False", False), ("0", False), ("1", False),
+    ("yes", False), ("null", False), (" true", False), ("true ", False),
+    ("true\n", False), ("true", True), ("TRUE", True), ("True", True),
+))
+@pytest.mark.parametrize("event,ref,formal,candidate", (
+    ("push", "refs/heads/main", False, True),
+    ("push", "refs/heads/main", True, True),  # Dispatch-only input cannot select formal on push.
+    ("workflow_dispatch", "refs/heads/main", False, True),  # Includes generated-data dispatches.
+    ("workflow_dispatch", "refs/heads/main", True, False),
+    ("pull_request", "refs/heads/main", False, False),
+    ("pull_request", "refs/pull/4/merge", False, False),
+    ("push", "refs/heads/feature", False, False),
+    ("workflow_dispatch", "refs/heads/feature", False, False),
+))
+def test_auto_deployment_requires_explicit_opt_in_on_every_main_run(
+    job_name: str, enabled: str, opted_in: bool, event: str, ref: str, formal: bool, candidate: bool,
+) -> None:
+    condition = yaml.safe_load(workflow("ci.yml"))["jobs"][job_name]["if"]
+    assert _ci_job_condition(condition, enabled=enabled, event=event, ref=ref, formal=formal) is (
+        opted_in and candidate
+    )
+
+
+@pytest.mark.parametrize("enabled", ("", "false", "true"))
+@pytest.mark.parametrize("event,ref,formal,expected", (
+    ("workflow_dispatch", "refs/heads/main", True, True),
+    ("workflow_dispatch", "refs/heads/main", False, False),
+    ("workflow_dispatch", "refs/heads/feature", True, False),
+    ("push", "refs/heads/main", True, False),
+    ("pull_request", "refs/heads/main", True, False),
+))
+def test_formal_persistence_audit_is_independent_of_auto_deployment_hold(
+    enabled: str, event: str, ref: str, formal: bool, expected: bool,
+) -> None:
+    condition = yaml.safe_load(workflow("ci.yml"))["jobs"]["formal_smoke"]["if"]
+    assert _ci_job_condition(condition, enabled=enabled, event=event, ref=ref, formal=formal) is expected
 
 
 def test_ci_runs_dependency_and_runtime_contract_gates() -> None:

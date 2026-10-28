@@ -1576,3 +1576,13 @@ Admin旧POST本身仍无独立持久原请求槽/回执，真实网络或提交�
 实际云状态只读发现：已确认My Workspace的两个API均Free、main、autoDeploy=yes、**autoDeployTrigger=commit**、healthCheckPath=/api/health；平台最近live为公开数据提交 `80d01717faeb5a21cd1240ea6d8142e3320f5ae4`。这意味着Render不是等本仓CI通过才部署，不能从CI YAML推出平台受门禁保护（[Render当前自动部署说明](https://render.com/docs/deploys#configuring-auto-deploys)）。两次直接health读取各20秒超时，稍后curl候选15秒仍HTTP000/0bytes（TCP/TLS已完成）；不将其归因为已确认服务崩溃，也不放宽超时换PASS。有限错误日志9条均为此前not-a-code负例，不解释本次读取超时；平台live不代替外部应用smoke。未触发重启、部署、套餐/环境变量改变，未读取密钥值。
 
 当前不能合并：生产Worker/Gist与应急路径仍未切换，完整行情入库/严格发送前时钟与预算/私有持久health/旧信号和歧义状态迁移尚缺；“同一管理Decision集合”边界不阻止旧Gist另造IDs。main Owner/analysis/machine仍是本地profile；真实远端停写、fresh protected backup、Free配额/provider能力、新profile迁移、应用跨重启/独立恢复，以及实际Chrome/旧PWA/多设备、自然5交易窗口/2周级周期与原性能债务均须独立通过。上次真实云schema8核验是历史，不冒充本轮已重核；当前源码明确拒绝Turso即已足以阻断启用。用户的合并授权保留，但不提前合入main、不升9.0.0、不创建tag/release、不删旧Gist；后续先完成真实消费者链与受控存储启用再核合并。
+
+### 仅合并代码的条件性授权与部署暂停（2026-10-28）
+
+后续用户明确选择“仅合并代码，先暂停自动部署”。据此将上述上线验收从本次代码合并的前置条件延期，但所有未完成项仍未通过、正式发布仍 BLOCKED，应用保持8.0.0。CI 测试和数据任务不跳过；不执行数据库迁移、不删旧Gist、不创建tag/release。
+
+已设置并实际读回仓库变量 `AUTO_DEPLOY_ENABLED=false`，CI 的 Pages deploy/candidate_smoke 改为显式 true 才启用，覆盖日后数据提交的 push/dispatch。该变量只有守卫合入 main 后生效，不能声称旧 main 已被它暂停。formal_smoke 原独立严格持久性审计不变。
+
+两个 Render API 本轮读回仍 autoDeploy=yes/commit，最新 live 均为80d01717；Chrome Settings 页重定向登录。现有 MCP 没有关闭 Auto-Deploy 的操作，正常 CLI/API 登录也未配置；没有提取连接器凭据或代造 Token，尚未修改 Render 或合并。须完成两个服务 Off 的真实读回与新精确 CI 后才执行用户授权的 code-only merge。完整控制/恢复方案及证据范围见 [CODE-ONLY-MERGE-HOLD.md](CODE-ONLY-MERGE-HOLD.md)。
+
+其后用户确认两个服务均已关闭，代理实际读回两者 `autoDeploy=no / autoDeployTrigger=off`（更新时间08:22:16Z/08:22:26Z）。最新部署列表均无新增排队/进行中项，仍 live=80d01717；Pages release.json 同样仍为80d01717。未暂停服务运行或更改套餐/环境变量/数据库。Pages 暂停合同本机248项通过，独立复审相同248项通过，原 YAML 缺守卫的 RED 亦保留；这些只证明部署控制，不证明完整云验收。新暂停提交走正常 feature push、精确 PR CI 后普通合并，不强制/不删分支；合并后的精确身份与 CI 原生结果以 GitHub 记录为准。
