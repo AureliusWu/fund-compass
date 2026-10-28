@@ -1586,3 +1586,13 @@ Admin旧POST本身仍无独立持久原请求槽/回执，真实网络或提交�
 两个 Render API 本轮读回仍 autoDeploy=yes/commit，最新 live 均为80d01717；Chrome Settings 页重定向登录。现有 MCP 没有关闭 Auto-Deploy 的操作，正常 CLI/API 登录也未配置；没有提取连接器凭据或代造 Token，尚未修改 Render 或合并。须完成两个服务 Off 的真实读回与新精确 CI 后才执行用户授权的 code-only merge。完整控制/恢复方案及证据范围见 [CODE-ONLY-MERGE-HOLD.md](CODE-ONLY-MERGE-HOLD.md)。
 
 其后用户确认两个服务均已关闭，代理实际读回两者 `autoDeploy=no / autoDeployTrigger=off`（更新时间08:22:16Z/08:22:26Z）。最新部署列表均无新增排队/进行中项，仍 live=80d01717；Pages release.json 同样仍为80d01717。未暂停服务运行或更改套餐/环境变量/数据库。Pages 暂停合同本机248项通过，独立复审相同248项通过，原 YAML 缺守卫的 RED 亦保留；这些只证明部署控制，不证明完整云验收。新暂停提交走正常 feature push、精确 PR CI 后普通合并，不强制/不删分支；合并后的精确身份与 CI 原生结果以 GitHub 记录为准。
+
+#### 合并与独立 Blueprint 入口遗漏
+
+暂停提交e2a2dbd正常推送，实际PR CI40656654547测试merge=dc4283d（parents80d01717+e2a2dbd、tree905d4975）；backend4586/2warnings/252.53s/pip clean，frontend3443/120文件/type/build8.95s/PWA，Worker148/check/dry-run均通过。frontend4low/0moderate/high/critical、Worker0；deploy/candidate_smoke/formal_smoke均skipped，未代替真实验收。普通匹配head合并于08:32:39Z完成，commit=db5ac3207c54e866c94044af7f8372dbc757023d，parents/tree与上述测试相同；分支未删、无tag/release。main push CI40657553598另行自动执行。
+
+合并前最后一次两服务均no/off，合并后候选却yes/commit，并出现dep-dbgr6bfb9u1s7392hid0、trigger=blueprint_sync。原服务保持Off/旧live。遗漏点为Blueprint Auto Sync：render.yaml的单worker启动参数与Owner密码Secret声明差异足以触发独立配置同步部署，CI Pages guard不覆盖。官方当前spec称省略autoDeployTrigger应保留已有值，故候选具体重置机制仍待原生同步日志，不能编造为已证实默认行为；配置同步与普通commit部署是两条路径。该部署08:33:50.151847Z update_failed，随后旧80d01717仍live，Pages release.json亦旧SHA；不抹除尝试、不声称完全未触发或数据库全程无变化。已即时告知用户并请求Blueprint Auto Sync=No及再次Off，停止后续main配置推送；本地追加显式字符串off与合同测试防复发。详见CODE-ONLY-MERGE-HOLD；正式发布仍BLOCKED。
+
+候选服务08:36:40Z实际再次读回no/off，原服务仍Off。独立修复分支 `fix/code-only-blueprint-hold-20261028` 基于db5ac32，新增显式字符串off及缺失/commit/checksPass/YAML布尔/旧字段混用等拒绝合同，原真实文件测试先RED；最终相关persistence+workflow测试263项通过，未删原进程恢复/权限/免费/单worker/Secret约束。源码验证不是平台暂停或恢复验收，Blueprint Auto Sync仍须单独确认后才更新main。
+
+其后用户确认关停，Chrome实际DOM读取关联Blueprint exs-d8v0sgjtqb8s73f29ok0 Settings，标题Sync paused、autoSync=No、main/render.yaml；没有点击手动同步或显示/复制私有Sync Hook。连接器再次读回两个服务no/off，部署列表保留原update_failed及旧80d01717 live；Pages AUTO_DEPLOY_ENABLED=false。PR4合并后的main CI40657553598实际completed/success，resolve/backend/frontend/worker成功、deploy/candidate_smoke/formal_smoke实际skipped。暂停控制补齐不等于生产验收，PR5最终新head仍走完整CI再普通合并，不部署、不恢复开关、不删分支/旧Gist、不升版本。

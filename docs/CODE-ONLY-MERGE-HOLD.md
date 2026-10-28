@@ -12,6 +12,7 @@
 - `resolve`、后端、前端、Worker 测试/构建/依赖审计继续执行；数据任务的计划与推送不关闭。
 - `formal_smoke` 保持独立、显式手动触发及原 `enforce_persistence: true`，不因暂停而放宽。它是审计，不是暂停期间的部署入口。
 - Render 必须另行将两个既存服务的 **Auto-Deploy → Off**：`fund-compass-api`（`srv-d8v0t26rnols73fq6beg`）和 `fund-compass-api-v8-candidate`（`srv-dab7g0n40ujc73a2ma50`）。仓库变量不控制 Render，修改 YAML 也不证明既存服务设置已变。
+- **Blueprint Auto Sync 必须独立设为 No**。服务 Off 不能阻止 Blueprint 配置同步触发部署；`render.yaml` 中显式 `autoDeployTrigger: 'off'` 也不能替代此平台设置。涉及 Blueprint 文件的下一次 main 更新前必须先确认 Auto Sync=No，不能仅复查服务设置后直接合并。
 
 合并前必须读回两个服务均已关闭自动部署，确认无排队/进行中的部署，并核对新 PR head 的 CI。合并使用普通 GitHub 合并，不强制、不跳过 CI；保留原分支。合并后再核 PR/main 身份、CI 仍执行且 Pages 发布跳过、Render live SHA 未被此次代码合并改变。
 
@@ -25,10 +26,24 @@
 
 Pages 暂停合同先在旧 YAML 上 RED，再在新 YAML 上 GREEN；本机 workflow contract 及独立复审重跑均为 **248 passed**。未设/false/非 true 值、push/dispatch、PR/非 main 与 formal 分流均有测试。整个新 head 仍须真实 PR CI 后才合并，合并身份以 GitHub 原生记录为准。
 
+## 合并结果与 Blueprint 异常（2026-10-28）
+
+PR #4 已于 `2026-10-28T08:32:39Z`（北京时间16:32:39）普通合并为 `db5ac3207c54e866c94044af7f8372dbc757023d`，父为80d01717与e2a2dbd。实际 tree=`905d4975ed12c4a375bc850b0436a1b9b820d538`，与通过的 PR CI 测试快照dc4283d相同。[PR CI 40656654547](https://github.com/AureliusWu/fund-compass/actions/runs/40656654547)：backend4586/2warnings/252.53s、frontend3443/120文件/type/build/PWA、Worker148/check/dry-run均通过；frontend审计4low、无中危及以上，Worker0。部署/两类smoke跳过，不是生产验收。
+
+**暂停检查遗漏了独立的 Blueprint Auto Sync。** main 同时合入的 Blueprint 配置差异为单 worker 启动参数及 Owner 密码 Secret 声明；合并后平台产生 `trigger=blueprint_sync` 的候选部署 `dep-dbgr6bfb9u1s7392hid0`，候选服务实际读回变为yes/commit，原服务仍no/off。官方规范称省略 autoDeployTrigger 应保留已有服务值，因此不能仅凭省略字段断言“按默认值必然重置”；实际设置改变的内部原因仍需平台同步日志确认。配置同步可独立部署及本次原生 trigger 已确证，不受 Pages 开关控制。参考 [Blueprint 自动同步](https://render.com/docs/infrastructure-as-code#disabling-automatic-sync) 与 [autoDeployTrigger 规范](https://render.com/docs/blueprint-spec#autodeploytrigger)。
+
+该部署于 `2026-10-28T08:33:50.151847Z` 以 **update_failed** 结束；随后部署列表仍保留80d01717为live，未观察到新代码成功上线。Pages release.json同样仍为80d01717。没有据平台live宣称API可用/数据库未发生任何变化或正式验收完成。原在途尝试与失败不能抹除，不能把此次操作总结为“完全未触发部署”。
+
+主代理已通知用户关闭 Blueprint Auto Sync、再次关闭候选 Auto-Deploy，并停止后续 main 配置推送。下一源码防线是显式声明字符串off及回归合同；这是仓库配置，不证明平台 Auto Sync 已关闭。控制未核齐前仍为 **deployment hold INCOMPLETE / formal release BLOCKED**，不再尝试重部署或自动恢复。
+
+随后候选设置于 `2026-10-28T08:36:40.678482Z` 再次变为no/off，原服务仍no/off；这是代理实际读回，不代替 Blueprint Auto Sync 的独立确认。防复发补丁在独立修复分支中显式声明off，原 YAML 的新文件合同先RED（缺字段失败），修复后 persistence/workflow 合同共 **263 passed**；测试拒绝缺失、commit、checksPass、YAML布尔与旧字段混用，保留免费/单服务/单进程/秘密配置原约束。仅可先推送修复分支进行PR CI，不在 Auto Sync 未确认前再次更新 main。
+
+用户随后确认已关闭，代理通过 Chrome **实际 DOM** 读取关联 Blueprint `exs-d8v0sgjtqb8s73f29ok0` 的 Settings：标题 **Sync paused**，`autoSync` 按钮 **No**，分支main、路径render.yaml；未点击Manual sync、未显示或复制Sync Hook。同期连接器再次确认两个服务no/off，候选无新部署、原update_failed及80d01717 live保留，Pages变量false。三类暂停控制现已实际核齐；这不撤销此前尝试，也不证明生产功能、数据库耐久或v9发布通过。独立补丁见 [PR #5](https://github.com/AureliusWu/fund-compass/pull/5)，仍须该最终head的完整CI后普通合并。PR4合并后的 [main CI40657553598](https://github.com/AureliusWu/fund-compass/actions/runs/40657553598) 已completed/success，四项质量作业成功、deploy/candidate_smoke/formal_smoke均实际skipped。
+
 实际状态可能变化，后续执行必须重新读取；不得从本文推断当前云设置。
 
 ## 恢复部署
 
-只有在取得针对后续部署的授权并完成相应上线门禁后，才重新启用 Render 自动部署和 Pages 仓库变量。恢复时选定同一精确 main SHA，先核 CI、存储兼容、备份/恢复与回滚点，再部署和执行真实冒烟。恢复开关不等于发布验收通过；不要为“解冻”而关闭 schema、权限、未知提交或持久性守卫。
+只有在取得针对后续部署的授权并完成相应上线门禁后，才分别恢复 Blueprint Auto Sync、Render 自动部署和 Pages 仓库变量。恢复时选定同一精确 main SHA，先核 CI、存储兼容、备份/恢复与回滚点，再部署和执行真实冒烟。恢复开关不等于发布验收通过；不要为“解冻”而关闭 schema、权限、未知提交或持久性守卫。
 
 暂停期间，公开站点与 API 不会自动获得 main 的新代码和静态数据制品；原生产 Worker 与其既有任务保持不变，旧线上数据新鲜度仍须独立关注。

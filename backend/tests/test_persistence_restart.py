@@ -4,6 +4,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 import yaml
 
 
@@ -156,18 +157,65 @@ def test_v8_full_ledger_reader_rejects_missing_source_health_audit(tmp_path: Pat
 
 def test_render_blueprint_stays_free_and_paid_blueprint_is_absent() -> None:
     active = yaml.safe_load((ROOT / "render.yaml").read_text(encoding="utf-8"))
+    assert len(active["services"]) == 1
     active_service = active["services"][0]
     environment = {item["key"]: item for item in active_service["envVars"]}
 
+    assert active_service["name"] == "fund-compass-api-v8-candidate"
+    assert active_service["type"] == "web"
+    assert active_service["runtime"] == "python"
+    assert active_service["rootDir"] == "backend"
     assert active_service["plan"] == "free"
     assert "disk" not in active_service
+    assert active_service["buildCommand"] == "pip install -r requirements.txt"
+    assert active_service["startCommand"] == (
+        "uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1"
+    )
+    assert active_service["healthCheckPath"] == "/api/health"
+    assert len(environment) == len(active_service["envVars"])
+    assert environment["PYTHON_VERSION"]["value"] == "3.12.7"
     assert environment["FUND_DB_BACKEND"]["value"] == "turso"
     assert environment["FUND_DB_PERSISTENCE"]["value"] == "turso_candidate"
     assert environment["FUND_DB_TIMEOUT_SECONDS"]["value"] == 60
-    assert environment["TURSO_DATABASE_URL"] == {
-        "key": "TURSO_DATABASE_URL", "sync": False,
+    secret_keys = {
+        "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN", "ADMIN_TOKEN", "WORKER_TOKEN",
+        "PRIVATE_READ_TOKEN", "OWNER_PASSWORD_HASH",
     }
-    assert environment["TURSO_AUTH_TOKEN"] == {
-        "key": "TURSO_AUTH_TOKEN", "sync": False,
+    assert set(environment) == secret_keys | {
+        "PYTHON_VERSION", "FUND_DB_BACKEND", "FUND_DB_PERSISTENCE", "FUND_DB_TIMEOUT_SECONDS",
     }
+    for key in secret_keys:
+        assert environment[key] == {"key": key, "sync": False}
     assert not (ROOT / "render-persistent.yaml").exists()
+
+
+def _assert_service_commit_auto_deploy_is_off(service: dict) -> None:
+    # This is only the source declaration for service commit deploys. A
+    # Blueprint configuration sync is a separate deploy path and must be
+    # paused/read back independently in Render before pushing Blueprint edits.
+    trigger = service.get("autoDeployTrigger")
+    assert type(trigger) is str and trigger == "off", "explicit string off is required"
+    assert "autoDeploy" not in service, "do not mix the deprecated autoDeploy field"
+
+
+def test_render_blueprint_declares_service_commit_auto_deploy_off() -> None:
+    active = yaml.safe_load((ROOT / "render.yaml").read_text(encoding="utf-8"))
+    for service in active["services"]:
+        _assert_service_commit_auto_deploy_is_off(service)
+
+
+@pytest.mark.parametrize("declaration", (
+    "{}",
+    "autoDeployTrigger: commit",
+    "autoDeployTrigger: checksPass",
+    "autoDeployTrigger: false",
+    "autoDeployTrigger: off",  # PyYAML YAML 1.1 coerces unquoted off to bool.
+    "autoDeployTrigger: true",
+    "autoDeployTrigger: null",
+    "autoDeployTrigger: ''",
+    "autoDeployTrigger: 'OFF'",
+    "autoDeployTrigger: 'off'\nautoDeploy: false",
+))
+def test_blueprint_hold_contract_rejects_missing_or_ambiguous_deploy_control(declaration: str) -> None:
+    with pytest.raises(AssertionError):
+        _assert_service_commit_auto_deploy_is_off(yaml.safe_load(declaration))
