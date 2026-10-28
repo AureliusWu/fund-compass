@@ -103,11 +103,27 @@ def verify_owner_analysis_schema(conn) -> None:
 
 
 def verify_owner_workspace_schema(conn) -> None:
-    """Read-only union of exactly Owner-only or the complete analysis profile."""
+    """Read-only union of three independently fixed local workspace profiles."""
     _local_connection(conn)
     actual = _objects(conn)
     owner = _verify_owner_sync_objects(conn, actual)
     if set(actual) == set(owner):
+        return
+    if ("table", "owner_machine_journal") in actual:
+        from database.owner_machine_schema import _verify_machine_objects
+        _verify_machine_objects(conn, actual, owner)
+        return
+    _verify_analysis_objects(conn, actual, owner)
+
+
+def verify_owner_analysis_workspace_schema(conn) -> None:
+    """Analysis-compatible local profiles only; plain Owner sync is refused."""
+    _local_connection(conn)
+    actual = _objects(conn)
+    owner = _verify_owner_sync_objects(conn, actual)
+    if ("table", "owner_machine_journal") in actual:
+        from database.owner_machine_schema import _verify_machine_objects
+        _verify_machine_objects(conn, actual, owner)
         return
     _verify_analysis_objects(conn, actual, owner)
 

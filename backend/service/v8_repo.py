@@ -2115,6 +2115,114 @@ def _notification_semantics(event: NotificationEvent) -> dict:
     return _without(event.model_dump(mode="python"), "occurred_at")
 
 
+def _notification_machine_binding_guard(conn, identifiers, events, binding) -> None:
+    """Keep actual machine-task decisions out of the legacy sending entry.
+
+    Membership is a same-database task/component relation, never a decision
+    prefix, caller detail, deployment flag or a second transport lock. The
+    machine caller has already verified source/Policy in this transaction;
+    this boundary binds the complete batch and every prior transport phase.
+    """
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='owner_machine_journal'").fetchone() is None:
+        if binding is not None:
+            raise SnapshotConflictError("machine notification task is unavailable")
+        return
+    placeholders = ",".join("?" for _ in identifiers)
+    matches = conn.execute(
+        "SELECT DISTINCT CASE WHEN typeof(j.record_id)='text' AND length(CAST(j.record_id AS BLOB))<=128 "
+        "THEN j.record_id ELSE NULL END,"
+        "CASE WHEN typeof(j.payload_hash)='text' AND length(CAST(j.payload_hash AS BLOB))=64 "
+        "AND j.payload_hash NOT GLOB '*[^0-9a-f]*' THEN j.payload_hash ELSE NULL END,"
+        "CASE WHEN typeof(j.analysis_request_id)='text' AND length(CAST(j.analysis_request_id AS BLOB))<=128 "
+        "THEN j.analysis_request_id ELSE NULL END FROM owner_machine_journal j "
+        "JOIN owner_analysis_components c ON c.request_id=j.analysis_request_id "
+        f"WHERE j.kind='task' AND c.decision_id IN ({placeholders}) LIMIT 101", identifiers,
+    ).fetchall()
+    if not matches and binding is None:
+        return  # Unrelated legacy decisions retain the original contract.
+    if binding is None:
+        raise SnapshotConflictError("machine-managed notifications require the machine task entry")
+    if (type(binding) is not tuple or len(binding) != 2 or any(type(item) is not str for item in binding)
+            or len(matches) != 1 or tuple(matches[0][:2]) != binding):
+        raise SnapshotConflictError("machine notification task binding mismatch")
+    # Import only for an actual machine-bound call. Old core/Owner/remote
+    # inventories are neither broadened nor automatically provisioned here.
+    from database.owner_machine_schema import verify_owner_machine_schema
+    from service import owner_machine_repo as machine
+    verify_owner_machine_schema(conn)
+    occurrence, task_hash = binding
+    loaded = machine._load(conn, "task", occurrence)
+    task = loaded[0] if loaded is not None else None
+    complete = [row[0] for row in conn.execute(
+        "SELECT CASE WHEN typeof(decision_id)='text' AND length(CAST(decision_id AS BLOB))=68 "
+        "THEN decision_id ELSE NULL END FROM owner_analysis_components WHERE request_id=? ORDER BY fund_code LIMIT 101",
+        (matches[0][2],),
+    ).fetchall()]
+    if (loaded is None or loaded[1] != task_hash or task.get("schema") != "owner-machine-task-1"
+            or task.get("analysis_request_id") != matches[0][2] or task.get("decision_ids") != complete
+            or not 1 <= len(complete) <= 100 or any(value is None for value in complete) or identifiers != complete
+            or events[0].scheduled_window not in {occurrence + "T14:30+08:00", occurrence + "T14:40+08:00"}
+            or events[0].detail != {"machine_task_hash": task_hash, "occurrence_id": occurrence}):
+        raise SnapshotConflictError("machine notification requires its complete original task batch")
+
+    # Existing V8 phases can predate creation of the task row. Neither a
+    # different natural/manual axis nor a forged task-only detail turns those
+    # legacy claims into a new safe delivery. Every prior send-related row
+    # must have an exact original immutable journal mapping.
+    allowed: dict[str, NotificationEvent] = {}
+    for slot in ("14:30", "14:40"):
+        entry = machine._load(conn, "attempt", occurrence + ":" + slot)
+        terminal = machine._load(conn, "result", occurrence + ":" + slot)
+        if entry is None:
+            if terminal is not None:
+                raise SnapshotConflictError("machine notification result has no original attempt")
+            continue
+        attempt, attempt_hash = entry
+        if (attempt.get("schema") != "owner-machine-attempt-1" or attempt.get("task_hash") != task_hash
+                or attempt.get("analysis_request_id") != matches[0][2] or attempt.get("decision_ids") != complete
+                or attempt.get("slot") != slot or attempt.get("scheduled_window") != occurrence + "T" + slot + "+08:00"
+                or type(attempt.get("attempt_no")) is not int or attempt["attempt_no"] not in {1, 2}
+                or type(attempt.get("natural_schedule")) is not bool):
+            raise SnapshotConflictError("machine notification attempt binding mismatch")
+        phases = [("attempted", datetime.fromisoformat(attempt["created_at"]), None)]
+        if terminal is not None:
+            value = terminal[0]
+            outcome = value.get("outcome")
+            if (value.get("schema") != "owner-machine-result-1" or value.get("attempt_hash") != attempt_hash
+                    or value.get("analysis_request_id") != matches[0][2]
+                    or outcome not in {"sent", "delivery_rejected", "pre_delivery_failed", "delivery_ambiguous"}):
+                raise SnapshotConflictError("machine notification result binding mismatch")
+            phases.append(("sent" if outcome == "sent" else "failed",
+                           datetime.fromisoformat(value["created_at"]), None if outcome == "sent" else outcome))
+        detail = {"machine_task_hash": task_hash, "occurrence_id": occurrence}
+        for status, stamp, error in phases:
+            for identifier in complete:
+                expected = _notification_event(decision_id=identifier, scheduled_window=attempt["scheduled_window"],
+                    status=status, attempt_no=attempt["attempt_no"], natural_schedule=attempt["natural_schedule"],
+                    occurred_at=stamp, error_class=error, detail=detail)
+                allowed[expected.event_log_id] = expected
+    prior = conn.execute(
+        "SELECT event_log_id,notification_event_id,decision_id,scheduled_window,status,attempt_no,natural_schedule,"
+        "occurred_at,error_class,CASE WHEN typeof(detail_json)='text' AND length(CAST(detail_json AS BLOB))<=16384 "
+        "THEN detail_json ELSE NULL END FROM production_notification_events "
+        f"WHERE decision_id IN ({placeholders}) AND substr(scheduled_window,1,10)=? "
+        "AND status IN ('attempted','sent','failed','compensated') LIMIT 401",
+        [*identifiers, occurrence],
+    ).fetchall()
+    if len(prior) > 400:
+        raise SnapshotConflictError("machine notification history exceeds its fixed task phases")
+    for row in prior:
+        expected = allowed.get(row[0])
+        if expected is None:
+            raise SnapshotConflictError("machine notification has an unbound earlier transport claim")
+        model = NotificationEvent.model_validate_json(row[9])
+        values = (expected.event_log_id, expected.notification_event_id, expected.decision_id,
+                  expected.scheduled_window, expected.status, expected.attempt_no, int(expected.natural_schedule),
+                  expected.occurred_at.isoformat(), expected.error_class)
+        if tuple(row[:9]) != values or model.model_dump(mode="python") != expected.model_dump(mode="python"):
+            raise SnapshotConflictError("machine notification history binding mismatch")
+
+
 def record_notification_events_batch(
     *,
     decision_ids: Iterable[str],
@@ -2138,6 +2246,51 @@ def record_notification_events_batch(
         raise ValueError("notification decision_ids must be non-empty and unique")
     stamp = occurred_at or _now()
     event_detail = detail or {}
+    # Preserve the public entry point's original no-connection validation.
+    # The independently callable kernel repeats model validation after checking
+    # transaction ownership rather than accepting caller-supplied event models.
+    for identifier in identifiers:
+        _notification_event(
+            decision_id=identifier, scheduled_window=scheduled_window,
+            status=status, attempt_no=attempt_no, natural_schedule=natural_schedule,
+            occurred_at=stamp, error_class=error_class, detail=event_detail,
+        )
+    with db.transaction(immediate=True) as conn:
+        return _record_notification_events_in_transaction(
+            conn, decision_ids=identifiers, scheduled_window=scheduled_window,
+            status=status, attempt_no=attempt_no, natural_schedule=natural_schedule,
+            occurred_at=stamp, error_class=error_class, detail=event_detail,
+        )
+
+
+def _record_notification_events_in_transaction(
+    conn,
+    *,
+    decision_ids: Iterable[str],
+    scheduled_window: str,
+    status: str,
+    attempt_no: int,
+    natural_schedule: bool,
+    occurred_at: datetime | None = None,
+    error_class: str | None = None,
+    detail: dict[str, Any] | None = None,
+    _machine_binding: tuple[str, str] | None = None,
+) -> list[NotificationRecordResult]:
+    """Use the existing batch claim in the caller's active transaction.
+
+    This internal primitive never opens a business connection or owns its
+    commit, rollback or close. Fixed schema verification may compile a trusted
+    in-memory reference on a cold verifier cache, not a second business DB.
+    The caller can atomically bind source/task checks to exactly
+    the same production lineage and notification claim used by the public API.
+    """
+    if getattr(conn, "in_transaction", False) is not True:
+        raise ValueError("active_transaction_required")
+    identifiers = list(decision_ids)
+    if not identifiers or len(identifiers) != len(set(identifiers)):
+        raise ValueError("notification decision_ids must be non-empty and unique")
+    stamp = occurred_at or _now()
+    event_detail = detail or {}
     events = [
         _notification_event(
             decision_id=identifier,
@@ -2151,139 +2304,139 @@ def record_notification_events_batch(
         )
         for identifier in identifiers
     ]
-    with db.transaction(immediate=True) as conn:
-        _acceptance_guard(conn, "notification", events[0])
-        placeholders = ",".join("?" for _ in identifiers)
-        lineages = _decision_lineages(conn, identifiers)
-        missing = [identifier for identifier in identifiers if identifier not in lineages]
-        if missing:
-            raise LookupError(f"notification decision not found: {','.join(missing)}")
-        _acceptance_guard(conn, "notification", events[0],
-                          *(record for lineage in lineages.values() for record in lineage))
+    _acceptance_guard(conn, "notification", events[0])
+    placeholders = ",".join("?" for _ in identifiers)
+    lineages = _decision_lineages(conn, identifiers)
+    missing = [identifier for identifier in identifiers if identifier not in lineages]
+    if missing:
+        raise LookupError(f"notification decision not found: {','.join(missing)}")
+    _acceptance_guard(conn, "notification", events[0],
+                      *(record for lineage in lineages.values() for record in lineage))
+    _notification_machine_binding_guard(conn, identifiers, events, _machine_binding)
 
-        if status == "attempted":
-            event_ids = [event.notification_event_id for event in events]
-            event_placeholders = ",".join("?" for _ in event_ids)
-            claimed_rows = conn.execute(
-                f"""SELECT event_log_id,detail_json FROM production_notification_events
-                    WHERE notification_event_id IN ({event_placeholders})
-                      AND status='attempted' AND natural_schedule=?""",
-                [*event_ids, int(natural_schedule)],
-            ).fetchall()
-            if claimed_rows:
-                exact = {
-                    row["event_log_id"]: NotificationEvent.model_validate_json(row["detail_json"])
-                    for row in claimed_rows
-                }
-                results = []
-                for event in events:
-                    existing = exact.get(event.event_log_id)
-                    if existing is not None and _notification_semantics(existing) != _notification_semantics(event):
-                        raise SnapshotConflictError("notification claim replay changed immutable content")
-                    results.append(NotificationRecordResult(
-                        event=existing or event,
-                        claimed=False,
-                        duplicate=True,
-                    ))
-                return results
-            if not natural_schedule:
-                natural_terminal = conn.execute(
-                    f"""SELECT 1 FROM production_notification_events
-                        WHERE decision_id IN ({placeholders})
-                          AND natural_schedule=1
-                          AND substr(scheduled_window,1,10)=?
-                          AND status IN ('sent','compensated') LIMIT 1""",
-                    [*identifiers, scheduled_window[:10]],
-                ).fetchone()
-                if natural_terminal:
-                    return [
-                        NotificationRecordResult(event=event, claimed=False, duplicate=True)
-                        for event in events
-                    ]
-            if natural_schedule:
-                prior_rows = conn.execute(
-                    f"""SELECT decision_id,notification_event_id,status,attempt_no,error_class
-                        FROM production_notification_events
-                        WHERE decision_id IN ({placeholders})
-                          AND natural_schedule=1
-                          AND substr(scheduled_window,1,10)=?
-                          AND notification_event_id NOT IN ({event_placeholders})""",
-                    [*identifiers, scheduled_window[:10], *event_ids],
-                ).fetchall()
-                phases: dict[tuple[str, str, int], dict[str, set[str]]] = {}
-                for row in prior_rows:
-                    phase = phases.setdefault(
-                        (row["decision_id"], row["notification_event_id"], int(row["attempt_no"])),
-                        {"states": set(), "errors": set()},
-                    )
-                    phase["states"].add(row["status"])
-                    if row["error_class"]:
-                        phase["errors"].add(row["error_class"])
-                prior_claim_is_terminal_or_ambiguous = any(
-                    "sent" in phase["states"]
-                    or "compensated" in phase["states"]
-                    or "delivery_ambiguous" in phase["errors"]
-                    or ("attempted" in phase["states"] and "failed" not in phase["states"])
-                    for phase in phases.values()
-                )
-                if prior_claim_is_terminal_or_ambiguous:
-                    return [
-                        NotificationRecordResult(event=event, claimed=False, duplicate=True)
-                        for event in events
-                    ]
+    if status == "attempted":
+        event_ids = [event.notification_event_id for event in events]
+        event_placeholders = ",".join("?" for _ in event_ids)
+        claimed_rows = conn.execute(
+            f"""SELECT event_log_id,detail_json FROM production_notification_events
+                WHERE notification_event_id IN ({event_placeholders})
+                  AND status='attempted' AND natural_schedule=?""",
+            [*event_ids, int(natural_schedule)],
+        ).fetchall()
+        if claimed_rows:
+            exact = {
+                row["event_log_id"]: NotificationEvent.model_validate_json(row["detail_json"])
+                for row in claimed_rows
+            }
+            results = []
             for event in events:
-                scheduled = conn.execute(
-                    """SELECT 1 FROM production_notification_events
-                       WHERE notification_event_id=? AND status='scheduled'
-                         AND attempt_no=0 AND natural_schedule=? LIMIT 1""",
-                    (event.notification_event_id, int(natural_schedule)),
-                ).fetchone()
-                if not scheduled:
-                    raise SnapshotConflictError("notification attempt has no scheduled event")
-
-        results: list[NotificationRecordResult] = []
-        for event in events:
-            existing_row = conn.execute(
-                "SELECT detail_json FROM production_notification_events WHERE event_log_id=?",
-                (event.event_log_id,),
-            ).fetchone()
-            if existing_row:
-                existing = NotificationEvent.model_validate_json(existing_row["detail_json"])
-                if _notification_semantics(existing) != _notification_semantics(event):
-                    raise SnapshotConflictError("notification event replay changed immutable content")
+                existing = exact.get(event.event_log_id)
+                if existing is not None and _notification_semantics(existing) != _notification_semantics(event):
+                    raise SnapshotConflictError("notification claim replay changed immutable content")
                 results.append(NotificationRecordResult(
-                    event=existing,
+                    event=existing or event,
                     claimed=False,
                     duplicate=True,
                 ))
-                continue
+            return results
+        if not natural_schedule:
+            natural_terminal = conn.execute(
+                f"""SELECT 1 FROM production_notification_events
+                    WHERE decision_id IN ({placeholders})
+                      AND natural_schedule=1
+                      AND substr(scheduled_window,1,10)=?
+                      AND status IN ('sent','compensated') LIMIT 1""",
+                [*identifiers, scheduled_window[:10]],
+            ).fetchone()
+            if natural_terminal:
+                return [
+                    NotificationRecordResult(event=event, claimed=False, duplicate=True)
+                    for event in events
+                ]
+        if natural_schedule:
+            prior_rows = conn.execute(
+                f"""SELECT decision_id,notification_event_id,status,attempt_no,error_class
+                    FROM production_notification_events
+                    WHERE decision_id IN ({placeholders})
+                      AND natural_schedule=1
+                      AND substr(scheduled_window,1,10)=?
+                      AND notification_event_id NOT IN ({event_placeholders})""",
+                [*identifiers, scheduled_window[:10], *event_ids],
+            ).fetchall()
+            phases: dict[tuple[str, str, int], dict[str, set[str]]] = {}
+            for row in prior_rows:
+                phase = phases.setdefault(
+                    (row["decision_id"], row["notification_event_id"], int(row["attempt_no"])),
+                    {"states": set(), "errors": set()},
+                )
+                phase["states"].add(row["status"])
+                if row["error_class"]:
+                    phase["errors"].add(row["error_class"])
+            prior_claim_is_terminal_or_ambiguous = any(
+                "sent" in phase["states"]
+                or "compensated" in phase["states"]
+                or "delivery_ambiguous" in phase["errors"]
+                or ("attempted" in phase["states"] and "failed" not in phase["states"])
+                for phase in phases.values()
+            )
+            if prior_claim_is_terminal_or_ambiguous:
+                return [
+                    NotificationRecordResult(event=event, claimed=False, duplicate=True)
+                    for event in events
+                ]
+        for event in events:
+            scheduled = conn.execute(
+                """SELECT 1 FROM production_notification_events
+                   WHERE notification_event_id=? AND status='scheduled'
+                     AND attempt_no=0 AND natural_schedule=? LIMIT 1""",
+                (event.notification_event_id, int(natural_schedule)),
+            ).fetchone()
+            if not scheduled:
+                raise SnapshotConflictError("notification attempt has no scheduled event")
 
-            if status in {"sent", "failed", "compensated"}:
-                attempted = conn.execute(
-                    """SELECT 1 FROM production_notification_events
-                       WHERE notification_event_id=? AND status='attempted'
-                         AND attempt_no=? AND natural_schedule=? LIMIT 1""",
-                    (event.notification_event_id, attempt_no, int(natural_schedule)),
-                ).fetchone()
-                if not attempted:
-                    raise SnapshotConflictError("notification completion has no matching attempted claim")
-
-            payload = event.model_dump(mode="python")
-            conn.execute(*prepare_v8_insert(
-                conn, "notification_events",
-                (
-                    event.event_log_id, event.notification_event_id, event.decision_id,
-                    event.scheduled_window, event.status, event.attempt_no,
-                    int(event.natural_schedule), event.occurred_at.isoformat(), event.error_class,
-                    _json(payload),
-                ),
-            ))
+    results: list[NotificationRecordResult] = []
+    for event in events:
+        existing_row = conn.execute(
+            "SELECT detail_json FROM production_notification_events WHERE event_log_id=?",
+            (event.event_log_id,),
+        ).fetchone()
+        if existing_row:
+            existing = NotificationEvent.model_validate_json(existing_row["detail_json"])
+            if _notification_semantics(existing) != _notification_semantics(event):
+                raise SnapshotConflictError("notification event replay changed immutable content")
             results.append(NotificationRecordResult(
-                event=event,
-                claimed=status == "attempted",
-                duplicate=False,
+                event=existing,
+                claimed=False,
+                duplicate=True,
             ))
-        return results
+            continue
+
+        if status in {"sent", "failed", "compensated"}:
+            attempted = conn.execute(
+                """SELECT 1 FROM production_notification_events
+                   WHERE notification_event_id=? AND status='attempted'
+                     AND attempt_no=? AND natural_schedule=? LIMIT 1""",
+                (event.notification_event_id, attempt_no, int(natural_schedule)),
+            ).fetchone()
+            if not attempted:
+                raise SnapshotConflictError("notification completion has no matching attempted claim")
+
+        payload = event.model_dump(mode="python")
+        conn.execute(*prepare_v8_insert(
+            conn, "notification_events",
+            (
+                event.event_log_id, event.notification_event_id, event.decision_id,
+                event.scheduled_window, event.status, event.attempt_no,
+                int(event.natural_schedule), event.occurred_at.isoformat(), event.error_class,
+                _json(payload),
+            ),
+        ))
+        results.append(NotificationRecordResult(
+            event=event,
+            claimed=status == "attempted",
+            duplicate=False,
+        ))
+    return results
 
 
 def record_notification_event(

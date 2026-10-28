@@ -15,7 +15,7 @@ import sqlite3
 import time
 from typing import Callable
 
-from database.owner_analysis_schema import verify_owner_analysis_schema
+from database.owner_analysis_schema import verify_owner_analysis_workspace_schema
 from models.owner_analysis import AnalysisValidationError, parse_owner_analysis_request
 from models.v8 import (
     DecisionSnapshot, EvidenceSnapshot, HoldingVersion, PortfolioPolicy,
@@ -127,7 +127,7 @@ def _ready(conn):
     try:
         if tuple(conn.execute("PRAGMA foreign_keys").fetchone()) != (1,):
             raise ValueError("foreign keys must already be enabled")
-        verify_owner_analysis_schema(conn)
+        verify_owner_analysis_workspace_schema(conn)
     except Exception:
         raise _Fault("analysis_storage_unavailable") from None
 
@@ -437,6 +437,45 @@ def _stored(conn, identifier: str, request_hash: str, check) -> AnalysisResult |
         raise _Fault("analysis_integrity_unavailable") from None
 
 
+def _create_analysis_in_transaction(conn, request, check) -> AnalysisResult:
+    """Append the original analysis chain inside a caller-owned transaction.
+
+    The caller supplies the already parsed request and authorization/budget
+    check, verifies its exact schema profile and owns every lifecycle step.
+    Source revision/hash, all actual V8 writes and the original task receipt
+    remain subject to the same checks as the Owner HTTP entry point.
+    """
+    if getattr(conn, "in_transaction", False) is not True:
+        raise ValueError("active_transaction_required")
+    existing = _stored(conn, request.request_id, request.request_hash(), check)
+    if existing is not None:
+        return existing
+    source, source_raw, source_hash = _source(conn, check)
+    if source["revision"] != request.expected_revision:
+        raise _Fault("analysis_source_conflict", 409)
+    body, response_raw, plans = _plan(conn, request, source, source_hash, _clock(), check)
+    counts = [conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+              for table in ("owner_analysis_runs", "owner_analysis_components")]
+    if counts[0] >= MAX_RUNS or counts[1] + len(plans) > MAX_COMPONENTS:
+        raise _Fault("analysis_capacity_exhausted")
+    check()
+    for holding, decision in plans:
+        check()
+        v8_repo._save_holding_in_transaction(conn, holding, scope=scopes.PRODUCTION)
+        v8_repo._save_decision_in_transaction(conn, decision, scope=scopes.PRODUCTION)
+    conn.execute("INSERT INTO owner_analysis_runs(" + ",".join(_RUN_COLUMNS) + ") VALUES(" + ",".join("?" for _ in _RUN_COLUMNS) + ")",
+        (request.request_id, request.request_hash(), request.canonical_body(), body["run_id"], source["revision"],
+         source_hash, source_raw, request.policy_version, ANALYSIS_STRATEGY_VERSION, body["created_at"], response_raw, _sha(response_raw)))
+    for holding, decision in plans:
+        check()
+        conn.execute("INSERT INTO owner_analysis_components(request_id,fund_code,holding_version,evidence_id,decision_id) VALUES(?,?,?,?,?)",
+            (request.request_id, holding.fund_code, holding.holding_version, decision.evidence_id, decision.decision_id))
+    result = _stored(conn, request.request_id, request.request_hash(), check)
+    if result is None or result.body != {"run": body, "source_current": True}:
+        raise _Fault("analysis_integrity_unavailable")
+    return result
+
+
 def create_analysis_local(conn, raw: bytes | str, *, before_commit: Callable | None = None) -> AnalysisResult:
     try:
         request = parse_owner_analysis_request(raw)
@@ -447,34 +486,8 @@ def create_analysis_local(conn, raw: bytes | str, *, before_commit: Callable | N
         check = _guard(before_commit)
         check(); _ready(conn); check()
         conn.execute("BEGIN IMMEDIATE"); active = True
-        verify_owner_analysis_schema(conn); check()
-        existing = _stored(conn, request.request_id, request.request_hash(), check)
-        if existing is not None:
-            check(); conn.commit(); active = False; check()
-            return existing
-        source, source_raw, source_hash = _source(conn, check)
-        if source["revision"] != request.expected_revision:
-            raise _Fault("analysis_source_conflict", 409)
-        body, response_raw, plans = _plan(conn, request, source, source_hash, _clock(), check)
-        counts = [conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-                  for table in ("owner_analysis_runs", "owner_analysis_components")]
-        if counts[0] >= MAX_RUNS or counts[1] + len(plans) > MAX_COMPONENTS:
-            raise _Fault("analysis_capacity_exhausted")
-        check()
-        for holding, decision in plans:
-            check()
-            v8_repo._save_holding_in_transaction(conn, holding, scope=scopes.PRODUCTION)
-            v8_repo._save_decision_in_transaction(conn, decision, scope=scopes.PRODUCTION)
-        conn.execute("INSERT INTO owner_analysis_runs(" + ",".join(_RUN_COLUMNS) + ") VALUES(" + ",".join("?" for _ in _RUN_COLUMNS) + ")",
-            (request.request_id, request.request_hash(), request.canonical_body(), body["run_id"], source["revision"],
-             source_hash, source_raw, request.policy_version, ANALYSIS_STRATEGY_VERSION, body["created_at"], response_raw, _sha(response_raw)))
-        for holding, decision in plans:
-            check()
-            conn.execute("INSERT INTO owner_analysis_components(request_id,fund_code,holding_version,evidence_id,decision_id) VALUES(?,?,?,?,?)",
-                (request.request_id, holding.fund_code, holding.holding_version, decision.evidence_id, decision.decision_id))
-        result = _stored(conn, request.request_id, request.request_hash(), check)
-        if result is None or result.body != {"run": body, "source_current": True}:
-            raise _Fault("analysis_integrity_unavailable")
+        verify_owner_analysis_workspace_schema(conn); check()
+        result = _create_analysis_in_transaction(conn, request, check)
         check(); conn.commit(); active = False; check()
         return result
     except _GuardFailure as error:
@@ -500,7 +513,7 @@ def reconcile_analysis_local(conn, request_id: str, request_hash: str) -> Analys
             raise ValueError("invalid receipt identity")
         check = _guard(None)
         _ready(conn); conn.execute("BEGIN"); active = True
-        verify_owner_analysis_schema(conn)
+        verify_owner_analysis_workspace_schema(conn)
         result = _stored(conn, request_id, request_hash, check)
         check(); conn.commit(); active = False; check()
         return AnalysisReconciliation("matched" if result is not None else "absent", request_id, result)
