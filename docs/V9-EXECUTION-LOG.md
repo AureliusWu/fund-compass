@@ -1548,3 +1548,31 @@ backend新增生命周期 **30 passed/1 warning/11.01s**：实际Admin A/B/C、�
 前候选9654的 [自然CI40291296060](https://github.com/AureliusWu/fund-compass/actions/runs/40291296060) 已另核：actual checkout=`d66141dd8fdf106fcc4bb91d4c5f5964f8935140`（5f8+9654父、tree=`7c3114c7ba0fd15dda4c367676a52d95e01a08c4`等于feature）；backend4090/2 warnings/217.95s/pip clean，frontend3440/120/37.16s/type/build6.23s/PWA7/7/audit0，Worker148/4/check/dryrun/audit0，resolve成功。runner仅Ubuntu26迁移notice；deploy/candidate_smoke/formal_smoke全skipped。这是原9654而非本轮新源码的CI，新精确候选须再验，不把本机PASS当部署。
 
 Admin旧POST本身仍无独立持久原请求槽/回执，真实网络或提交未知时不从相似历史或missing推断提交/回滚，不自动重发；真实云Policy仅受保护运维可执行。Owner三scope/机器权限、main Turso/schema8拒绝、Wrangler认证部署阻断均不改。本轮不改云秘密/套餐/schema/重启/main/tag/Gist，不绕浏览器/OAuth/PR写403，应用仍8.0.0。I19机器消费者/持久状态、复盘/实验私人入口、实际Chrome/PWA/多设备，I18迁移/耐久/独立恢复，I20自然窗口、I21历史资源及交互性能仍分别推进，不以此次Admin链修复勾整个I19或宣称v9完成。
+
+## 2026-10-28：I19 机器任务本地业务链与合并门禁
+
+用户要求补齐剩余内容后合并 PR #4。先保护原14个未提交文件，继续完成实际本地机器接口和两项P1；未将“合并授权”解释为门禁已通过。实现提交 `a5c5296cce4f10566b16527e0bc266d1874c0a56`，tree=`92aea1f6ad4561871710b89799cdc598efe0ca69`。应用仍8.0.0；此提交不是 main 合并、部署或正式Release。
+
+新增明确的 `owner-machine-schema-1` 第三profile：只显式扩展完整本地analysis候选，单个不可变journal/固定marker，正常startup不建表。完整固定inventory125对象，加原三张可选固定表恰128，不提高原预算；旧Owner-only/analysis public exact verifier保持闭集，实际workspace/analysis兼容入口明确选择已知完整profile。真实配置工厂→sync读取→analysis→原回执/FK已用SQLite验证，不能把此兼容改成Turso放行。
+
+`/api/v2/worker/portfolio` 的source、prepare、claim、finish、原任务status仅Worker/Admin，匿名/Owner/PrivateRead前置拒绝，私人响应no-store。完整已确认Owner来源（含全部账户、manual、tombstone、0/null/-0）与原source SHA、实际Holding/Decision/analysis/task在一个BEGIN IMMEDIATE追加；claim同事务核原来源/当前Policy/策略/行情后使用既有notification内核，不另建发送锁。100基金完整整批，旧50项公开DTO不变，101/客户端截断明确拒绝。14:30/14:40/人工共享day task与原Decision IDs；真实trigger及计划/实际/产出时刻、execution/artifact、数量/digest分轴追加。整个返回像同样2MiB，观察最多200项，不按每行预算倍增；已知拒绝后的观察写入仍用原30秒协作总预算。
+
+同连接analysis/notification内核要求已有事务，不开/提交/回滚/关闭第二业务连接。固定schema verifier冷缓存可能构造可信内存参考DDL，已如实限定文案；不是第二业务库或远端连接。main依然拒Turso、URI、缺库和不兼容inventory；新profile没有startup迁移、远端能力或真实发送。
+
+两项实际P1已闭合：其一，旧通知manual轴的attempted/ambiguous若没有原machine journal，新入口不能换natural轴取得第二次发送权；旧入口也拒绝对实际task关联Decision写任何阶段。绑定须完整有序原批次/occurrence/hash及全部同日真实V8+attempt/result映射；未绑定旧claim、跨窗口、伪造detail均拒绝，普通legacy Decision保持原合同。其二，已保存blocked的原invocation不能在稍后条件满足时重新执行成功；成功也只读回原task/attempt，claim回读始终不再授予发送权。新独立调用必须新request_id。missing/改变原映射不能自动重建。
+
+有效RED证据：跨接口在兼容私有参数已接通、守卫尚未加入时12项实际失败（8次DIDNOTRAISE、4次错误守卫原因），不是最初并行接口未接通的TypeError。invocation独立SQLite探针实际复现14:29 blocked→14:31同原请求创建run但原观察仍blocked；修复后9项原回执回归通过。增加逐调用观察时的7项失败是旧测试复用相同ID改变trigger/slot或把所有journal行当业务行，改为新独立ID、分别精确核业务不变与新增观察，不放宽原包/去重断言。早期schema超长pytest自动参数ID在Windows造成setup失败，使用显式短ID；最初模型after-validator签名收集错误已按self修复。所有失败均未记作PASS或线上事故。
+
+专项实际SQLite与HTTP覆盖：第三profile66、完整/容量51与100/101、源typed SHA/manual/tombstone、并发人工自然唯一claim、每阶段真实INSERT故障/整批回滚、实际COMMIT后丢响应、close未知、原回执重开、Policy激活、当日90分钟边界、未知年份/节假日、权限/no-store/有界正文及凭据中途轮换。最终跨接口等9文件281项/62.91s，独立复审相关3文件45项/22.13s，根代理最终HTTP/来源/回执4文件103项/32.90s；本轮新增204项由完整全量统一认证，不将这些相交子集相加。
+
+最终本地质量门禁均直接命令执行并正常终止：backend **4362 passed/1211 warnings/805.52s**，`pip check` clean；Python3.14环境告警为既有1209个PurePath.is_reserved弃用、Starlette/httpx弃用及1个故意坏模型序列化警告。frontend **3443 passed/120 files/53.67s**，type-check exit0，production build **12.76s**、PWA **7/7**。Worker check exit0、**148 passed/4 files/6.35s**、Wrangler dry-run **114.28KiB/gzip26.58KiB** exit0；代理环境warning保留，不是认证部署。frontend/worker生产源码与lock相对eec63未变，未把重新build当真实浏览器/完整资源预算通过。
+
+本轮官方registry审计均显式include=dev、moderate门槛、0重试/20秒请求预算：Worker 0；frontend **4 low/0 moderate/0 high/0 critical**，退出0但不是0漏洞。低危链为deepmerge→@rollup/plugin-node-resolve/workbox-build/vite-plugin-pwa，未用force/回退PWA依赖换零告警。历史Wrangler内嵌风险及认证deploy固定阻断没有解除。
+
+`tools/benchmark_owner_machine.py` 与 `OWNER-MACHINE-PERFORMANCE-20261028.json` 保留最终源码导入前/后/运行后SHA及所有历史原始样本。真实ASGI鉴权/SQLite/模型、3/100基金每规模5份新副本、50次完整HTTP；固定业务时钟不替代真实perf时钟，原30次limiter每独立规模25次请求，未改生产限频。最终3基金完整链median/worst **313.03/393.63ms**，100基金 **2244.55/2311.36ms**；新API无旧基线，NOT_COMPARABLE。精确eec63旧notification wrapper同依赖5次交替对照：3基金median **18.90→18.69ms/-1.12%**，100基金 **48.73→50.80ms/+4.25%**。首次100基金 **+10.48% WARN**及后续全部raw仍保留；总判定是小样本波动/未完成发布门禁WARN。最终测量时本轮backend全量仍在运行，宿主负载明确记录，不当作云端p95、真实TCP、浏览器、外部送达、OS网络沙箱或完整HEAD发布资格。测试finish(sent)只是合成授权回报，没有Server酱请求。
+
+前一候选eec63的[CI 40306577112](https://github.com/AureliusWu/fund-compass/actions/runs/40306577112)已核实际checkout `a8da51fcb28334f0db3af87a3d731334c5375bbf`（5f8+eec63父、tree等于eec63）：backend4158/2warnings/377.82s/pip clean，frontend3443/type/build9.40s/PWA7/7/audit0，Worker148/check/dryrun/audit0，resolve成功；deploy/formal_smoke/candidate_smoke全部skipped。此为旧提交证据，不覆盖本轮新增代码或10-28新低危公告；新feature推送后必须再核精确CI。
+
+实际云状态只读发现：已确认My Workspace的两个API均Free、main、autoDeploy=yes、**autoDeployTrigger=commit**、healthCheckPath=/api/health；平台最近live为公开数据提交 `80d01717faeb5a21cd1240ea6d8142e3320f5ae4`。这意味着Render不是等本仓CI通过才部署，不能从CI YAML推出平台受门禁保护（[Render当前自动部署说明](https://render.com/docs/deploys#configuring-auto-deploys)）。两次直接health读取各20秒超时，稍后curl候选15秒仍HTTP000/0bytes（TCP/TLS已完成）；不将其归因为已确认服务崩溃，也不放宽超时换PASS。有限错误日志9条均为此前not-a-code负例，不解释本次读取超时；平台live不代替外部应用smoke。未触发重启、部署、套餐/环境变量改变，未读取密钥值。
+
+当前不能合并：生产Worker/Gist与应急路径仍未切换，完整行情入库/严格发送前时钟与预算/私有持久health/旧信号和歧义状态迁移尚缺；“同一管理Decision集合”边界不阻止旧Gist另造IDs。main Owner/analysis/machine仍是本地profile；真实远端停写、fresh protected backup、Free配额/provider能力、新profile迁移、应用跨重启/独立恢复，以及实际Chrome/旧PWA/多设备、自然5交易窗口/2周级周期与原性能债务均须独立通过。上次真实云schema8核验是历史，不冒充本轮已重核；当前源码明确拒绝Turso即已足以阻断启用。用户的合并授权保留，但不提前合入main、不升9.0.0、不创建tag/release、不删旧Gist；后续先完成真实消费者链与受控存储启用再核合并。
