@@ -38,6 +38,8 @@ PR #4 已于 `2026-10-28T08:32:39Z`（北京时间16:32:39）普通合并为 `db
 
 随后候选设置于 `2026-10-28T08:36:40.678482Z` 再次变为no/off，原服务仍no/off；这是代理实际读回，不代替 Blueprint Auto Sync 的独立确认。防复发补丁在独立修复分支中显式声明off，原 YAML 的新文件合同先RED（缺字段失败），修复后 persistence/workflow 合同共 **263 passed**；测试拒绝缺失、commit、checksPass、YAML布尔与旧字段混用，保留免费/单服务/单进程/秘密配置原约束。仅可先推送修复分支进行PR CI，不在 Auto Sync 未确认前再次更新 main。
 
+用户随后确认已关闭，代理通过 Chrome **实际 DOM** 读取关联 Blueprint `exs-d8v0sgjtqb8s73f29ok0` 的 Settings：标题 **Sync paused**，`autoSync` 按钮 **No**，分支main、路径render.yaml；未点击Manual sync、未显示或复制Sync Hook。同期连接器再次确认两个服务no/off，候选无新部署、原update_failed及80d01717 live保留，Pages变量false。三类暂停控制现已实际核齐；这不撤销此前尝试，也不证明生产功能、数据库耐久或v9发布通过。独立补丁见 [PR #5](https://github.com/AureliusWu/fund-compass/pull/5)，仍须该最终head的完整CI后普通合并。PR4合并后的 [main CI40657553598](https://github.com/AureliusWu/fund-compass/actions/runs/40657553598) 已completed/success，四项质量作业成功、deploy/candidate_smoke/formal_smoke均实际skipped。
+
 实际状态可能变化，后续执行必须重新读取；不得从本文推断当前云设置。
 
 ## 恢复部署
