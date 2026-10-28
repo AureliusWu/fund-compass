@@ -5,7 +5,7 @@
     "applied_at": "2026-08-13T13:46:49+08:00",
     "legacy_records_excluded": 17
   },
-  "updated_at": "2026-10-26T21:30:22+08:00",
+  "updated_at": "2026-10-28T21:28:54+08:00",
   "models": {
     "539002": {
       "name": "建信新兴市场混合(QDII)A",
@@ -79,27 +79,27 @@
         }
       },
       "candidate": {
-        "version": "candidate-20261026",
-        "created_at": "2026-10-26T21:30:22+08:00",
-        "data_fingerprint": "060be4cfe724054dd9c034a5d21ce40e719bc33d22b991daa0c92eb4cd8e40fb",
-        "data_effective_at": "2026-10-26T21:29:21+08:00",
+        "version": "candidate-20261028",
+        "created_at": "2026-10-28T21:28:54+08:00",
+        "data_fingerprint": "217fd1911c3335f01d1dd56750d71cd238f4b8db244806e2c54fff97716bd95d",
+        "data_effective_at": "2026-10-28T21:28:09+08:00",
         "status": "rejected",
-        "samples": 26,
+        "samples": 27,
         "split_date": "2026-09-17",
         "train_samples": 18,
-        "validation_samples": 8,
+        "validation_samples": 9,
         "baseline": {
-          "samples": 8,
-          "mae": 0.9,
-          "bias": 0.3921,
+          "samples": 9,
+          "mae": 0.8695,
+          "bias": 0.4181,
           "direction_accuracy": 100.0,
           "extreme_mae": 0.8378
         },
         "candidate": {
-          "samples": 8,
-          "mae": 1.1322,
-          "bias": 0.8403,
-          "direction_accuracy": 87.5,
+          "samples": 9,
+          "mae": 1.1152,
+          "bias": 0.8557,
+          "direction_accuracy": 88.9,
           "extreme_mae": 1.3097
         },
         "parameters": {
@@ -157,9 +157,9 @@
         "min_samples": 20,
         "poor_cycles": 0,
         "drift_evidence": {
-          "samples": 26,
-          "previous_mae": 0.595,
-          "recent_mae": 0.843,
+          "samples": 27,
+          "previous_mae": 0.565,
+          "recent_mae": 0.825,
           "recent_direction_accuracy": 100.0
         },
         "active_change_policy": "explicit_admin_only",
@@ -240,29 +240,63 @@
         }
       },
       "candidate": {
-        "version": "candidate-20261026",
-        "created_at": "2026-10-26T21:30:22+08:00",
-        "data_fingerprint": "a278e24ae6d105b58c8fed920c8a3e54ad96abf178ba8d4195ddbbf38ea0e4ae",
-        "data_effective_at": "2026-10-26T21:29:21+08:00",
-        "status": "collecting",
-        "samples": 19,
-        "required": 20,
+        "version": "candidate-20261028",
+        "created_at": "2026-10-28T21:28:54+08:00",
+        "data_fingerprint": "4a6d148e80213bcfa9c33fb9746515a23dd939114e212ec320aab3a735c583cf",
+        "data_effective_at": "2026-10-28T21:28:09+08:00",
+        "status": "rejected",
+        "samples": 20,
+        "split_date": "2026-10-15",
+        "train_samples": 14,
+        "validation_samples": 6,
+        "baseline": {
+          "samples": 0,
+          "mae": null,
+          "direction_accuracy": null,
+          "extreme_mae": null
+        },
+        "candidate": {
+          "samples": 0,
+          "mae": null,
+          "direction_accuracy": null,
+          "extreme_mae": null
+        },
+        "parameters": {
+          "scale": 1.4,
+          "bias": 0.0,
+          "legs": [
+            {
+              "code": "usQQQ",
+              "weight": 45.0
+            },
+            {
+              "code": "usSOXX",
+              "weight": 30.0
+            },
+            {
+              "code": "sh000300",
+              "weight": 25.0
+            }
+          ]
+        },
         "eligible_for_admin_review": false,
         "admin_review_recommendation": "no_active_change"
       },
       "history": [],
       "governance": {
-        "status": "collecting",
+        "status": "healthy",
         "min_samples": 20,
         "poor_cycles": 0,
         "drift_evidence": {
-          "samples": 19,
-          "reason": "insufficient"
+          "samples": 20,
+          "previous_mae": 1.823,
+          "recent_mae": 1.689,
+          "recent_direction_accuracy": 70.0
         },
         "active_change_policy": "explicit_admin_only",
         "candidate_eligible_for_admin_review": false,
         "rollback_recommended": false,
-        "recommendation": "collect_more_evidence"
+        "recommendation": "keep_active_rejected_candidate"
       }
     },
     "018147": {
