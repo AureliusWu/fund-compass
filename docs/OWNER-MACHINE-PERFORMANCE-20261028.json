@@ -1,0 +1,4135 @@
+{
+  "schema": "owner-machine-local-performance-1",
+  "observed_at": "2026-10-28T15:32:03.127886+08:00",
+  "baseline_commit": "eec63a15b98e6550759dcdd0ae6b47056da5b29a",
+  "baseline_v8_repo_sha256": "84a2acde2da18ad86bb43092c53946624b0f7df9bbb7103cd5ab78d7e38a36e6",
+  "current_head": "eec63a15b98e6550759dcdd0ae6b47056da5b29a",
+  "current_worktree_dirty": true,
+  "source_before": {
+    "backend/database/owner_machine_schema.py": "572e8fb7b4c5766fe20e3409a1bac3498494d4a9bc8a61308a79a62dabbb4ea2",
+    "backend/database/owner_analysis_schema.py": "662e48a9e11201dc6ba9f419a3975a5abea7d1fe1871db02d0b679b72dbd146b",
+    "backend/service/owner_machine_repo.py": "ad7ac20bc30c38185bdc0b43272d2fe9da887aff37594e4204a486b16817737c",
+    "backend/service/owner_machine.py": "c165659820d0f44fe551cd2bc04d6f52152409fe1a697d412107ef049b1ebaca",
+    "backend/models/owner_machine.py": "d64cda7d162f7c75e60c586462d26ef69a12cf18e2ab6bb5214217e7e43fd5b6",
+    "backend/service/owner_analysis_repo.py": "ca9d6b9bfc8512d2895b58a0434a6247b5e086d2acae609ec93c4e7a23d2d9f4",
+    "backend/service/owner_policy_state.py": "baf066bb1e495d855919298a44345312134defa77e66cfeadefbffefba21d867",
+    "backend/service/owner_sync_repo.py": "6cbf1f9c3eb37ea58a2afd57cd4f50387625d19072624bb36138f09597b6c87e",
+    "backend/service/owner_sync.py": "bdc1c987a6ce3d9129fc4bc88d0f856e5cc93b37e617127062bb39fe58c3fae5",
+    "backend/service/v8_repo.py": "18c1e885179567d3921ae3d7f97ecdfb276bbf03c1ea44e498aed33dad77bf41",
+    "backend/service/repository_scopes.py": "24c7952eb26c9dd25b27d25a3cbab8578c75645f127f411ce588ad0cc8448fb1",
+    "backend/database/v8_insert.py": "e5c0968cde88ffb26228ec7d1b12f4668973e0aaf49349dbb0618e2261362381",
+    "backend/database/db.py": "5ebbae9636198b901b2d0b594e29ec08fef5360804742c0cedc448c926772b26",
+    "backend/database/owner_sync_schema.py": "5d9d5d659472a978083a8ac361cf1ce0e60aeab4c0744d64175d5e2f7451bd72",
+    "backend/models/owner_analysis.py": "f4d77f8acd3ff95a3721ed2fb1a65a21aced6ef5b40d74414003312cbb6864b4",
+    "backend/models/owner_sync.py": "940c41c5f9bf76c23b1179a3454ec89ae586ac42bbb18090db98ac565d85bc0f",
+    "backend/strategy/decision_v2.py": "e49b7064f971d4b5e6534a3a78c3a7bae5b85b704f65e7d7ab12d495a75b8959",
+    "backend/models/v8.py": "11b29e5cdbd497f7915ac479beac24fd669d05f6060398ef3b5b3438495d7178",
+    "backend/tests/test_owner_machine_repo.py": "62baea8420712048fb38fc957b3f49c8111de6e9ac3b7f5a9beb9dc272103188",
+    "backend/tests/test_owner_machine_capacity.py": "939f12969f9c7ad4055e843fa95b2e45aa69e12167896ae789865d496f705c40",
+    "backend/tests/test_owner_analysis_repo.py": "151f6cb16d13e377c495f0f744e94e40990af63c751f91ffcacbc0cf91e6ddd8",
+    "tools/benchmark_owner_machine.py": "bff08ad7418463c324dc88849bbffaa8a23b84b46ee1b5f9c03d839b478ff8c1"
+  },
+  "source_after_import": {
+    "backend/database/owner_machine_schema.py": "572e8fb7b4c5766fe20e3409a1bac3498494d4a9bc8a61308a79a62dabbb4ea2",
+    "backend/database/owner_analysis_schema.py": "662e48a9e11201dc6ba9f419a3975a5abea7d1fe1871db02d0b679b72dbd146b",
+    "backend/service/owner_machine_repo.py": "ad7ac20bc30c38185bdc0b43272d2fe9da887aff37594e4204a486b16817737c",
+    "backend/service/owner_machine.py": "c165659820d0f44fe551cd2bc04d6f52152409fe1a697d412107ef049b1ebaca",
+    "backend/models/owner_machine.py": "d64cda7d162f7c75e60c586462d26ef69a12cf18e2ab6bb5214217e7e43fd5b6",
+    "backend/service/owner_analysis_repo.py": "ca9d6b9bfc8512d2895b58a0434a6247b5e086d2acae609ec93c4e7a23d2d9f4",
+    "backend/service/owner_policy_state.py": "baf066bb1e495d855919298a44345312134defa77e66cfeadefbffefba21d867",
+    "backend/service/owner_sync_repo.py": "6cbf1f9c3eb37ea58a2afd57cd4f50387625d19072624bb36138f09597b6c87e",
+    "backend/service/owner_sync.py": "bdc1c987a6ce3d9129fc4bc88d0f856e5cc93b37e617127062bb39fe58c3fae5",
+    "backend/service/v8_repo.py": "18c1e885179567d3921ae3d7f97ecdfb276bbf03c1ea44e498aed33dad77bf41",
+    "backend/service/repository_scopes.py": "24c7952eb26c9dd25b27d25a3cbab8578c75645f127f411ce588ad0cc8448fb1",
+    "backend/database/v8_insert.py": "e5c0968cde88ffb26228ec7d1b12f4668973e0aaf49349dbb0618e2261362381",
+    "backend/database/db.py": "5ebbae9636198b901b2d0b594e29ec08fef5360804742c0cedc448c926772b26",
+    "backend/database/owner_sync_schema.py": "5d9d5d659472a978083a8ac361cf1ce0e60aeab4c0744d64175d5e2f7451bd72",
+    "backend/models/owner_analysis.py": "f4d77f8acd3ff95a3721ed2fb1a65a21aced6ef5b40d74414003312cbb6864b4",
+    "backend/models/owner_sync.py": "940c41c5f9bf76c23b1179a3454ec89ae586ac42bbb18090db98ac565d85bc0f",
+    "backend/strategy/decision_v2.py": "e49b7064f971d4b5e6534a3a78c3a7bae5b85b704f65e7d7ab12d495a75b8959",
+    "backend/models/v8.py": "11b29e5cdbd497f7915ac479beac24fd669d05f6060398ef3b5b3438495d7178",
+    "backend/tests/test_owner_machine_repo.py": "62baea8420712048fb38fc957b3f49c8111de6e9ac3b7f5a9beb9dc272103188",
+    "backend/tests/test_owner_machine_capacity.py": "939f12969f9c7ad4055e843fa95b2e45aa69e12167896ae789865d496f705c40",
+    "backend/tests/test_owner_analysis_repo.py": "151f6cb16d13e377c495f0f744e94e40990af63c751f91ffcacbc0cf91e6ddd8",
+    "tools/benchmark_owner_machine.py": "bff08ad7418463c324dc88849bbffaa8a23b84b46ee1b5f9c03d839b478ff8c1"
+  },
+  "source_after": {
+    "backend/database/owner_machine_schema.py": "572e8fb7b4c5766fe20e3409a1bac3498494d4a9bc8a61308a79a62dabbb4ea2",
+    "backend/database/owner_analysis_schema.py": "662e48a9e11201dc6ba9f419a3975a5abea7d1fe1871db02d0b679b72dbd146b",
+    "backend/service/owner_machine_repo.py": "ad7ac20bc30c38185bdc0b43272d2fe9da887aff37594e4204a486b16817737c",
+    "backend/service/owner_machine.py": "c165659820d0f44fe551cd2bc04d6f52152409fe1a697d412107ef049b1ebaca",
+    "backend/models/owner_machine.py": "d64cda7d162f7c75e60c586462d26ef69a12cf18e2ab6bb5214217e7e43fd5b6",
+    "backend/service/owner_analysis_repo.py": "ca9d6b9bfc8512d2895b58a0434a6247b5e086d2acae609ec93c4e7a23d2d9f4",
+    "backend/service/owner_policy_state.py": "baf066bb1e495d855919298a44345312134defa77e66cfeadefbffefba21d867",
+    "backend/service/owner_sync_repo.py": "6cbf1f9c3eb37ea58a2afd57cd4f50387625d19072624bb36138f09597b6c87e",
+    "backend/service/owner_sync.py": "bdc1c987a6ce3d9129fc4bc88d0f856e5cc93b37e617127062bb39fe58c3fae5",
+    "backend/service/v8_repo.py": "18c1e885179567d3921ae3d7f97ecdfb276bbf03c1ea44e498aed33dad77bf41",
+    "backend/service/repository_scopes.py": "24c7952eb26c9dd25b27d25a3cbab8578c75645f127f411ce588ad0cc8448fb1",
+    "backend/database/v8_insert.py": "e5c0968cde88ffb26228ec7d1b12f4668973e0aaf49349dbb0618e2261362381",
+    "backend/database/db.py": "5ebbae9636198b901b2d0b594e29ec08fef5360804742c0cedc448c926772b26",
+    "backend/database/owner_sync_schema.py": "5d9d5d659472a978083a8ac361cf1ce0e60aeab4c0744d64175d5e2f7451bd72",
+    "backend/models/owner_analysis.py": "f4d77f8acd3ff95a3721ed2fb1a65a21aced6ef5b40d74414003312cbb6864b4",
+    "backend/models/owner_sync.py": "940c41c5f9bf76c23b1179a3454ec89ae586ac42bbb18090db98ac565d85bc0f",
+    "backend/strategy/decision_v2.py": "e49b7064f971d4b5e6534a3a78c3a7bae5b85b704f65e7d7ab12d495a75b8959",
+    "backend/models/v8.py": "11b29e5cdbd497f7915ac479beac24fd669d05f6060398ef3b5b3438495d7178",
+    "backend/tests/test_owner_machine_repo.py": "62baea8420712048fb38fc957b3f49c8111de6e9ac3b7f5a9beb9dc272103188",
+    "backend/tests/test_owner_machine_capacity.py": "939f12969f9c7ad4055e843fa95b2e45aa69e12167896ae789865d496f705c40",
+    "backend/tests/test_owner_analysis_repo.py": "151f6cb16d13e377c495f0f744e94e40990af63c751f91ffcacbc0cf91e6ddd8",
+    "tools/benchmark_owner_machine.py": "bff08ad7418463c324dc88849bbffaa8a23b84b46ee1b5f9c03d839b478ff8c1"
+  },
+  "source_drift": [],
+  "source_stable_during_measurement": true,
+  "synthetic_business_clock": "2026-10-26T14:31:00+08:00",
+  "python": "3.14.4",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "sqlite": "3.50.4",
+  "shared_dependencies": {
+    "fastapi": "0.138.1",
+    "starlette": "1.3.1",
+    "pydantic": "2.13.4",
+    "httpx": "0.28.1",
+    "pytest": "9.1.1"
+  },
+  "sample_count_per_size_and_side": 5,
+  "aggregation": [
+    {
+      "size": 3,
+      "machine_http": {
+        "source": {
+          "samples_ms": [
+            49.6042,
+            39.035,
+            39.5929,
+            40.2543,
+            40.148
+          ],
+          "median_ms": 40.148,
+          "worst_ms": 49.6042,
+          "sample_count": 5
+        },
+        "prepare": {
+          "samples_ms": [
+            74.5497,
+            73.6535,
+            74.8749,
+            77.0641,
+            74.3844
+          ],
+          "median_ms": 74.5497,
+          "worst_ms": 77.0641,
+          "sample_count": 5
+        },
+        "claim": {
+          "samples_ms": [
+            95.5459,
+            80.2044,
+            79.2283,
+            81.8453,
+            114.4532
+          ],
+          "median_ms": 81.8453,
+          "worst_ms": 114.4532,
+          "sample_count": 5
+        },
+        "finish": {
+          "samples_ms": [
+            68.1428,
+            66.4646,
+            68.7549,
+            67.3192,
+            98.0023
+          ],
+          "median_ms": 68.1428,
+          "worst_ms": 98.0023,
+          "sample_count": 5
+        },
+        "status": {
+          "samples_ms": [
+            47.9092,
+            48.0131,
+            47.6632,
+            46.544,
+            66.6432
+          ],
+          "median_ms": 47.9092,
+          "worst_ms": 66.6432,
+          "sample_count": 5
+        },
+        "complete_flow": {
+          "samples_ms": [
+            335.7518,
+            307.3706,
+            310.1142,
+            313.0269,
+            393.6311
+          ],
+          "median_ms": 313.0269,
+          "worst_ms": 393.6311,
+          "sample_count": 5
+        }
+      },
+      "machine_baseline": "NOT_COMPARABLE_NEW_API",
+      "legacy_notification_claim_comparison": {
+        "baseline": {
+          "samples_ms": [
+            18.9008,
+            19.8476,
+            18.6896,
+            19.0227,
+            18.7495
+          ],
+          "median_ms": 18.9008,
+          "worst_ms": 19.8476,
+          "sample_count": 5
+        },
+        "current": {
+          "samples_ms": [
+            18.8396,
+            18.5877,
+            18.0172,
+            21.5487,
+            18.6882
+          ],
+          "median_ms": 18.6882,
+          "worst_ms": 21.5487,
+          "sample_count": 5
+        },
+        "median_delta_percent": -1.1248,
+        "verdict": "PASS"
+      },
+      "http_body_identical_across_samples": true
+    },
+    {
+      "size": 100,
+      "machine_http": {
+        "source": {
+          "samples_ms": [
+            73.846,
+            50.2571,
+            76.0614,
+            60.0505,
+            49.4416
+          ],
+          "median_ms": 60.0505,
+          "worst_ms": 76.0614,
+          "sample_count": 5
+        },
+        "prepare": {
+          "samples_ms": [
+            934.5533,
+            997.2759,
+            974.3857,
+            943.2589,
+            881.7073
+          ],
+          "median_ms": 943.2589,
+          "worst_ms": 997.2759,
+          "sample_count": 5
+        },
+        "claim": {
+          "samples_ms": [
+            504.9603,
+            454.5327,
+            466.924,
+            467.1046,
+            504.5805
+          ],
+          "median_ms": 467.1046,
+          "worst_ms": 504.9603,
+          "sample_count": 5
+        },
+        "finish": {
+          "samples_ms": [
+            386.3263,
+            442.6104,
+            401.6638,
+            401.7109,
+            403.3243
+          ],
+          "median_ms": 401.7109,
+          "worst_ms": 442.6104,
+          "sample_count": 5
+        },
+        "status": {
+          "samples_ms": [
+            344.8607,
+            349.0661,
+            392.3274,
+            335.9368,
+            340.8927
+          ],
+          "median_ms": 344.8607,
+          "worst_ms": 392.3274,
+          "sample_count": 5
+        },
+        "complete_flow": {
+          "samples_ms": [
+            2244.5466,
+            2293.7422,
+            2311.3623,
+            2208.0617,
+            2179.9464
+          ],
+          "median_ms": 2244.5466,
+          "worst_ms": 2311.3623,
+          "sample_count": 5
+        }
+      },
+      "machine_baseline": "NOT_COMPARABLE_NEW_API",
+      "legacy_notification_claim_comparison": {
+        "baseline": {
+          "samples_ms": [
+            45.4602,
+            49.7457,
+            48.728,
+            46.822,
+            48.8689
+          ],
+          "median_ms": 48.728,
+          "worst_ms": 49.7457,
+          "sample_count": 5
+        },
+        "current": {
+          "samples_ms": [
+            50.7965,
+            50.7984,
+            52.6632,
+            50.674,
+            59.8759
+          ],
+          "median_ms": 50.7984,
+          "worst_ms": 59.8759,
+          "sample_count": 5
+        },
+        "median_delta_percent": 4.2489,
+        "verdict": "PASS"
+      },
+      "http_body_identical_across_samples": true
+    }
+  ],
+  "machine_http_samples": [
+    {
+      "size": 3,
+      "sample": 1,
+      "phases": {
+        "source": {
+          "elapsed_ms": 49.6042,
+          "http_status": 200,
+          "response_bytes": 291
+        },
+        "prepare": {
+          "elapsed_ms": 74.5497,
+          "http_status": 200,
+          "response_bytes": 19430
+        },
+        "claim": {
+          "elapsed_ms": 95.5459,
+          "http_status": 200,
+          "response_bytes": 19304
+        },
+        "finish": {
+          "elapsed_ms": 68.1428,
+          "http_status": 200,
+          "response_bytes": 754
+        },
+        "status": {
+          "elapsed_ms": 47.9092,
+          "http_status": 200,
+          "response_bytes": 22999
+        }
+      },
+      "counts": {
+        "tables": {
+          "owner_analysis_runs": 1,
+          "owner_analysis_components": 3,
+          "holding_versions": 3,
+          "decision_snapshots": 3,
+          "notification_events": 9,
+          "owner_machine_journal": 6
+        },
+        "notification_phases": {
+          "attempted": 3,
+          "scheduled": 3,
+          "sent": 3
+        },
+        "journal_kinds": {
+          "attempt": 1,
+          "observation": 2,
+          "result": 1,
+          "schema": 1,
+          "task": 1
+        }
+      },
+      "complete_components": 3,
+      "body_digest": "09a8db71f646c94de40ee0f805ab6ab77582bb9d15be0ec2cb240974aca14293"
+    },
+    {
+      "size": 3,
+      "sample": 2,
+      "phases": {
+        "source": {
+          "elapsed_ms": 39.035,
+          "http_status": 200,
+          "response_bytes": 291
+        },
+        "prepare": {
+          "elapsed_ms": 73.6535,
+          "http_status": 200,
+          "response_bytes": 19430
+        },
+        "claim": {
+          "elapsed_ms": 80.2044,
+          "http_status": 200,
+          "response_bytes": 19304
+        },
+        "finish": {
+          "elapsed_ms": 66.4646,
+          "http_status": 200,
+          "response_bytes": 754
+        },
+        "status": {
+          "elapsed_ms": 48.0131,
+          "http_status": 200,
+          "response_bytes": 22999
+        }
+      },
+      "counts": {
+        "tables": {
+          "owner_analysis_runs": 1,
+          "owner_analysis_components": 3,
+          "holding_versions": 3,
+          "decision_snapshots": 3,
+          "notification_events": 9,
+          "owner_machine_journal": 6
+        },
+        "notification_phases": {
+          "attempted": 3,
+          "scheduled": 3,
+          "sent": 3
+        },
+        "journal_kinds": {
+          "attempt": 1,
+          "observation": 2,
+          "result": 1,
+          "schema": 1,
+          "task": 1
+        }
+      },
+      "complete_components": 3,
+      "body_digest": "09a8db71f646c94de40ee0f805ab6ab77582bb9d15be0ec2cb240974aca14293"
+    },
+    {
+      "size": 3,
+      "sample": 3,
+      "phases": {
+        "source": {
+          "elapsed_ms": 39.5929,
+          "http_status": 200,
+          "response_bytes": 291
+        },
+        "prepare": {
+          "elapsed_ms": 74.8749,
+          "http_status": 200,
+          "response_bytes": 19430
+        },
+        "claim": {
+          "elapsed_ms": 79.2283,
+          "http_status": 200,
+          "response_bytes": 19304
+        },
+        "finish": {
+          "elapsed_ms": 68.7549,
+          "http_status": 200,
+          "response_bytes": 754
+        },
+        "status": {
+          "elapsed_ms": 47.6632,
+          "http_status": 200,
+          "response_bytes": 22999
+        }
+      },
+      "counts": {
+        "tables": {
+          "owner_analysis_runs": 1,
+          "owner_analysis_components": 3,
+          "holding_versions": 3,
+          "decision_snapshots": 3,
+          "notification_events": 9,
+          "owner_machine_journal": 6
+        },
+        "notification_phases": {
+          "attempted": 3,
+          "scheduled": 3,
+          "sent": 3
+        },
+        "journal_kinds": {
+          "attempt": 1,
+          "observation": 2,
+          "result": 1,
+          "schema": 1,
+          "task": 1
+        }
+      },
+      "complete_components": 3,
+      "body_digest": "09a8db71f646c94de40ee0f805ab6ab77582bb9d15be0ec2cb240974aca14293"
+    },
+    {
+      "size": 3,
+      "sample": 4,
+      "phases": {
+        "source": {
+          "elapsed_ms": 40.2543,
+          "http_status": 200,
+          "response_bytes": 291
+        },
+        "prepare": {
+          "elapsed_ms": 77.0641,
+          "http_status": 200,
+          "response_bytes": 19430
+        },
+        "claim": {
+          "elapsed_ms": 81.8453,
+          "http_status": 200,
+          "response_bytes": 19304
+        },
+        "finish": {
+          "elapsed_ms": 67.3192,
+          "http_status": 200,
+          "response_bytes": 754
+        },
+        "status": {
+          "elapsed_ms": 46.544,
+          "http_status": 200,
+          "response_bytes": 22999
+        }
+      },
+      "counts": {
+        "tables": {
+          "owner_analysis_runs": 1,
+          "owner_analysis_components": 3,
+          "holding_versions": 3,
+          "decision_snapshots": 3,
+          "notification_events": 9,
+          "owner_machine_journal": 6
+        },
+        "notification_phases": {
+          "attempted": 3,
+          "scheduled": 3,
+          "sent": 3
+        },
+        "journal_kinds": {
+          "attempt": 1,
+          "observation": 2,
+          "result": 1,
+          "schema": 1,
+          "task": 1
+        }
+      },
+      "complete_components": 3,
+      "body_digest": "09a8db71f646c94de40ee0f805ab6ab77582bb9d15be0ec2cb240974aca14293"
+    },
+    {
+      "size": 3,
+      "sample": 5,
+      "phases": {
+        "source": {
+          "elapsed_ms": 40.148,
+          "http_status": 200,
+          "response_bytes": 291
+        },
+        "prepare": {
+          "elapsed_ms": 74.3844,
+          "http_status": 200,
+          "response_bytes": 19430
+        },
+        "claim": {
+          "elapsed_ms": 114.4532,
+          "http_status": 200,
+          "response_bytes": 19304
+        },
+        "finish": {
+          "elapsed_ms": 98.0023,
+          "http_status": 200,
+          "response_bytes": 754
+        },
+        "status": {
+          "elapsed_ms": 66.6432,
+          "http_status": 200,
+          "response_bytes": 22999
+        }
+      },
+      "counts": {
+        "tables": {
+          "owner_analysis_runs": 1,
+          "owner_analysis_components": 3,
+          "holding_versions": 3,
+          "decision_snapshots": 3,
+          "notification_events": 9,
+          "owner_machine_journal": 6
+        },
+        "notification_phases": {
+          "attempted": 3,
+          "scheduled": 3,
+          "sent": 3
+        },
+        "journal_kinds": {
+          "attempt": 1,
+          "observation": 2,
+          "result": 1,
+          "schema": 1,
+          "task": 1
+        }
+      },
+      "complete_components": 3,
+      "body_digest": "09a8db71f646c94de40ee0f805ab6ab77582bb9d15be0ec2cb240974aca14293"
+    },
+    {
+      "size": 100,
+      "sample": 1,
+      "phases": {
+        "source": {
+          "elapsed_ms": 73.846,
+          "http_status": 200,
+          "response_bytes": 1166
+        },
+        "prepare": {
+          "elapsed_ms": 934.5533,
+          "http_status": 200,
+          "response_bytes": 590956
+        },
+        "claim": {
+          "elapsed_ms": 504.9603,
+          "http_status": 200,
+          "response_bytes": 590834
+        },
+        "finish": {
+          "elapsed_ms": 386.3263,
+          "http_status": 200,
+          "response_bytes": 758
+        },
+        "status": {
+          "elapsed_ms": 344.8607,
+          "http_status": 200,
+          "response_bytes": 601428
+        }
+      },
+      "counts": {
+        "tables": {
+          "owner_analysis_runs": 1,
+          "owner_analysis_components": 100,
+          "holding_versions": 100,
+          "decision_snapshots": 100,
+          "notification_events": 300,
+          "owner_machine_journal": 6
+        },
+        "notification_phases": {
+          "attempted": 100,
+          "scheduled": 100,
+          "sent": 100
+        },
+        "journal_kinds": {
+          "attempt": 1,
+          "observation": 2,
+          "result": 1,
+          "schema": 1,
+          "task": 1
+        }
+      },
+      "complete_components": 100,
+      "body_digest": "c88bb09ea8b0741fd45aaae1df60b658edf75eb28cd5d252909b50ea23fb66c1"
+    },
+    {
+      "size": 100,
+      "sample": 2,
+      "phases": {
+        "source": {
+          "elapsed_ms": 50.2571,
+          "http_status": 200,
+          "response_bytes": 1166
+        },
+        "prepare": {
+          "elapsed_ms": 997.2759,
+          "http_status": 200,
+          "response_bytes": 590956
+        },
+        "claim": {
+          "elapsed_ms": 454.5327,
+          "http_status": 200,
+          "response_bytes": 590834
+        },
+        "finish": {
+          "elapsed_ms": 442.6104,
+          "http_status": 200,
+          "response_bytes": 758
+        },
+        "status": {
+          "elapsed_ms": 349.0661,
+          "http_status": 200,
+          "response_bytes": 601428
+        }
+      },
+      "counts": {
+        "tables": {
+          "owner_analysis_runs": 1,
+          "owner_analysis_components": 100,
+          "holding_versions": 100,
+          "decision_snapshots": 100,
+          "notification_events": 300,
+          "owner_machine_journal": 6
+        },
+        "notification_phases": {
+          "attempted": 100,
+          "scheduled": 100,
+          "sent": 100
+        },
+        "journal_kinds": {
+          "attempt": 1,
+          "observation": 2,
+          "result": 1,
+          "schema": 1,
+          "task": 1
+        }
+      },
+      "complete_components": 100,
+      "body_digest": "c88bb09ea8b0741fd45aaae1df60b658edf75eb28cd5d252909b50ea23fb66c1"
+    },
+    {
+      "size": 100,
+      "sample": 3,
+      "phases": {
+        "source": {
+          "elapsed_ms": 76.0614,
+          "http_status": 200,
+          "response_bytes": 1166
+        },
+        "prepare": {
+          "elapsed_ms": 974.3857,
+          "http_status": 200,
+          "response_bytes": 590956
+        },
+        "claim": {
+          "elapsed_ms": 466.924,
+          "http_status": 200,
+          "response_bytes": 590834
+        },
+        "finish": {
+          "elapsed_ms": 401.6638,
+          "http_status": 200,
+          "response_bytes": 758
+        },
+        "status": {
+          "elapsed_ms": 392.3274,
+          "http_status": 200,
+          "response_bytes": 601428
+        }
+      },
+      "counts": {
+        "tables": {
+          "owner_analysis_runs": 1,
+          "owner_analysis_components": 100,
+          "holding_versions": 100,
+          "decision_snapshots": 100,
+          "notification_events": 300,
+          "owner_machine_journal": 6
+        },
+        "notification_phases": {
+          "attempted": 100,
+          "scheduled": 100,
+          "sent": 100
+        },
+        "journal_kinds": {
+          "attempt": 1,
+          "observation": 2,
+          "result": 1,
+          "schema": 1,
+          "task": 1
+        }
+      },
+      "complete_components": 100,
+      "body_digest": "c88bb09ea8b0741fd45aaae1df60b658edf75eb28cd5d252909b50ea23fb66c1"
+    },
+    {
+      "size": 100,
+      "sample": 4,
+      "phases": {
+        "source": {
+          "elapsed_ms": 60.0505,
+          "http_status": 200,
+          "response_bytes": 1166
+        },
+        "prepare": {
+          "elapsed_ms": 943.2589,
+          "http_status": 200,
+          "response_bytes": 590956
+        },
+        "claim": {
+          "elapsed_ms": 467.1046,
+          "http_status": 200,
+          "response_bytes": 590834
+        },
+        "finish": {
+          "elapsed_ms": 401.7109,
+          "http_status": 200,
+          "response_bytes": 758
+        },
+        "status": {
+          "elapsed_ms": 335.9368,
+          "http_status": 200,
+          "response_bytes": 601428
+        }
+      },
+      "counts": {
+        "tables": {
+          "owner_analysis_runs": 1,
+          "owner_analysis_components": 100,
+          "holding_versions": 100,
+          "decision_snapshots": 100,
+          "notification_events": 300,
+          "owner_machine_journal": 6
+        },
+        "notification_phases": {
+          "attempted": 100,
+          "scheduled": 100,
+          "sent": 100
+        },
+        "journal_kinds": {
+          "attempt": 1,
+          "observation": 2,
+          "result": 1,
+          "schema": 1,
+          "task": 1
+        }
+      },
+      "complete_components": 100,
+      "body_digest": "c88bb09ea8b0741fd45aaae1df60b658edf75eb28cd5d252909b50ea23fb66c1"
+    },
+    {
+      "size": 100,
+      "sample": 5,
+      "phases": {
+        "source": {
+          "elapsed_ms": 49.4416,
+          "http_status": 200,
+          "response_bytes": 1166
+        },
+        "prepare": {
+          "elapsed_ms": 881.7073,
+          "http_status": 200,
+          "response_bytes": 590956
+        },
+        "claim": {
+          "elapsed_ms": 504.5805,
+          "http_status": 200,
+          "response_bytes": 590834
+        },
+        "finish": {
+          "elapsed_ms": 403.3243,
+          "http_status": 200,
+          "response_bytes": 758
+        },
+        "status": {
+          "elapsed_ms": 340.8927,
+          "http_status": 200,
+          "response_bytes": 601428
+        }
+      },
+      "counts": {
+        "tables": {
+          "owner_analysis_runs": 1,
+          "owner_analysis_components": 100,
+          "holding_versions": 100,
+          "decision_snapshots": 100,
+          "notification_events": 300,
+          "owner_machine_journal": 6
+        },
+        "notification_phases": {
+          "attempted": 100,
+          "scheduled": 100,
+          "sent": 100
+        },
+        "journal_kinds": {
+          "attempt": 1,
+          "observation": 2,
+          "result": 1,
+          "schema": 1,
+          "task": 1
+        }
+      },
+      "complete_components": 100,
+      "body_digest": "c88bb09ea8b0741fd45aaae1df60b658edf75eb28cd5d252909b50ea23fb66c1"
+    }
+  ],
+  "legacy_claim_samples": [
+    {
+      "size": 3,
+      "sample": 1,
+      "side": "baseline",
+      "elapsed_ms": 18.9008,
+      "claimed_count": 3,
+      "event_digest": "d619d341be2f780744cdf0ec9b7e5159538b9b0ac0a46787f8ea787243727f20",
+      "counts": {
+        "tables": {
+          "owner_analysis_runs": 1,
+          "owner_analysis_components": 3,
+          "holding_versions": 3,
+          "decision_snapshots": 3,
+          "notification_events": 6,
+          "owner_machine_journal": 1
+        },
+        "notification_phases": {
+          "attempted": 3,
+          "scheduled": 3
+        },
+        "journal_kinds": {
+          "schema": 1
+        }
+      }
+    },
+    {
+      "size": 3,
+      "sample": 1,
+      "side": "current",
+      "elapsed_ms": 18.8396,
+      "claimed_count": 3,
+      "event_digest": "d619d341be2f780744cdf0ec9b7e5159538b9b0ac0a46787f8ea787243727f20",
+      "counts": {
+        "tables": {
+          "owner_analysis_runs": 1,
+          "owner_analysis_components": 3,
+          "holding_versions": 3,
+          "decision_snapshots": 3,
+          "notification_events": 6,
+          "owner_machine_journal": 1
+        },
+        "notification_phases": {
+          "attempted": 3,
+          "scheduled": 3
+        },
+        "journal_kinds": {
+          "schema": 1
+        }
+      }
+    },
+    {
+      "size": 3,
+      "sample": 2,
+      "side": "current",
+      "elapsed_ms": 18.5877,
+      "claimed_count": 3,
+      "event_digest": "d619d341be2f780744cdf0ec9b7e5159538b9b0ac0a46787f8ea787243727f20",
+      "counts": {
+        "tables": {
+          "owner_analysis_runs": 1,
+          "owner_analysis_components": 3,
+          "holding_versions": 3,
+          "decision_snapshots": 3,
+          "notification_events": 6,
+          "owner_machine_journal": 1
+        },
+        "notification_phases": {
+          "attempted": 3,
+          "scheduled": 3
+        },
+        "journal_kinds": {
+          "schema": 1
+        }
+      }
+    },
+    {
+      "size": 3,
+      "sample": 2,
+      "side": "baseline",
+      "elapsed_ms": 19.8476,
+      "claimed_count": 3,
+      "event_digest": "d619d341be2f780744cdf0ec9b7e5159538b9b0ac0a46787f8ea787243727f20",
+      "counts": {
+        "tables": {
+          "owner_analysis_runs": 1,
+          "owner_analysis_components": 3,
+          "holding_versions": 3,
+          "decision_snapshots": 3,
+          "notification_events": 6,
+          "owner_machine_journal": 1
+        },
+        "notification_phases": {
+          "attempted": 3,
+          "scheduled": 3
+        },
+        "journal_kinds": {
+          "schema": 1
+        }
+      }
+    },
+    {
+      "size": 3,
+      "sample": 3,
+      "side": "baseline",
+      "elapsed_ms": 18.6896,
+      "claimed_count": 3,
+      "event_digest": "d619d341be2f780744cdf0ec9b7e5159538b9b0ac0a46787f8ea787243727f20",
+      "counts": {
+        "tables": {
+          "owner_analysis_runs": 1,
+          "owner_analysis_components": 3,
+          "holding_versions": 3,
+          "decision_snapshots": 3,
+          "notification_events": 6,
+          "owner_machine_journal": 1
+        },
+        "notification_phases": {
+          "attempted": 3,
+          "scheduled": 3
+        },
+        "journal_kinds": {
+          "schema": 1
+        }
+      }
+    },
+    {
+      "size": 3,
+      "sample": 3,
+      "side": "current",
+      "elapsed_ms": 18.0172,
+      "claimed_count": 3,
+      "event_digest": "d619d341be2f780744cdf0ec9b7e5159538b9b0ac0a46787f8ea787243727f20",
+      "counts": {
+        "tables": {
+          "owner_analysis_runs": 1,
+          "owner_analysis_components": 3,
+          "holding_versions": 3,
+          "decision_snapshots": 3,
+          "notification_events": 6,
+          "owner_machine_journal": 1
+        },
+        "notification_phases": {
+          "attempted": 3,
+          "scheduled": 3
+        },
+        "journal_kinds": {
+          "schema": 1
+        }
+      }
+    },
+    {
+      "size": 3,
+      "sample": 4,
+      "side": "current",
+      "elapsed_ms": 21.5487,
+      "claimed_count": 3,
+      "event_digest": "d619d341be2f780744cdf0ec9b7e5159538b9b0ac0a46787f8ea787243727f20",
+      "counts": {
+        "tables": {
+          "owner_analysis_runs": 1,
+          "owner_analysis_components": 3,
+          "holding_versions": 3,
+          "decision_snapshots": 3,
+          "notification_events": 6,
+          "owner_machine_journal": 1
+        },
+        "notification_phases": {
+          "attempted": 3,
+          "scheduled": 3
+        },
+        "journal_kinds": {
+          "schema": 1
+        }
+      }
+    },
+    {
+      "size": 3,
+      "sample": 4,
+      "side": "baseline",
+      "elapsed_ms": 19.0227,
+      "claimed_count": 3,
+      "event_digest": "d619d341be2f780744cdf0ec9b7e5159538b9b0ac0a46787f8ea787243727f20",
+      "counts": {
+        "tables": {
+          "owner_analysis_runs": 1,
+          "owner_analysis_components": 3,
+          "holding_versions": 3,
+          "decision_snapshots": 3,
+          "notification_events": 6,
+          "owner_machine_journal": 1
+        },
+        "notification_phases": {
+          "attempted": 3,
+          "scheduled": 3
+        },
+        "journal_kinds": {
+          "schema": 1
+        }
+      }
+    },
+    {
+      "size": 3,
+      "sample": 5,
+      "side": "baseline",
+      "elapsed_ms": 18.7495,
+      "claimed_count": 3,
+      "event_digest": "d619d341be2f780744cdf0ec9b7e5159538b9b0ac0a46787f8ea787243727f20",
+      "counts": {
+        "tables": {
+          "owner_analysis_runs": 1,
+          "owner_analysis_components": 3,
+          "holding_versions": 3,
+          "decision_snapshots": 3,
+          "notification_events": 6,
+          "owner_machine_journal": 1
+        },
+        "notification_phases": {
+          "attempted": 3,
+          "scheduled": 3
+        },
+        "journal_kinds": {
+          "schema": 1
+        }
+      }
+    },
+    {
+      "size": 3,
+      "sample": 5,
+      "side": "current",
+      "elapsed_ms": 18.6882,
+      "claimed_count": 3,
+      "event_digest": "d619d341be2f780744cdf0ec9b7e5159538b9b0ac0a46787f8ea787243727f20",
+      "counts": {
+        "tables": {
+          "owner_analysis_runs": 1,
+          "owner_analysis_components": 3,
+          "holding_versions": 3,
+          "decision_snapshots": 3,
+          "notification_events": 6,
+          "owner_machine_journal": 1
+        },
+        "notification_phases": {
+          "attempted": 3,
+          "scheduled": 3
+        },
+        "journal_kinds": {
+          "schema": 1
+        }
+      }
+    },
+    {
+      "size": 100,
+      "sample": 1,
+      "side": "baseline",
+      "elapsed_ms": 45.4602,
+      "claimed_count": 100,
+      "event_digest": "81567e61a7210c4ac29c42a66f0ea84b71f95a917b08029f1f346b7124a26a95",
+      "counts": {
+        "tables": {
+          "owner_analysis_runs": 1,
+          "owner_analysis_components": 100,
+          "holding_versions": 100,
+          "decision_snapshots": 100,
+          "notification_events": 200,
+          "owner_machine_journal": 1
+        },
+        "notification_phases": {
+          "attempted": 100,
+          "scheduled": 100
+        },
+        "journal_kinds": {
+          "schema": 1
+        }
+      }
+    },
+    {
+      "size": 100,
+      "sample": 1,
+      "side": "current",
+      "elapsed_ms": 50.7965,
+      "claimed_count": 100,
+      "event_digest": "81567e61a7210c4ac29c42a66f0ea84b71f95a917b08029f1f346b7124a26a95",
+      "counts": {
+        "tables": {
+          "owner_analysis_runs": 1,
+          "owner_analysis_components": 100,
+          "holding_versions": 100,
+          "decision_snapshots": 100,
+          "notification_events": 200,
+          "owner_machine_journal": 1
+        },
+        "notification_phases": {
+          "attempted": 100,
+          "scheduled": 100
+        },
+        "journal_kinds": {
+          "schema": 1
+        }
+      }
+    },
+    {
+      "size": 100,
+      "sample": 2,
+      "side": "current",
+      "elapsed_ms": 50.7984,
+      "claimed_count": 100,
+      "event_digest": "81567e61a7210c4ac29c42a66f0ea84b71f95a917b08029f1f346b7124a26a95",
+      "counts": {
+        "tables": {
+          "owner_analysis_runs": 1,
+          "owner_analysis_components": 100,
+          "holding_versions": 100,
+          "decision_snapshots": 100,
+          "notification_events": 200,
+          "owner_machine_journal": 1
+        },
+        "notification_phases": {
+          "attempted": 100,
+          "scheduled": 100
+        },
+        "journal_kinds": {
+          "schema": 1
+        }
+      }
+    },
+    {
+      "size": 100,
+      "sample": 2,
+      "side": "baseline",
+      "elapsed_ms": 49.7457,
+      "claimed_count": 100,
+      "event_digest": "81567e61a7210c4ac29c42a66f0ea84b71f95a917b08029f1f346b7124a26a95",
+      "counts": {
+        "tables": {
+          "owner_analysis_runs": 1,
+          "owner_analysis_components": 100,
+          "holding_versions": 100,
+          "decision_snapshots": 100,
+          "notification_events": 200,
+          "owner_machine_journal": 1
+        },
+        "notification_phases": {
+          "attempted": 100,
+          "scheduled": 100
+        },
+        "journal_kinds": {
+          "schema": 1
+        }
+      }
+    },
+    {
+      "size": 100,
+      "sample": 3,
+      "side": "baseline",
+      "elapsed_ms": 48.728,
+      "claimed_count": 100,
+      "event_digest": "81567e61a7210c4ac29c42a66f0ea84b71f95a917b08029f1f346b7124a26a95",
+      "counts": {
+        "tables": {
+          "owner_analysis_runs": 1,
+          "owner_analysis_components": 100,
+          "holding_versions": 100,
+          "decision_snapshots": 100,
+          "notification_events": 200,
+          "owner_machine_journal": 1
+        },
+        "notification_phases": {
+          "attempted": 100,
+          "scheduled": 100
+        },
+        "journal_kinds": {
+          "schema": 1
+        }
+      }
+    },
+    {
+      "size": 100,
+      "sample": 3,
+      "side": "current",
+      "elapsed_ms": 52.6632,
+      "claimed_count": 100,
+      "event_digest": "81567e61a7210c4ac29c42a66f0ea84b71f95a917b08029f1f346b7124a26a95",
+      "counts": {
+        "tables": {
+          "owner_analysis_runs": 1,
+          "owner_analysis_components": 100,
+          "holding_versions": 100,
+          "decision_snapshots": 100,
+          "notification_events": 200,
+          "owner_machine_journal": 1
+        },
+        "notification_phases": {
+          "attempted": 100,
+          "scheduled": 100
+        },
+        "journal_kinds": {
+          "schema": 1
+        }
+      }
+    },
+    {
+      "size": 100,
+      "sample": 4,
+      "side": "current",
+      "elapsed_ms": 50.674,
+      "claimed_count": 100,
+      "event_digest": "81567e61a7210c4ac29c42a66f0ea84b71f95a917b08029f1f346b7124a26a95",
+      "counts": {
+        "tables": {
+          "owner_analysis_runs": 1,
+          "owner_analysis_components": 100,
+          "holding_versions": 100,
+          "decision_snapshots": 100,
+          "notification_events": 200,
+          "owner_machine_journal": 1
+        },
+        "notification_phases": {
+          "attempted": 100,
+          "scheduled": 100
+        },
+        "journal_kinds": {
+          "schema": 1
+        }
+      }
+    },
+    {
+      "size": 100,
+      "sample": 4,
+      "side": "baseline",
+      "elapsed_ms": 46.822,
+      "claimed_count": 100,
+      "event_digest": "81567e61a7210c4ac29c42a66f0ea84b71f95a917b08029f1f346b7124a26a95",
+      "counts": {
+        "tables": {
+          "owner_analysis_runs": 1,
+          "owner_analysis_components": 100,
+          "holding_versions": 100,
+          "decision_snapshots": 100,
+          "notification_events": 200,
+          "owner_machine_journal": 1
+        },
+        "notification_phases": {
+          "attempted": 100,
+          "scheduled": 100
+        },
+        "journal_kinds": {
+          "schema": 1
+        }
+      }
+    },
+    {
+      "size": 100,
+      "sample": 5,
+      "side": "baseline",
+      "elapsed_ms": 48.8689,
+      "claimed_count": 100,
+      "event_digest": "81567e61a7210c4ac29c42a66f0ea84b71f95a917b08029f1f346b7124a26a95",
+      "counts": {
+        "tables": {
+          "owner_analysis_runs": 1,
+          "owner_analysis_components": 100,
+          "holding_versions": 100,
+          "decision_snapshots": 100,
+          "notification_events": 200,
+          "owner_machine_journal": 1
+        },
+        "notification_phases": {
+          "attempted": 100,
+          "scheduled": 100
+        },
+        "journal_kinds": {
+          "schema": 1
+        }
+      }
+    },
+    {
+      "size": 100,
+      "sample": 5,
+      "side": "current",
+      "elapsed_ms": 59.8759,
+      "claimed_count": 100,
+      "event_digest": "81567e61a7210c4ac29c42a66f0ea84b71f95a917b08029f1f346b7124a26a95",
+      "counts": {
+        "tables": {
+          "owner_analysis_runs": 1,
+          "owner_analysis_components": 100,
+          "holding_versions": 100,
+          "decision_snapshots": 100,
+          "notification_events": 200,
+          "owner_machine_journal": 1
+        },
+        "notification_phases": {
+          "attempted": 100,
+          "scheduled": 100
+        },
+        "journal_kinds": {
+          "schema": 1
+        }
+      }
+    }
+  ],
+  "qualification": {
+    "local_synthetic_only": true,
+    "no_lifespan": true,
+    "in_process_asgi_not_tcp": true,
+    "actual_sqlite_and_auth": true,
+    "actual_external_delivery": false,
+    "production_readiness": false,
+    "remote_migration_or_durability": false,
+    "formal_release": false,
+    "full_head_qualification": false,
+    "unchanged_production_rate_limits": true,
+    "business_clock_not_performance_clock": true,
+    "socket_create_connection_block_is_not_os_network_sandbox": true
+  },
+  "limits": [
+    "Synthetic fixed fixtures, current shared dependencies; not a complete historical environment replay.",
+    "Fresh SQLite files and new requests, but imported Python modules and OS page caches remain warm.",
+    "Five samples give directional median/worst only, not statistically established p95 or production latency.",
+    "Terminal sent is a synthetic authorized API report; no ServerChan or other notification transport was invoked.",
+    "The complete machine API is new and cannot claim before/after improvement.",
+    "Worktree source may be concurrently edited; any hash drift invalidates current qualification and requires a new run.",
+    "No frontend artifacts or real browser interactions are measured by this backend benchmark."
+  ],
+  "retained_prior_runs": [
+    {
+      "schema": "owner-machine-local-performance-1",
+      "observed_at": "2026-10-28T07:13:37.019800+00:00",
+      "baseline_commit": "eec63a15b98e6550759dcdd0ae6b47056da5b29a",
+      "baseline_v8_repo_sha256": "84a2acde2da18ad86bb43092c53946624b0f7df9bbb7103cd5ab78d7e38a36e6",
+      "current_head": "eec63a15b98e6550759dcdd0ae6b47056da5b29a",
+      "current_worktree_dirty": true,
+      "source_before": {
+        "backend/database/owner_machine_schema.py": "572e8fb7b4c5766fe20e3409a1bac3498494d4a9bc8a61308a79a62dabbb4ea2",
+        "backend/database/owner_analysis_schema.py": "662e48a9e11201dc6ba9f419a3975a5abea7d1fe1871db02d0b679b72dbd146b",
+        "backend/service/owner_machine_repo.py": "f82a374a67b99a55fecfcddb6f9172ffe764df24772d3b816c946e9a2e587f06",
+        "backend/service/owner_machine.py": "c165659820d0f44fe551cd2bc04d6f52152409fe1a697d412107ef049b1ebaca",
+        "backend/models/owner_machine.py": "d64cda7d162f7c75e60c586462d26ef69a12cf18e2ab6bb5214217e7e43fd5b6",
+        "backend/service/owner_analysis_repo.py": "ca9d6b9bfc8512d2895b58a0434a6247b5e086d2acae609ec93c4e7a23d2d9f4",
+        "backend/service/owner_policy_state.py": "baf066bb1e495d855919298a44345312134defa77e66cfeadefbffefba21d867",
+        "backend/service/owner_sync_repo.py": "6cbf1f9c3eb37ea58a2afd57cd4f50387625d19072624bb36138f09597b6c87e",
+        "backend/service/owner_sync.py": "bdc1c987a6ce3d9129fc4bc88d0f856e5cc93b37e617127062bb39fe58c3fae5",
+        "backend/service/v8_repo.py": "f6066c653adeec814f9150baefac7e9407a15c17aade085bacddc09e1a763a99",
+        "backend/service/repository_scopes.py": "24c7952eb26c9dd25b27d25a3cbab8578c75645f127f411ce588ad0cc8448fb1",
+        "backend/database/v8_insert.py": "e5c0968cde88ffb26228ec7d1b12f4668973e0aaf49349dbb0618e2261362381",
+        "backend/strategy/decision_v2.py": "e49b7064f971d4b5e6534a3a78c3a7bae5b85b704f65e7d7ab12d495a75b8959",
+        "backend/models/v8.py": "11b29e5cdbd497f7915ac479beac24fd669d05f6060398ef3b5b3438495d7178",
+        "backend/tests/test_owner_machine_repo.py": "62baea8420712048fb38fc957b3f49c8111de6e9ac3b7f5a9beb9dc272103188",
+        "backend/tests/test_owner_machine_capacity.py": "939f12969f9c7ad4055e843fa95b2e45aa69e12167896ae789865d496f705c40",
+        "backend/tests/test_owner_analysis_repo.py": "151f6cb16d13e377c495f0f744e94e40990af63c751f91ffcacbc0cf91e6ddd8",
+        "tools/benchmark_owner_machine.py": "c9b7bf84de9c7e7e621754467790917c9b2f7ef861865112fff1a94473c66933"
+      },
+      "source_after": {
+        "backend/database/owner_machine_schema.py": "572e8fb7b4c5766fe20e3409a1bac3498494d4a9bc8a61308a79a62dabbb4ea2",
+        "backend/database/owner_analysis_schema.py": "662e48a9e11201dc6ba9f419a3975a5abea7d1fe1871db02d0b679b72dbd146b",
+        "backend/service/owner_machine_repo.py": "f82a374a67b99a55fecfcddb6f9172ffe764df24772d3b816c946e9a2e587f06",
+        "backend/service/owner_machine.py": "c165659820d0f44fe551cd2bc04d6f52152409fe1a697d412107ef049b1ebaca",
+        "backend/models/owner_machine.py": "d64cda7d162f7c75e60c586462d26ef69a12cf18e2ab6bb5214217e7e43fd5b6",
+        "backend/service/owner_analysis_repo.py": "ca9d6b9bfc8512d2895b58a0434a6247b5e086d2acae609ec93c4e7a23d2d9f4",
+        "backend/service/owner_policy_state.py": "baf066bb1e495d855919298a44345312134defa77e66cfeadefbffefba21d867",
+        "backend/service/owner_sync_repo.py": "6cbf1f9c3eb37ea58a2afd57cd4f50387625d19072624bb36138f09597b6c87e",
+        "backend/service/owner_sync.py": "bdc1c987a6ce3d9129fc4bc88d0f856e5cc93b37e617127062bb39fe58c3fae5",
+        "backend/service/v8_repo.py": "f6066c653adeec814f9150baefac7e9407a15c17aade085bacddc09e1a763a99",
+        "backend/service/repository_scopes.py": "24c7952eb26c9dd25b27d25a3cbab8578c75645f127f411ce588ad0cc8448fb1",
+        "backend/database/v8_insert.py": "e5c0968cde88ffb26228ec7d1b12f4668973e0aaf49349dbb0618e2261362381",
+        "backend/strategy/decision_v2.py": "e49b7064f971d4b5e6534a3a78c3a7bae5b85b704f65e7d7ab12d495a75b8959",
+        "backend/models/v8.py": "11b29e5cdbd497f7915ac479beac24fd669d05f6060398ef3b5b3438495d7178",
+        "backend/tests/test_owner_machine_repo.py": "62baea8420712048fb38fc957b3f49c8111de6e9ac3b7f5a9beb9dc272103188",
+        "backend/tests/test_owner_machine_capacity.py": "939f12969f9c7ad4055e843fa95b2e45aa69e12167896ae789865d496f705c40",
+        "backend/tests/test_owner_analysis_repo.py": "151f6cb16d13e377c495f0f744e94e40990af63c751f91ffcacbc0cf91e6ddd8",
+        "tools/benchmark_owner_machine.py": "c9b7bf84de9c7e7e621754467790917c9b2f7ef861865112fff1a94473c66933"
+      },
+      "source_drift": [],
+      "source_stable_during_measurement": true,
+      "synthetic_business_clock": "2026-10-26T06:31:00+00:00",
+      "python": "3.14.4",
+      "platform": "Windows-11-10.0.26200-SP0",
+      "sqlite": "3.50.4",
+      "sample_count_per_size_and_side": 5,
+      "aggregation": [
+        {
+          "size": 3,
+          "machine_http": {
+            "source": {
+              "samples_ms": [
+                51.8303,
+                52.4554,
+                38.7688,
+                38.9495,
+                40.1042
+              ],
+              "median_ms": 40.1042,
+              "worst_ms": 52.4554,
+              "sample_count": 5
+            },
+            "prepare": {
+              "samples_ms": [
+                77.4335,
+                79.7406,
+                71.654,
+                74.7222,
+                73.1509
+              ],
+              "median_ms": 74.7222,
+              "worst_ms": 79.7406,
+              "sample_count": 5
+            },
+            "claim": {
+              "samples_ms": [
+                63.7561,
+                62.6505,
+                59.8173,
+                61.4705,
+                67.2333
+              ],
+              "median_ms": 62.6505,
+              "worst_ms": 67.2333,
+              "sample_count": 5
+            },
+            "finish": {
+              "samples_ms": [
+                57.3791,
+                58.5385,
+                56.1189,
+                55.9523,
+                59.9954
+              ],
+              "median_ms": 57.3791,
+              "worst_ms": 59.9954,
+              "sample_count": 5
+            },
+            "status": {
+              "samples_ms": [
+                47.0021,
+                45.8629,
+                51.6254,
+                45.5586,
+                48.1109
+              ],
+              "median_ms": 47.0021,
+              "worst_ms": 51.6254,
+              "sample_count": 5
+            },
+            "complete_flow": {
+              "samples_ms": [
+                297.4011,
+                299.2479,
+                277.9844,
+                276.6531,
+                288.5947
+              ],
+              "median_ms": 288.5947,
+              "worst_ms": 299.2479,
+              "sample_count": 5
+            }
+          },
+          "machine_baseline": "NOT_COMPARABLE_NEW_API",
+          "legacy_notification_claim_comparison": {
+            "baseline": {
+              "samples_ms": [
+                14.9471,
+                16.81,
+                16.8071,
+                14.8745,
+                17.1366
+              ],
+              "median_ms": 16.8071,
+              "worst_ms": 17.1366,
+              "sample_count": 5
+            },
+            "current": {
+              "samples_ms": [
+                14.5384,
+                16.9294,
+                14.8308,
+                15.8564,
+                15.7034
+              ],
+              "median_ms": 15.7034,
+              "worst_ms": 16.9294,
+              "sample_count": 5
+            },
+            "median_delta_percent": -6.5669,
+            "verdict": "PASS"
+          },
+          "http_body_identical_across_samples": true
+        },
+        {
+          "size": 100,
+          "machine_http": {
+            "source": {
+              "samples_ms": [
+                52.5989,
+                67.0517,
+                51.6175,
+                68.7586,
+                49.8087
+              ],
+              "median_ms": 52.5989,
+              "worst_ms": 68.7586,
+              "sample_count": 5
+            },
+            "prepare": {
+              "samples_ms": [
+                754.9042,
+                921.715,
+                858.3349,
+                1012.3485,
+                755.2712
+              ],
+              "median_ms": 858.3349,
+              "worst_ms": 1012.3485,
+              "sample_count": 5
+            },
+            "claim": {
+              "samples_ms": [
+                360.2131,
+                452.0559,
+                397.8218,
+                368.4658,
+                337.0504
+              ],
+              "median_ms": 368.4658,
+              "worst_ms": 452.0559,
+              "sample_count": 5
+            },
+            "finish": {
+              "samples_ms": [
+                386.1055,
+                351.6792,
+                420.0077,
+                332.4833,
+                296.7835
+              ],
+              "median_ms": 351.6792,
+              "worst_ms": 420.0077,
+              "sample_count": 5
+            },
+            "status": {
+              "samples_ms": [
+                365.7317,
+                310.7785,
+                522.0697,
+                304.8728,
+                288.049
+              ],
+              "median_ms": 310.7785,
+              "worst_ms": 522.0697,
+              "sample_count": 5
+            },
+            "complete_flow": {
+              "samples_ms": [
+                1919.5534,
+                2103.2803,
+                2249.8516,
+                2086.929,
+                1726.9628
+              ],
+              "median_ms": 2086.929,
+              "worst_ms": 2249.8516,
+              "sample_count": 5
+            }
+          },
+          "machine_baseline": "NOT_COMPARABLE_NEW_API",
+          "legacy_notification_claim_comparison": {
+            "baseline": {
+              "samples_ms": [
+                57.8689,
+                54.6855,
+                50.1791,
+                68.4362,
+                51.1492
+              ],
+              "median_ms": 54.6855,
+              "worst_ms": 68.4362,
+              "sample_count": 5
+            },
+            "current": {
+              "samples_ms": [
+                65.9072,
+                60.1157,
+                60.4158,
+                51.5123,
+                65.6974
+              ],
+              "median_ms": 60.4158,
+              "worst_ms": 65.9072,
+              "sample_count": 5
+            },
+            "median_delta_percent": 10.4786,
+            "verdict": "WARN"
+          },
+          "http_body_identical_across_samples": true
+        }
+      ],
+      "machine_http_samples": [
+        {
+          "size": 3,
+          "sample": 1,
+          "phases": {
+            "source": {
+              "elapsed_ms": 51.8303,
+              "http_status": 200,
+              "response_bytes": 291
+            },
+            "prepare": {
+              "elapsed_ms": 77.4335,
+              "http_status": 200,
+              "response_bytes": 19430
+            },
+            "claim": {
+              "elapsed_ms": 63.7561,
+              "http_status": 200,
+              "response_bytes": 19304
+            },
+            "finish": {
+              "elapsed_ms": 57.3791,
+              "http_status": 200,
+              "response_bytes": 754
+            },
+            "status": {
+              "elapsed_ms": 47.0021,
+              "http_status": 200,
+              "response_bytes": 22999
+            }
+          },
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 3,
+              "holding_versions": 3,
+              "decision_snapshots": 3,
+              "notification_events": 9,
+              "owner_machine_journal": 6
+            },
+            "notification_phases": {
+              "attempted": 3,
+              "scheduled": 3,
+              "sent": 3
+            },
+            "journal_kinds": {
+              "attempt": 1,
+              "observation": 2,
+              "result": 1,
+              "schema": 1,
+              "task": 1
+            }
+          },
+          "complete_components": 3,
+          "body_digest": "09a8db71f646c94de40ee0f805ab6ab77582bb9d15be0ec2cb240974aca14293"
+        },
+        {
+          "size": 3,
+          "sample": 2,
+          "phases": {
+            "source": {
+              "elapsed_ms": 52.4554,
+              "http_status": 200,
+              "response_bytes": 291
+            },
+            "prepare": {
+              "elapsed_ms": 79.7406,
+              "http_status": 200,
+              "response_bytes": 19430
+            },
+            "claim": {
+              "elapsed_ms": 62.6505,
+              "http_status": 200,
+              "response_bytes": 19304
+            },
+            "finish": {
+              "elapsed_ms": 58.5385,
+              "http_status": 200,
+              "response_bytes": 754
+            },
+            "status": {
+              "elapsed_ms": 45.8629,
+              "http_status": 200,
+              "response_bytes": 22999
+            }
+          },
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 3,
+              "holding_versions": 3,
+              "decision_snapshots": 3,
+              "notification_events": 9,
+              "owner_machine_journal": 6
+            },
+            "notification_phases": {
+              "attempted": 3,
+              "scheduled": 3,
+              "sent": 3
+            },
+            "journal_kinds": {
+              "attempt": 1,
+              "observation": 2,
+              "result": 1,
+              "schema": 1,
+              "task": 1
+            }
+          },
+          "complete_components": 3,
+          "body_digest": "09a8db71f646c94de40ee0f805ab6ab77582bb9d15be0ec2cb240974aca14293"
+        },
+        {
+          "size": 3,
+          "sample": 3,
+          "phases": {
+            "source": {
+              "elapsed_ms": 38.7688,
+              "http_status": 200,
+              "response_bytes": 291
+            },
+            "prepare": {
+              "elapsed_ms": 71.654,
+              "http_status": 200,
+              "response_bytes": 19430
+            },
+            "claim": {
+              "elapsed_ms": 59.8173,
+              "http_status": 200,
+              "response_bytes": 19304
+            },
+            "finish": {
+              "elapsed_ms": 56.1189,
+              "http_status": 200,
+              "response_bytes": 754
+            },
+            "status": {
+              "elapsed_ms": 51.6254,
+              "http_status": 200,
+              "response_bytes": 22999
+            }
+          },
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 3,
+              "holding_versions": 3,
+              "decision_snapshots": 3,
+              "notification_events": 9,
+              "owner_machine_journal": 6
+            },
+            "notification_phases": {
+              "attempted": 3,
+              "scheduled": 3,
+              "sent": 3
+            },
+            "journal_kinds": {
+              "attempt": 1,
+              "observation": 2,
+              "result": 1,
+              "schema": 1,
+              "task": 1
+            }
+          },
+          "complete_components": 3,
+          "body_digest": "09a8db71f646c94de40ee0f805ab6ab77582bb9d15be0ec2cb240974aca14293"
+        },
+        {
+          "size": 3,
+          "sample": 4,
+          "phases": {
+            "source": {
+              "elapsed_ms": 38.9495,
+              "http_status": 200,
+              "response_bytes": 291
+            },
+            "prepare": {
+              "elapsed_ms": 74.7222,
+              "http_status": 200,
+              "response_bytes": 19430
+            },
+            "claim": {
+              "elapsed_ms": 61.4705,
+              "http_status": 200,
+              "response_bytes": 19304
+            },
+            "finish": {
+              "elapsed_ms": 55.9523,
+              "http_status": 200,
+              "response_bytes": 754
+            },
+            "status": {
+              "elapsed_ms": 45.5586,
+              "http_status": 200,
+              "response_bytes": 22999
+            }
+          },
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 3,
+              "holding_versions": 3,
+              "decision_snapshots": 3,
+              "notification_events": 9,
+              "owner_machine_journal": 6
+            },
+            "notification_phases": {
+              "attempted": 3,
+              "scheduled": 3,
+              "sent": 3
+            },
+            "journal_kinds": {
+              "attempt": 1,
+              "observation": 2,
+              "result": 1,
+              "schema": 1,
+              "task": 1
+            }
+          },
+          "complete_components": 3,
+          "body_digest": "09a8db71f646c94de40ee0f805ab6ab77582bb9d15be0ec2cb240974aca14293"
+        },
+        {
+          "size": 3,
+          "sample": 5,
+          "phases": {
+            "source": {
+              "elapsed_ms": 40.1042,
+              "http_status": 200,
+              "response_bytes": 291
+            },
+            "prepare": {
+              "elapsed_ms": 73.1509,
+              "http_status": 200,
+              "response_bytes": 19430
+            },
+            "claim": {
+              "elapsed_ms": 67.2333,
+              "http_status": 200,
+              "response_bytes": 19304
+            },
+            "finish": {
+              "elapsed_ms": 59.9954,
+              "http_status": 200,
+              "response_bytes": 754
+            },
+            "status": {
+              "elapsed_ms": 48.1109,
+              "http_status": 200,
+              "response_bytes": 22999
+            }
+          },
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 3,
+              "holding_versions": 3,
+              "decision_snapshots": 3,
+              "notification_events": 9,
+              "owner_machine_journal": 6
+            },
+            "notification_phases": {
+              "attempted": 3,
+              "scheduled": 3,
+              "sent": 3
+            },
+            "journal_kinds": {
+              "attempt": 1,
+              "observation": 2,
+              "result": 1,
+              "schema": 1,
+              "task": 1
+            }
+          },
+          "complete_components": 3,
+          "body_digest": "09a8db71f646c94de40ee0f805ab6ab77582bb9d15be0ec2cb240974aca14293"
+        },
+        {
+          "size": 100,
+          "sample": 1,
+          "phases": {
+            "source": {
+              "elapsed_ms": 52.5989,
+              "http_status": 200,
+              "response_bytes": 1166
+            },
+            "prepare": {
+              "elapsed_ms": 754.9042,
+              "http_status": 200,
+              "response_bytes": 590956
+            },
+            "claim": {
+              "elapsed_ms": 360.2131,
+              "http_status": 200,
+              "response_bytes": 590834
+            },
+            "finish": {
+              "elapsed_ms": 386.1055,
+              "http_status": 200,
+              "response_bytes": 758
+            },
+            "status": {
+              "elapsed_ms": 365.7317,
+              "http_status": 200,
+              "response_bytes": 601428
+            }
+          },
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 100,
+              "holding_versions": 100,
+              "decision_snapshots": 100,
+              "notification_events": 300,
+              "owner_machine_journal": 6
+            },
+            "notification_phases": {
+              "attempted": 100,
+              "scheduled": 100,
+              "sent": 100
+            },
+            "journal_kinds": {
+              "attempt": 1,
+              "observation": 2,
+              "result": 1,
+              "schema": 1,
+              "task": 1
+            }
+          },
+          "complete_components": 100,
+          "body_digest": "c88bb09ea8b0741fd45aaae1df60b658edf75eb28cd5d252909b50ea23fb66c1"
+        },
+        {
+          "size": 100,
+          "sample": 2,
+          "phases": {
+            "source": {
+              "elapsed_ms": 67.0517,
+              "http_status": 200,
+              "response_bytes": 1166
+            },
+            "prepare": {
+              "elapsed_ms": 921.715,
+              "http_status": 200,
+              "response_bytes": 590956
+            },
+            "claim": {
+              "elapsed_ms": 452.0559,
+              "http_status": 200,
+              "response_bytes": 590834
+            },
+            "finish": {
+              "elapsed_ms": 351.6792,
+              "http_status": 200,
+              "response_bytes": 758
+            },
+            "status": {
+              "elapsed_ms": 310.7785,
+              "http_status": 200,
+              "response_bytes": 601428
+            }
+          },
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 100,
+              "holding_versions": 100,
+              "decision_snapshots": 100,
+              "notification_events": 300,
+              "owner_machine_journal": 6
+            },
+            "notification_phases": {
+              "attempted": 100,
+              "scheduled": 100,
+              "sent": 100
+            },
+            "journal_kinds": {
+              "attempt": 1,
+              "observation": 2,
+              "result": 1,
+              "schema": 1,
+              "task": 1
+            }
+          },
+          "complete_components": 100,
+          "body_digest": "c88bb09ea8b0741fd45aaae1df60b658edf75eb28cd5d252909b50ea23fb66c1"
+        },
+        {
+          "size": 100,
+          "sample": 3,
+          "phases": {
+            "source": {
+              "elapsed_ms": 51.6175,
+              "http_status": 200,
+              "response_bytes": 1166
+            },
+            "prepare": {
+              "elapsed_ms": 858.3349,
+              "http_status": 200,
+              "response_bytes": 590956
+            },
+            "claim": {
+              "elapsed_ms": 397.8218,
+              "http_status": 200,
+              "response_bytes": 590834
+            },
+            "finish": {
+              "elapsed_ms": 420.0077,
+              "http_status": 200,
+              "response_bytes": 758
+            },
+            "status": {
+              "elapsed_ms": 522.0697,
+              "http_status": 200,
+              "response_bytes": 601428
+            }
+          },
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 100,
+              "holding_versions": 100,
+              "decision_snapshots": 100,
+              "notification_events": 300,
+              "owner_machine_journal": 6
+            },
+            "notification_phases": {
+              "attempted": 100,
+              "scheduled": 100,
+              "sent": 100
+            },
+            "journal_kinds": {
+              "attempt": 1,
+              "observation": 2,
+              "result": 1,
+              "schema": 1,
+              "task": 1
+            }
+          },
+          "complete_components": 100,
+          "body_digest": "c88bb09ea8b0741fd45aaae1df60b658edf75eb28cd5d252909b50ea23fb66c1"
+        },
+        {
+          "size": 100,
+          "sample": 4,
+          "phases": {
+            "source": {
+              "elapsed_ms": 68.7586,
+              "http_status": 200,
+              "response_bytes": 1166
+            },
+            "prepare": {
+              "elapsed_ms": 1012.3485,
+              "http_status": 200,
+              "response_bytes": 590956
+            },
+            "claim": {
+              "elapsed_ms": 368.4658,
+              "http_status": 200,
+              "response_bytes": 590834
+            },
+            "finish": {
+              "elapsed_ms": 332.4833,
+              "http_status": 200,
+              "response_bytes": 758
+            },
+            "status": {
+              "elapsed_ms": 304.8728,
+              "http_status": 200,
+              "response_bytes": 601428
+            }
+          },
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 100,
+              "holding_versions": 100,
+              "decision_snapshots": 100,
+              "notification_events": 300,
+              "owner_machine_journal": 6
+            },
+            "notification_phases": {
+              "attempted": 100,
+              "scheduled": 100,
+              "sent": 100
+            },
+            "journal_kinds": {
+              "attempt": 1,
+              "observation": 2,
+              "result": 1,
+              "schema": 1,
+              "task": 1
+            }
+          },
+          "complete_components": 100,
+          "body_digest": "c88bb09ea8b0741fd45aaae1df60b658edf75eb28cd5d252909b50ea23fb66c1"
+        },
+        {
+          "size": 100,
+          "sample": 5,
+          "phases": {
+            "source": {
+              "elapsed_ms": 49.8087,
+              "http_status": 200,
+              "response_bytes": 1166
+            },
+            "prepare": {
+              "elapsed_ms": 755.2712,
+              "http_status": 200,
+              "response_bytes": 590956
+            },
+            "claim": {
+              "elapsed_ms": 337.0504,
+              "http_status": 200,
+              "response_bytes": 590834
+            },
+            "finish": {
+              "elapsed_ms": 296.7835,
+              "http_status": 200,
+              "response_bytes": 758
+            },
+            "status": {
+              "elapsed_ms": 288.049,
+              "http_status": 200,
+              "response_bytes": 601428
+            }
+          },
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 100,
+              "holding_versions": 100,
+              "decision_snapshots": 100,
+              "notification_events": 300,
+              "owner_machine_journal": 6
+            },
+            "notification_phases": {
+              "attempted": 100,
+              "scheduled": 100,
+              "sent": 100
+            },
+            "journal_kinds": {
+              "attempt": 1,
+              "observation": 2,
+              "result": 1,
+              "schema": 1,
+              "task": 1
+            }
+          },
+          "complete_components": 100,
+          "body_digest": "c88bb09ea8b0741fd45aaae1df60b658edf75eb28cd5d252909b50ea23fb66c1"
+        }
+      ],
+      "legacy_claim_samples": [
+        {
+          "size": 3,
+          "sample": 1,
+          "side": "baseline",
+          "elapsed_ms": 14.9471,
+          "claimed_count": 3,
+          "event_digest": "d619d341be2f780744cdf0ec9b7e5159538b9b0ac0a46787f8ea787243727f20",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 3,
+              "holding_versions": 3,
+              "decision_snapshots": 3,
+              "notification_events": 6,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 3,
+              "scheduled": 3
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        },
+        {
+          "size": 3,
+          "sample": 1,
+          "side": "current",
+          "elapsed_ms": 14.5384,
+          "claimed_count": 3,
+          "event_digest": "d619d341be2f780744cdf0ec9b7e5159538b9b0ac0a46787f8ea787243727f20",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 3,
+              "holding_versions": 3,
+              "decision_snapshots": 3,
+              "notification_events": 6,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 3,
+              "scheduled": 3
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        },
+        {
+          "size": 3,
+          "sample": 2,
+          "side": "current",
+          "elapsed_ms": 16.9294,
+          "claimed_count": 3,
+          "event_digest": "d619d341be2f780744cdf0ec9b7e5159538b9b0ac0a46787f8ea787243727f20",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 3,
+              "holding_versions": 3,
+              "decision_snapshots": 3,
+              "notification_events": 6,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 3,
+              "scheduled": 3
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        },
+        {
+          "size": 3,
+          "sample": 2,
+          "side": "baseline",
+          "elapsed_ms": 16.81,
+          "claimed_count": 3,
+          "event_digest": "d619d341be2f780744cdf0ec9b7e5159538b9b0ac0a46787f8ea787243727f20",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 3,
+              "holding_versions": 3,
+              "decision_snapshots": 3,
+              "notification_events": 6,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 3,
+              "scheduled": 3
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        },
+        {
+          "size": 3,
+          "sample": 3,
+          "side": "baseline",
+          "elapsed_ms": 16.8071,
+          "claimed_count": 3,
+          "event_digest": "d619d341be2f780744cdf0ec9b7e5159538b9b0ac0a46787f8ea787243727f20",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 3,
+              "holding_versions": 3,
+              "decision_snapshots": 3,
+              "notification_events": 6,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 3,
+              "scheduled": 3
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        },
+        {
+          "size": 3,
+          "sample": 3,
+          "side": "current",
+          "elapsed_ms": 14.8308,
+          "claimed_count": 3,
+          "event_digest": "d619d341be2f780744cdf0ec9b7e5159538b9b0ac0a46787f8ea787243727f20",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 3,
+              "holding_versions": 3,
+              "decision_snapshots": 3,
+              "notification_events": 6,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 3,
+              "scheduled": 3
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        },
+        {
+          "size": 3,
+          "sample": 4,
+          "side": "current",
+          "elapsed_ms": 15.8564,
+          "claimed_count": 3,
+          "event_digest": "d619d341be2f780744cdf0ec9b7e5159538b9b0ac0a46787f8ea787243727f20",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 3,
+              "holding_versions": 3,
+              "decision_snapshots": 3,
+              "notification_events": 6,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 3,
+              "scheduled": 3
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        },
+        {
+          "size": 3,
+          "sample": 4,
+          "side": "baseline",
+          "elapsed_ms": 14.8745,
+          "claimed_count": 3,
+          "event_digest": "d619d341be2f780744cdf0ec9b7e5159538b9b0ac0a46787f8ea787243727f20",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 3,
+              "holding_versions": 3,
+              "decision_snapshots": 3,
+              "notification_events": 6,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 3,
+              "scheduled": 3
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        },
+        {
+          "size": 3,
+          "sample": 5,
+          "side": "baseline",
+          "elapsed_ms": 17.1366,
+          "claimed_count": 3,
+          "event_digest": "d619d341be2f780744cdf0ec9b7e5159538b9b0ac0a46787f8ea787243727f20",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 3,
+              "holding_versions": 3,
+              "decision_snapshots": 3,
+              "notification_events": 6,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 3,
+              "scheduled": 3
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        },
+        {
+          "size": 3,
+          "sample": 5,
+          "side": "current",
+          "elapsed_ms": 15.7034,
+          "claimed_count": 3,
+          "event_digest": "d619d341be2f780744cdf0ec9b7e5159538b9b0ac0a46787f8ea787243727f20",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 3,
+              "holding_versions": 3,
+              "decision_snapshots": 3,
+              "notification_events": 6,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 3,
+              "scheduled": 3
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        },
+        {
+          "size": 100,
+          "sample": 1,
+          "side": "baseline",
+          "elapsed_ms": 57.8689,
+          "claimed_count": 100,
+          "event_digest": "81567e61a7210c4ac29c42a66f0ea84b71f95a917b08029f1f346b7124a26a95",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 100,
+              "holding_versions": 100,
+              "decision_snapshots": 100,
+              "notification_events": 200,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 100,
+              "scheduled": 100
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        },
+        {
+          "size": 100,
+          "sample": 1,
+          "side": "current",
+          "elapsed_ms": 65.9072,
+          "claimed_count": 100,
+          "event_digest": "81567e61a7210c4ac29c42a66f0ea84b71f95a917b08029f1f346b7124a26a95",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 100,
+              "holding_versions": 100,
+              "decision_snapshots": 100,
+              "notification_events": 200,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 100,
+              "scheduled": 100
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        },
+        {
+          "size": 100,
+          "sample": 2,
+          "side": "current",
+          "elapsed_ms": 60.1157,
+          "claimed_count": 100,
+          "event_digest": "81567e61a7210c4ac29c42a66f0ea84b71f95a917b08029f1f346b7124a26a95",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 100,
+              "holding_versions": 100,
+              "decision_snapshots": 100,
+              "notification_events": 200,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 100,
+              "scheduled": 100
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        },
+        {
+          "size": 100,
+          "sample": 2,
+          "side": "baseline",
+          "elapsed_ms": 54.6855,
+          "claimed_count": 100,
+          "event_digest": "81567e61a7210c4ac29c42a66f0ea84b71f95a917b08029f1f346b7124a26a95",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 100,
+              "holding_versions": 100,
+              "decision_snapshots": 100,
+              "notification_events": 200,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 100,
+              "scheduled": 100
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        },
+        {
+          "size": 100,
+          "sample": 3,
+          "side": "baseline",
+          "elapsed_ms": 50.1791,
+          "claimed_count": 100,
+          "event_digest": "81567e61a7210c4ac29c42a66f0ea84b71f95a917b08029f1f346b7124a26a95",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 100,
+              "holding_versions": 100,
+              "decision_snapshots": 100,
+              "notification_events": 200,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 100,
+              "scheduled": 100
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        },
+        {
+          "size": 100,
+          "sample": 3,
+          "side": "current",
+          "elapsed_ms": 60.4158,
+          "claimed_count": 100,
+          "event_digest": "81567e61a7210c4ac29c42a66f0ea84b71f95a917b08029f1f346b7124a26a95",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 100,
+              "holding_versions": 100,
+              "decision_snapshots": 100,
+              "notification_events": 200,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 100,
+              "scheduled": 100
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        },
+        {
+          "size": 100,
+          "sample": 4,
+          "side": "current",
+          "elapsed_ms": 51.5123,
+          "claimed_count": 100,
+          "event_digest": "81567e61a7210c4ac29c42a66f0ea84b71f95a917b08029f1f346b7124a26a95",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 100,
+              "holding_versions": 100,
+              "decision_snapshots": 100,
+              "notification_events": 200,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 100,
+              "scheduled": 100
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        },
+        {
+          "size": 100,
+          "sample": 4,
+          "side": "baseline",
+          "elapsed_ms": 68.4362,
+          "claimed_count": 100,
+          "event_digest": "81567e61a7210c4ac29c42a66f0ea84b71f95a917b08029f1f346b7124a26a95",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 100,
+              "holding_versions": 100,
+              "decision_snapshots": 100,
+              "notification_events": 200,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 100,
+              "scheduled": 100
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        },
+        {
+          "size": 100,
+          "sample": 5,
+          "side": "baseline",
+          "elapsed_ms": 51.1492,
+          "claimed_count": 100,
+          "event_digest": "81567e61a7210c4ac29c42a66f0ea84b71f95a917b08029f1f346b7124a26a95",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 100,
+              "holding_versions": 100,
+              "decision_snapshots": 100,
+              "notification_events": 200,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 100,
+              "scheduled": 100
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        },
+        {
+          "size": 100,
+          "sample": 5,
+          "side": "current",
+          "elapsed_ms": 65.6974,
+          "claimed_count": 100,
+          "event_digest": "81567e61a7210c4ac29c42a66f0ea84b71f95a917b08029f1f346b7124a26a95",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 100,
+              "holding_versions": 100,
+              "decision_snapshots": 100,
+              "notification_events": 200,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 100,
+              "scheduled": 100
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        }
+      ],
+      "qualification": {
+        "local_synthetic_only": true,
+        "no_lifespan": true,
+        "in_process_asgi_not_tcp": true,
+        "actual_sqlite_and_auth": true,
+        "actual_external_delivery": false,
+        "production_readiness": false,
+        "remote_migration_or_durability": false,
+        "formal_release": false,
+        "full_head_qualification": false,
+        "unchanged_production_rate_limits": true,
+        "business_clock_not_performance_clock": true,
+        "socket_create_connection_block_is_not_os_network_sandbox": true
+      },
+      "limits": [
+        "Synthetic fixed fixtures, current shared dependencies; not a complete historical environment replay.",
+        "Fresh SQLite files and new requests, but imported Python modules and OS page caches remain warm.",
+        "Five samples give directional median/worst only, not statistically established p95 or production latency.",
+        "Terminal sent is a synthetic authorized API report; no ServerChan or other notification transport was invoked.",
+        "The complete machine API is new and cannot claim before/after improvement.",
+        "Worktree source may be concurrently edited; any hash drift invalidates current qualification and requires a new run.",
+        "No frontend artifacts or real browser interactions are measured by this backend benchmark."
+      ]
+    },
+    {
+      "schema": "owner-machine-local-performance-1",
+      "observed_at": "2026-10-28T07:14:56.555041+00:00",
+      "baseline_commit": "eec63a15b98e6550759dcdd0ae6b47056da5b29a",
+      "baseline_v8_repo_sha256": "84a2acde2da18ad86bb43092c53946624b0f7df9bbb7103cd5ab78d7e38a36e6",
+      "current_head": "eec63a15b98e6550759dcdd0ae6b47056da5b29a",
+      "current_worktree_dirty": true,
+      "source_before": {
+        "backend/database/owner_machine_schema.py": "572e8fb7b4c5766fe20e3409a1bac3498494d4a9bc8a61308a79a62dabbb4ea2",
+        "backend/database/owner_analysis_schema.py": "662e48a9e11201dc6ba9f419a3975a5abea7d1fe1871db02d0b679b72dbd146b",
+        "backend/service/owner_machine_repo.py": "f82a374a67b99a55fecfcddb6f9172ffe764df24772d3b816c946e9a2e587f06",
+        "backend/service/owner_machine.py": "c165659820d0f44fe551cd2bc04d6f52152409fe1a697d412107ef049b1ebaca",
+        "backend/models/owner_machine.py": "d64cda7d162f7c75e60c586462d26ef69a12cf18e2ab6bb5214217e7e43fd5b6",
+        "backend/service/owner_analysis_repo.py": "ca9d6b9bfc8512d2895b58a0434a6247b5e086d2acae609ec93c4e7a23d2d9f4",
+        "backend/service/owner_policy_state.py": "baf066bb1e495d855919298a44345312134defa77e66cfeadefbffefba21d867",
+        "backend/service/owner_sync_repo.py": "6cbf1f9c3eb37ea58a2afd57cd4f50387625d19072624bb36138f09597b6c87e",
+        "backend/service/owner_sync.py": "bdc1c987a6ce3d9129fc4bc88d0f856e5cc93b37e617127062bb39fe58c3fae5",
+        "backend/service/v8_repo.py": "3a714a9436b54420b54b8e49aed72f691b049bb395287b49fd4e07c883a9af83",
+        "backend/service/repository_scopes.py": "24c7952eb26c9dd25b27d25a3cbab8578c75645f127f411ce588ad0cc8448fb1",
+        "backend/database/v8_insert.py": "e5c0968cde88ffb26228ec7d1b12f4668973e0aaf49349dbb0618e2261362381",
+        "backend/database/db.py": "5ebbae9636198b901b2d0b594e29ec08fef5360804742c0cedc448c926772b26",
+        "backend/database/owner_sync_schema.py": "5d9d5d659472a978083a8ac361cf1ce0e60aeab4c0744d64175d5e2f7451bd72",
+        "backend/models/owner_analysis.py": "f4d77f8acd3ff95a3721ed2fb1a65a21aced6ef5b40d74414003312cbb6864b4",
+        "backend/models/owner_sync.py": "940c41c5f9bf76c23b1179a3454ec89ae586ac42bbb18090db98ac565d85bc0f",
+        "backend/strategy/decision_v2.py": "e49b7064f971d4b5e6534a3a78c3a7bae5b85b704f65e7d7ab12d495a75b8959",
+        "backend/models/v8.py": "11b29e5cdbd497f7915ac479beac24fd669d05f6060398ef3b5b3438495d7178",
+        "backend/tests/test_owner_machine_repo.py": "62baea8420712048fb38fc957b3f49c8111de6e9ac3b7f5a9beb9dc272103188",
+        "backend/tests/test_owner_machine_capacity.py": "939f12969f9c7ad4055e843fa95b2e45aa69e12167896ae789865d496f705c40",
+        "backend/tests/test_owner_analysis_repo.py": "151f6cb16d13e377c495f0f744e94e40990af63c751f91ffcacbc0cf91e6ddd8",
+        "tools/benchmark_owner_machine.py": "bff08ad7418463c324dc88849bbffaa8a23b84b46ee1b5f9c03d839b478ff8c1"
+      },
+      "source_after_import": {
+        "backend/database/owner_machine_schema.py": "572e8fb7b4c5766fe20e3409a1bac3498494d4a9bc8a61308a79a62dabbb4ea2",
+        "backend/database/owner_analysis_schema.py": "662e48a9e11201dc6ba9f419a3975a5abea7d1fe1871db02d0b679b72dbd146b",
+        "backend/service/owner_machine_repo.py": "f82a374a67b99a55fecfcddb6f9172ffe764df24772d3b816c946e9a2e587f06",
+        "backend/service/owner_machine.py": "c165659820d0f44fe551cd2bc04d6f52152409fe1a697d412107ef049b1ebaca",
+        "backend/models/owner_machine.py": "d64cda7d162f7c75e60c586462d26ef69a12cf18e2ab6bb5214217e7e43fd5b6",
+        "backend/service/owner_analysis_repo.py": "ca9d6b9bfc8512d2895b58a0434a6247b5e086d2acae609ec93c4e7a23d2d9f4",
+        "backend/service/owner_policy_state.py": "baf066bb1e495d855919298a44345312134defa77e66cfeadefbffefba21d867",
+        "backend/service/owner_sync_repo.py": "6cbf1f9c3eb37ea58a2afd57cd4f50387625d19072624bb36138f09597b6c87e",
+        "backend/service/owner_sync.py": "bdc1c987a6ce3d9129fc4bc88d0f856e5cc93b37e617127062bb39fe58c3fae5",
+        "backend/service/v8_repo.py": "3a714a9436b54420b54b8e49aed72f691b049bb395287b49fd4e07c883a9af83",
+        "backend/service/repository_scopes.py": "24c7952eb26c9dd25b27d25a3cbab8578c75645f127f411ce588ad0cc8448fb1",
+        "backend/database/v8_insert.py": "e5c0968cde88ffb26228ec7d1b12f4668973e0aaf49349dbb0618e2261362381",
+        "backend/database/db.py": "5ebbae9636198b901b2d0b594e29ec08fef5360804742c0cedc448c926772b26",
+        "backend/database/owner_sync_schema.py": "5d9d5d659472a978083a8ac361cf1ce0e60aeab4c0744d64175d5e2f7451bd72",
+        "backend/models/owner_analysis.py": "f4d77f8acd3ff95a3721ed2fb1a65a21aced6ef5b40d74414003312cbb6864b4",
+        "backend/models/owner_sync.py": "940c41c5f9bf76c23b1179a3454ec89ae586ac42bbb18090db98ac565d85bc0f",
+        "backend/strategy/decision_v2.py": "e49b7064f971d4b5e6534a3a78c3a7bae5b85b704f65e7d7ab12d495a75b8959",
+        "backend/models/v8.py": "11b29e5cdbd497f7915ac479beac24fd669d05f6060398ef3b5b3438495d7178",
+        "backend/tests/test_owner_machine_repo.py": "62baea8420712048fb38fc957b3f49c8111de6e9ac3b7f5a9beb9dc272103188",
+        "backend/tests/test_owner_machine_capacity.py": "939f12969f9c7ad4055e843fa95b2e45aa69e12167896ae789865d496f705c40",
+        "backend/tests/test_owner_analysis_repo.py": "151f6cb16d13e377c495f0f744e94e40990af63c751f91ffcacbc0cf91e6ddd8",
+        "tools/benchmark_owner_machine.py": "bff08ad7418463c324dc88849bbffaa8a23b84b46ee1b5f9c03d839b478ff8c1"
+      },
+      "source_after": {
+        "backend/database/owner_machine_schema.py": "572e8fb7b4c5766fe20e3409a1bac3498494d4a9bc8a61308a79a62dabbb4ea2",
+        "backend/database/owner_analysis_schema.py": "662e48a9e11201dc6ba9f419a3975a5abea7d1fe1871db02d0b679b72dbd146b",
+        "backend/service/owner_machine_repo.py": "f82a374a67b99a55fecfcddb6f9172ffe764df24772d3b816c946e9a2e587f06",
+        "backend/service/owner_machine.py": "c165659820d0f44fe551cd2bc04d6f52152409fe1a697d412107ef049b1ebaca",
+        "backend/models/owner_machine.py": "d64cda7d162f7c75e60c586462d26ef69a12cf18e2ab6bb5214217e7e43fd5b6",
+        "backend/service/owner_analysis_repo.py": "ca9d6b9bfc8512d2895b58a0434a6247b5e086d2acae609ec93c4e7a23d2d9f4",
+        "backend/service/owner_policy_state.py": "baf066bb1e495d855919298a44345312134defa77e66cfeadefbffefba21d867",
+        "backend/service/owner_sync_repo.py": "6cbf1f9c3eb37ea58a2afd57cd4f50387625d19072624bb36138f09597b6c87e",
+        "backend/service/owner_sync.py": "bdc1c987a6ce3d9129fc4bc88d0f856e5cc93b37e617127062bb39fe58c3fae5",
+        "backend/service/v8_repo.py": "3a714a9436b54420b54b8e49aed72f691b049bb395287b49fd4e07c883a9af83",
+        "backend/service/repository_scopes.py": "24c7952eb26c9dd25b27d25a3cbab8578c75645f127f411ce588ad0cc8448fb1",
+        "backend/database/v8_insert.py": "e5c0968cde88ffb26228ec7d1b12f4668973e0aaf49349dbb0618e2261362381",
+        "backend/database/db.py": "5ebbae9636198b901b2d0b594e29ec08fef5360804742c0cedc448c926772b26",
+        "backend/database/owner_sync_schema.py": "5d9d5d659472a978083a8ac361cf1ce0e60aeab4c0744d64175d5e2f7451bd72",
+        "backend/models/owner_analysis.py": "f4d77f8acd3ff95a3721ed2fb1a65a21aced6ef5b40d74414003312cbb6864b4",
+        "backend/models/owner_sync.py": "940c41c5f9bf76c23b1179a3454ec89ae586ac42bbb18090db98ac565d85bc0f",
+        "backend/strategy/decision_v2.py": "e49b7064f971d4b5e6534a3a78c3a7bae5b85b704f65e7d7ab12d495a75b8959",
+        "backend/models/v8.py": "11b29e5cdbd497f7915ac479beac24fd669d05f6060398ef3b5b3438495d7178",
+        "backend/tests/test_owner_machine_repo.py": "62baea8420712048fb38fc957b3f49c8111de6e9ac3b7f5a9beb9dc272103188",
+        "backend/tests/test_owner_machine_capacity.py": "939f12969f9c7ad4055e843fa95b2e45aa69e12167896ae789865d496f705c40",
+        "backend/tests/test_owner_analysis_repo.py": "151f6cb16d13e377c495f0f744e94e40990af63c751f91ffcacbc0cf91e6ddd8",
+        "tools/benchmark_owner_machine.py": "bff08ad7418463c324dc88849bbffaa8a23b84b46ee1b5f9c03d839b478ff8c1"
+      },
+      "source_drift": [],
+      "source_stable_during_measurement": true,
+      "synthetic_business_clock": "2026-10-26T06:31:00+00:00",
+      "python": "3.14.4",
+      "platform": "Windows-11-10.0.26200-SP0",
+      "sqlite": "3.50.4",
+      "shared_dependencies": {
+        "fastapi": "0.138.1",
+        "starlette": "1.3.1",
+        "pydantic": "2.13.4",
+        "httpx": "0.28.1",
+        "pytest": "9.1.1"
+      },
+      "sample_count_per_size_and_side": 5,
+      "aggregation": [
+        {
+          "size": 3,
+          "machine_http": {
+            "source": {
+              "samples_ms": [
+                61.1992,
+                60.0849,
+                41.1306,
+                51.0723,
+                40.7284
+              ],
+              "median_ms": 51.0723,
+              "worst_ms": 61.1992,
+              "sample_count": 5
+            },
+            "prepare": {
+              "samples_ms": [
+                86.7188,
+                86.1145,
+                78.0585,
+                105.2824,
+                74.7592
+              ],
+              "median_ms": 86.1145,
+              "worst_ms": 105.2824,
+              "sample_count": 5
+            },
+            "claim": {
+              "samples_ms": [
+                92.3394,
+                88.8172,
+                94.621,
+                101.4893,
+                79.1368
+              ],
+              "median_ms": 92.3394,
+              "worst_ms": 101.4893,
+              "sample_count": 5
+            },
+            "finish": {
+              "samples_ms": [
+                73.4248,
+                79.193,
+                113.84,
+                66.8648,
+                66.7777
+              ],
+              "median_ms": 73.4248,
+              "worst_ms": 113.84,
+              "sample_count": 5
+            },
+            "status": {
+              "samples_ms": [
+                68.9699,
+                47.69,
+                68.6344,
+                46.3673,
+                47.8694
+              ],
+              "median_ms": 47.8694,
+              "worst_ms": 68.9699,
+              "sample_count": 5
+            },
+            "complete_flow": {
+              "samples_ms": [
+                382.6521,
+                361.8996,
+                396.2845,
+                371.0761,
+                309.2715
+              ],
+              "median_ms": 371.0761,
+              "worst_ms": 396.2845,
+              "sample_count": 5
+            }
+          },
+          "machine_baseline": "NOT_COMPARABLE_NEW_API",
+          "legacy_notification_claim_comparison": {
+            "baseline": {
+              "samples_ms": [
+                19.8132,
+                16.1626,
+                15.8536,
+                15.9586,
+                17.702
+              ],
+              "median_ms": 16.1626,
+              "worst_ms": 19.8132,
+              "sample_count": 5
+            },
+            "current": {
+              "samples_ms": [
+                15.475,
+                16.9231,
+                12.487,
+                16.8085,
+                16.5824
+              ],
+              "median_ms": 16.5824,
+              "worst_ms": 16.9231,
+              "sample_count": 5
+            },
+            "median_delta_percent": 2.5974,
+            "verdict": "PASS"
+          },
+          "http_body_identical_across_samples": true
+        },
+        {
+          "size": 100,
+          "machine_http": {
+            "source": {
+              "samples_ms": [
+                52.0775,
+                50.2556,
+                62.2593,
+                61.6304,
+                57.3542
+              ],
+              "median_ms": 57.3542,
+              "worst_ms": 62.2593,
+              "sample_count": 5
+            },
+            "prepare": {
+              "samples_ms": [
+                754.4486,
+                795.0498,
+                804.1304,
+                851.7508,
+                809.5405
+              ],
+              "median_ms": 804.1304,
+              "worst_ms": 851.7508,
+              "sample_count": 5
+            },
+            "claim": {
+              "samples_ms": [
+                376.455,
+                421.9628,
+                398.6208,
+                369.207,
+                369.1082
+              ],
+              "median_ms": 376.455,
+              "worst_ms": 421.9628,
+              "sample_count": 5
+            },
+            "finish": {
+              "samples_ms": [
+                326.9643,
+                366.8483,
+                385.2615,
+                338.2832,
+                349.7026
+              ],
+              "median_ms": 349.7026,
+              "worst_ms": 385.2615,
+              "sample_count": 5
+            },
+            "status": {
+              "samples_ms": [
+                282.7066,
+                374.0045,
+                324.3202,
+                317.3471,
+                287.5693
+              ],
+              "median_ms": 317.3471,
+              "worst_ms": 374.0045,
+              "sample_count": 5
+            },
+            "complete_flow": {
+              "samples_ms": [
+                1792.652,
+                2008.121,
+                1974.5922,
+                1938.2185,
+                1873.2748
+              ],
+              "median_ms": 1938.2185,
+              "worst_ms": 2008.121,
+              "sample_count": 5
+            }
+          },
+          "machine_baseline": "NOT_COMPARABLE_NEW_API",
+          "legacy_notification_claim_comparison": {
+            "baseline": {
+              "samples_ms": [
+                56.931,
+                46.9534,
+                47.6471,
+                53.1306,
+                56.3971
+              ],
+              "median_ms": 53.1306,
+              "worst_ms": 56.931,
+              "sample_count": 5
+            },
+            "current": {
+              "samples_ms": [
+                49.2816,
+                48.6152,
+                50.9424,
+                54.6684,
+                57.5337
+              ],
+              "median_ms": 50.9424,
+              "worst_ms": 57.5337,
+              "sample_count": 5
+            },
+            "median_delta_percent": -4.1185,
+            "verdict": "PASS"
+          },
+          "http_body_identical_across_samples": true
+        }
+      ],
+      "machine_http_samples": [
+        {
+          "size": 3,
+          "sample": 1,
+          "phases": {
+            "source": {
+              "elapsed_ms": 61.1992,
+              "http_status": 200,
+              "response_bytes": 291
+            },
+            "prepare": {
+              "elapsed_ms": 86.7188,
+              "http_status": 200,
+              "response_bytes": 19430
+            },
+            "claim": {
+              "elapsed_ms": 92.3394,
+              "http_status": 200,
+              "response_bytes": 19304
+            },
+            "finish": {
+              "elapsed_ms": 73.4248,
+              "http_status": 200,
+              "response_bytes": 754
+            },
+            "status": {
+              "elapsed_ms": 68.9699,
+              "http_status": 200,
+              "response_bytes": 22999
+            }
+          },
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 3,
+              "holding_versions": 3,
+              "decision_snapshots": 3,
+              "notification_events": 9,
+              "owner_machine_journal": 6
+            },
+            "notification_phases": {
+              "attempted": 3,
+              "scheduled": 3,
+              "sent": 3
+            },
+            "journal_kinds": {
+              "attempt": 1,
+              "observation": 2,
+              "result": 1,
+              "schema": 1,
+              "task": 1
+            }
+          },
+          "complete_components": 3,
+          "body_digest": "09a8db71f646c94de40ee0f805ab6ab77582bb9d15be0ec2cb240974aca14293"
+        },
+        {
+          "size": 3,
+          "sample": 2,
+          "phases": {
+            "source": {
+              "elapsed_ms": 60.0849,
+              "http_status": 200,
+              "response_bytes": 291
+            },
+            "prepare": {
+              "elapsed_ms": 86.1145,
+              "http_status": 200,
+              "response_bytes": 19430
+            },
+            "claim": {
+              "elapsed_ms": 88.8172,
+              "http_status": 200,
+              "response_bytes": 19304
+            },
+            "finish": {
+              "elapsed_ms": 79.193,
+              "http_status": 200,
+              "response_bytes": 754
+            },
+            "status": {
+              "elapsed_ms": 47.69,
+              "http_status": 200,
+              "response_bytes": 22999
+            }
+          },
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 3,
+              "holding_versions": 3,
+              "decision_snapshots": 3,
+              "notification_events": 9,
+              "owner_machine_journal": 6
+            },
+            "notification_phases": {
+              "attempted": 3,
+              "scheduled": 3,
+              "sent": 3
+            },
+            "journal_kinds": {
+              "attempt": 1,
+              "observation": 2,
+              "result": 1,
+              "schema": 1,
+              "task": 1
+            }
+          },
+          "complete_components": 3,
+          "body_digest": "09a8db71f646c94de40ee0f805ab6ab77582bb9d15be0ec2cb240974aca14293"
+        },
+        {
+          "size": 3,
+          "sample": 3,
+          "phases": {
+            "source": {
+              "elapsed_ms": 41.1306,
+              "http_status": 200,
+              "response_bytes": 291
+            },
+            "prepare": {
+              "elapsed_ms": 78.0585,
+              "http_status": 200,
+              "response_bytes": 19430
+            },
+            "claim": {
+              "elapsed_ms": 94.621,
+              "http_status": 200,
+              "response_bytes": 19304
+            },
+            "finish": {
+              "elapsed_ms": 113.84,
+              "http_status": 200,
+              "response_bytes": 754
+            },
+            "status": {
+              "elapsed_ms": 68.6344,
+              "http_status": 200,
+              "response_bytes": 22999
+            }
+          },
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 3,
+              "holding_versions": 3,
+              "decision_snapshots": 3,
+              "notification_events": 9,
+              "owner_machine_journal": 6
+            },
+            "notification_phases": {
+              "attempted": 3,
+              "scheduled": 3,
+              "sent": 3
+            },
+            "journal_kinds": {
+              "attempt": 1,
+              "observation": 2,
+              "result": 1,
+              "schema": 1,
+              "task": 1
+            }
+          },
+          "complete_components": 3,
+          "body_digest": "09a8db71f646c94de40ee0f805ab6ab77582bb9d15be0ec2cb240974aca14293"
+        },
+        {
+          "size": 3,
+          "sample": 4,
+          "phases": {
+            "source": {
+              "elapsed_ms": 51.0723,
+              "http_status": 200,
+              "response_bytes": 291
+            },
+            "prepare": {
+              "elapsed_ms": 105.2824,
+              "http_status": 200,
+              "response_bytes": 19430
+            },
+            "claim": {
+              "elapsed_ms": 101.4893,
+              "http_status": 200,
+              "response_bytes": 19304
+            },
+            "finish": {
+              "elapsed_ms": 66.8648,
+              "http_status": 200,
+              "response_bytes": 754
+            },
+            "status": {
+              "elapsed_ms": 46.3673,
+              "http_status": 200,
+              "response_bytes": 22999
+            }
+          },
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 3,
+              "holding_versions": 3,
+              "decision_snapshots": 3,
+              "notification_events": 9,
+              "owner_machine_journal": 6
+            },
+            "notification_phases": {
+              "attempted": 3,
+              "scheduled": 3,
+              "sent": 3
+            },
+            "journal_kinds": {
+              "attempt": 1,
+              "observation": 2,
+              "result": 1,
+              "schema": 1,
+              "task": 1
+            }
+          },
+          "complete_components": 3,
+          "body_digest": "09a8db71f646c94de40ee0f805ab6ab77582bb9d15be0ec2cb240974aca14293"
+        },
+        {
+          "size": 3,
+          "sample": 5,
+          "phases": {
+            "source": {
+              "elapsed_ms": 40.7284,
+              "http_status": 200,
+              "response_bytes": 291
+            },
+            "prepare": {
+              "elapsed_ms": 74.7592,
+              "http_status": 200,
+              "response_bytes": 19430
+            },
+            "claim": {
+              "elapsed_ms": 79.1368,
+              "http_status": 200,
+              "response_bytes": 19304
+            },
+            "finish": {
+              "elapsed_ms": 66.7777,
+              "http_status": 200,
+              "response_bytes": 754
+            },
+            "status": {
+              "elapsed_ms": 47.8694,
+              "http_status": 200,
+              "response_bytes": 22999
+            }
+          },
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 3,
+              "holding_versions": 3,
+              "decision_snapshots": 3,
+              "notification_events": 9,
+              "owner_machine_journal": 6
+            },
+            "notification_phases": {
+              "attempted": 3,
+              "scheduled": 3,
+              "sent": 3
+            },
+            "journal_kinds": {
+              "attempt": 1,
+              "observation": 2,
+              "result": 1,
+              "schema": 1,
+              "task": 1
+            }
+          },
+          "complete_components": 3,
+          "body_digest": "09a8db71f646c94de40ee0f805ab6ab77582bb9d15be0ec2cb240974aca14293"
+        },
+        {
+          "size": 100,
+          "sample": 1,
+          "phases": {
+            "source": {
+              "elapsed_ms": 52.0775,
+              "http_status": 200,
+              "response_bytes": 1166
+            },
+            "prepare": {
+              "elapsed_ms": 754.4486,
+              "http_status": 200,
+              "response_bytes": 590956
+            },
+            "claim": {
+              "elapsed_ms": 376.455,
+              "http_status": 200,
+              "response_bytes": 590834
+            },
+            "finish": {
+              "elapsed_ms": 326.9643,
+              "http_status": 200,
+              "response_bytes": 758
+            },
+            "status": {
+              "elapsed_ms": 282.7066,
+              "http_status": 200,
+              "response_bytes": 601428
+            }
+          },
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 100,
+              "holding_versions": 100,
+              "decision_snapshots": 100,
+              "notification_events": 300,
+              "owner_machine_journal": 6
+            },
+            "notification_phases": {
+              "attempted": 100,
+              "scheduled": 100,
+              "sent": 100
+            },
+            "journal_kinds": {
+              "attempt": 1,
+              "observation": 2,
+              "result": 1,
+              "schema": 1,
+              "task": 1
+            }
+          },
+          "complete_components": 100,
+          "body_digest": "c88bb09ea8b0741fd45aaae1df60b658edf75eb28cd5d252909b50ea23fb66c1"
+        },
+        {
+          "size": 100,
+          "sample": 2,
+          "phases": {
+            "source": {
+              "elapsed_ms": 50.2556,
+              "http_status": 200,
+              "response_bytes": 1166
+            },
+            "prepare": {
+              "elapsed_ms": 795.0498,
+              "http_status": 200,
+              "response_bytes": 590956
+            },
+            "claim": {
+              "elapsed_ms": 421.9628,
+              "http_status": 200,
+              "response_bytes": 590834
+            },
+            "finish": {
+              "elapsed_ms": 366.8483,
+              "http_status": 200,
+              "response_bytes": 758
+            },
+            "status": {
+              "elapsed_ms": 374.0045,
+              "http_status": 200,
+              "response_bytes": 601428
+            }
+          },
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 100,
+              "holding_versions": 100,
+              "decision_snapshots": 100,
+              "notification_events": 300,
+              "owner_machine_journal": 6
+            },
+            "notification_phases": {
+              "attempted": 100,
+              "scheduled": 100,
+              "sent": 100
+            },
+            "journal_kinds": {
+              "attempt": 1,
+              "observation": 2,
+              "result": 1,
+              "schema": 1,
+              "task": 1
+            }
+          },
+          "complete_components": 100,
+          "body_digest": "c88bb09ea8b0741fd45aaae1df60b658edf75eb28cd5d252909b50ea23fb66c1"
+        },
+        {
+          "size": 100,
+          "sample": 3,
+          "phases": {
+            "source": {
+              "elapsed_ms": 62.2593,
+              "http_status": 200,
+              "response_bytes": 1166
+            },
+            "prepare": {
+              "elapsed_ms": 804.1304,
+              "http_status": 200,
+              "response_bytes": 590956
+            },
+            "claim": {
+              "elapsed_ms": 398.6208,
+              "http_status": 200,
+              "response_bytes": 590834
+            },
+            "finish": {
+              "elapsed_ms": 385.2615,
+              "http_status": 200,
+              "response_bytes": 758
+            },
+            "status": {
+              "elapsed_ms": 324.3202,
+              "http_status": 200,
+              "response_bytes": 601428
+            }
+          },
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 100,
+              "holding_versions": 100,
+              "decision_snapshots": 100,
+              "notification_events": 300,
+              "owner_machine_journal": 6
+            },
+            "notification_phases": {
+              "attempted": 100,
+              "scheduled": 100,
+              "sent": 100
+            },
+            "journal_kinds": {
+              "attempt": 1,
+              "observation": 2,
+              "result": 1,
+              "schema": 1,
+              "task": 1
+            }
+          },
+          "complete_components": 100,
+          "body_digest": "c88bb09ea8b0741fd45aaae1df60b658edf75eb28cd5d252909b50ea23fb66c1"
+        },
+        {
+          "size": 100,
+          "sample": 4,
+          "phases": {
+            "source": {
+              "elapsed_ms": 61.6304,
+              "http_status": 200,
+              "response_bytes": 1166
+            },
+            "prepare": {
+              "elapsed_ms": 851.7508,
+              "http_status": 200,
+              "response_bytes": 590956
+            },
+            "claim": {
+              "elapsed_ms": 369.207,
+              "http_status": 200,
+              "response_bytes": 590834
+            },
+            "finish": {
+              "elapsed_ms": 338.2832,
+              "http_status": 200,
+              "response_bytes": 758
+            },
+            "status": {
+              "elapsed_ms": 317.3471,
+              "http_status": 200,
+              "response_bytes": 601428
+            }
+          },
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 100,
+              "holding_versions": 100,
+              "decision_snapshots": 100,
+              "notification_events": 300,
+              "owner_machine_journal": 6
+            },
+            "notification_phases": {
+              "attempted": 100,
+              "scheduled": 100,
+              "sent": 100
+            },
+            "journal_kinds": {
+              "attempt": 1,
+              "observation": 2,
+              "result": 1,
+              "schema": 1,
+              "task": 1
+            }
+          },
+          "complete_components": 100,
+          "body_digest": "c88bb09ea8b0741fd45aaae1df60b658edf75eb28cd5d252909b50ea23fb66c1"
+        },
+        {
+          "size": 100,
+          "sample": 5,
+          "phases": {
+            "source": {
+              "elapsed_ms": 57.3542,
+              "http_status": 200,
+              "response_bytes": 1166
+            },
+            "prepare": {
+              "elapsed_ms": 809.5405,
+              "http_status": 200,
+              "response_bytes": 590956
+            },
+            "claim": {
+              "elapsed_ms": 369.1082,
+              "http_status": 200,
+              "response_bytes": 590834
+            },
+            "finish": {
+              "elapsed_ms": 349.7026,
+              "http_status": 200,
+              "response_bytes": 758
+            },
+            "status": {
+              "elapsed_ms": 287.5693,
+              "http_status": 200,
+              "response_bytes": 601428
+            }
+          },
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 100,
+              "holding_versions": 100,
+              "decision_snapshots": 100,
+              "notification_events": 300,
+              "owner_machine_journal": 6
+            },
+            "notification_phases": {
+              "attempted": 100,
+              "scheduled": 100,
+              "sent": 100
+            },
+            "journal_kinds": {
+              "attempt": 1,
+              "observation": 2,
+              "result": 1,
+              "schema": 1,
+              "task": 1
+            }
+          },
+          "complete_components": 100,
+          "body_digest": "c88bb09ea8b0741fd45aaae1df60b658edf75eb28cd5d252909b50ea23fb66c1"
+        }
+      ],
+      "legacy_claim_samples": [
+        {
+          "size": 3,
+          "sample": 1,
+          "side": "baseline",
+          "elapsed_ms": 19.8132,
+          "claimed_count": 3,
+          "event_digest": "d619d341be2f780744cdf0ec9b7e5159538b9b0ac0a46787f8ea787243727f20",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 3,
+              "holding_versions": 3,
+              "decision_snapshots": 3,
+              "notification_events": 6,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 3,
+              "scheduled": 3
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        },
+        {
+          "size": 3,
+          "sample": 1,
+          "side": "current",
+          "elapsed_ms": 15.475,
+          "claimed_count": 3,
+          "event_digest": "d619d341be2f780744cdf0ec9b7e5159538b9b0ac0a46787f8ea787243727f20",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 3,
+              "holding_versions": 3,
+              "decision_snapshots": 3,
+              "notification_events": 6,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 3,
+              "scheduled": 3
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        },
+        {
+          "size": 3,
+          "sample": 2,
+          "side": "current",
+          "elapsed_ms": 16.9231,
+          "claimed_count": 3,
+          "event_digest": "d619d341be2f780744cdf0ec9b7e5159538b9b0ac0a46787f8ea787243727f20",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 3,
+              "holding_versions": 3,
+              "decision_snapshots": 3,
+              "notification_events": 6,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 3,
+              "scheduled": 3
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        },
+        {
+          "size": 3,
+          "sample": 2,
+          "side": "baseline",
+          "elapsed_ms": 16.1626,
+          "claimed_count": 3,
+          "event_digest": "d619d341be2f780744cdf0ec9b7e5159538b9b0ac0a46787f8ea787243727f20",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 3,
+              "holding_versions": 3,
+              "decision_snapshots": 3,
+              "notification_events": 6,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 3,
+              "scheduled": 3
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        },
+        {
+          "size": 3,
+          "sample": 3,
+          "side": "baseline",
+          "elapsed_ms": 15.8536,
+          "claimed_count": 3,
+          "event_digest": "d619d341be2f780744cdf0ec9b7e5159538b9b0ac0a46787f8ea787243727f20",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 3,
+              "holding_versions": 3,
+              "decision_snapshots": 3,
+              "notification_events": 6,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 3,
+              "scheduled": 3
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        },
+        {
+          "size": 3,
+          "sample": 3,
+          "side": "current",
+          "elapsed_ms": 12.487,
+          "claimed_count": 3,
+          "event_digest": "d619d341be2f780744cdf0ec9b7e5159538b9b0ac0a46787f8ea787243727f20",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 3,
+              "holding_versions": 3,
+              "decision_snapshots": 3,
+              "notification_events": 6,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 3,
+              "scheduled": 3
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        },
+        {
+          "size": 3,
+          "sample": 4,
+          "side": "current",
+          "elapsed_ms": 16.8085,
+          "claimed_count": 3,
+          "event_digest": "d619d341be2f780744cdf0ec9b7e5159538b9b0ac0a46787f8ea787243727f20",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 3,
+              "holding_versions": 3,
+              "decision_snapshots": 3,
+              "notification_events": 6,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 3,
+              "scheduled": 3
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        },
+        {
+          "size": 3,
+          "sample": 4,
+          "side": "baseline",
+          "elapsed_ms": 15.9586,
+          "claimed_count": 3,
+          "event_digest": "d619d341be2f780744cdf0ec9b7e5159538b9b0ac0a46787f8ea787243727f20",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 3,
+              "holding_versions": 3,
+              "decision_snapshots": 3,
+              "notification_events": 6,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 3,
+              "scheduled": 3
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        },
+        {
+          "size": 3,
+          "sample": 5,
+          "side": "baseline",
+          "elapsed_ms": 17.702,
+          "claimed_count": 3,
+          "event_digest": "d619d341be2f780744cdf0ec9b7e5159538b9b0ac0a46787f8ea787243727f20",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 3,
+              "holding_versions": 3,
+              "decision_snapshots": 3,
+              "notification_events": 6,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 3,
+              "scheduled": 3
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        },
+        {
+          "size": 3,
+          "sample": 5,
+          "side": "current",
+          "elapsed_ms": 16.5824,
+          "claimed_count": 3,
+          "event_digest": "d619d341be2f780744cdf0ec9b7e5159538b9b0ac0a46787f8ea787243727f20",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 3,
+              "holding_versions": 3,
+              "decision_snapshots": 3,
+              "notification_events": 6,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 3,
+              "scheduled": 3
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        },
+        {
+          "size": 100,
+          "sample": 1,
+          "side": "baseline",
+          "elapsed_ms": 56.931,
+          "claimed_count": 100,
+          "event_digest": "81567e61a7210c4ac29c42a66f0ea84b71f95a917b08029f1f346b7124a26a95",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 100,
+              "holding_versions": 100,
+              "decision_snapshots": 100,
+              "notification_events": 200,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 100,
+              "scheduled": 100
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        },
+        {
+          "size": 100,
+          "sample": 1,
+          "side": "current",
+          "elapsed_ms": 49.2816,
+          "claimed_count": 100,
+          "event_digest": "81567e61a7210c4ac29c42a66f0ea84b71f95a917b08029f1f346b7124a26a95",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 100,
+              "holding_versions": 100,
+              "decision_snapshots": 100,
+              "notification_events": 200,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 100,
+              "scheduled": 100
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        },
+        {
+          "size": 100,
+          "sample": 2,
+          "side": "current",
+          "elapsed_ms": 48.6152,
+          "claimed_count": 100,
+          "event_digest": "81567e61a7210c4ac29c42a66f0ea84b71f95a917b08029f1f346b7124a26a95",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 100,
+              "holding_versions": 100,
+              "decision_snapshots": 100,
+              "notification_events": 200,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 100,
+              "scheduled": 100
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        },
+        {
+          "size": 100,
+          "sample": 2,
+          "side": "baseline",
+          "elapsed_ms": 46.9534,
+          "claimed_count": 100,
+          "event_digest": "81567e61a7210c4ac29c42a66f0ea84b71f95a917b08029f1f346b7124a26a95",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 100,
+              "holding_versions": 100,
+              "decision_snapshots": 100,
+              "notification_events": 200,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 100,
+              "scheduled": 100
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        },
+        {
+          "size": 100,
+          "sample": 3,
+          "side": "baseline",
+          "elapsed_ms": 47.6471,
+          "claimed_count": 100,
+          "event_digest": "81567e61a7210c4ac29c42a66f0ea84b71f95a917b08029f1f346b7124a26a95",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 100,
+              "holding_versions": 100,
+              "decision_snapshots": 100,
+              "notification_events": 200,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 100,
+              "scheduled": 100
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        },
+        {
+          "size": 100,
+          "sample": 3,
+          "side": "current",
+          "elapsed_ms": 50.9424,
+          "claimed_count": 100,
+          "event_digest": "81567e61a7210c4ac29c42a66f0ea84b71f95a917b08029f1f346b7124a26a95",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 100,
+              "holding_versions": 100,
+              "decision_snapshots": 100,
+              "notification_events": 200,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 100,
+              "scheduled": 100
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        },
+        {
+          "size": 100,
+          "sample": 4,
+          "side": "current",
+          "elapsed_ms": 54.6684,
+          "claimed_count": 100,
+          "event_digest": "81567e61a7210c4ac29c42a66f0ea84b71f95a917b08029f1f346b7124a26a95",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 100,
+              "holding_versions": 100,
+              "decision_snapshots": 100,
+              "notification_events": 200,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 100,
+              "scheduled": 100
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        },
+        {
+          "size": 100,
+          "sample": 4,
+          "side": "baseline",
+          "elapsed_ms": 53.1306,
+          "claimed_count": 100,
+          "event_digest": "81567e61a7210c4ac29c42a66f0ea84b71f95a917b08029f1f346b7124a26a95",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 100,
+              "holding_versions": 100,
+              "decision_snapshots": 100,
+              "notification_events": 200,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 100,
+              "scheduled": 100
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        },
+        {
+          "size": 100,
+          "sample": 5,
+          "side": "baseline",
+          "elapsed_ms": 56.3971,
+          "claimed_count": 100,
+          "event_digest": "81567e61a7210c4ac29c42a66f0ea84b71f95a917b08029f1f346b7124a26a95",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 100,
+              "holding_versions": 100,
+              "decision_snapshots": 100,
+              "notification_events": 200,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 100,
+              "scheduled": 100
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        },
+        {
+          "size": 100,
+          "sample": 5,
+          "side": "current",
+          "elapsed_ms": 57.5337,
+          "claimed_count": 100,
+          "event_digest": "81567e61a7210c4ac29c42a66f0ea84b71f95a917b08029f1f346b7124a26a95",
+          "counts": {
+            "tables": {
+              "owner_analysis_runs": 1,
+              "owner_analysis_components": 100,
+              "holding_versions": 100,
+              "decision_snapshots": 100,
+              "notification_events": 200,
+              "owner_machine_journal": 1
+            },
+            "notification_phases": {
+              "attempted": 100,
+              "scheduled": 100
+            },
+            "journal_kinds": {
+              "schema": 1
+            }
+          }
+        }
+      ],
+      "qualification": {
+        "local_synthetic_only": true,
+        "no_lifespan": true,
+        "in_process_asgi_not_tcp": true,
+        "actual_sqlite_and_auth": true,
+        "actual_external_delivery": false,
+        "production_readiness": false,
+        "remote_migration_or_durability": false,
+        "formal_release": false,
+        "full_head_qualification": false,
+        "unchanged_production_rate_limits": true,
+        "business_clock_not_performance_clock": true,
+        "socket_create_connection_block_is_not_os_network_sandbox": true
+      },
+      "limits": [
+        "Synthetic fixed fixtures, current shared dependencies; not a complete historical environment replay.",
+        "Fresh SQLite files and new requests, but imported Python modules and OS page caches remain warm.",
+        "Five samples give directional median/worst only, not statistically established p95 or production latency.",
+        "Terminal sent is a synthetic authorized API report; no ServerChan or other notification transport was invoked.",
+        "The complete machine API is new and cannot claim before/after improvement.",
+        "Worktree source may be concurrently edited; any hash drift invalidates current qualification and requires a new run.",
+        "No frontend artifacts or real browser interactions are measured by this backend benchmark."
+      ],
+      "run_variance_note": "First run used an earlier benchmark pinning layout; its actual raw samples are retained, including the 100-fund legacy-claim +10.4786% WARN. The strengthened harness rerun measured -4.1185%; five samples per run do not establish a statistically consistent regression or erase the warning. Current production sources were stable within each run; source manifests state the exact measured bytes.",
+      "overall_local_verdict": "WARN_SMALL_SAMPLE_VARIANCE_AND_UNFINISHED_RELEASE_GATES",
+      "retention_note": "Earlier pre-cross-endpoint-guard measurement retained verbatim as history, not final source qualification."
+    }
+  ],
+  "run_variance_note": "Retain the original 100-fund +10.48% legacy claim WARN and every subsequent raw run. Five-sample host variance is not a release PASS; source hashes identify each separate implementation.",
+  "concurrent_load": {
+    "backend_full_pytest_session": 56532,
+    "backend_full_pytest_confirmed_running": true,
+    "frontend_and_worker_tests_terminal_before_measurement": true,
+    "note": "One full backend pytest process was active during this final run. Network transport and real browser performance were not measured."
+  },
+  "overall_local_verdict": "WARN_SMALL_SAMPLE_VARIANCE_AND_UNFINISHED_RELEASE_GATES"
+}

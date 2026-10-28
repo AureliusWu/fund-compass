@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import sqlite3
 import sys
 from urllib.parse import urlsplit
 
@@ -194,6 +195,34 @@ def read_probe(conn, nonce):
     return {"nonce_sha256": digest, "matched": True}
 
 
+def _operation_error_code(exc):
+    """Classify only adapter HTTP status, never provider text or attributes."""
+    fallback = "candidate_operation_failed"
+    if not isinstance(exc, sqlite3.OperationalError):
+        return fallback
+    # Keep driver imports outside argument/config validation and success paths
+    # with injected SQLite connections. This module never imports database.db.
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
+        from database.turso import TursoHTTPError
+    except ImportError:
+        return fallback
+    if type(exc) is not TursoHTTPError:
+        return fallback
+    status = getattr(exc, "status_code", None)
+    if type(status) is not int or not 100 <= status <= 599:
+        return fallback
+    if status == 401:
+        return "candidate_authentication_rejected"
+    if status == 403:
+        return "candidate_access_denied"
+    if status == 429:
+        return "candidate_rate_limited"
+    if 500 <= status <= 599:
+        return "candidate_service_unavailable"
+    return fallback
+
+
 def main(argv=None, *, connector=None, environ=None, stdout=None, stderr=None):
     """Run the CLI with injectable connections for isolated boundary tests."""
     stdout = sys.stdout if stdout is None else stdout
@@ -231,10 +260,10 @@ def main(argv=None, *, connector=None, environ=None, stdout=None, stderr=None):
     except CandidateError as exc:
         print(json.dumps({"ok": False, "error": str(exc)}), file=stderr)
         return 2
-    except Exception:
+    except Exception as exc:
         # Never emit exception text, URLs, SQL parameters, response bodies or
         # tracebacks: provider errors can contain tokens and private data.
-        print(json.dumps({"ok": False, "error": "candidate_operation_failed"}), file=stderr)
+        print(json.dumps({"ok": False, "error": _operation_error_code(exc)}), file=stderr)
         return 1
     finally:
         if conn is not None:

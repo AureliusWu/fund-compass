@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { ownerSession, ownerSessionGeneration } from '@/stores/ownerSession'
 import { getPortfolioOutcomes, getStrategyOutcomes, type OutcomeMetric, type PortfolioOutcomesResp, type StrategyOutcomesResp } from '@/api/client'
 import OverseasAccuracyPanel from '@/components/OverseasAccuracyPanel.vue'
 import Icon from '@/components/Icon.vue'
@@ -16,18 +17,39 @@ const accuracy = ref<AccuracyReport | null>(null)
 const portfolio = ref<PortfolioOutcomesResp | null>(null)
 const exportOpen = ref(false)
 const exportActions = [{ name: '决策实盘 CSV', key: 'decisions' }, { name: '海外误差 CSV', key: 'overseas' }]
+let loadGeneration = 0
 
-onMounted(async () => {
+async function loadPrivateOutcomes() {
+  const expected = ++loadGeneration
+  data.value = null
+  portfolio.value = null
+  error.value = ''
+  loading.value = true
   try {
-    const [outcomes, overseas, portfolioOutcomes] = await Promise.all([
-      getStrategyOutcomes(), loadOverseasAccuracy(), getPortfolioOutcomes().catch(() => null),
+    const [outcomes, portfolioOutcomes] = await Promise.all([
+      getStrategyOutcomes(), getPortfolioOutcomes().catch(() => null),
     ])
+    if (expected !== loadGeneration) return
     data.value = outcomes
-    accuracy.value = overseas
     portfolio.value = portfolioOutcomes
   }
-  catch { error.value = '实盘结果暂时不可用' }
-  finally { loading.value = false }
+  catch { if (expected === loadGeneration) error.value = ownerSession.value ? '实盘结果暂时不可用' : '请在自选页登录私人会话后查看实盘结果' }
+  finally { if (expected === loadGeneration) loading.value = false }
+}
+
+watch(ownerSessionGeneration, () => {
+  loadGeneration++
+  data.value = null
+  portfolio.value = null
+  exportOpen.value = false
+  error.value = '请在自选页登录私人会话后查看实盘结果'
+  loading.value = false
+  if (ownerSession.value) void loadPrivateOutcomes()
+}, { flush: 'sync' })
+
+onMounted(() => {
+  void loadPrivateOutcomes()
+  void loadOverseasAccuracy().then(value => { accuracy.value = value }).catch(() => { accuracy.value = null })
 })
 
 function onExport(action: { key: string }) {
@@ -97,8 +119,8 @@ function pct(value: number | null | undefined) {
           <div v-if="!portfolio.items.length" class="po-empty">暂无组合建议快照</div>
         </section>
 
-        <OverseasAccuracyPanel />
       </template>
+      <OverseasAccuracyPanel />
     </div>
     <van-action-sheet v-model:show="exportOpen" :actions="exportActions" cancel-text="取消" @select="onExport" />
   </div>

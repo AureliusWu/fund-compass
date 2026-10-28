@@ -1,0 +1,932 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { IDBFactory } from 'fake-indexeddb'
+import { openOwnerSyncOutbox, type OwnerSyncOutbox } from './ownerSyncOutbox'
+import { createOwnerSyncCandidate, type OwnerSyncCandidateTransport } from './ownerSyncCandidate'
+import { buildOwnerSyncRequest, parseSyncChangesPage, OWNER_SYNC_MAX_RESPONSE_BYTES,
+  type BuiltOwnerSyncRequest, type OwnerSyncRecord } from '@/utils/ownerSyncContract'
+
+const TARGET = 'a'.repeat(64)
+const DRAFT = { key: 'asset:synthetic-candidate', kind: 'manual_asset' as const, deleted: false,
+  changes: { name: 'Synthetic candidate', cls: '现金', value: 0, note: null } }
+const handles: OwnerSyncOutbox[] = []
+afterEach(() => { for (const handle of handles.splice(0)) handle.close(); vi.useRealTimers(); vi.unstubAllGlobals() })
+function record(key = DRAFT.key, revision = 1): OwnerSyncRecord {
+  return { key, kind: 'manual_asset', deleted: false, record_revision: revision,
+    lifecycle_revision: 1, field_revisions: { name: 1, cls: 1, value: revision, note: 1 },
+    values: { ...DRAFT.changes } }
+}
+function page(changes: OwnerSyncRecord[] = [], upper = 0, cursor: readonly [number, string] | null = null) {
+  return { status: 200, rawBody: JSON.stringify({ upper_revision: upper, changes, next_cursor: cursor, complete: cursor === null }) }
+}
+function paddedPage(response: ReturnType<typeof page>, bytes: number) {
+  const actual = new TextEncoder().encode(response.rawBody).byteLength
+  expect(actual).toBeLessThanOrEqual(bytes)
+  return { ...response, rawBody: response.rawBody + ' '.repeat(bytes - actual) }
+}
+function repeatedHistory(revision: number, first = 0, note: string | null = null) {
+  return Array.from({ length: 200 }, (_, index) => {
+    const row = record('asset:bounded-' + String(first + index).padStart(3, '0'), revision)
+    return { ...row, values: { ...row.values, note } }
+  })
+}
+function success(original: BuiltOwnerSyncRequest, head = 1) {
+  return { status: 200, rawBody: JSON.stringify({ revision: head, records: original.request.operations
+    .filter(operation => !operation.deleted).map(operation => ({ ...record(operation.key, head),
+      values: { name: 'Synthetic candidate', cls: '现金', value: 0, note: null, ...operation.changes } })) }) }
+}
+function conflict() {
+  return { status: 409, rawBody: JSON.stringify({ error: {
+    code: 'sync_conflict', message: '同步冲突，请保留本地草稿并重新核对。',
+  }, conflicts: [{ key_digest: 'b'.repeat(16), fields: ['value'] }] }) }
+}
+async function fixture(factory = new IDBFactory()) {
+  const outbox = await openOwnerSyncOutbox(factory, TARGET)
+  handles.push(outbox)
+  let session = { authenticated: true, generation: 1 }
+  const transport = {
+    targetFingerprint: TARGET,
+    write: vi.fn(async (original: BuiltOwnerSyncRequest, _signal: AbortSignal) => success(original)),
+    receipt: vi.fn(async (_id: string, _hash: string, _signal: AbortSignal): Promise<{ status: number; rawBody: string }> =>
+      ({ status: 404, rawBody: JSON.stringify({ state: 'unknown', error: 'sync_result_unknown' }) })),
+    changes: vi.fn(async (_parameters: Parameters<OwnerSyncCandidateTransport['changes']>[0], _signal: AbortSignal) => page()),
+  }
+  const candidate = createOwnerSyncCandidate({ outbox, transport, session: () => session })
+  return { outbox, transport, candidate, setSession: (next: typeof session) => { session = next } }
+}
+async function prepared() {
+  const result = await fixture()
+  result.candidate.setCloudConsent(true)
+  await result.candidate.pullBaseline()
+  await result.candidate.prepare('synthetic-request-0001', [DRAFT])
+  return result
+}
+
+async function replacedPreparedSlot() {
+  const factory = new IDBFactory(), first = await fixture(factory)
+  first.candidate.setCloudConsent(true)
+  await first.candidate.pullBaseline()
+  await first.candidate.prepare('synthetic-first-slot', [DRAFT])
+  const second = await fixture(factory)
+  second.candidate.setCloudConsent(true)
+  await second.candidate.hydratePending()
+  await second.candidate.clearResolvedOrUnsent()
+  await second.candidate.pullBaseline()
+  await second.candidate.prepare('synthetic-other-slot', [{ ...DRAFT, changes: { ...DRAFT.changes, name: 'Other tab draft' } }])
+  return { first, second, other: await second.outbox.read() }
+}
+
+async function trackedFixture() {
+  const base = await fixture()
+  let session = { authenticated: true, generation: 1 }
+  const storage: OwnerSyncOutbox = {
+    targetFingerprint: TARGET,
+    read: vi.fn(() => base.outbox.read()),
+    compareAndSwap: vi.fn((version, next) => base.outbox.compareAndSwap(version, next)),
+    close: () => base.outbox.close(),
+  }
+  const candidate = createOwnerSyncCandidate({ outbox: storage, transport: base.transport, session: () => session })
+  return { ...base, candidate, storage,
+    setSession: (next: typeof session) => { session = next } }
+}
+async function trackedPrepared() {
+  const value = await trackedFixture()
+  value.candidate.setCloudConsent(true)
+  await value.candidate.pullBaseline()
+  await value.candidate.prepare('synthetic-managed-0001', [DRAFT])
+  return value
+}
+async function resolvedManaged() {
+  const value = await trackedPrepared()
+  value.transport.write.mockImplementation(async original => success(original, 4))
+  await value.candidate.sendPrepared()
+  return value
+}
+
+describe('managed candidate full pull, bound observations and memory-only reset', () => {
+  it.each(['incremental', 'full'] as const)('bounds all raw %s history bytes even when every page replaces the same 200 keys', async mode => {
+    const f = await trackedFixture(); f.candidate.setCloudConsent(true)
+    f.transport.changes.mockResolvedValueOnce(page([record('asset:original-seed', 1)], 1))
+    await f.candidate.pullBaseline(); f.transport.changes.mockClear()
+    const since = mode === 'incremental' ? 1 : 0
+    const batches = [2, 3, 10].map(revision => repeatedHistory(revision))
+    const responses = batches.map((rows, index) => paddedPage(page(rows, 10,
+      index === 2 ? null : [rows[199].record_revision, rows[199].key]), 1536 * 1024))
+    // Every raw page is legal and the final unique-key image is only 200 small
+    // rows. It is cumulative transfer, not invalid JSON or retained size, that
+    // must stop this real reader before it publishes a complete D.
+    responses.forEach((response, index) => expect(parseSyncChangesPage(response.rawBody, {
+      sinceRevision: since, limit: 200, ...(index === 0 ? {} : { upperRevision: 10,
+        cursor: [batches[index - 1][199].record_revision, batches[index - 1][199].key] as const }),
+    }).changes).toHaveLength(200))
+    for (const response of responses) f.transport.changes.mockResolvedValueOnce(response)
+    const pull = mode === 'incremental' ? () => f.candidate.pullBaseline() : () => f.candidate.pullCompleteBaseline()
+    await expect(pull()).rejects.toMatchObject({ code: 'sync_unavailable' })
+    expect(f.transport.changes).toHaveBeenCalledTimes(3)
+    expect(f.transport.changes.mock.calls[0][0]).toEqual({ sinceRevision: since, limit: 200 })
+    expect(f.candidate.status()).toMatchObject({ state: 'blocked', latestObservedHead: 10,
+      lastCompletePulledRevision: 1, baselineReady: false })
+    expect(f.candidate.getBaseline()).toBeNull()
+    await expect(f.candidate.prepare('bounded-no-partial-prepare', [DRAFT])).rejects.toMatchObject({ code: 'sync_pull_required' })
+    f.transport.changes.mockResolvedValueOnce(page([record(DRAFT.key, 9)], 9))
+    await expect(f.candidate.pullCompleteBaseline()).rejects.toMatchObject({ code: 'sync_unavailable' })
+    expect(f.candidate.status().latestObservedHead).toBe(10)
+    expect(f.candidate.getBaseline()).toBeNull()
+    expect(f.storage.compareAndSwap).not.toHaveBeenCalled()
+    expect(f.transport.write).not.toHaveBeenCalled(); expect(f.transport.receipt).not.toHaveBeenCalled()
+    // The rejected fold cannot leak any replacement into the original seed.
+    // A subsequent legal complete pull gets a new bounded fold, not a retry
+    // of the failed pages or an implicit write.
+    f.transport.changes.mockResolvedValueOnce(page([record(DRAFT.key, 10)], 10))
+    await f.candidate.pullCompleteBaseline()
+    expect(f.candidate.getBaseline()).toEqual({ pulledRevision: 10, records: [record(DRAFT.key, 10)] })
+  })
+
+  it('accepts exactly four MiB of legal history without dropping repeated-key revisions', async () => {
+    const f = await trackedFixture(); f.candidate.setCloudConsent(true)
+    const first = repeatedHistory(1), last = repeatedHistory(2)
+    f.transport.changes.mockResolvedValueOnce(paddedPage(page(first, 2, [1, first[199].key]), OWNER_SYNC_MAX_RESPONSE_BYTES))
+      .mockResolvedValueOnce(paddedPage(page(last, 2), OWNER_SYNC_MAX_RESPONSE_BYTES))
+    await f.candidate.pullCompleteBaseline()
+    expect(f.transport.changes).toHaveBeenCalledTimes(2)
+    expect(f.candidate.getBaseline()).toEqual({ pulledRevision: 2, records: last })
+    expect(f.candidate.status()).toMatchObject({ baselineReady: true, latestObservedHead: 2, lastCompletePulledRevision: 2 })
+    expect(f.storage.compareAndSwap).not.toHaveBeenCalled(); expect(f.transport.write).not.toHaveBeenCalled()
+  })
+
+  it.each(['retained-image', 'incomplete-head'] as const)('preserves a legal page upper after %s rejection without publishing its partial rows', async fault => {
+    const f = await trackedFixture(); f.candidate.setCloudConsent(true)
+    if (fault === 'retained-image') {
+      const first = repeatedHistory(1, 0, '中'.repeat(2000)), last = repeatedHistory(10, 200, '中'.repeat(2000))
+      const start = page(first, 10, [1, first[199].key]), end = page(last, 10)
+      expect(new TextEncoder().encode(start.rawBody + end.rawBody).byteLength).toBeLessThan(4 * 1024 * 1024)
+      expect(parseSyncChangesPage(start.rawBody, { sinceRevision: 0, limit: 200 }).complete).toBe(false)
+      expect(parseSyncChangesPage(end.rawBody, { sinceRevision: 0, limit: 200, upperRevision: 10,
+        cursor: [1, first[199].key] }).complete).toBe(true)
+      f.transport.changes.mockResolvedValueOnce(start).mockResolvedValueOnce(end)
+    } else {
+      const response = page([record(DRAFT.key, 1)], 10)
+      expect(parseSyncChangesPage(response.rawBody, { sinceRevision: 0, limit: 200 }).upper_revision).toBe(10)
+      f.transport.changes.mockResolvedValueOnce(response)
+    }
+    await expect(f.candidate.pullCompleteBaseline()).rejects.toMatchObject({ code: 'sync_unavailable' })
+    expect(f.candidate.status()).toMatchObject({ latestObservedHead: 10, baselineReady: false, lastCompletePulledRevision: null })
+    expect(f.candidate.getBaseline()).toBeNull()
+    f.transport.changes.mockResolvedValueOnce(page([record(DRAFT.key, 9)], 9))
+    await expect(f.candidate.pullCompleteBaseline()).rejects.toMatchObject({ code: 'sync_unavailable' })
+    expect(f.candidate.status().latestObservedHead).toBe(10)
+    expect(f.storage.compareAndSwap).not.toHaveBeenCalled(); expect(f.transport.write).not.toHaveBeenCalled()
+  })
+
+  it.each(['write', 'receipt'] as const)('retains a matched %s head before a failed confirmed CAS', async source => {
+    const f = await trackedPrepared()
+    const original = await buildOwnerSyncRequest(JSON.parse((await f.outbox.read()).entry!.rawBody))
+    if (source === 'receipt') {
+      f.transport.write.mockRejectedValueOnce(new Error('synthetic response lost'))
+      await f.candidate.sendPrepared()
+      const response = success(original, 10)
+      f.transport.receipt.mockResolvedValueOnce({ status: 200, rawBody: JSON.stringify({
+        state: 'matched', status: 200, result: JSON.parse(response.rawBody),
+      }) })
+    } else f.transport.write.mockResolvedValueOnce(success(original, 10))
+    vi.spyOn(f.storage, 'compareAndSwap').mockImplementation(async (version, next) => {
+      if (next?.state === 'confirmed') throw new Error('synthetic local confirmation CAS failure')
+      return f.outbox.compareAndSwap(version, next)
+    })
+    if (source === 'write') await f.candidate.sendPrepared()
+    else await f.candidate.reconcilePending()
+    expect(f.candidate.status()).toMatchObject({ state: 'unknown', latestObservedHead: 10, baselineReady: false })
+    expect(f.candidate.getBoundResult()).toBeNull()
+    f.transport.changes.mockResolvedValueOnce(page([record(DRAFT.key, 9)], 9))
+    await expect(f.candidate.pullCompleteBaseline()).rejects.toMatchObject({ code: 'sync_unavailable' })
+    expect(f.candidate.status().latestObservedHead).toBe(10)
+    expect(f.candidate.getBaseline()).toBeNull()
+    expect(f.transport.write).toHaveBeenCalledTimes(1)
+  })
+
+  it('retains a parsed partial-page upper when a later page fails without inventing a complete baseline', async () => {
+    const f = await trackedFixture()
+    f.candidate.setCloudConsent(true)
+    const rows = Array.from({ length: 200 }, (_, index) => record('asset:partial-' + String(index).padStart(3, '0'), 10))
+    f.transport.changes.mockResolvedValueOnce(page(rows, 10, [10, rows[199]!.key]))
+      .mockResolvedValueOnce({ status: 500, rawBody: '{}' })
+    await expect(f.candidate.pullCompleteBaseline()).rejects.toMatchObject({ code: 'sync_unavailable' })
+    expect(f.candidate.status()).toMatchObject({ latestObservedHead: 10, baselineReady: false, lastCompletePulledRevision: null })
+    f.transport.changes.mockResolvedValueOnce(page([record(DRAFT.key, 9)], 9))
+    await expect(f.candidate.pullCompleteBaseline()).rejects.toMatchObject({ code: 'sync_unavailable' })
+    expect(f.candidate.status().latestObservedHead).toBe(10)
+    expect(f.storage.compareAndSwap).not.toHaveBeenCalled()
+  })
+
+  it('keeps incremental pull behavior while full D always starts at0 and replaces its complete synthetic image', async () => {
+    const f = await trackedFixture()
+    f.candidate.setCloudConsent(true)
+    f.transport.changes.mockResolvedValueOnce(page([record('asset:synthetic-old', 2)], 2))
+    await f.candidate.pullBaseline()
+    f.transport.changes.mockResolvedValueOnce(page([record('asset:synthetic-new', 3)], 3))
+    await f.candidate.pullBaseline()
+    expect(f.transport.changes.mock.calls[1][0]).toEqual({ sinceRevision: 2, limit: 200 })
+    expect(f.candidate.getBaseline()!.records).toHaveLength(2)
+    f.transport.changes.mockResolvedValueOnce(page([record('asset:synthetic-new', 4)], 4))
+    await f.candidate.pullCompleteBaseline()
+    expect(f.transport.changes.mock.calls[2][0]).toEqual({ sinceRevision: 0, limit: 200 })
+    expect(f.candidate.getBaseline()).toEqual({ pulledRevision: 4, records: [record('asset:synthetic-new', 4)] })
+    expect(f.storage.compareAndSwap).not.toHaveBeenCalled()
+    expect(f.transport.write).not.toHaveBeenCalled()
+  })
+
+  it('pins one upper across all full-D pages without inheriting the old checkpoint cursor', async () => {
+    const f = await trackedFixture()
+    f.candidate.setCloudConsent(true)
+    f.transport.changes.mockResolvedValueOnce(page([record('asset:synthetic-old', 1)], 1))
+    await f.candidate.pullBaseline()
+    const first = Array.from({ length: 200 }, (_, index) => record('asset:synthetic-' + String(index).padStart(3, '0'), 2))
+    const cursor = [2, first.at(-1)!.key] as const
+    const final = record('asset:synthetic-final', 3)
+    f.transport.changes.mockResolvedValueOnce(page(first, 3, cursor)).mockResolvedValueOnce(page([final], 3))
+    await f.candidate.pullCompleteBaseline()
+    expect(f.transport.changes.mock.calls.slice(1).map(call => call[0])).toEqual([
+      { sinceRevision: 0, limit: 200 }, { sinceRevision: 0, upperRevision: 3, cursor, limit: 200 },
+    ])
+    expect(f.candidate.getBaseline()!.records).toEqual([...first, final])
+  })
+
+  it('publishes the actual original packet identity, current generation and deeply immutable result', async () => {
+    const f = await resolvedManaged(), original = f.transport.write.mock.calls[0][0]
+    const bound = f.candidate.getBoundResult()!
+    expect(bound).toEqual({ requestId: original.request.request_id, requestHash: original.requestHash,
+      generation: 1, result: f.candidate.getLastResult() })
+    expect(Object.isFrozen(bound)).toBe(true)
+    expect(Object.isFrozen(bound.result)).toBe(true)
+    expect(Object.isFrozen(bound.result.result)).toBe(true)
+    expect(Reflect.set(bound, 'requestHash', 'f'.repeat(64))).toBe(false)
+    expect(Reflect.set(bound.result, 'kind', 'conflict')).toBe(false)
+    f.setSession({ authenticated: true, generation: 2 })
+    expect(f.candidate.getBoundResult()).toBeNull()
+    expect(f.candidate.getLastResult()).toBeNull()
+  })
+
+  it.each(['success', 'conflict'] as const)('freezes the plain outer receipt-derived %s wrapper and clears its binding on hydrate/revoke', async outcome => {
+    const f = await trackedPrepared()
+    f.transport.write.mockRejectedValueOnce(new Error('synthetic unknown'))
+    await f.candidate.sendPrepared()
+    const raw = (await f.outbox.read()).entry!, original = await buildOwnerSyncRequest(JSON.parse(raw.rawBody))
+    const response = outcome === 'success' ? success(original, 4) : conflict()
+    f.transport.receipt.mockResolvedValueOnce({ status: 200,
+      rawBody: JSON.stringify({ state: 'matched', status: response.status, result: JSON.parse(response.rawBody) }) })
+    await f.candidate.reconcilePending()
+    expect(f.candidate.getBoundResult()).toMatchObject({ requestId: original.request.request_id,
+      requestHash: original.requestHash, generation: 1, result: { kind: outcome } })
+    const result = f.candidate.getLastResult()!
+    expect(Object.isFrozen(result)).toBe(true)
+    expect(Reflect.set(result, 'kind', 'failure')).toBe(false)
+    await f.candidate.hydratePending()
+    expect(f.candidate.getBoundResult()).toBeNull()
+    expect(f.candidate.getLastResult()).toBeNull()
+    await expect(f.candidate.resetAfterManagedAcknowledgement(raw.requestHash)).rejects.toMatchObject({ code: 'sync_invalid_transition' })
+    f.candidate.setCloudConsent(false)
+    expect(f.candidate.getBoundResult()).toBeNull()
+  })
+
+  it('keeps the exact bound result and original durable slot across a complete D pull', async () => {
+    const f = await resolvedManaged(), before = await f.outbox.read(), bound = f.candidate.getBoundResult()
+    vi.mocked(f.storage.compareAndSwap).mockClear()
+    f.transport.changes.mockResolvedValueOnce(page([record(DRAFT.key, 5)], 5))
+    await f.candidate.pullCompleteBaseline()
+    expect(f.candidate.getBoundResult()).toBe(bound)
+    expect(f.candidate.getLastResult()).toBe(bound!.result)
+    expect(f.candidate.status()).toMatchObject({ latestObservedHead: 5, lastCompletePulledRevision: 5, baselineReady: true })
+    expect(await f.outbox.read()).toEqual(before)
+    expect(f.storage.compareAndSwap).not.toHaveBeenCalled()
+    expect(f.transport.write).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['low-head', 'bad-upper', 'malformed', 'http-error'] as const)('retains original result/slot on failed complete D: %s', async fault => {
+    const f = await resolvedManaged(), before = await f.outbox.read(), bound = f.candidate.getBoundResult()
+    const response = fault === 'low-head' ? page([record(DRAFT.key, 3)], 3)
+      : fault === 'bad-upper' ? page([record(DRAFT.key, 5)], 3)
+        : fault === 'malformed' ? { status: 200, rawBody: '{"upper_revision":4,"upper_revision":4}' }
+          : { status: 503, rawBody: 'synthetic unavailable' }
+    f.transport.changes.mockResolvedValueOnce(response)
+    vi.mocked(f.storage.compareAndSwap).mockClear()
+    await expect(f.candidate.pullCompleteBaseline()).rejects.toMatchObject({ code: 'sync_unavailable' })
+    expect(f.candidate.getBaseline()).toBeNull()
+    expect(f.candidate.getBoundResult()).toBe(bound)
+    expect(f.candidate.status()).toMatchObject({ latestObservedHead: 4, baselineReady: false })
+    expect(await f.outbox.read()).toEqual(before)
+    expect(f.storage.compareAndSwap).not.toHaveBeenCalled()
+    expect(f.transport.write).toHaveBeenCalledTimes(1)
+  })
+
+  it('times out the whole full pull while retaining original result and blocking any late next page', async () => {
+    const f = await resolvedManaged(), before = await f.outbox.read(), bound = f.candidate.getBoundResult()
+    let finish!: (response: ReturnType<typeof page>) => void
+    f.transport.changes.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const count = f.transport.changes.mock.calls.length
+    vi.mocked(f.storage.compareAndSwap).mockClear()
+    vi.useFakeTimers()
+    const pending = f.candidate.pullCompleteBaseline()
+    const rejected = expect(pending).rejects.toMatchObject({ code: 'sync_unavailable' })
+    await vi.advanceTimersByTimeAsync(12_001)
+    await rejected
+    expect(f.candidate.getBoundResult()).toBe(bound)
+    finish(page([record(DRAFT.key, 5)], 5, [5, DRAFT.key]))
+    await vi.advanceTimersByTimeAsync(1)
+    expect(f.transport.changes).toHaveBeenCalledTimes(count + 1)
+    expect(f.storage.compareAndSwap).not.toHaveBeenCalled()
+    expect(f.transport.write).toHaveBeenCalledTimes(1)
+    vi.useRealTimers()
+    expect(await f.outbox.read()).toEqual(before)
+  })
+
+  it('cannot apply a late full D or retain its private bound result after logout', async () => {
+    const f = await resolvedManaged(), before = await f.outbox.read()
+    let finish!: (response: ReturnType<typeof page>) => void
+    f.transport.changes.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const pulling = f.candidate.pullCompleteBaseline()
+    const rejected = expect(pulling).rejects.toMatchObject({ code: 'sync_unavailable' })
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+    f.setSession({ authenticated: false, generation: 2 })
+    f.candidate.notifySessionChanged()
+    finish(page([record(DRAFT.key, 5)], 5))
+    await rejected
+    expect(f.candidate.getBoundResult()).toBeNull()
+    expect(f.candidate.getLastResult()).toBeNull()
+    expect(f.candidate.getBaseline()).toBeNull()
+    expect(await f.outbox.read()).toEqual(before)
+    expect(f.transport.write).toHaveBeenCalledTimes(1)
+  })
+
+  it('refuses reset before the actual ACK empty slot and never performs a clearing CAS', async () => {
+    const f = await resolvedManaged(), bound = f.candidate.getBoundResult()!, before = await f.outbox.read()
+    vi.mocked(f.storage.compareAndSwap).mockClear()
+    await expect(f.candidate.resetAfterManagedAcknowledgement(bound.requestHash)).rejects.toMatchObject({ code: 'sync_invalid_transition' })
+    expect(f.candidate.getBoundResult()).toBe(bound)
+    expect(await f.outbox.read()).toEqual(before)
+    expect(f.storage.compareAndSwap).not.toHaveBeenCalled()
+    expect(f.transport.write).toHaveBeenCalledTimes(1)
+  })
+
+  it('resets only memory after independently emptying the original resolved slot, preserving the head floor', async () => {
+    const f = await resolvedManaged(), bound = f.candidate.getBoundResult()!, before = await f.outbox.read()
+    // A standalone legacy test adapter emulates the caller's independently
+    // proved local ACK. This is not a real managed transaction/confirmation.
+    const empty = await f.outbox.compareAndSwap(before.version, null)
+    vi.mocked(f.storage.compareAndSwap).mockClear()
+    const state = await f.candidate.resetAfterManagedAcknowledgement(bound.requestHash)
+    expect(state).toMatchObject({ state: 'idle', baselineReady: false,
+      lastCompletePulledRevision: null, latestObservedHead: 4 })
+    expect(f.candidate.getBoundResult()).toBeNull()
+    expect(f.candidate.getLastResult()).toBeNull()
+    expect(f.candidate.getBaseline()).toBeNull()
+    expect(await f.outbox.read()).toEqual(empty)
+    expect(f.storage.compareAndSwap).not.toHaveBeenCalled()
+    f.transport.changes.mockResolvedValueOnce(page([record(DRAFT.key, 3)], 3))
+    await expect(f.candidate.pullCompleteBaseline()).rejects.toMatchObject({ code: 'sync_unavailable' })
+    expect(f.transport.changes.mock.calls.at(-1)![0]).toEqual({ sinceRevision: 0, limit: 200 })
+    expect(f.candidate.status().latestObservedHead).toBe(4)
+    expect(f.transport.write).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects malformed, boxed or different reset hashes before any outbox read or write', async () => {
+    const f = await resolvedManaged(), bound = f.candidate.getBoundResult()
+    vi.mocked(f.storage.read).mockClear()
+    vi.mocked(f.storage.compareAndSwap).mockClear()
+    for (const hash of [null, undefined, true, 1, new String(bound!.requestHash), 'a'.repeat(63),
+      'A'.repeat(64), bound!.requestHash + '\n', 'f'.repeat(64)]) {
+      await expect(f.candidate.resetAfterManagedAcknowledgement(hash as string)).rejects.toMatchObject({ code: 'sync_invalid_transition' })
+    }
+    expect(f.storage.read).not.toHaveBeenCalled()
+    expect(f.storage.compareAndSwap).not.toHaveBeenCalled()
+    expect(f.candidate.getBoundResult()).toBe(bound)
+  })
+
+  it('does not use an old bound result to reset a different cross-tab packet', async () => {
+    const f = await resolvedManaged(), bound = f.candidate.getBoundResult()!, known = await f.outbox.read()
+    const empty = await f.outbox.compareAndSwap(known.version, null)
+    const other = await buildOwnerSyncRequest({ request_id: 'synthetic-other-managed-0001', expected_revision: 0,
+      operations: [DRAFT] })
+    const next = await f.outbox.compareAndSwap(empty.version, { schema: 'owner-sync-outbox-1', state: 'prepared',
+      rawBody: other.rawBody, requestHash: other.requestHash })
+    vi.mocked(f.storage.compareAndSwap).mockClear()
+    await expect(f.candidate.resetAfterManagedAcknowledgement(other.requestHash)).rejects.toMatchObject({ code: 'sync_invalid_transition' })
+    await expect(f.candidate.resetAfterManagedAcknowledgement(bound.requestHash)).rejects.toMatchObject({ code: 'sync_invalid_transition' })
+    expect(await f.outbox.read()).toEqual(next)
+    expect(f.candidate.getBoundResult()).toBe(bound)
+    expect(f.storage.compareAndSwap).not.toHaveBeenCalled()
+  })
+
+  it('refuses a busy reset before reading storage and retains the result during the complete pull', async () => {
+    const f = await resolvedManaged(), bound = f.candidate.getBoundResult()!
+    let finish!: (response: ReturnType<typeof page>) => void
+    f.transport.changes.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const pulling = f.candidate.pullCompleteBaseline()
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+    vi.mocked(f.storage.read).mockClear()
+    await expect(f.candidate.resetAfterManagedAcknowledgement(bound.requestHash)).rejects.toMatchObject({ code: 'sync_busy' })
+    expect(f.storage.read).not.toHaveBeenCalled()
+    expect(f.candidate.getBoundResult()).toBe(bound)
+    finish(page([record(DRAFT.key, 4)], 4))
+    await pulling
+  })
+
+  it('rejects an empty-slot reset whose session changed while the adapter read was pending', async () => {
+    const f = await resolvedManaged(), bound = f.candidate.getBoundResult()!, old = await f.outbox.read()
+    const empty = await f.outbox.compareAndSwap(old.version, null)
+    let finish!: (snapshot: typeof empty) => void
+    vi.mocked(f.storage.read).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    vi.mocked(f.storage.compareAndSwap).mockClear()
+    const resetting = f.candidate.resetAfterManagedAcknowledgement(bound.requestHash)
+    const rejected = expect(resetting).rejects.toMatchObject({ code: 'sync_signed_out' })
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+    f.setSession({ authenticated: false, generation: 2 })
+    f.candidate.notifySessionChanged()
+    finish(empty)
+    await rejected
+    expect(f.candidate.getBoundResult()).toBeNull()
+    expect(await f.outbox.read()).toEqual(empty)
+    expect(f.storage.compareAndSwap).not.toHaveBeenCalled()
+  })
+
+  it('does not create a bound result from unknown, rehydrated or missing receipt state', async () => {
+    const f = await trackedPrepared()
+    expect(f.candidate.getBoundResult()).toBeNull()
+    f.transport.write.mockRejectedValueOnce(new Error('synthetic unknown'))
+    await f.candidate.sendPrepared()
+    expect(f.candidate.getBoundResult()).toBeNull()
+    await f.candidate.hydratePending()
+    expect(f.candidate.getBoundResult()).toBeNull()
+    await f.candidate.reconcilePending()
+    expect(f.candidate.getBoundResult()).toBeNull()
+    expect(f.transport.write).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('explicit owner sync candidate', () => {
+  it('imports/constructs disabled without requesting, reading legacy storage or persisting consent', async () => {
+    const { candidate, transport, outbox } = await fixture()
+    expect(candidate.status().state).toBe('disabled')
+    for (const operation of [() => candidate.hydratePending(), () => candidate.pullBaseline(), () => candidate.sendPrepared()]) {
+      await expect(operation()).rejects.toMatchObject({ code: 'sync_disabled' })
+    }
+    expect(transport.write).not.toHaveBeenCalled()
+    expect(transport.changes).not.toHaveBeenCalled()
+    expect(transport.receipt).not.toHaveBeenCalled()
+    expect(await outbox.read()).toEqual({ version: 0, entry: null })
+  })
+
+  it('rejects a mismatched transport resource before any request', async () => {
+    const f = await fixture()
+    expect(() => createOwnerSyncCandidate({ outbox: f.outbox,
+      transport: { ...f.transport, targetFingerprint: 'c'.repeat(64) }, session: () => ({ authenticated: true, generation: 1 }) }))
+      .toThrowError('Owner sync candidate operation unavailable')
+    expect(f.transport.write).not.toHaveBeenCalled()
+  })
+
+  it('requires a complete cloud baseline, persists before POST and does not promote POST head to pull checkpoint', async () => {
+    const f = await fixture()
+    f.candidate.setCloudConsent(true)
+    await expect(f.candidate.prepare('synthetic-request-0001', [DRAFT])).rejects.toMatchObject({ code: 'sync_pull_required' })
+    expect((await f.candidate.pullBaseline()).busy).toBe(false)
+    expect((await f.candidate.prepare('synthetic-request-0001', [DRAFT])).state).toBe('prepared')
+    f.transport.write.mockImplementation(async original => {
+      const persisted = await f.outbox.read()
+      expect(persisted.entry?.state).toBe('attempted')
+      expect(persisted.entry?.rawBody).toBe(original.rawBody)
+      expect(persisted.entry?.requestHash).toBe(original.requestHash)
+      return success(original, 4)
+    })
+    expect((await f.candidate.sendPrepared()).state).toBe('confirmed')
+    expect(f.candidate.status()).toMatchObject({ lastCompletePulledRevision: 0, latestObservedHead: 4, baselineReady: false })
+    expect(f.candidate.getLastResult()?.kind).toBe('success')
+    await f.candidate.clearResolvedOrUnsent()
+    await expect(f.candidate.prepare('synthetic-request-0002', [DRAFT])).rejects.toMatchObject({ code: 'sync_pull_required' })
+  })
+
+  it('keeps original bytes/id when network outcome is unknown and never automatically re-POSTs', async () => {
+    const f = await prepared()
+    const before = (await f.outbox.read()).entry!
+    f.transport.write.mockRejectedValue(new Error('synthetic private provider failure'))
+    expect((await f.candidate.sendPrepared()).state).toBe('unknown')
+    expect(f.transport.write).toHaveBeenCalledTimes(1)
+    expect(await f.outbox.read()).toMatchObject({ entry: { ...before, state: 'unknown' } })
+    await f.candidate.hydratePending()
+    await f.candidate.reconcilePending()
+    await f.candidate.reconcilePending()
+    expect(f.transport.receipt).toHaveBeenCalledTimes(2)
+    expect(f.transport.write).toHaveBeenCalledTimes(1)
+    await expect(f.candidate.sendPrepared()).rejects.toMatchObject({ code: 'sync_invalid_transition' })
+    await expect(f.candidate.clearResolvedOrUnsent()).rejects.toMatchObject({ code: 'sync_invalid_transition' })
+    await expect(f.candidate.prepare('synthetic-replacement-0002', [DRAFT])).rejects.toMatchObject({ code: 'sync_pending' })
+  })
+
+  it('reopens an attempted packet as unknown; fresh controller stays disabled', async () => {
+    const f = await prepared()
+    const stored = await f.outbox.read()
+    await f.outbox.compareAndSwap(stored.version, { ...stored.entry!, state: 'attempted' })
+    const reopened = createOwnerSyncCandidate({ outbox: f.outbox, transport: f.transport,
+      session: () => ({ authenticated: true, generation: 2 }) })
+    expect(reopened.status().state).toBe('disabled')
+    reopened.setCloudConsent(true)
+    expect((await reopened.hydratePending()).state).toBe('unknown')
+    expect(f.transport.write).not.toHaveBeenCalled()
+  })
+
+  it('only confirms exact hash receipt, without a POST retry or a full-pull revision shortcut', async () => {
+    const f = await prepared()
+    f.transport.write.mockRejectedValue(new Error('synthetic lost response'))
+    await f.candidate.sendPrepared()
+    const stored = (await f.outbox.read()).entry!
+    f.transport.receipt.mockImplementation(async (id, hash) => {
+      expect(id).toBe('synthetic-request-0001')
+      expect(hash).toBe(stored.requestHash)
+      const original = await buildOwnerSyncRequest(JSON.parse(stored.rawBody))
+      return { status: 200, rawBody: JSON.stringify({ state: 'matched', status: 200, result: JSON.parse(success(original, 4).rawBody) }) }
+    })
+    expect((await f.candidate.reconcilePending()).state).toBe('confirmed')
+    expect(f.transport.write).toHaveBeenCalledTimes(1)
+    expect(f.candidate.status()).toMatchObject({ lastCompletePulledRevision: 0, latestObservedHead: 4, baselineReady: false })
+  })
+
+  it('keeps closed unavailable receipt and malformed matched envelope unknown', async () => {
+    const f = await prepared()
+    f.transport.write.mockRejectedValue(new Error('synthetic lost response'))
+    await f.candidate.sendPrepared()
+    for (const response of [
+      { status: 503, rawBody: '{"state":"unknown","error":"sync_result_unknown"}' },
+      { status: 200, rawBody: '{"state":"matched","status":200,"result":{"revision":0,"records":[]},"secret":"private"}' },
+    ]) {
+      f.transport.receipt.mockResolvedValue(response)
+      expect((await f.candidate.reconcilePending()).state).toBe('unknown')
+      expect((await f.outbox.read()).entry?.state).toBe('unknown')
+    }
+    expect(f.transport.write).toHaveBeenCalledTimes(1)
+  })
+
+  it('requires explicit unknown replay acknowledgement and reuses byte-exact original packet', async () => {
+    const f = await prepared()
+    f.transport.write.mockRejectedValueOnce(new Error('synthetic disconnect'))
+    await f.candidate.sendPrepared()
+    const original = (await f.outbox.read()).entry!
+    await expect(f.candidate.resendUnknown(false as true)).rejects.toMatchObject({ code: 'sync_unknown_resend_requires_confirmation' })
+    expect(f.transport.write).toHaveBeenCalledTimes(1)
+    expect((await f.candidate.resendUnknown(true)).state).toBe('confirmed')
+    const posted = f.transport.write.mock.calls.map(call => call[0])
+    expect(posted.map(packet => packet.rawBody)).toEqual([original.rawBody, original.rawBody])
+    expect(posted.map(packet => packet.requestHash)).toEqual([original.requestHash, original.requestHash])
+  })
+
+  it('retains deterministic field conflict; clears only explicit resolved/unsent slots', async () => {
+    const f = await prepared()
+    f.transport.write.mockResolvedValue(conflict())
+    expect((await f.candidate.sendPrepared()).state).toBe('conflict')
+    expect(f.candidate.getLastResult()?.kind).toBe('conflict')
+    await f.candidate.clearResolvedOrUnsent()
+    expect((await f.outbox.read()).entry).toBeNull()
+    expect(f.candidate.getBaseline()).toBeNull()
+    expect(f.candidate.status()).toMatchObject({ lastCompletePulledRevision: null, latestObservedHead: 0, baselineReady: false })
+    await expect(f.candidate.prepare('synthetic-request-0002', [DRAFT])).rejects.toMatchObject({ code: 'sync_pull_required' })
+    await f.candidate.pullBaseline()
+    expect(f.transport.changes.mock.calls.at(-1)?.[0]).toEqual({ sinceRevision: 0, limit: 200 })
+    await f.candidate.prepare('synthetic-request-0002', [DRAFT])
+    await f.candidate.clearResolvedOrUnsent()
+    expect(f.candidate.getBaseline()).not.toBeNull()
+    expect(f.candidate.status()).toMatchObject({ lastCompletePulledRevision: 0, latestObservedHead: 0, baselineReady: true })
+    expect(f.transport.write).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the observed success head after explicit clear and rejects an older full-pull watermark', async () => {
+    const f = await prepared()
+    f.transport.write.mockImplementation(async original => success(original, 4))
+    await f.candidate.sendPrepared()
+    await f.candidate.clearResolvedOrUnsent()
+    expect(f.candidate.getBaseline()).toBeNull()
+    expect(f.candidate.status()).toMatchObject({ lastCompletePulledRevision: null, latestObservedHead: 4, baselineReady: false })
+    f.transport.changes.mockResolvedValueOnce(page([], 3))
+    await expect(f.candidate.pullBaseline()).rejects.toMatchObject({ code: 'sync_unavailable' })
+    expect(f.transport.changes.mock.calls.at(-1)?.[0]).toEqual({ sinceRevision: 0, limit: 200 })
+    expect(f.candidate.getBaseline()).toBeNull()
+    expect(f.candidate.status().latestObservedHead).toBe(4)
+    expect((await f.outbox.read()).entry).toBeNull()
+    expect(f.transport.write).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['success', 'conflict'] as const)('requires a matched receipt before clearing a rehydrated known %s slot', async outcome => {
+    const f = await prepared()
+    const original = await buildOwnerSyncRequest(JSON.parse((await f.outbox.read()).entry!.rawBody))
+    const stored = outcome === 'success' ? success(original) : conflict()
+    f.transport.write.mockResolvedValueOnce(stored)
+    await f.candidate.sendPrepared()
+    const known = (await f.outbox.read()).entry!
+    const restored = createOwnerSyncCandidate({ outbox: f.outbox, transport: f.transport,
+      session: () => ({ authenticated: true, generation: 2 }) })
+    restored.setCloudConsent(true)
+    await restored.hydratePending()
+    expect(restored.getLastResult()).toBeNull()
+    await expect(restored.clearResolvedOrUnsent()).rejects.toMatchObject({ code: 'sync_invalid_transition' })
+    expect((await f.outbox.read()).entry).toEqual(known)
+    f.transport.receipt.mockResolvedValueOnce({ status: 200, rawBody: JSON.stringify({
+      state: 'matched', status: stored.status, result: JSON.parse(stored.rawBody),
+    }) })
+    await restored.reconcilePending()
+    expect(restored.getLastResult()?.kind).toBe(outcome)
+    await restored.clearResolvedOrUnsent()
+    expect((await f.outbox.read()).entry).toBeNull()
+    expect(restored.getBaseline()).toBeNull()
+    expect(restored.status()).toMatchObject({ lastCompletePulledRevision: null, baselineReady: false })
+    expect(f.transport.receipt).toHaveBeenCalledTimes(1)
+    expect(f.transport.write).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not use an old same-kind result to clear a different cross-tab packet', async () => {
+    const f = await prepared()
+    await f.candidate.sendPrepared()
+    const old = await f.outbox.read()
+    const other = await buildOwnerSyncRequest({ request_id: 'synthetic-other-packet', expected_revision: 0,
+      operations: [{ ...DRAFT, changes: { ...DRAFT.changes, name: 'Other tab packet' } }] })
+    const empty = await f.outbox.compareAndSwap(old.version, null)
+    const preparedOther = await f.outbox.compareAndSwap(empty.version, { schema: old.entry!.schema,
+      state: 'prepared', rawBody: other.rawBody, requestHash: other.requestHash })
+    const attemptedOther = await f.outbox.compareAndSwap(preparedOther.version, { ...preparedOther.entry!, state: 'attempted' })
+    const confirmedOther = await f.outbox.compareAndSwap(attemptedOther.version, { ...attemptedOther.entry!, state: 'confirmed' })
+    expect(f.candidate.getLastResult()?.kind).toBe('success')
+    await expect(f.candidate.clearResolvedOrUnsent()).rejects.toMatchObject({ code: 'sync_invalid_transition' })
+    expect(await f.outbox.read()).toEqual(confirmedOther)
+    expect(f.transport.write).toHaveBeenCalledTimes(1)
+    expect(f.transport.receipt).not.toHaveBeenCalled()
+  })
+
+  it('does not clear another tab prepared packet until explicitly observing that replacement', async () => {
+    const { first, second, other } = await replacedPreparedSlot()
+    await expect(first.candidate.clearResolvedOrUnsent()).rejects.toMatchObject({ code: 'sync_invalid_transition' })
+    expect(await second.outbox.read()).toEqual(other)
+    await first.candidate.hydratePending()
+    await first.candidate.clearResolvedOrUnsent()
+    expect((await second.outbox.read()).entry).toBeNull()
+    expect(first.transport.write).not.toHaveBeenCalled()
+    expect(second.transport.write).not.toHaveBeenCalled()
+  })
+
+  it('does not mark or POST another tab prepared packet using the previous packet binding', async () => {
+    const { first, second, other } = await replacedPreparedSlot()
+    await expect(first.candidate.sendPrepared()).rejects.toMatchObject({ code: 'sync_invalid_transition' })
+    expect(await second.outbox.read()).toEqual(other)
+    expect(other.entry?.state).toBe('prepared')
+    expect(first.transport.write).not.toHaveBeenCalled()
+    expect(second.transport.write).not.toHaveBeenCalled()
+  })
+
+  it('does not expose late success after logout; persistent request is not discarded', async () => {
+    const f = await prepared()
+    f.transport.write.mockImplementation(async original => {
+      f.setSession({ authenticated: false, generation: 2 })
+      f.candidate.notifySessionChanged()
+      return success(original)
+    })
+    expect((await f.candidate.sendPrepared()).state).toBe('signed_out')
+    expect(f.candidate.getLastResult()).toBeNull()
+    expect(f.candidate.status()).toMatchObject({ lastCompletePulledRevision: null, latestObservedHead: null, baselineReady: false })
+    expect((await f.outbox.read()).entry?.state).toBe('unknown')
+  })
+
+  it('revocation during a transport that ignores cancellation rejects late result without retry', async () => {
+    const f = await prepared()
+    let finish!: (value: { status: number; rawBody: string }) => void
+    f.transport.write.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    const sending = f.candidate.sendPrepared()
+    await vi.waitFor(() => expect(f.transport.write).toHaveBeenCalledTimes(1))
+    f.candidate.setCloudConsent(false)
+    expect((await sending).state).toBe('disabled')
+    const original = f.transport.write.mock.calls[0]![0]
+    finish(success(original))
+    await Promise.resolve()
+    expect(f.candidate.getLastResult()).toBeNull()
+    expect((await f.outbox.read()).entry?.state).toBe('unknown')
+    expect(f.transport.write).toHaveBeenCalledTimes(1)
+  })
+
+  it('serializes concurrent local sends before any double POST', async () => {
+    const f = await prepared()
+    let finish!: (value: { status: number; rawBody: string }) => void
+    f.transport.write.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    const sending = f.candidate.sendPrepared()
+    await vi.waitFor(() => expect(f.transport.write).toHaveBeenCalledTimes(1))
+    await expect(f.candidate.sendPrepared()).rejects.toMatchObject({ code: 'sync_busy' })
+    finish(success(f.transport.write.mock.calls[0]![0]))
+    await sending
+    expect(f.transport.write).toHaveBeenCalledTimes(1)
+  })
+
+  it('blocks cross-tab send losers before POST using the actual IDB CAS', async () => {
+    const factory = new IDBFactory()
+    const first = await fixture(factory)
+    const second = await fixture(factory)
+    first.candidate.setCloudConsent(true)
+    second.candidate.setCloudConsent(true)
+    await first.candidate.pullBaseline()
+    await first.candidate.prepare('synthetic-request-0001', [DRAFT])
+    const outcomes = await Promise.allSettled([first.candidate.sendPrepared(), second.candidate.sendPrepared()])
+    expect(outcomes.filter(result => result.status === 'fulfilled')).toHaveLength(1)
+    expect(first.transport.write.mock.calls.length + second.transport.write.mock.calls.length).toBe(1)
+  })
+
+  it('only publishes complete fixed-upper pagination and preserves the draft observed baseline for ABA', async () => {
+    const f = await fixture()
+    f.candidate.setCloudConsent(true)
+    const chunk = Array.from({ length: 200 }, (_, index) => record('asset:synthetic-' + String(index).padStart(3, '0'), 1))
+    const first = chunk[0]!, tail = chunk.at(-1)!, second = record('asset:synthetic-z', 1)
+    f.transport.changes.mockResolvedValueOnce(page(chunk, 1, [1, tail.key]))
+      .mockImplementationOnce(async parameters => {
+        expect(f.candidate.status().lastCompletePulledRevision).toBeNull()
+        expect(parameters).toMatchObject({ sinceRevision: 0, upperRevision: 1, cursor: [1, tail.key] })
+        return page([second], 1)
+      })
+    expect((await f.candidate.pullBaseline()).lastCompletePulledRevision).toBe(1)
+    await f.candidate.prepare('synthetic-old-base-0001', [{ ...DRAFT, key: first.key, changes: { value: 2 } }])
+    const before = (await f.outbox.read()).entry!
+    f.transport.changes.mockResolvedValue(page([record(first.key, 3)], 3))
+    await f.candidate.pullBaseline()
+    const after = (await f.outbox.read()).entry!
+    expect(after.rawBody).toBe(before.rawBody)
+    expect(JSON.parse(after.rawBody).expected_revision).toBe(1)
+    expect(JSON.parse(after.rawBody).operations[0].base_values.value).toBe(0)
+  })
+
+  it('does not commit a partial page or silently accept upper drift', async () => {
+    const f = await fixture()
+    f.candidate.setCloudConsent(true)
+    const chunk = Array.from({ length: 200 }, (_, index) => record('asset:synthetic-' + String(index).padStart(3, '0'), 1))
+    const tail = chunk.at(-1)!
+    f.transport.changes.mockResolvedValueOnce(page(chunk, 1, [1, tail.key]))
+      .mockResolvedValueOnce(page([record('asset:synthetic-z', 2)], 2))
+    await expect(f.candidate.pullBaseline()).rejects.toMatchObject({ code: 'sync_unavailable' })
+    expect(f.candidate.status()).toMatchObject({ lastCompletePulledRevision: null, baselineReady: false, state: 'blocked' })
+    await expect(f.candidate.prepare('synthetic-request-0001', [DRAFT])).rejects.toMatchObject({ code: 'sync_pull_required' })
+  })
+
+  it('refuses head regression after seeing a newer accepted POST', async () => {
+    const f = await prepared()
+    f.transport.write.mockImplementation(async original => success(original, 4))
+    await f.candidate.sendPrepared()
+    f.transport.changes.mockResolvedValue(page([record()], 1))
+    await expect(f.candidate.pullBaseline()).rejects.toMatchObject({ code: 'sync_unavailable' })
+    expect(f.candidate.status().lastCompletePulledRevision).toBe(0)
+    expect(f.candidate.status().baselineReady).toBe(false)
+  })
+
+  it('rejects unrelated or missing success records rather than confirming arbitrary data', async () => {
+    for (const records of [[], [record('asset:synthetic-other')]]) {
+      const f = await prepared()
+      f.transport.write.mockResolvedValue({ status: 200, rawBody: JSON.stringify({ revision: 1, records }) })
+      expect((await f.candidate.sendPrepared()).state).toBe('unknown')
+      expect(f.candidate.getLastResult()).toBeNull()
+    }
+  })
+
+  it.each(['write', 'receipt', 'resend'] as const)('does not invoke %s after consent revocation in the scheduled transport microtask', async method => {
+    const f = await prepared()
+    if (method !== 'write') {
+      f.transport.write.mockRejectedValueOnce(new Error('synthetic lost response'))
+      await f.candidate.sendPrepared()
+    }
+    f.transport.write.mockClear()
+    const NativeAbortController = globalThis.AbortController
+    vi.stubGlobal('AbortController', class extends NativeAbortController {
+      constructor() { super(); queueMicrotask(() => f.candidate.setCloudConsent(false)) }
+    })
+    const outcome = method === 'write' ? await f.candidate.sendPrepared()
+      : method === 'receipt' ? await f.candidate.reconcilePending() : await f.candidate.resendUnknown(true)
+    expect(outcome.state).toBe('disabled')
+    expect(f.transport.write).not.toHaveBeenCalled()
+    expect(f.transport.receipt).not.toHaveBeenCalled()
+    expect((await f.outbox.read()).entry?.state).toBe('unknown')
+  })
+
+  it.each([
+    [{ value: 17 }, { value: 0 }],
+    [{ note: null }, { note: '' }],
+    [{ name: 'Synthetic requested' }, { name: 'Synthetic other' }],
+    [{ cls: '权益' }, { cls: '现金' }],
+  ])('does not confirm a same-key success with different requested scalar values (%j)', async (changes, returned) => {
+    const f = await fixture()
+    f.candidate.setCloudConsent(true)
+    await f.candidate.pullBaseline()
+    await f.candidate.prepare('synthetic-wrong-values-0001', [{ ...DRAFT, changes: { ...DRAFT.changes, ...changes } }])
+    const original = (await f.outbox.read()).entry!
+    f.transport.write.mockImplementation(async packet => {
+      const response = JSON.parse(success(packet).rawBody)
+      response.records[0].values = { ...response.records[0].values, ...returned }
+      return { status: 200, rawBody: JSON.stringify(response) }
+    })
+    expect((await f.candidate.sendPrepared()).state).toBe('unknown')
+    expect(f.candidate.getLastResult()).toBeNull()
+    expect((await f.outbox.read()).entry).toEqual({ ...original, state: 'unknown' })
+    await expect(f.candidate.clearResolvedOrUnsent()).rejects.toMatchObject({ code: 'sync_invalid_transition' })
+  })
+
+  it('also rejects a matched receipt whose requested change differs', async () => {
+    const f = await prepared()
+    f.transport.write.mockRejectedValueOnce(new Error('synthetic lost response'))
+    await f.candidate.sendPrepared()
+    f.transport.receipt.mockResolvedValue({ status: 200, rawBody: JSON.stringify({ state: 'matched', status: 200,
+      result: { revision: 1, records: [{ ...record(), values: { ...DRAFT.changes, value: 17 } }] } }) })
+    expect((await f.candidate.reconcilePending()).state).toBe('unknown')
+    expect(f.candidate.getLastResult()).toBeNull()
+    expect((await f.outbox.read()).entry?.state).toBe('unknown')
+  })
+
+  it('accepts equivalent finite numbers without collapsing null to zero', async () => {
+    const f = await fixture()
+    f.candidate.setCloudConsent(true)
+    await f.candidate.pullBaseline()
+    await f.candidate.prepare('synthetic-numeric-0001', [{ ...DRAFT, changes: { ...DRAFT.changes, value: 1 } }])
+    f.transport.write.mockImplementation(async packet => {
+      const response = success(packet)
+      return { ...response, rawBody: response.rawBody.replace('"value":1,"note":null', '"value":1.0,"note":null') }
+    })
+    expect((await f.candidate.sendPrepared()).state).toBe('confirmed')
+  })
+
+  it('a post-commit 401/idempotency error does not prove rollback', async () => {
+    for (const response of [
+      { status: 401, rawBody: '{"detail":"Owner 会话无效或已过期，请重新登录"}' },
+      { status: 409, rawBody: JSON.stringify({ error: { code: 'idempotency_conflict', message: '请求标识已用于不同的同步请求。' } }) },
+    ]) {
+      const f = await prepared()
+      f.transport.write.mockResolvedValue(response)
+      expect((await f.candidate.sendPrepared()).state).toBe('unknown')
+      expect((await f.outbox.read()).entry?.state).toBe('unknown')
+    }
+  })
+
+  it('total pagination timeout stops local waiting and late transport cannot issue more pages', async () => {
+    const f = await fixture()
+    f.candidate.setCloudConsent(true)
+    let finish!: (value: { status: number; rawBody: string }) => void
+    f.transport.changes.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    vi.useFakeTimers()
+    const pull = f.candidate.pullBaseline()
+    const rejected = expect(pull).rejects.toMatchObject({ code: 'sync_unavailable' })
+    await vi.advanceTimersByTimeAsync(12_001)
+    await rejected
+    const first = record('asset:synthetic-a', 1)
+    finish(page([first], 1, [1, first.key]))
+    await vi.advanceTimersByTimeAsync(1)
+    expect(f.transport.changes).toHaveBeenCalledTimes(1)
+    expect(f.candidate.status()).toMatchObject({ baselineReady: false, lastCompletePulledRevision: null })
+  })
+
+  it('exposes only a complete current frozen baseline, including tombstone lifecycle metadata', async () => {
+    const f = await fixture()
+    expect(f.candidate.getBaseline()).toBeNull()
+    f.candidate.setCloudConsent(true)
+    const tombstone = { ...record(), deleted: true }
+    f.transport.changes.mockResolvedValueOnce(page([tombstone], 1))
+    await f.candidate.pullBaseline()
+    const baseline = f.candidate.getBaseline()!
+    expect(baseline).toEqual({ pulledRevision: 1, records: [tombstone] })
+    expect(Object.isFrozen(baseline)).toBe(true)
+    expect(Object.isFrozen(baseline.records)).toBe(true)
+    expect(Object.isFrozen(baseline.records[0]!.values)).toBe(true)
+    expect(Reflect.set(baseline.records[0]!, 'deleted', false)).toBe(false)
+    let finish!: (value: ReturnType<typeof page>) => void
+    f.transport.changes.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const pending = f.candidate.pullBaseline()
+    await vi.waitFor(() => expect(f.transport.changes).toHaveBeenCalledTimes(2))
+    expect(f.candidate.getBaseline()).toBeNull()
+    finish(page([], 1))
+    await pending
+    expect(f.candidate.getBaseline()).toEqual(baseline)
+    f.setSession({ authenticated: true, generation: 2 })
+    expect(f.candidate.getBaseline()).toBeNull()
+    f.candidate.notifySessionChanged()
+    expect(f.candidate.getBaseline()).toBeNull()
+  })
+
+  it.each(['success', 'conflict'] as const)('shows a restored unknown matched %s without inventing a pulled baseline', async outcome => {
+    const f = await prepared()
+    f.transport.write.mockRejectedValueOnce(new Error('synthetic lost response'))
+    await f.candidate.sendPrepared()
+    const original = await buildOwnerSyncRequest(JSON.parse((await f.outbox.read()).entry!.rawBody))
+    const stored = outcome === 'success' ? success(original) : conflict()
+    f.transport.receipt.mockResolvedValue({ status: 200, rawBody: JSON.stringify({
+      state: 'matched', status: stored.status, result: JSON.parse(stored.rawBody),
+    }) })
+    let generation = 2
+    const restored = createOwnerSyncCandidate({ outbox: f.outbox, transport: f.transport,
+      session: () => ({ authenticated: true, generation }) })
+    restored.setCloudConsent(true)
+    await restored.hydratePending()
+    expect(restored.getBaseline()).toBeNull()
+    await restored.reconcilePending()
+    expect(restored.getLastResult()?.kind).toBe(outcome)
+    expect(restored.status()).toMatchObject({ baselineReady: false, lastCompletePulledRevision: null })
+    expect(restored.getBaseline()).toBeNull()
+    generation = 3
+    expect(restored.getLastResult()).toBeNull()
+    restored.notifySessionChanged()
+    restored.setCloudConsent(false)
+    expect(restored.getLastResult()).toBeNull()
+    expect(f.transport.write).toHaveBeenCalledTimes(1)
+  })
+
+})

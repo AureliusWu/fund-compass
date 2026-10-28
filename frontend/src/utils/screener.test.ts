@@ -32,7 +32,7 @@ describe('loadScreener and findSimilar', () => {
 
   function response(body: unknown, ok = true) {
     const text = JSON.stringify(body)
-    return { ok, json: vi.fn().mockResolvedValue(body), text: vi.fn().mockResolvedValue(text) }
+    return { ok, status: ok ? 200 : 404, json: vi.fn().mockResolvedValue(body), text: vi.fn().mockResolvedValue(text) }
   }
 
   function mockLegacy(funds: unknown[], schemaVersion = 2) {
@@ -120,6 +120,18 @@ describe('loadScreener and findSimilar', () => {
     await expect(findSimilar('混合型', 'SELF', null)).resolves.toEqual([])
   })
 
+  it('recomputes Beijing freshness on a cache hit after crossing the age budget', async () => {
+    const fetchMock = mockLegacy([
+      { c: '000001', n: '基金A', t: '混合型', r1m: 1, r3m: 2, r6m: 3, r1y: 4, r3y: 5, ytd: null, fee: 0.1 },
+    ])
+    const { loadScreener, findSimilar } = await import('./screener')
+    expect((await loadScreener()).stale).toBe(false)
+    vi.setSystemTime(new Date('2026-07-11T16:00:00Z'))
+    expect(await loadScreener()).toMatchObject({ ageDays: 11, stale: true, updated: '2026-07-01' })
+    expect(await findSimilar('混合型', 'SELF', null)).toEqual([])
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
   it('rejects a legacy monolith without schema v2', async () => {
     mockLegacy([
       { c: '000001', n: '基金A', t: '混合型', r1m: null, r3m: null, r6m: 1, r1y: 2, r3y: 3, ytd: null, fee: 0.1 },
@@ -160,7 +172,7 @@ describe('screenQuality evidence gate', () => {
         sha256: 'a'.repeat(64), chunks: [file],
         chunk_sha256: { [file]: 'b'.repeat(12) + 'c'.repeat(52) },
       }) })
-      .mockResolvedValueOnce({ ok: false, text: vi.fn() })
+      .mockResolvedValueOnce({ ok: false, status: 503, text: vi.fn() })
     vi.stubGlobal('fetch', fetchMock)
     const { loadScreener } = await import('./screener')
 

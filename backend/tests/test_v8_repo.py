@@ -66,10 +66,10 @@ def concurrent_saves(monkeypatch, *, table, save):
     readers_lock = Lock()
     missing_readers = 0
 
-    def delayed_existing_model(conn, candidate_table, id_column, identifier, model_type):
+    def delayed_existing_model(conn, candidate_table, id_column, identifier, model_type, **kwargs):
         nonlocal missing_readers
         result = original_existing_model(
-            conn, candidate_table, id_column, identifier, model_type,
+            conn, candidate_table, id_column, identifier, model_type, **kwargs,
         )
         if candidate_table == table and result is None:
             with readers_lock:

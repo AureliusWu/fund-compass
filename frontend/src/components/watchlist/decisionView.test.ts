@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { V8Action, V8DecisionDiff, V8DecisionResult } from '@/api/client'
 import {
   buildWatchDecisionRow,
@@ -11,6 +11,7 @@ import type { Estimate } from '@/utils/estimate'
 
 function result(action: V8Action = 'buy', confidence: number | null = 82): V8DecisionResult {
   const strength = 76
+  const held = ['add', 'hold', 'reduce', 'sell'].includes(action)
   return {
     code: '000001',
     name: '测试基金',
@@ -21,23 +22,42 @@ function result(action: V8Action = 'buy', confidence: number | null = 82): V8Dec
     confidence,
     summary: '当前建议',
     decision: {
-      decision_id: 'dec_1', evidence_id: 'evi_1', fund_code: '000001', holding_version: 'hold_1',
-      policy_version: 'policy_1', strategy_version: 'strategy_1', action, strength, confidence,
+      schema_version: 'v8-decision-1', decision_id: `dec_${'d'.repeat(64)}`, evidence_id: `ev_${'a'.repeat(64)}`,
+      fund_code: '000001', holding_version: `hold_${'b'.repeat(64)}`,
+      policy_version: `pol_${'c'.repeat(64)}`, strategy_version: 'strategy_1', action, strength, confidence,
+      user_state: held ? 'held' : 'unheld', summary: '当前建议', reason_codes: [`ACTION_${action.toUpperCase()}`],
+      invalidation_codes: ['DATA_STALE'], invalidation_conditions: ['数据过期'], position_guidance: null,
       reasons: ['估值处于较低区间'], risks: [], evidence_nodes: [], created_at: '2026-08-28T06:00:00Z',
     },
     evidence: {
-      evidence_id: 'evi_1', fund_code: '000001', stale_fields: [], missing_fields: [],
-      estimate_status: 'modeled', source_states: [{ source_id: 'estimate:model', state: 'degraded', stale: false }],
+      schema_version: 'v8-evidence-1', evidence_id: `ev_${'a'.repeat(64)}`, fund_code: '000001',
+      fund_name: '测试基金', fund_type: 'QDII', stale_fields: [], missing_fields: [], risk_flags: [],
+      created_at: '2026-08-28T06:00:00Z', market_time: '2026-08-28T06:00:00Z',
+      official_nav: 1, official_nav_date: '2026-08-27', target_nav_date: '2026-08-28',
+      benchmark_id: null, valuation_percentile: 20, trend_state: '上升趋势', momentum_state: null,
+      drawdown: null, volatility: null, market_temperature: null, score: 82, score_version: 'score-v1',
+      score_coverage: 0.8, timing_coverage: 0.8, timing_signal: '买入', estimate: 0,
+      estimate_coverage: 80, estimate_model_version: 'model-v1', estimate_error_p80: null,
+      estimate_sample_count: 20, estimate_mae: null, estimate_direction_accuracy: null,
+      evidence_nodes: [], evidence_strength: 80,
+      estimate_status: 'modeled', source_states: [{ source_id: 'estimate:model', state: 'degraded', stale: false,
+        last_success: '2026-08-28T06:00:00Z', last_failure: null, data_age_seconds: 0, latency_ms: 0, error_class: null }],
     },
-    holding: { holding_version: 'hold_1' },
-    policy: { policy_version: 'policy_1' },
+    holding: { schema_version: 'v8-holding-1', holding_version: `hold_${'b'.repeat(64)}`, fund_code: '000001',
+      user_state: held ? 'held' : 'unheld', shares: held ? 10 : 0, market_value: held ? 10 : 0,
+      cost: null, current_weight: null, target_weight: null, account: null, updated_at: null,
+      source: 'fixture', created_at: '2026-08-28T06:00:00Z' },
+    policy: { schema_version: 'v8-policy-1', policy_version: `pol_${'c'.repeat(64)}`, dca_rules: {},
+      name: '合成策略', source: 'fixture', supersedes: null, target_allocations: {}, target_ranges: {},
+      max_single_fund_weight: 40, max_theme_weight: 60, rebalance_band: 2, reduce_rules: {}, sell_rules: {},
+      created_at: '2026-08-28T06:00:00Z', effective_at: '2026-08-28T06:00:00Z' },
     diff: {},
   } as unknown as V8DecisionResult
 }
 
 function diff(overrides: Partial<V8DecisionDiff> = {}): V8DecisionDiff {
   return {
-    previous_decision_id: 'dec_0', current_decision_id: 'dec_1', previous_action: 'watch',
+    previous_decision_id: `dec_${'e'.repeat(64)}`, current_decision_id: `dec_${'d'.repeat(64)}`, previous_action: 'watch',
     current_action: 'buy', changed: true, drivers: ['估值分位下移'], driver_codes: ['VALUATION'], unchanged: [],
     ...overrides,
   }
@@ -52,6 +72,8 @@ function source(overrides: Partial<WatchDecisionSource> = {}): WatchDecisionSour
 }
 
 describe('watchlist V8 decision view', () => {
+  beforeEach(() => { vi.useFakeTimers().setSystemTime('2026-08-28T06:00:00Z') })
+  afterEach(() => { vi.useRealTimers() })
   it('labels a direct QDII estimate as a next-NAV estimate from fund semantics', () => {
     const estimate = {
       code: '018147',
@@ -107,7 +129,7 @@ describe('watchlist V8 decision view', () => {
 
     expect(row.actionLabel).toBe('暂停动作')
     expect(row.snapshotActionLabel).toBe('分批定投')
-    expect(row.dataDetail).toContain('置信度低于 55')
+    expect(row.dataDetail).toContain('置信度低于 60')
     expect(row.actionable).toBe(false)
   })
 
@@ -152,7 +174,7 @@ describe('watchlist V8 decision view', () => {
   it('filters action directions, abnormalities and non-null moves, then sorts nulls last', () => {
     const buy = source()
     const sellResult = result('sell', 90)
-    sellResult.code = sellResult.decision.fund_code = sellResult.evidence.fund_code = '000002'
+    sellResult.code = sellResult.decision.fund_code = sellResult.evidence.fund_code = sellResult.holding.fund_code = '000002'
     const sell = source({ code: '000002', name: '卖出基金', result: sellResult, change: -2, diff: diff({ current_action: 'sell' }) })
     const missing = source({
       code: '000003', name: '无快照基金', result: null, diff: null, change: null,

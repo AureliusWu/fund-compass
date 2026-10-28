@@ -1,0 +1,2537 @@
+{
+  "schema": "admin-policy-performance-review-1",
+  "applicationVersion": "8.0.0",
+  "state": "FINAL_QUERY_OPTIMIZATION_AND_LEGACY_READ_MEASURED",
+  "implementationCommit": "51a39feaaf105825f8b5541564be453c72e8c242",
+  "implementationTree": "acf143e952089f70832fc1cc7f8ef28ef6ef0ea1",
+  "localVerification": {
+    "backend": { "passed": 4158, "warnings": 1211, "seconds": 624.54, "python": "3.14.4", "pipCheck": "clean" },
+    "frontend": { "passed": 3443, "files": 120, "seconds": 37.34, "typeCheck": "EXIT0" },
+    "worker": { "passed": 148, "files": 4, "seconds": 4.43, "typeCheck": "EXIT0", "dryRun": "114.28 KiB / gzip 26.58 KiB; not an authenticated deploy" },
+    "officialAudit": { "frontend": 0, "worker": 0, "includeDev": true, "registry": "https://registry.npmjs.org" },
+    "exactNewCandidateCi": "Separate; these local results are not deployment or release evidence"
+  },
+  "frontendArtifactEquivalence": {
+    "referenceCandidate": "9654fb765dba9bafe9f764876257c7f280725b76",
+    "productionFrontendFilesChanged": false,
+    "newFixtureImportedOnlyByTests": true,
+    "buildInputPin": "b053fd329467315de558e2aa309ca9d980944e8293b3a7d16fd92c1fa80d7452",
+    "freshCurrentSamples": 3,
+    "builtSeconds": [9.94, 7.77, 8.04],
+    "pwa": "7/7 on all three builds",
+    "measuredInventorySha256": "0ffb63c0f6947cc140ea291f5af11830c873d90745042287f8ce714fd5fef1e9",
+    "allThreeEqualReferenceMeasuredInventory": true,
+    "jsCssGzip9": 676183,
+    "precacheGzip9": 552017,
+    "installationUnionGzip9": 562187,
+    "rawDirectory": "C:/Users/84046/AppData/Local/Temp/fc-full-sync-perf-20261025-519848f/final-policy-lifecycle-20261026-v1",
+    "independentlyArchived": false,
+    "scope": "Actual JS/CSS, static JS closures and PWA precache/support measured inventory. No new frontend artifact growth versus 9654; inherited historical resource FAIL/WARN and real-device/browser gates remain open."
+  },
+  "qualification": {
+    "localSyntheticPerformanceOnly": true,
+    "cloud": false,
+    "realBrowser": false,
+    "formalRelease": false,
+    "resourceBudgetClosed": false
+  },
+  "tool": {
+    "path": "tools/benchmark_admin_policy.py",
+    "sha256": "0624b050a4061abc58381f61ee68bfe9a6ce6cb4ec0a35c535f8bf9bb2837560",
+    "runsOfflineOnly": true,
+    "retainsOwnedSyntheticDatabases": true
+  },
+  "final": {
+    "actualHttpAdminAppendComparisons": {
+      "0": {
+        "deltaMedianPercent": -42.74,
+        "verdict": "NOT_COMPARABLE",
+        "absoluteMedianDeltaMilliseconds": -15.0487
+      },
+      "10": {
+        "deltaMedianPercent": -7.85,
+        "verdict": "PASS",
+        "absoluteMedianDeltaMilliseconds": -1.884
+      },
+      "100": {
+        "deltaMedianPercent": -24.36,
+        "verdict": "PASS",
+        "absoluteMedianDeltaMilliseconds": -10.0471
+      },
+      "1000": {
+        "deltaMedianPercent": -42.46,
+        "verdict": "PASS",
+        "absoluteMedianDeltaMilliseconds": -810.0641
+      }
+    },
+    "legacyGetPolicyComparisons": {
+      "0": {
+        "deltaMedianPercent": 12.6,
+        "verdict": "WARN",
+        "absoluteMedianDeltaMilliseconds": 2.1334
+      },
+      "10": {
+        "deltaMedianPercent": -2.21,
+        "verdict": "PASS",
+        "absoluteMedianDeltaMilliseconds": -0.1289
+      },
+      "100": {
+        "deltaMedianPercent": -0.51,
+        "verdict": "PASS",
+        "absoluteMedianDeltaMilliseconds": -0.0809
+      },
+      "1000": {
+        "deltaMedianPercent": 0.46,
+        "verdict": "PASS",
+        "absoluteMedianDeltaMilliseconds": 4.9574
+      }
+    },
+    "measured": {
+      "actualHttpAdminAppend": {
+        "0": {
+          "baseline": {
+            "median": 35.2115,
+            "samples": [
+              43.666,
+              35.2115,
+              36.9668,
+              34.0914,
+              34.2677
+            ],
+            "unit": "milliseconds",
+            "worst": 43.666
+          },
+          "comparableBusinessSemantics": false,
+          "current": {
+            "median": 20.1628,
+            "samples": [
+              22.0038,
+              20.1628,
+              19.9847,
+              20.9098,
+              19.8977
+            ],
+            "unit": "milliseconds",
+            "worst": 22.0038
+          },
+          "equalResponseBodies": [],
+          "policyCountsAfterAppend": {
+            "baseline": [
+              2,
+              2,
+              2,
+              2,
+              2
+            ],
+            "current": [
+              1,
+              1,
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "10": {
+          "baseline": {
+            "median": 23.9971,
+            "samples": [
+              26.1632,
+              24.0693,
+              23.9237,
+              23.9971,
+              23.8327
+            ],
+            "unit": "milliseconds",
+            "worst": 26.1632
+          },
+          "comparableBusinessSemantics": true,
+          "current": {
+            "median": 22.1131,
+            "samples": [
+              23.1767,
+              22.1131,
+              21.2308,
+              22.2182,
+              19.5029
+            ],
+            "unit": "milliseconds",
+            "worst": 23.1767
+          },
+          "equalResponseBodies": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "policyCountsAfterAppend": {
+            "baseline": [
+              11,
+              11,
+              11,
+              11,
+              11
+            ],
+            "current": [
+              11,
+              11,
+              11,
+              11,
+              11
+            ]
+          }
+        },
+        "100": {
+          "baseline": {
+            "median": 41.2448,
+            "samples": [
+              41.1084,
+              43.258,
+              42.7617,
+              41.2448,
+              40.0622
+            ],
+            "unit": "milliseconds",
+            "worst": 43.258
+          },
+          "comparableBusinessSemantics": true,
+          "current": {
+            "median": 31.1977,
+            "samples": [
+              31.2188,
+              31.1977,
+              29.5394,
+              31.7016,
+              30.2434
+            ],
+            "unit": "milliseconds",
+            "worst": 31.7016
+          },
+          "equalResponseBodies": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "policyCountsAfterAppend": {
+            "baseline": [
+              101,
+              101,
+              101,
+              101,
+              101
+            ],
+            "current": [
+              101,
+              101,
+              101,
+              101,
+              101
+            ]
+          }
+        },
+        "1000": {
+          "baseline": {
+            "median": 1907.6823,
+            "samples": [
+              1947.5497,
+              1909.7375,
+              1904.1723,
+              1901.9844,
+              1907.6823
+            ],
+            "unit": "milliseconds",
+            "worst": 1947.5497
+          },
+          "comparableBusinessSemantics": true,
+          "current": {
+            "median": 1097.6182,
+            "samples": [
+              1090.4994,
+              1097.6182,
+              1101.7432,
+              1103.3967,
+              1094.8377
+            ],
+            "unit": "milliseconds",
+            "worst": 1103.3967
+          },
+          "equalResponseBodies": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "policyCountsAfterAppend": {
+            "baseline": [
+              1001,
+              1001,
+              1001,
+              1001,
+              1001
+            ],
+            "current": [
+              1001,
+              1001,
+              1001,
+              1001,
+              1001
+            ]
+          }
+        }
+      },
+      "baselineCommit": "9654fb765dba9bafe9f764876257c7f280725b76",
+      "baselineSourceSha256": {
+        "backend/main.py": "324e93f4f066ac288bd397cdc4632bf4e78fd6e239c3471b78ec33487d49f3d6",
+        "backend/service/repository_scopes.py": "1c0a203be93bad52cfc0cb8fd7705336be01cb213a6a632f45826a18db3fc6fa",
+        "backend/service/v8_repo.py": "e5480a10aa395246f0116b132ca322f7a2104bc036c68e4968ccaee3239ca516"
+      },
+      "captured_at_utc": "2026-10-26T09:54:35.996521+00:00",
+      "currentSourceSha256": {
+        "backend/main.py": "40ebcd7de9ade53062a714f796d53544ef554331f38ad6d94aa9d9983318c9dc",
+        "backend/service/repository_scopes.py": "24c7952eb26c9dd25b27d25a3cbab8578c75645f127f411ce588ad0cc8448fb1",
+        "backend/service/v8_repo.py": "84a2acde2da18ad86bb43092c53946624b0f7df9bbb7103cd5ab78d7e38a36e6"
+      },
+      "excludedAttempt": "Initial unqualified attempt reused one accumulating synthetic Admin limiter bucket across all sizes, correctly received HTTP429 on reaching request31 at size1000, and stopped. No budgets or production auth changed; size fixtures are now isolated.",
+      "legacyGetPolicy": {
+        "0": {
+          "baseline": {
+            "median": 16.9263,
+            "samples": [
+              16.0129,
+              16.932,
+              17.2077,
+              16.895,
+              16.9263
+            ],
+            "unit": "milliseconds",
+            "worst": 17.2077
+          },
+          "current": {
+            "median": 19.0597,
+            "samples": [
+              19.0597,
+              18.1542,
+              18.9112,
+              19.6216,
+              20.5393
+            ],
+            "unit": "milliseconds",
+            "worst": 20.5393
+          },
+          "nonemptyHistoryUnchanged": false,
+          "policyCountsAfterRead": {
+            "baseline": [
+              1,
+              1,
+              1,
+              1,
+              1
+            ],
+            "current": [
+              1,
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "sameEffectivePolicy": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "semantics": "legacy initialization creates one default"
+        },
+        "10": {
+          "baseline": {
+            "median": 5.8268,
+            "samples": [
+              5.8268,
+              6.1419,
+              5.7819,
+              5.8867,
+              5.7491
+            ],
+            "unit": "milliseconds",
+            "worst": 6.1419
+          },
+          "current": {
+            "median": 5.6979,
+            "samples": [
+              5.6026,
+              5.8329,
+              5.5313,
+              5.6979,
+              5.7827
+            ],
+            "unit": "milliseconds",
+            "worst": 5.8329
+          },
+          "nonemptyHistoryUnchanged": true,
+          "policyCountsAfterRead": {
+            "baseline": [
+              10,
+              10,
+              10,
+              10,
+              10
+            ],
+            "current": [
+              10,
+              10,
+              10,
+              10,
+              10
+            ]
+          },
+          "sameEffectivePolicy": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "semantics": "same default-root chain with later scheduled versions; select only the currently effective Policy"
+        },
+        "100": {
+          "baseline": {
+            "median": 15.7858,
+            "samples": [
+              15.7113,
+              15.8416,
+              16.5159,
+              15.6416,
+              15.7858
+            ],
+            "unit": "milliseconds",
+            "worst": 16.5159
+          },
+          "current": {
+            "median": 15.7049,
+            "samples": [
+              15.3643,
+              15.7049,
+              15.7946,
+              15.4994,
+              15.9465
+            ],
+            "unit": "milliseconds",
+            "worst": 15.9465
+          },
+          "nonemptyHistoryUnchanged": true,
+          "policyCountsAfterRead": {
+            "baseline": [
+              100,
+              100,
+              100,
+              100,
+              100
+            ],
+            "current": [
+              100,
+              100,
+              100,
+              100,
+              100
+            ]
+          },
+          "sameEffectivePolicy": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "semantics": "same default-root chain with later scheduled versions; select only the currently effective Policy"
+        },
+        "1000": {
+          "baseline": {
+            "median": 1075.1785,
+            "samples": [
+              1067.3725,
+              1068.7197,
+              1095.7063,
+              1075.1785,
+              1089.248
+            ],
+            "unit": "milliseconds",
+            "worst": 1095.7063
+          },
+          "current": {
+            "median": 1080.1359,
+            "samples": [
+              1075.5257,
+              1081.3124,
+              1080.597,
+              1075.112,
+              1080.1359
+            ],
+            "unit": "milliseconds",
+            "worst": 1081.3124
+          },
+          "nonemptyHistoryUnchanged": true,
+          "policyCountsAfterRead": {
+            "baseline": [
+              1000,
+              1000,
+              1000,
+              1000,
+              1000
+            ],
+            "current": [
+              1000,
+              1000,
+              1000,
+              1000,
+              1000
+            ]
+          },
+          "sameEffectivePolicy": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ],
+          "semantics": "same default-root chain with later scheduled versions; select only the currently effective Policy"
+        }
+      },
+      "limits": "Small synthetic local samples; not a network/cloud/real-device benchmark. Seed construction uses fixed real models/INSERT/scope records, not repeated Admin HTTP; it is performance setup, not lifecycle correctness evidence. Global dependency drift from baseline is not isolated. No resource or formal-release gate is closed.",
+      "method": "Same installed dependencies, exact baseline repo/endpoint function source compiled in isolated namespaces; shared current model/schema/guard dependencies. Old scope function uses current immutable scope types. Five alternating fresh DB-copy HTTP requests per side/size, real auth/Pydantic/SQLite write, no lifespan or sockets. Each independent size group resets only its local synthetic limiter fixture; ten requests remain under the unchanged actual 30-request limit. SQL timings warm cache and alternate order. Empty HTTP history baseline initializes an extra default row, so its business semantics differ and it is not a like-for-like latency comparison. The separately timed legacy get_policy path uses independent default-root histories with scheduled future versions, checks complete Policy rows unchanged on nonempty reads, and compares full selected effective Policy values; empty legacy calls intentionally bootstrap one default on both sides.",
+      "ownedSyntheticDirectory": "C:\\Users\\84046\\AppData\\Local\\Temp\\fc-admin-policy-bench-94674p7v",
+      "python": "3.14.4",
+      "queryPlans": {
+        "0:correlated_not_exists": [
+          [
+            2,
+            0,
+            0,
+            "CO-ROUTINE production_chain"
+          ],
+          [
+            6,
+            2,
+            0,
+            "SETUP"
+          ],
+          [
+            10,
+            6,
+            56,
+            "SEARCH s USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            15,
+            6,
+            46,
+            "SEARCH p USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            35,
+            2,
+            0,
+            "RECURSIVE STEP"
+          ],
+          [
+            39,
+            35,
+            56,
+            "SEARCH s USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            44,
+            35,
+            46,
+            "SEARCH child USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            49,
+            35,
+            216,
+            "SCAN parent"
+          ],
+          [
+            66,
+            0,
+            56,
+            "SEARCH ps USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            73,
+            0,
+            46,
+            "SEARCH r USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            79,
+            0,
+            0,
+            "CORRELATED SCALAR SUBQUERY 1"
+          ],
+          [
+            85,
+            79,
+            56,
+            "SEARCH cs USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            92,
+            79,
+            46,
+            "SEARCH child USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            115,
+            0,
+            53,
+            "SEARCH pc USING AUTOMATIC COVERING INDEX (policy_version=?)"
+          ]
+        ],
+        "0:uncorrelated_not_in": [
+          [
+            2,
+            0,
+            0,
+            "CO-ROUTINE production_chain"
+          ],
+          [
+            6,
+            2,
+            0,
+            "SETUP"
+          ],
+          [
+            10,
+            6,
+            56,
+            "SEARCH s USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            15,
+            6,
+            46,
+            "SEARCH p USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            35,
+            2,
+            0,
+            "RECURSIVE STEP"
+          ],
+          [
+            39,
+            35,
+            56,
+            "SEARCH s USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            44,
+            35,
+            46,
+            "SEARCH child USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            49,
+            35,
+            216,
+            "SCAN parent"
+          ],
+          [
+            66,
+            0,
+            56,
+            "SEARCH ps USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            73,
+            0,
+            46,
+            "SEARCH r USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            81,
+            0,
+            0,
+            "LIST SUBQUERY 1"
+          ],
+          [
+            86,
+            81,
+            56,
+            "SEARCH cs USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            93,
+            81,
+            46,
+            "SEARCH child USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            104,
+            81,
+            0,
+            "CREATE BLOOM FILTER"
+          ],
+          [
+            131,
+            0,
+            53,
+            "SEARCH pc USING AUTOMATIC COVERING INDEX (policy_version=?)"
+          ]
+        ],
+        "1000:correlated_not_exists": [
+          [
+            2,
+            0,
+            0,
+            "CO-ROUTINE production_chain"
+          ],
+          [
+            6,
+            2,
+            0,
+            "SETUP"
+          ],
+          [
+            10,
+            6,
+            56,
+            "SEARCH s USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            15,
+            6,
+            46,
+            "SEARCH p USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            35,
+            2,
+            0,
+            "RECURSIVE STEP"
+          ],
+          [
+            39,
+            35,
+            56,
+            "SEARCH s USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            44,
+            35,
+            46,
+            "SEARCH child USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            49,
+            35,
+            216,
+            "SCAN parent"
+          ],
+          [
+            66,
+            0,
+            56,
+            "SEARCH ps USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            73,
+            0,
+            46,
+            "SEARCH r USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            79,
+            0,
+            0,
+            "CORRELATED SCALAR SUBQUERY 1"
+          ],
+          [
+            85,
+            79,
+            56,
+            "SEARCH cs USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            92,
+            79,
+            46,
+            "SEARCH child USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            115,
+            0,
+            53,
+            "SEARCH pc USING AUTOMATIC COVERING INDEX (policy_version=?)"
+          ]
+        ],
+        "1000:uncorrelated_not_in": [
+          [
+            2,
+            0,
+            0,
+            "CO-ROUTINE production_chain"
+          ],
+          [
+            6,
+            2,
+            0,
+            "SETUP"
+          ],
+          [
+            10,
+            6,
+            56,
+            "SEARCH s USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            15,
+            6,
+            46,
+            "SEARCH p USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            35,
+            2,
+            0,
+            "RECURSIVE STEP"
+          ],
+          [
+            39,
+            35,
+            56,
+            "SEARCH s USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            44,
+            35,
+            46,
+            "SEARCH child USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            49,
+            35,
+            216,
+            "SCAN parent"
+          ],
+          [
+            66,
+            0,
+            56,
+            "SEARCH ps USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            73,
+            0,
+            46,
+            "SEARCH r USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            81,
+            0,
+            0,
+            "LIST SUBQUERY 1"
+          ],
+          [
+            86,
+            81,
+            56,
+            "SEARCH cs USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            93,
+            81,
+            46,
+            "SEARCH child USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            104,
+            81,
+            0,
+            "CREATE BLOOM FILTER"
+          ],
+          [
+            131,
+            0,
+            53,
+            "SEARCH pc USING AUTOMATIC COVERING INDEX (policy_version=?)"
+          ]
+        ],
+        "100:correlated_not_exists": [
+          [
+            2,
+            0,
+            0,
+            "CO-ROUTINE production_chain"
+          ],
+          [
+            6,
+            2,
+            0,
+            "SETUP"
+          ],
+          [
+            10,
+            6,
+            56,
+            "SEARCH s USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            15,
+            6,
+            46,
+            "SEARCH p USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            35,
+            2,
+            0,
+            "RECURSIVE STEP"
+          ],
+          [
+            39,
+            35,
+            56,
+            "SEARCH s USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            44,
+            35,
+            46,
+            "SEARCH child USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            49,
+            35,
+            216,
+            "SCAN parent"
+          ],
+          [
+            66,
+            0,
+            56,
+            "SEARCH ps USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            73,
+            0,
+            46,
+            "SEARCH r USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            79,
+            0,
+            0,
+            "CORRELATED SCALAR SUBQUERY 1"
+          ],
+          [
+            85,
+            79,
+            56,
+            "SEARCH cs USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            92,
+            79,
+            46,
+            "SEARCH child USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            115,
+            0,
+            53,
+            "SEARCH pc USING AUTOMATIC COVERING INDEX (policy_version=?)"
+          ]
+        ],
+        "100:uncorrelated_not_in": [
+          [
+            2,
+            0,
+            0,
+            "CO-ROUTINE production_chain"
+          ],
+          [
+            6,
+            2,
+            0,
+            "SETUP"
+          ],
+          [
+            10,
+            6,
+            56,
+            "SEARCH s USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            15,
+            6,
+            46,
+            "SEARCH p USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            35,
+            2,
+            0,
+            "RECURSIVE STEP"
+          ],
+          [
+            39,
+            35,
+            56,
+            "SEARCH s USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            44,
+            35,
+            46,
+            "SEARCH child USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            49,
+            35,
+            216,
+            "SCAN parent"
+          ],
+          [
+            66,
+            0,
+            56,
+            "SEARCH ps USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            73,
+            0,
+            46,
+            "SEARCH r USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            81,
+            0,
+            0,
+            "LIST SUBQUERY 1"
+          ],
+          [
+            86,
+            81,
+            56,
+            "SEARCH cs USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            93,
+            81,
+            46,
+            "SEARCH child USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            104,
+            81,
+            0,
+            "CREATE BLOOM FILTER"
+          ],
+          [
+            131,
+            0,
+            53,
+            "SEARCH pc USING AUTOMATIC COVERING INDEX (policy_version=?)"
+          ]
+        ],
+        "10:correlated_not_exists": [
+          [
+            2,
+            0,
+            0,
+            "CO-ROUTINE production_chain"
+          ],
+          [
+            6,
+            2,
+            0,
+            "SETUP"
+          ],
+          [
+            10,
+            6,
+            56,
+            "SEARCH s USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            15,
+            6,
+            46,
+            "SEARCH p USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            35,
+            2,
+            0,
+            "RECURSIVE STEP"
+          ],
+          [
+            39,
+            35,
+            56,
+            "SEARCH s USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            44,
+            35,
+            46,
+            "SEARCH child USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            49,
+            35,
+            216,
+            "SCAN parent"
+          ],
+          [
+            66,
+            0,
+            56,
+            "SEARCH ps USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            73,
+            0,
+            46,
+            "SEARCH r USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            79,
+            0,
+            0,
+            "CORRELATED SCALAR SUBQUERY 1"
+          ],
+          [
+            85,
+            79,
+            56,
+            "SEARCH cs USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            92,
+            79,
+            46,
+            "SEARCH child USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            115,
+            0,
+            53,
+            "SEARCH pc USING AUTOMATIC COVERING INDEX (policy_version=?)"
+          ]
+        ],
+        "10:uncorrelated_not_in": [
+          [
+            2,
+            0,
+            0,
+            "CO-ROUTINE production_chain"
+          ],
+          [
+            6,
+            2,
+            0,
+            "SETUP"
+          ],
+          [
+            10,
+            6,
+            56,
+            "SEARCH s USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            15,
+            6,
+            46,
+            "SEARCH p USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            35,
+            2,
+            0,
+            "RECURSIVE STEP"
+          ],
+          [
+            39,
+            35,
+            56,
+            "SEARCH s USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            44,
+            35,
+            46,
+            "SEARCH child USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            49,
+            35,
+            216,
+            "SCAN parent"
+          ],
+          [
+            66,
+            0,
+            56,
+            "SEARCH ps USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            73,
+            0,
+            46,
+            "SEARCH r USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            81,
+            0,
+            0,
+            "LIST SUBQUERY 1"
+          ],
+          [
+            86,
+            81,
+            56,
+            "SEARCH cs USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            93,
+            81,
+            46,
+            "SEARCH child USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            104,
+            81,
+            0,
+            "CREATE BLOOM FILTER"
+          ],
+          [
+            131,
+            0,
+            53,
+            "SEARCH pc USING AUTOMATIC COVERING INDEX (policy_version=?)"
+          ]
+        ]
+      },
+      "querySemanticChecks": [
+        {
+          "case": "empty",
+          "equal": true,
+          "scope": "production",
+          "tipCount": 0
+        },
+        {
+          "case": "empty",
+          "equal": true,
+          "scope": "acceptance:v9-acceptance-policy-perf",
+          "tipCount": 0
+        },
+        {
+          "case": "separate_scoped_null_roots",
+          "equal": true,
+          "scope": "production",
+          "tipCount": 1
+        },
+        {
+          "case": "separate_scoped_null_roots",
+          "equal": true,
+          "scope": "acceptance:v9-acceptance-policy-perf",
+          "tipCount": 1
+        },
+        {
+          "case": "foreign_unregistered_child_and_reserved_root",
+          "equal": true,
+          "scope": "production",
+          "tipCount": 2
+        },
+        {
+          "case": "foreign_unregistered_child_and_reserved_root",
+          "equal": true,
+          "scope": "acceptance:v9-acceptance-policy-perf",
+          "tipCount": 2
+        },
+        {
+          "case": "same_scope_fork",
+          "equal": true,
+          "scope": "production",
+          "tipCount": 3
+        },
+        {
+          "case": "same_scope_fork",
+          "equal": true,
+          "scope": "acceptance:v9-acceptance-policy-perf",
+          "tipCount": 2
+        }
+      ],
+      "samplesPerSide": 5,
+      "schema": "admin-policy-local-performance-1",
+      "sql": {
+        "0": {
+          "correlated_not_exists": {
+            "median": 0.0065,
+            "samples": [
+              0.0124,
+              0.0066,
+              0.0065,
+              0.0062,
+              0.0062
+            ],
+            "unit": "milliseconds",
+            "worst": 0.0124
+          },
+          "uncorrelated_not_in": {
+            "median": 0.0064,
+            "samples": [
+              0.0079,
+              0.0072,
+              0.0062,
+              0.0063,
+              0.0064
+            ],
+            "unit": "milliseconds",
+            "worst": 0.0079
+          }
+        },
+        "10": {
+          "correlated_not_exists": {
+            "median": 0.0958,
+            "samples": [
+              0.1061,
+              0.0991,
+              0.0958,
+              0.0953,
+              0.095
+            ],
+            "unit": "milliseconds",
+            "worst": 0.1061
+          },
+          "uncorrelated_not_in": {
+            "median": 0.0812,
+            "samples": [
+              0.0843,
+              0.0828,
+              0.0809,
+              0.0812,
+              0.0809
+            ],
+            "unit": "milliseconds",
+            "worst": 0.0843
+          }
+        },
+        "100": {
+          "correlated_not_exists": {
+            "median": 6.5316,
+            "samples": [
+              6.8002,
+              6.8178,
+              6.4517,
+              6.4113,
+              6.5316
+            ],
+            "unit": "milliseconds",
+            "worst": 6.8178
+          },
+          "uncorrelated_not_in": {
+            "median": 4.5116,
+            "samples": [
+              4.6162,
+              4.4998,
+              4.452,
+              4.5116,
+              4.6425
+            ],
+            "unit": "milliseconds",
+            "worst": 4.6425
+          }
+        },
+        "1000": {
+          "correlated_not_exists": {
+            "median": 798.361,
+            "samples": [
+              798.5589,
+              790.3074,
+              843.1831,
+              798.361,
+              792.4451
+            ],
+            "unit": "milliseconds",
+            "worst": 843.1831
+          },
+          "uncorrelated_not_in": {
+            "median": 537.2734,
+            "samples": [
+              533.1136,
+              534.0262,
+              557.0335,
+              537.661,
+              537.2734
+            ],
+            "unit": "milliseconds",
+            "worst": 557.0335
+          }
+        }
+      },
+      "sqlite": "3.50.4"
+    }
+  },
+  "preOptimization": {
+    "schema": "admin-policy-performance-review-1",
+    "applicationVersion": "8.0.0",
+    "state": "PRE_QUERY_OPTIMIZATION_MEASURED",
+    "qualification": {
+      "localSyntheticPerformanceOnly": true,
+      "cloud": false,
+      "realBrowser": false,
+      "formalRelease": false,
+      "resourceBudgetClosed": false
+    },
+    "finding": "No measured greater-than-20-percent HTTP regression in successful like-for-like append cases. Both exact baseline and current path approach two seconds at a 1000-version chain. Replacing the correlated tip anti-join reduces the isolated query median by about32percent but does not remove recursive production-view traversal.",
+    "previousFailure": {
+      "phase": "unqualified initial harness attempt",
+      "result": "HTTP429 at request31 in the original shared synthetic limiter bucket; no qualified report produced",
+      "correction": "Reset only process-local limiter between independent size fixtures; real Admin limit remains30 and each group performs10 real authenticated requests."
+    },
+    "comparisons": {
+      "0": {
+        "deltaMedianPercent": -45.19,
+        "comparisonEligible": false,
+        "verdict": "NOT_COMPARABLE"
+      },
+      "10": {
+        "deltaMedianPercent": -7.05,
+        "comparisonEligible": true,
+        "verdict": "PASS"
+      },
+      "100": {
+        "deltaMedianPercent": -14.94,
+        "comparisonEligible": true,
+        "verdict": "PASS"
+      },
+      "1000": {
+        "deltaMedianPercent": -8.69,
+        "comparisonEligible": true,
+        "verdict": "PASS"
+      }
+    },
+    "queryComparisons": {
+      "0": {
+        "candidateMedianDeltaPercent": -21.43
+      },
+      "10": {
+        "candidateMedianDeltaPercent": -16.05
+      },
+      "100": {
+        "candidateMedianDeltaPercent": -30.64
+      },
+      "1000": {
+        "candidateMedianDeltaPercent": -32.15
+      }
+    },
+    "measured": {
+      "actualHttpAdminAppend": {
+        "0": {
+          "baseline": {
+            "median": 44.2616,
+            "samples": [
+              48.6474,
+              50.6425,
+              40.3452,
+              40.7746,
+              44.2616
+            ],
+            "unit": "milliseconds",
+            "worst": 50.6425
+          },
+          "comparableBusinessSemantics": false,
+          "current": {
+            "median": 24.2593,
+            "samples": [
+              33.4245,
+              25.9566,
+              24.2593,
+              22.7481,
+              24.1073
+            ],
+            "unit": "milliseconds",
+            "worst": 33.4245
+          },
+          "policyCountsAfterAppend": {
+            "baseline": [
+              2,
+              2,
+              2,
+              2,
+              2
+            ],
+            "current": [
+              1,
+              1,
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "10": {
+          "baseline": {
+            "median": 37.2194,
+            "samples": [
+              30.0981,
+              63.5265,
+              38.0222,
+              37.2194,
+              32.5066
+            ],
+            "unit": "milliseconds",
+            "worst": 63.5265
+          },
+          "comparableBusinessSemantics": true,
+          "current": {
+            "median": 34.5964,
+            "samples": [
+              26.611,
+              34.5964,
+              51.8533,
+              43.4303,
+              31.8724
+            ],
+            "unit": "milliseconds",
+            "worst": 51.8533
+          },
+          "policyCountsAfterAppend": {
+            "baseline": [
+              11,
+              11,
+              11,
+              11,
+              11
+            ],
+            "current": [
+              11,
+              11,
+              11,
+              11,
+              11
+            ]
+          }
+        },
+        "100": {
+          "baseline": {
+            "median": 45.5491,
+            "samples": [
+              45.347,
+              42.8213,
+              48.5824,
+              46.1803,
+              45.5491
+            ],
+            "unit": "milliseconds",
+            "worst": 48.5824
+          },
+          "comparableBusinessSemantics": true,
+          "current": {
+            "median": 38.744,
+            "samples": [
+              37.6172,
+              38.744,
+              40.2553,
+              38.5159,
+              39.1587
+            ],
+            "unit": "milliseconds",
+            "worst": 40.2553
+          },
+          "policyCountsAfterAppend": {
+            "baseline": [
+              101,
+              101,
+              101,
+              101,
+              101
+            ],
+            "current": [
+              101,
+              101,
+              101,
+              101,
+              101
+            ]
+          }
+        },
+        "1000": {
+          "baseline": {
+            "median": 2105.5579,
+            "samples": [
+              2148.6186,
+              2105.5579,
+              2393.9715,
+              1923.105,
+              2009.1658
+            ],
+            "unit": "milliseconds",
+            "worst": 2393.9715
+          },
+          "comparableBusinessSemantics": true,
+          "current": {
+            "median": 1922.6331,
+            "samples": [
+              1922.6331,
+              1749.784,
+              1978.0962,
+              1969.0939,
+              1743.2411
+            ],
+            "unit": "milliseconds",
+            "worst": 1978.0962
+          },
+          "policyCountsAfterAppend": {
+            "baseline": [
+              1001,
+              1001,
+              1001,
+              1001,
+              1001
+            ],
+            "current": [
+              1001,
+              1001,
+              1001,
+              1001,
+              1001
+            ]
+          }
+        }
+      },
+      "baselineCommit": "9654fb765dba9bafe9f764876257c7f280725b76",
+      "baselineSourceSha256": {
+        "backend/main.py": "324e93f4f066ac288bd397cdc4632bf4e78fd6e239c3471b78ec33487d49f3d6",
+        "backend/service/repository_scopes.py": "1c0a203be93bad52cfc0cb8fd7705336be01cb213a6a632f45826a18db3fc6fa",
+        "backend/service/v8_repo.py": "e5480a10aa395246f0116b132ca322f7a2104bc036c68e4968ccaee3239ca516"
+      },
+      "captured_at_utc": "2026-10-26T09:47:25.612424+00:00",
+      "currentSourceSha256": {
+        "backend/main.py": "e6e3883811e83d4dc0df6e2e66db510e925f6b3aba209062cad69d8abde577a5",
+        "backend/service/repository_scopes.py": "1c0a203be93bad52cfc0cb8fd7705336be01cb213a6a632f45826a18db3fc6fa",
+        "backend/service/v8_repo.py": "84a2acde2da18ad86bb43092c53946624b0f7df9bbb7103cd5ab78d7e38a36e6"
+      },
+      "excludedAttempt": "Initial unqualified attempt reused one accumulating synthetic Admin limiter bucket across all sizes, correctly received HTTP429 on reaching request31 at size1000, and stopped. No budgets or production auth changed; size fixtures are now isolated.",
+      "limits": "Small synthetic local samples; not a network/cloud/real-device benchmark. Seed construction uses fixed real models/INSERT/scope records, not repeated Admin HTTP; it is performance setup, not lifecycle correctness evidence. Global dependency drift from baseline is not isolated. No resource or formal-release gate is closed.",
+      "method": "Same installed dependencies, exact baseline repo/endpoint function source compiled in isolated namespaces; shared current model/schema/guard dependencies. Old scope function uses current immutable scope types. Five alternating fresh DB-copy HTTP requests per side/size, real auth/Pydantic/SQLite write, no lifespan or sockets. Each independent size group resets only its local synthetic limiter fixture; ten requests remain under the unchanged actual 30-request limit. SQL timings warm cache and alternate order. Empty history baseline initializes an extra default row, so its business semantics differ and it is not a like-for-like latency comparison.",
+      "ownedSyntheticDirectory": "C:\\Users\\84046\\AppData\\Local\\Temp\\fc-admin-policy-bench-1hmivo4w",
+      "python": "3.14.4",
+      "queryPlans": {
+        "0:correlated_not_exists": [
+          [
+            2,
+            0,
+            0,
+            "CO-ROUTINE production_chain"
+          ],
+          [
+            6,
+            2,
+            0,
+            "SETUP"
+          ],
+          [
+            10,
+            6,
+            56,
+            "SEARCH s USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            15,
+            6,
+            46,
+            "SEARCH p USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            35,
+            2,
+            0,
+            "RECURSIVE STEP"
+          ],
+          [
+            39,
+            35,
+            56,
+            "SEARCH s USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            44,
+            35,
+            46,
+            "SEARCH child USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            49,
+            35,
+            216,
+            "SCAN parent"
+          ],
+          [
+            66,
+            0,
+            56,
+            "SEARCH ps USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            73,
+            0,
+            46,
+            "SEARCH r USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            79,
+            0,
+            0,
+            "CORRELATED SCALAR SUBQUERY 1"
+          ],
+          [
+            85,
+            79,
+            56,
+            "SEARCH cs USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            92,
+            79,
+            46,
+            "SEARCH child USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            115,
+            0,
+            53,
+            "SEARCH pc USING AUTOMATIC COVERING INDEX (policy_version=?)"
+          ]
+        ],
+        "0:uncorrelated_not_in": [
+          [
+            2,
+            0,
+            0,
+            "CO-ROUTINE production_chain"
+          ],
+          [
+            6,
+            2,
+            0,
+            "SETUP"
+          ],
+          [
+            10,
+            6,
+            56,
+            "SEARCH s USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            15,
+            6,
+            46,
+            "SEARCH p USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            35,
+            2,
+            0,
+            "RECURSIVE STEP"
+          ],
+          [
+            39,
+            35,
+            56,
+            "SEARCH s USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            44,
+            35,
+            46,
+            "SEARCH child USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            49,
+            35,
+            216,
+            "SCAN parent"
+          ],
+          [
+            66,
+            0,
+            56,
+            "SEARCH ps USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            73,
+            0,
+            46,
+            "SEARCH r USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            81,
+            0,
+            0,
+            "LIST SUBQUERY 1"
+          ],
+          [
+            86,
+            81,
+            56,
+            "SEARCH cs USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            93,
+            81,
+            46,
+            "SEARCH child USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            104,
+            81,
+            0,
+            "CREATE BLOOM FILTER"
+          ],
+          [
+            131,
+            0,
+            53,
+            "SEARCH pc USING AUTOMATIC COVERING INDEX (policy_version=?)"
+          ]
+        ],
+        "1000:correlated_not_exists": [
+          [
+            2,
+            0,
+            0,
+            "CO-ROUTINE production_chain"
+          ],
+          [
+            6,
+            2,
+            0,
+            "SETUP"
+          ],
+          [
+            10,
+            6,
+            56,
+            "SEARCH s USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            15,
+            6,
+            46,
+            "SEARCH p USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            35,
+            2,
+            0,
+            "RECURSIVE STEP"
+          ],
+          [
+            39,
+            35,
+            56,
+            "SEARCH s USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            44,
+            35,
+            46,
+            "SEARCH child USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            49,
+            35,
+            216,
+            "SCAN parent"
+          ],
+          [
+            66,
+            0,
+            56,
+            "SEARCH ps USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            73,
+            0,
+            46,
+            "SEARCH r USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            79,
+            0,
+            0,
+            "CORRELATED SCALAR SUBQUERY 1"
+          ],
+          [
+            85,
+            79,
+            56,
+            "SEARCH cs USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            92,
+            79,
+            46,
+            "SEARCH child USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            115,
+            0,
+            53,
+            "SEARCH pc USING AUTOMATIC COVERING INDEX (policy_version=?)"
+          ]
+        ],
+        "1000:uncorrelated_not_in": [
+          [
+            2,
+            0,
+            0,
+            "CO-ROUTINE production_chain"
+          ],
+          [
+            6,
+            2,
+            0,
+            "SETUP"
+          ],
+          [
+            10,
+            6,
+            56,
+            "SEARCH s USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            15,
+            6,
+            46,
+            "SEARCH p USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            35,
+            2,
+            0,
+            "RECURSIVE STEP"
+          ],
+          [
+            39,
+            35,
+            56,
+            "SEARCH s USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            44,
+            35,
+            46,
+            "SEARCH child USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            49,
+            35,
+            216,
+            "SCAN parent"
+          ],
+          [
+            66,
+            0,
+            56,
+            "SEARCH ps USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            73,
+            0,
+            46,
+            "SEARCH r USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            81,
+            0,
+            0,
+            "LIST SUBQUERY 1"
+          ],
+          [
+            86,
+            81,
+            56,
+            "SEARCH cs USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            93,
+            81,
+            46,
+            "SEARCH child USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            104,
+            81,
+            0,
+            "CREATE BLOOM FILTER"
+          ],
+          [
+            131,
+            0,
+            53,
+            "SEARCH pc USING AUTOMATIC COVERING INDEX (policy_version=?)"
+          ]
+        ],
+        "100:correlated_not_exists": [
+          [
+            2,
+            0,
+            0,
+            "CO-ROUTINE production_chain"
+          ],
+          [
+            6,
+            2,
+            0,
+            "SETUP"
+          ],
+          [
+            10,
+            6,
+            56,
+            "SEARCH s USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            15,
+            6,
+            46,
+            "SEARCH p USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            35,
+            2,
+            0,
+            "RECURSIVE STEP"
+          ],
+          [
+            39,
+            35,
+            56,
+            "SEARCH s USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            44,
+            35,
+            46,
+            "SEARCH child USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            49,
+            35,
+            216,
+            "SCAN parent"
+          ],
+          [
+            66,
+            0,
+            56,
+            "SEARCH ps USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            73,
+            0,
+            46,
+            "SEARCH r USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            79,
+            0,
+            0,
+            "CORRELATED SCALAR SUBQUERY 1"
+          ],
+          [
+            85,
+            79,
+            56,
+            "SEARCH cs USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            92,
+            79,
+            46,
+            "SEARCH child USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            115,
+            0,
+            53,
+            "SEARCH pc USING AUTOMATIC COVERING INDEX (policy_version=?)"
+          ]
+        ],
+        "100:uncorrelated_not_in": [
+          [
+            2,
+            0,
+            0,
+            "CO-ROUTINE production_chain"
+          ],
+          [
+            6,
+            2,
+            0,
+            "SETUP"
+          ],
+          [
+            10,
+            6,
+            56,
+            "SEARCH s USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            15,
+            6,
+            46,
+            "SEARCH p USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            35,
+            2,
+            0,
+            "RECURSIVE STEP"
+          ],
+          [
+            39,
+            35,
+            56,
+            "SEARCH s USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            44,
+            35,
+            46,
+            "SEARCH child USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            49,
+            35,
+            216,
+            "SCAN parent"
+          ],
+          [
+            66,
+            0,
+            56,
+            "SEARCH ps USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            73,
+            0,
+            46,
+            "SEARCH r USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            81,
+            0,
+            0,
+            "LIST SUBQUERY 1"
+          ],
+          [
+            86,
+            81,
+            56,
+            "SEARCH cs USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            93,
+            81,
+            46,
+            "SEARCH child USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            104,
+            81,
+            0,
+            "CREATE BLOOM FILTER"
+          ],
+          [
+            131,
+            0,
+            53,
+            "SEARCH pc USING AUTOMATIC COVERING INDEX (policy_version=?)"
+          ]
+        ],
+        "10:correlated_not_exists": [
+          [
+            2,
+            0,
+            0,
+            "CO-ROUTINE production_chain"
+          ],
+          [
+            6,
+            2,
+            0,
+            "SETUP"
+          ],
+          [
+            10,
+            6,
+            56,
+            "SEARCH s USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            15,
+            6,
+            46,
+            "SEARCH p USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            35,
+            2,
+            0,
+            "RECURSIVE STEP"
+          ],
+          [
+            39,
+            35,
+            56,
+            "SEARCH s USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            44,
+            35,
+            46,
+            "SEARCH child USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            49,
+            35,
+            216,
+            "SCAN parent"
+          ],
+          [
+            66,
+            0,
+            56,
+            "SEARCH ps USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            73,
+            0,
+            46,
+            "SEARCH r USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            79,
+            0,
+            0,
+            "CORRELATED SCALAR SUBQUERY 1"
+          ],
+          [
+            85,
+            79,
+            56,
+            "SEARCH cs USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            92,
+            79,
+            46,
+            "SEARCH child USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            115,
+            0,
+            53,
+            "SEARCH pc USING AUTOMATIC COVERING INDEX (policy_version=?)"
+          ]
+        ],
+        "10:uncorrelated_not_in": [
+          [
+            2,
+            0,
+            0,
+            "CO-ROUTINE production_chain"
+          ],
+          [
+            6,
+            2,
+            0,
+            "SETUP"
+          ],
+          [
+            10,
+            6,
+            56,
+            "SEARCH s USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            15,
+            6,
+            46,
+            "SEARCH p USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            35,
+            2,
+            0,
+            "RECURSIVE STEP"
+          ],
+          [
+            39,
+            35,
+            56,
+            "SEARCH s USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            44,
+            35,
+            46,
+            "SEARCH child USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            49,
+            35,
+            216,
+            "SCAN parent"
+          ],
+          [
+            66,
+            0,
+            56,
+            "SEARCH ps USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            73,
+            0,
+            46,
+            "SEARCH r USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            81,
+            0,
+            0,
+            "LIST SUBQUERY 1"
+          ],
+          [
+            86,
+            81,
+            56,
+            "SEARCH cs USING COVERING INDEX idx_v8_record_scope (scope_key=? AND record_kind=?)"
+          ],
+          [
+            93,
+            81,
+            46,
+            "SEARCH child USING INDEX sqlite_autoindex_portfolio_policy_versions_1 (policy_version=?)"
+          ],
+          [
+            104,
+            81,
+            0,
+            "CREATE BLOOM FILTER"
+          ],
+          [
+            131,
+            0,
+            53,
+            "SEARCH pc USING AUTOMATIC COVERING INDEX (policy_version=?)"
+          ]
+        ]
+      },
+      "querySemanticChecks": [
+        {
+          "case": "empty",
+          "equal": true,
+          "scope": "production",
+          "tipCount": 0
+        },
+        {
+          "case": "empty",
+          "equal": true,
+          "scope": "acceptance:v9-acceptance-policy-perf",
+          "tipCount": 0
+        },
+        {
+          "case": "separate_scoped_null_roots",
+          "equal": true,
+          "scope": "production",
+          "tipCount": 1
+        },
+        {
+          "case": "separate_scoped_null_roots",
+          "equal": true,
+          "scope": "acceptance:v9-acceptance-policy-perf",
+          "tipCount": 1
+        },
+        {
+          "case": "foreign_unregistered_child_and_reserved_root",
+          "equal": true,
+          "scope": "production",
+          "tipCount": 2
+        },
+        {
+          "case": "foreign_unregistered_child_and_reserved_root",
+          "equal": true,
+          "scope": "acceptance:v9-acceptance-policy-perf",
+          "tipCount": 2
+        },
+        {
+          "case": "same_scope_fork",
+          "equal": true,
+          "scope": "production",
+          "tipCount": 3
+        },
+        {
+          "case": "same_scope_fork",
+          "equal": true,
+          "scope": "acceptance:v9-acceptance-policy-perf",
+          "tipCount": 2
+        }
+      ],
+      "samplesPerSide": 5,
+      "schema": "admin-policy-local-performance-1",
+      "sql": {
+        "0": {
+          "correlated_not_exists": {
+            "median": 0.0098,
+            "samples": [
+              0.0128,
+              0.0065,
+              0.0062,
+              0.0098,
+              0.0104
+            ],
+            "unit": "milliseconds",
+            "worst": 0.0128
+          },
+          "uncorrelated_not_in": {
+            "median": 0.0077,
+            "samples": [
+              0.0081,
+              0.0072,
+              0.0063,
+              0.0077,
+              0.0116
+            ],
+            "unit": "milliseconds",
+            "worst": 0.0116
+          }
+        },
+        "10": {
+          "correlated_not_exists": {
+            "median": 0.1059,
+            "samples": [
+              0.1083,
+              0.1059,
+              0.0995,
+              0.1127,
+              0.1045
+            ],
+            "unit": "milliseconds",
+            "worst": 0.1127
+          },
+          "uncorrelated_not_in": {
+            "median": 0.0889,
+            "samples": [
+              0.0856,
+              0.0889,
+              0.083,
+              0.1101,
+              0.0908
+            ],
+            "unit": "milliseconds",
+            "worst": 0.1101
+          }
+        },
+        "100": {
+          "correlated_not_exists": {
+            "median": 6.6096,
+            "samples": [
+              6.5708,
+              6.6096,
+              6.6404,
+              6.7552,
+              6.561
+            ],
+            "unit": "milliseconds",
+            "worst": 6.7552
+          },
+          "uncorrelated_not_in": {
+            "median": 4.5846,
+            "samples": [
+              4.5701,
+              4.6261,
+              4.5989,
+              4.5505,
+              4.5846
+            ],
+            "unit": "milliseconds",
+            "worst": 4.6261
+          }
+        },
+        "1000": {
+          "correlated_not_exists": {
+            "median": 876.5323,
+            "samples": [
+              876.5323,
+              1034.6021,
+              892.7228,
+              872.0332,
+              843.9745
+            ],
+            "unit": "milliseconds",
+            "worst": 1034.6021
+          },
+          "uncorrelated_not_in": {
+            "median": 594.7125,
+            "samples": [
+              687.5826,
+              599.443,
+              567.182,
+              594.7125,
+              570.2875
+            ],
+            "unit": "milliseconds",
+            "worst": 687.5826
+          }
+        }
+      },
+      "sqlite": "3.50.4"
+    },
+    "recommendation": {
+      "candidate": "Preserve production_table/scope filters and final save_policy transactional check; consider only NULL-filtered uncorrelated NOT IN anti-join, then rerun the same actual HTTP benchmark.",
+      "ddlChanged": false,
+      "authorityChanged": false,
+      "budgetsChanged": false
+    },
+    "caveats": [
+      "HTTP tests are TestClient ASGI calls, not TCP/TLS or deployed service latency.",
+      "The baseline executes exact9654 repository source and exact endpoint function AST, with shared installed dependencies/model/schema/security helpers.",
+      "Fixture direct fixed model/INSERT/scope setup is performance preparation, not lifecycle or authorization-correctness proof.",
+      "Raw reserved roots/forks and foreign/unregistered children are deliberate synthetic query-equivalence faults; ambiguous tips remain visible for caller rejection, not a claim of arbitrary raw-SQL defense.",
+      "Five samples and a single Windows host give directional observations; build/other host workload and filesystem caches are not globally isolated."
+    ],
+    "harnessDifferences": "This earlier qualified stage did not yet add the separately timed legacy reads or full successful-response equality assertions. Actual timed append call, fresh-copy method and exact baseline source loading were unchanged."
+  },
+  "conclusions": [
+    "No greater-than20percent median regression was measured for successful like-for-like Admin append or nonempty legacy reads. At1000versions actual Admin HTTP median fell from1907.6823ms to1097.6182ms; nonempty legacy effective read was1075.1785ms to1080.1359ms.",
+    "Empty legacy bootstrap rose from16.9263ms to19.0597ms, about12.60percent/WARN and2.1334ms absolute. It now observes an empty tip before initialization; this warning is retained without raising thresholds.",
+    "Empty Admin POST does different intended work: baseline persists hidden default plus explicit root, current persists only explicit Admin root. Its relative latency is NOT_COMPARABLE.",
+    "The original production Policy view traverses a recursive chain and remains the dominant1000-version cost; no view, index, schema, scope or final write-CAS guard was changed for speed.",
+    "Successful nonempty append response models matched completely on all15pairs. All20legacy effective Policy selections matched, and nonempty Policy rows were unchanged. SQL candidates retained identical result sets in8scope/NULL/fork/fault cases."
+  ],
+  "causesAndSmallestFixes": [
+    "Correlated child anti-join repeated work during tip observation and final append checks; root changed only this fixed query to an explicitly NULL-filtered NOT IN form.",
+    "Recursive production-view traversal remains expensive at1000versions. A future indexing/view change needs explicit schema/migration and isolation review; it is not authorized or included here.",
+    "Local transaction/auth/model cost dominates short histories. Avoid optimizing away empty-chain observation, permissions, history or finalCAS to remove the small initialization WARN."
+  ],
+  "caveats": [
+    "HTTP tests are TestClient ASGI calls, not TCP/TLS or deployed service latency.",
+    "The baseline executes exact9654 repository source and exact endpoint function AST, with shared installed dependencies/model/schema/security helpers.",
+    "Fixture direct fixed model/INSERT/scope setup is performance preparation, not lifecycle or authorization-correctness proof.",
+    "Raw reserved roots/forks and foreign/unregistered children are deliberate synthetic query-equivalence faults; ambiguous tips remain visible for caller rejection, not a claim of arbitrary raw-SQL defense.",
+    "Five samples and a single Windows host give directional observations; build/other host workload and filesystem caches are not globally isolated."
+  ]
+}

@@ -111,10 +111,13 @@ jobs:
           node-version: 20
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - run: npm ci
+      - run: npm ci --include=dev
       - run: npm run type-check
       - run: npm run test
       - run: npm run build
+      - name: Audit dependency advisories
+        timeout-minutes: 2
+        run: npm audit --json --include=dev --audit-level=moderate --registry=https://registry.npmjs.org --fetch-retries=0 --fetch-timeout=20000
 
   worker:
     needs: resolve
@@ -136,13 +139,18 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: worker/package-lock.json
-      - run: npm ci
+      - run: npm ci --include=dev
       - run: npm run check
       - run: npm test
       - run: npx wrangler deploy --dry-run
+      - name: Audit dependency advisories
+        timeout-minutes: 2
+        run: npm audit --json --include=dev --audit-level=moderate --registry=https://registry.npmjs.org --fetch-retries=0 --fetch-timeout=20000
 
   deploy:
-    if: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && !(github.event_name == 'workflow_dispatch' && inputs.formal_release) }}
+    # Persistent code-only hold: unset/false also blocks later generated-data
+    # push/dispatch runs. This guards Pages only; pause Render separately.
+    if: ${{ vars.AUTO_DEPLOY_ENABLED == 'true' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && !(github.event_name == 'workflow_dispatch' && inputs.formal_release) }}
     needs: [resolve, backend, frontend, worker]
     uses: ./.github/workflows/deploy.yml
     with:
@@ -153,7 +161,7 @@ jobs:
       id-token: write
 
   candidate_smoke:
-    if: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && !(github.event_name == 'workflow_dispatch' && inputs.formal_release) }}
+    if: ${{ vars.AUTO_DEPLOY_ENABLED == 'true' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && !(github.event_name == 'workflow_dispatch' && inputs.formal_release) }}
     needs: [resolve, deploy]
     uses: ./.github/workflows/post-deploy-smoke.yml
     with:

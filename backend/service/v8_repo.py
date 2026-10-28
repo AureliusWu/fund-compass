@@ -12,6 +12,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Iterable
 
 from database import db
+from database.v8_insert import prepare_v8_insert
 from models.v8 import (
     DecisionDiff,
     DecisionSnapshot,
@@ -29,6 +30,7 @@ from models.v8 import (
     stable_id,
 )
 from strategy.decision_v2 import build_decision_diff, default_portfolio_policy
+from service import repository_scopes as scopes
 
 
 POSITIVE_ACTIONS = {"buy", "dca", "add"}
@@ -45,6 +47,10 @@ _idempotency_owners: ContextVar[dict[tuple[str, str], str]] = ContextVar(
 
 class SnapshotConflictError(RuntimeError):
     """A deterministic identifier was reused for different immutable data."""
+
+
+class PolicyChainConflictError(ValueError):
+    """A valid Policy cannot append to the observed immutable chain."""
 
 
 @dataclass(frozen=True)
@@ -123,37 +129,94 @@ def _assert_id(actual: str, expected: str, kind: str) -> None:
         raise SnapshotConflictError(f"{kind} deterministic id does not match payload")
 
 
-def _existing_model(conn, table: str, id_column: str, identifier: str, model_type):
-    row = conn.execute(
-        f"SELECT payload_json FROM {table} WHERE {id_column}=?",
-        (identifier,),
-    ).fetchone()
+def _existing_model(conn, table: str, id_column: str, identifier: str, model_type, *, scope=scopes.PRODUCTION):
+    sql, params = scopes.model_query(table, id_column, identifier, scope)
+    row = conn.execute(sql, params).fetchone()
     return model_type.model_validate_json(row["payload_json"]) if row else None
 
 
-def save_evidence(snapshot: EvidenceSnapshot) -> EvidenceSnapshot:
+def _write_reference(conn, table, id_column, identifier, model_type):
+    """Private write-only lookup; caller must guard persisted scope before use.
+
+    Inspect reserved legacy provenance as well as scope so an old hidden row
+    cannot evade the existing acceptance boundary via a changed child payload.
+    """
+    row = conn.execute(f"SELECT payload_json FROM {table} WHERE {id_column}=?", (identifier,)).fetchone()
+    return model_type.model_validate_json(row["payload_json"]) if row else None
+
+
+def _acceptance_preflight(candidate, scope=scopes.PRODUCTION):
+    scope = scopes.validate_scope(scope)
+    if scope != scopes.PRODUCTION and db.database_backend() != "sqlite":
+        raise ValueError("local_acceptance_write_forbidden")
+    from service.persistence_verification import preflight_repository_write
+    preflight_repository_write(candidate)
+
+
+def _acceptance_guard(conn, kind, candidate, *references, scope=scopes.PRODUCTION):
+    from service.persistence_verification import guard_repository_write
+    guard_repository_write(conn, kind, candidate, *references, scope=scope)
+    for reference in references:
+        for root_kind, model in (("evidence", EvidenceSnapshot), ("holding", HoldingVersion),
+                                 ("policy", PortfolioPolicy), ("decision", DecisionSnapshot)):
+            if isinstance(reference, model):
+                scopes.assert_record_scope(conn, root_kind, getattr(reference, scopes.ROOTS[root_kind][1]), scope)
+    if kind in scopes.ROOTS:
+        scopes.assert_record_scope(conn, kind, getattr(candidate, scopes.ROOTS[kind][1]), scope)
+
+
+def _decision_lineages(conn, identifiers):
+    """One parameterized lookup for persisted provenance, including roots."""
+    identifiers = list(dict.fromkeys(identifiers))
+    if not identifiers:
+        return {}
+    placeholders = ",".join("?" for _ in identifiers)
+    rows = conn.execute(
+        f"""SELECT d.decision_id,d.evidence_id,d.holding_version,d.policy_version,
+            d.payload_json AS decision_payload,
+            e.payload_json AS evidence_payload,h.payload_json AS holding_payload,
+            p.payload_json AS policy_payload FROM decision_snapshots d
+            LEFT JOIN evidence_snapshots e ON e.evidence_id=d.evidence_id
+            LEFT JOIN holding_versions h ON h.holding_version=d.holding_version
+            LEFT JOIN portfolio_policy_versions p ON p.policy_version=d.policy_version
+            WHERE d.decision_id IN ({placeholders})""", identifiers,
+    ).fetchall()
+    result = {}
+    for row in rows:
+        if any(row[field] is None for field in ("evidence_payload", "holding_payload", "policy_payload")):
+            raise LookupError("decision has incomplete persisted references")
+        lineage = tuple(model.model_validate_json(row[field]) for model, field in (
+            (DecisionSnapshot, "decision_payload"), (EvidenceSnapshot, "evidence_payload"),
+            (HoldingVersion, "holding_payload"), (PortfolioPolicy, "policy_payload"),
+        ))
+        decision, evidence, holding, policy = lineage
+        if (decision.decision_id != row["decision_id"]
+                or decision.evidence_id != row["evidence_id"] or evidence.evidence_id != row["evidence_id"]
+                or decision.holding_version != row["holding_version"] or holding.holding_version != row["holding_version"]
+                or decision.policy_version != row["policy_version"] or policy.policy_version != row["policy_version"]
+                or decision.fund_code != evidence.fund_code or decision.fund_code != holding.fund_code):
+            raise SnapshotConflictError("persisted decision references disagree with their projections")
+        result[row["decision_id"]] = lineage
+    return result
+
+
+def save_evidence(snapshot: EvidenceSnapshot, *, scope=scopes.PRODUCTION) -> EvidenceSnapshot:
+    _acceptance_preflight(snapshot, scope)
     identity = _evidence_identity(snapshot)
     _assert_id(snapshot.evidence_id, stable_id("ev", identity), "evidence")
     payload = _model_payload(snapshot)
     semantic_sha = payload_sha256(identity)
     with db.transaction(immediate=True) as conn:
-        existing = _existing_model(conn, "evidence_snapshots", "evidence_id", snapshot.evidence_id, EvidenceSnapshot)
+        _acceptance_guard(conn, "evidence", snapshot, scope=scope)
+        existing = _existing_model(conn, "evidence_snapshots", "evidence_id", snapshot.evidence_id, EvidenceSnapshot, scope=scope)
         if existing is not None:
             if payload_sha256(_evidence_identity(existing)) != semantic_sha:
                 raise SnapshotConflictError("stored evidence id has different content")
             return existing
-        conn.execute(
-            """INSERT INTO evidence_snapshots(
-               evidence_id,fund_code,fund_name,fund_type,created_at,market_time,
-               official_nav,official_nav_date,target_nav_date,benchmark_id,
-               valuation_percentile,trend_state,momentum_state,drawdown,volatility,
-               market_temperature,score,score_version,score_coverage,timing_signal,
-               timing_coverage,estimate,estimate_status,estimate_coverage,
-               estimate_model_version,estimate_error_p80,estimate_sample_count,
-               estimate_mae,estimate_direction_accuracy,evidence_strength,
-               source_states_json,evidence_nodes_json,missing_fields_json,
-               stale_fields_json,risk_flags_json,payload_json,payload_sha256
-             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        # Precompile the whole append before its first INSERT. In particular,
+        # a bad remote health REAL must not leave a partially written Evidence.
+        inserts = [prepare_v8_insert(
+            conn, "evidence_snapshots",
             (
                 snapshot.evidence_id, snapshot.fund_code, snapshot.fund_name, snapshot.fund_type,
                 snapshot.created_at.isoformat(), snapshot.market_time.isoformat() if snapshot.market_time else None,
@@ -170,7 +233,7 @@ def save_evidence(snapshot: EvidenceSnapshot) -> EvidenceSnapshot:
                 _json(snapshot.missing_fields), _json(snapshot.stale_fields), _json(snapshot.risk_flags),
                 _json(payload), semantic_sha,
             ),
-        )
+        )]
         for state in snapshot.source_states:
             state_payload = state.model_dump(mode="python")
             event_identity = {
@@ -178,11 +241,8 @@ def save_evidence(snapshot: EvidenceSnapshot) -> EvidenceSnapshot:
                 "source_id": state.source_id,
                 "state": state_payload,
             }
-            conn.execute(
-                """INSERT INTO source_health_events(
-                   event_id,evidence_id,source_id,state,last_success,last_failure,
-                   latency_ms,data_age_seconds,stale,error_class,observed_at,payload_json
-                 ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            inserts.append(prepare_v8_insert(
+                conn, "source_health_events",
                 (
                     stable_id("src", event_identity), snapshot.evidence_id, state.source_id, state.state,
                     state.last_success.isoformat() if state.last_success else None,
@@ -190,14 +250,17 @@ def save_evidence(snapshot: EvidenceSnapshot) -> EvidenceSnapshot:
                     state.latency_ms, state.data_age_seconds, int(state.stale), state.error_class,
                     snapshot.created_at.isoformat(), _json(state_payload),
                 ),
-            )
+            ))
+        for statement in inserts:
+            conn.execute(*statement)
+        scopes.register_record(conn, "evidence", snapshot.evidence_id, scope)
     return snapshot
 
 
-def get_evidence(evidence_id: str) -> EvidenceSnapshot | None:
+def get_evidence(evidence_id: str, *, scope=scopes.PRODUCTION) -> EvidenceSnapshot | None:
     conn = db.get_conn()
     try:
-        return _existing_model(conn, "evidence_snapshots", "evidence_id", evidence_id, EvidenceSnapshot)
+        return _existing_model(conn, "evidence_snapshots", "evidence_id", evidence_id, EvidenceSnapshot, scope=scope)
     finally:
         conn.close()
 
@@ -210,13 +273,13 @@ def latest_evidence(fund_code: str, *, at: datetime | None = None) -> EvidenceSn
     try:
         if at is None:
             row = conn.execute(
-                """SELECT payload_json FROM evidence_snapshots
+                """SELECT payload_json FROM production_evidence_snapshots
                    WHERE fund_code=? ORDER BY created_at DESC,rowid DESC LIMIT 1""",
                 (fund_code,),
             ).fetchone()
         else:
             row = conn.execute(
-                """SELECT payload_json FROM evidence_snapshots
+                """SELECT payload_json FROM production_evidence_snapshots
                    WHERE fund_code=? AND created_at<=?
                    ORDER BY created_at DESC,rowid DESC LIMIT 1""",
                 (fund_code, at.isoformat()),
@@ -226,80 +289,89 @@ def latest_evidence(fund_code: str, *, at: datetime | None = None) -> EvidenceSn
         conn.close()
 
 
-def save_holding(version: HoldingVersion) -> HoldingVersion:
+def save_holding(version: HoldingVersion, *, scope=scopes.PRODUCTION) -> HoldingVersion:
+    _acceptance_preflight(version, scope)
     identity = _holding_identity(version)
     _assert_id(version.holding_version, stable_id("hold", identity), "holding")
     semantic_sha = payload_sha256(identity)
     payload = _model_payload(version)
     with db.transaction(immediate=True) as conn:
-        existing = _existing_model(conn, "holding_versions", "holding_version", version.holding_version, HoldingVersion)
-        if existing is not None:
-            if payload_sha256(_holding_identity(existing)) != semantic_sha:
-                raise SnapshotConflictError("stored holding id has different content")
-            return existing
-        conn.execute(
-            """INSERT INTO holding_versions(
-               holding_version,fund_code,user_state,shares,cost,market_value,account,
-               current_weight,target_weight,updated_at,source,created_at,payload_json,payload_sha256
-             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (
-                version.holding_version, version.fund_code, version.user_state, version.shares,
-                version.cost, version.market_value, version.account, version.current_weight,
-                version.target_weight, version.updated_at.isoformat() if version.updated_at else None,
-                version.source, version.created_at.isoformat(), _json(payload), semantic_sha,
-            ),
-        )
+        return _save_holding_in_transaction(conn, version, scope=scope)
+
+
+def _save_holding_in_transaction(conn, version: HoldingVersion, *, scope=scopes.PRODUCTION) -> HoldingVersion:
+    """Write through the caller-owned transaction; never commit or close it."""
+    if getattr(conn, "in_transaction", False) is not True:
+        raise ValueError("active_transaction_required")
+    _acceptance_preflight(version, scope)
+    identity = _holding_identity(version)
+    _assert_id(version.holding_version, stable_id("hold", identity), "holding")
+    semantic_sha = payload_sha256(identity)
+    payload = _model_payload(version)
+    _acceptance_guard(conn, "holding", version, scope=scope)
+    existing = _existing_model(conn, "holding_versions", "holding_version", version.holding_version, HoldingVersion, scope=scope)
+    if existing is not None:
+        if payload_sha256(_holding_identity(existing)) != semantic_sha:
+            raise SnapshotConflictError("stored holding id has different content")
+        return existing
+    conn.execute(*prepare_v8_insert(
+        conn, "holding_versions",
+        (
+            version.holding_version, version.fund_code, version.user_state, version.shares,
+            version.cost, version.market_value, version.account, version.current_weight,
+            version.target_weight, version.updated_at.isoformat() if version.updated_at else None,
+            version.source, version.created_at.isoformat(), _json(payload), semantic_sha,
+        ),
+    ))
+    scopes.register_record(conn, "holding", version.holding_version, scope)
     return version
 
 
-def get_holding(holding_version: str | None) -> HoldingVersion | None:
+def get_holding(holding_version: str | None, *, scope=scopes.PRODUCTION) -> HoldingVersion | None:
     if not holding_version:
         return None
     conn = db.get_conn()
     try:
-        return _existing_model(conn, "holding_versions", "holding_version", holding_version, HoldingVersion)
+        return _existing_model(conn, "holding_versions", "holding_version", holding_version, HoldingVersion, scope=scope)
     finally:
         conn.close()
 
 
-def save_policy(policy: PortfolioPolicy) -> PortfolioPolicy:
+def save_policy(policy: PortfolioPolicy, *, scope=scopes.PRODUCTION) -> PortfolioPolicy:
+    _acceptance_preflight(policy, scope)
     identity = _policy_identity(policy)
     _assert_id(policy.policy_version, stable_id("pol", identity), "policy")
     semantic_sha = payload_sha256(identity)
     payload = _model_payload(policy)
     with db.transaction(immediate=True) as conn:
-        existing = _existing_model(conn, "portfolio_policy_versions", "policy_version", policy.policy_version, PortfolioPolicy)
+        _acceptance_guard(conn, "policy", policy, scope=scope)
+        existing = _existing_model(conn, "portfolio_policy_versions", "policy_version", policy.policy_version, PortfolioPolicy, scope=scope)
         if existing is not None:
             if payload_sha256(_policy_identity(existing)) != semantic_sha:
                 raise SnapshotConflictError("stored policy id has different content")
             return existing
-        rows = conn.execute(
-            """SELECT p.payload_json
-               FROM portfolio_policy_versions p
-               LEFT JOIN portfolio_policy_versions child
-                 ON child.supersedes=p.policy_version
-               WHERE child.policy_version IS NULL"""
-        ).fetchall()
+        if policy.supersedes:
+            predecessor = _write_reference(conn, "portfolio_policy_versions", "policy_version", policy.supersedes, PortfolioPolicy)
+            if predecessor is not None:
+                _acceptance_guard(conn, "policy", policy, predecessor, scope=scope)
+        sql, params = scopes.policy_tips_query(scope)
+        rows = conn.execute(sql + " LIMIT 2", params).fetchall()
         if not rows:
             if policy.supersedes is not None:
-                raise ValueError("the first policy cannot supersede another version")
+                raise PolicyChainConflictError("the first policy cannot supersede another version")
         else:
             if len(rows) != 1:
                 raise SnapshotConflictError("stored policy history contains multiple chain tips")
             tip = PortfolioPolicy.model_validate_json(rows[0]["payload_json"])
+            _acceptance_guard(conn, "policy", policy, tip, scope=scope)
             if policy.supersedes != tip.policy_version:
-                raise ValueError("new policy must supersede the current chain tip")
+                raise PolicyChainConflictError("new policy must supersede the current chain tip")
             if policy.effective_at <= tip.effective_at:
-                raise ValueError("new policy effective_at must be after the superseded policy")
+                raise PolicyChainConflictError("new policy effective_at must be after the superseded policy")
             if policy.created_at < tip.created_at:
-                raise ValueError("new policy cannot be backfilled before its predecessor")
-        conn.execute(
-            """INSERT INTO portfolio_policy_versions(
-               policy_version,name,target_allocations_json,target_ranges_json,
-               max_single_fund_weight,max_theme_weight,rebalance_band,dca_rules_json,
-               reduce_rules_json,sell_rules_json,effective_at,created_at,source,
-               supersedes,payload_json,payload_sha256
-             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                raise PolicyChainConflictError("new policy cannot be backfilled before its predecessor")
+        conn.execute(*prepare_v8_insert(
+            conn, "portfolio_policy_versions",
             (
                 policy.policy_version, policy.name, _json(policy.target_allocations), _json(policy.target_ranges),
                 policy.max_single_fund_weight, policy.max_theme_weight, policy.rebalance_band,
@@ -307,12 +379,51 @@ def save_policy(policy: PortfolioPolicy) -> PortfolioPolicy:
                 policy.effective_at.isoformat(), policy.created_at.isoformat(), policy.source,
                 policy.supersedes, _json(payload), semantic_sha,
             ),
-        )
+        ))
+        scopes.register_record(conn, "policy", policy.policy_version, scope)
     return policy
 
 
+def read_policy_tip(*, scope=scopes.PRODUCTION) -> PortfolioPolicy | None:
+    """Observe the unique complete-chain tip, including scheduled versions.
+
+    No initialization or write lock: save_policy rechecks this predecessor in
+    its actual immediate transaction and refuses a stale observation.
+    """
+    conn = db.get_conn()
+    try:
+        sql, params = scopes.policy_tips_query(scope)
+        rows = conn.execute(sql + " LIMIT 2", params).fetchall()
+        if len(rows) > 1:
+            raise SnapshotConflictError("stored policy history contains multiple chain tips")
+        if not rows:
+            return None
+        tip = PortfolioPolicy.model_validate_json(rows[0]["payload_json"])
+        _assert_id(tip.policy_version, stable_id("pol", _policy_identity(tip)), "policy")
+        scopes.assert_record_scope(conn, "policy", tip.policy_version, scope)
+        return tip
+    finally:
+        conn.close()
+
+
 def ensure_default_policy(created_at: datetime | None = None) -> PortfolioPolicy:
-    return save_policy(default_portfolio_policy(created_at))
+    """Legacy bootstrap for an empty chain, never a second Policy root.
+
+    An existing explicit Admin root or scheduled tip is returned unchanged;
+    callers still use read_policy to select an actually effective version.
+    """
+    tip = read_policy_tip()
+    if tip is not None:
+        return tip
+    try:
+        return save_policy(default_portfolio_policy(created_at))
+    except PolicyChainConflictError:
+        # A concurrent first root can win this pre-insert chain check. Read it
+        # without replay; unknown commit/close failures are not caught here.
+        tip = read_policy_tip()
+        if tip is None:
+            raise
+        return tip
 
 
 def get_policy(policy_version: str | None = None, *, at: datetime | None = None) -> PortfolioPolicy:
@@ -320,37 +431,37 @@ def get_policy(policy_version: str | None = None, *, at: datetime | None = None)
     return read_policy(policy_version, at=at)
 
 
-def read_policy(policy_version: str | None = None, *, at: datetime | None = None) -> PortfolioPolicy:
+def read_policy(policy_version: str | None = None, *, at: datetime | None = None, scope=scopes.PRODUCTION) -> PortfolioPolicy:
     """Read an effective policy without creating the default policy row."""
     current = at or _now()
     if current.tzinfo is None:
         raise ValueError("policy lookup time must include a timezone")
     current = current.astimezone(timezone.utc)
-    if policy_version:
-        conn = db.get_conn()
-        try:
+    conn = db.get_conn()
+    try:
+        if policy_version:
             policy = _existing_model(
-                conn, "portfolio_policy_versions", "policy_version", policy_version, PortfolioPolicy,
+                conn, "portfolio_policy_versions", "policy_version", policy_version, PortfolioPolicy, scope=scope,
             )
-        finally:
-            conn.close()
+        else:
+            scope = scopes.validate_scope(scope)
+            table = scopes.production_table("portfolio_policy_versions") if scope == scopes.PRODUCTION else "portfolio_policy_versions"
+            rows = conn.execute(
+                f"SELECT p.payload_json FROM {table} p JOIN v8_record_scopes s "
+                "ON s.record_kind='policy' AND s.record_id=p.policy_version WHERE s.scope_key=? "
+                "ORDER BY p.effective_at DESC,p.created_at DESC", (scope.key,),
+            ).fetchall()
+            policies = [PortfolioPolicy.model_validate_json(row["payload_json"]) for row in rows]
+            policies.sort(key=lambda item: (item.effective_at.astimezone(timezone.utc),
+                                           item.created_at.astimezone(timezone.utc)), reverse=True)
+            policy = next((item for item in policies if item.effective_at <= current), None)
         if policy is None:
-            raise LookupError("policy version not found")
+            raise LookupError("policy version not found" if policy_version else "no effective policy version")
         if policy.effective_at.astimezone(timezone.utc) > current:
             raise LookupError("policy version is not effective at the requested time")
         return policy
-    conn = db.get_conn()
-    try:
-        rows = conn.execute(
-            "SELECT payload_json FROM portfolio_policy_versions ORDER BY effective_at DESC, created_at DESC"
-        ).fetchall()
     finally:
         conn.close()
-    policies = [PortfolioPolicy.model_validate_json(row["payload_json"]) for row in rows]
-    active = next((policy for policy in policies if policy.effective_at <= current), None)
-    if active is None:
-        raise LookupError("no effective policy version")
-    return active
 
 
 def policy_history() -> list[PortfolioPolicy]:
@@ -363,80 +474,113 @@ def read_policy_history() -> list[PortfolioPolicy]:
     conn = db.get_conn()
     try:
         rows = conn.execute(
-            "SELECT payload_json FROM portfolio_policy_versions ORDER BY effective_at DESC, created_at DESC"
+            "SELECT payload_json FROM production_portfolio_policy_versions ORDER BY effective_at DESC, created_at DESC"
         ).fetchall()
-        return [PortfolioPolicy.model_validate_json(row["payload_json"]) for row in rows]
+        policies = [PortfolioPolicy.model_validate_json(row["payload_json"]) for row in rows]
+        return sorted(policies, key=lambda policy: (policy.effective_at.astimezone(timezone.utc),
+                      policy.created_at.astimezone(timezone.utc)), reverse=True)
     finally:
         conn.close()
 
 
-def save_decision(snapshot: DecisionSnapshot) -> DecisionSnapshot:
+def save_decision(snapshot: DecisionSnapshot, *, scope=scopes.PRODUCTION) -> DecisionSnapshot:
+    _acceptance_preflight(snapshot, scope)
     _assert_id(snapshot.decision_id, stable_id("dec", _decision_identity(snapshot)), "decision")
     payload = _model_payload(snapshot)
     semantic = _without(payload, "created_at")
     semantic_sha = payload_sha256(semantic)
     with db.transaction(immediate=True) as conn:
-        evidence = _existing_model(
-            conn, "evidence_snapshots", "evidence_id", snapshot.evidence_id, EvidenceSnapshot,
-        )
-        holding = _existing_model(
-            conn, "holding_versions", "holding_version", snapshot.holding_version, HoldingVersion,
-        )
-        policy = _existing_model(
-            conn, "portfolio_policy_versions", "policy_version", snapshot.policy_version, PortfolioPolicy,
-        )
-        if evidence is None:
-            raise LookupError("decision evidence does not exist")
-        if holding is None:
-            raise LookupError("decision holding version does not exist")
-        if policy is None:
-            raise LookupError("decision policy version does not exist")
-        if evidence.fund_code != snapshot.fund_code or holding.fund_code != snapshot.fund_code:
-            raise ValueError("decision, evidence, and holding fund codes must match")
-        if holding.user_state != snapshot.user_state:
-            raise ValueError("decision user_state must match its holding version")
-        if evidence.created_at > snapshot.created_at:
-            raise ValueError("decision cannot reference future evidence")
-        if evidence.market_time is not None and evidence.market_time > snapshot.created_at:
-            raise ValueError("decision cannot reference a future market timestamp")
-        if holding.created_at > snapshot.created_at or (
-            holding.updated_at is not None and holding.updated_at > snapshot.created_at
-        ):
-            raise ValueError("decision cannot reference a future holding state")
-        if policy.created_at > snapshot.created_at or policy.effective_at > snapshot.created_at:
-            raise ValueError("decision cannot reference a future policy")
-        existing = _existing_model(conn, "decision_snapshots", "decision_id", snapshot.decision_id, DecisionSnapshot)
-        if existing is not None:
-            if payload_sha256(_without(_model_payload(existing), "created_at")) != semantic_sha:
-                raise SnapshotConflictError("stored decision id has different output")
-            return existing
-        conn.execute(
-            """INSERT INTO decision_snapshots(
-               decision_id,evidence_id,fund_code,holding_version,policy_version,
-               strategy_version,user_state,action,strength,confidence,summary,
-               reason_codes_json,reasons_json,risks_json,invalidation_codes_json,
-               invalidation_json,position_guidance_json,evidence_nodes_json,
-               created_at,payload_json,payload_sha256
-             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (
-                snapshot.decision_id, snapshot.evidence_id, snapshot.fund_code,
-                snapshot.holding_version, snapshot.policy_version, snapshot.strategy_version,
-                snapshot.user_state, snapshot.action, snapshot.strength, snapshot.confidence,
-                snapshot.summary, _json(snapshot.reason_codes), _json(snapshot.reasons),
-                _json(snapshot.risks), _json(snapshot.invalidation_codes),
-                _json(snapshot.invalidation_conditions),
-                _json(snapshot.position_guidance) if snapshot.position_guidance else None,
-                _json(snapshot.evidence_nodes), snapshot.created_at.isoformat(),
-                _json(payload), semantic_sha,
-            ),
-        )
+        return _save_decision_in_transaction(conn, snapshot, scope=scope)
+
+
+def _save_decision_in_transaction(conn, snapshot: DecisionSnapshot, *, scope=scopes.PRODUCTION) -> DecisionSnapshot:
+    """Write through the caller-owned transaction; never commit or close it."""
+    if getattr(conn, "in_transaction", False) is not True:
+        raise ValueError("active_transaction_required")
+    _acceptance_preflight(snapshot, scope)
+    _assert_id(snapshot.decision_id, stable_id("dec", _decision_identity(snapshot)), "decision")
+    payload = _model_payload(snapshot)
+    semantic = _without(payload, "created_at")
+    semantic_sha = payload_sha256(semantic)
+    evidence = _write_reference(
+        conn, "evidence_snapshots", "evidence_id", snapshot.evidence_id, EvidenceSnapshot,
+    )
+    holding = _write_reference(
+        conn, "holding_versions", "holding_version", snapshot.holding_version, HoldingVersion,
+    )
+    policy = _write_reference(
+        conn, "portfolio_policy_versions", "policy_version", snapshot.policy_version, PortfolioPolicy,
+    )
+    if evidence is None:
+        raise LookupError("decision evidence does not exist")
+    if holding is None:
+        raise LookupError("decision holding version does not exist")
+    if policy is None:
+        raise LookupError("decision policy version does not exist")
+    _acceptance_guard(conn, "decision", snapshot, evidence, holding, policy, scope=scope)
+    if evidence.fund_code != snapshot.fund_code or holding.fund_code != snapshot.fund_code:
+        raise ValueError("decision, evidence, and holding fund codes must match")
+    if holding.user_state != snapshot.user_state:
+        raise ValueError("decision user_state must match its holding version")
+    if evidence.created_at > snapshot.created_at:
+        raise ValueError("decision cannot reference future evidence")
+    if evidence.market_time is not None and evidence.market_time > snapshot.created_at:
+        raise ValueError("decision cannot reference a future market timestamp")
+    if holding.created_at > snapshot.created_at or (
+        holding.updated_at is not None and holding.updated_at > snapshot.created_at
+    ):
+        raise ValueError("decision cannot reference a future holding state")
+    if policy.created_at > snapshot.created_at or policy.effective_at > snapshot.created_at:
+        raise ValueError("decision cannot reference a future policy")
+    existing = _existing_model(conn, "decision_snapshots", "decision_id", snapshot.decision_id, DecisionSnapshot, scope=scope)
+    if existing is not None:
+        if payload_sha256(_without(_model_payload(existing), "created_at")) != semantic_sha:
+            raise SnapshotConflictError("stored decision id has different output")
+        return existing
+    conn.execute(*prepare_v8_insert(
+        conn, "decision_snapshots",
+        (
+            snapshot.decision_id, snapshot.evidence_id, snapshot.fund_code,
+            snapshot.holding_version, snapshot.policy_version, snapshot.strategy_version,
+            snapshot.user_state, snapshot.action, snapshot.strength, snapshot.confidence,
+            snapshot.summary, _json(snapshot.reason_codes), _json(snapshot.reasons),
+            _json(snapshot.risks), _json(snapshot.invalidation_codes),
+            _json(snapshot.invalidation_conditions),
+            _json(snapshot.position_guidance) if snapshot.position_guidance else None,
+            _json(snapshot.evidence_nodes), snapshot.created_at.isoformat(),
+            _json(payload), semantic_sha,
+        ),
+    ))
+    scopes.register_record(conn, "decision", snapshot.decision_id, scope)
     return snapshot
 
 
-def get_decision(decision_id: str) -> DecisionSnapshot | None:
+def save_holding_and_decision(
+    version: HoldingVersion, snapshot: DecisionSnapshot, *, scope=scopes.PRODUCTION,
+) -> tuple[HoldingVersion, DecisionSnapshot]:
+    """Atomically append the pair and its scopes, not the earlier Evidence write."""
+    # Keep both original connection-free preflights before obtaining a writer.
+    _acceptance_preflight(version, scope)
+    identity = _holding_identity(version)
+    _assert_id(version.holding_version, stable_id("hold", identity), "holding")
+    holding_sha = payload_sha256(identity)
+    holding_payload = _model_payload(version)
+    _acceptance_preflight(snapshot, scope)
+    _assert_id(snapshot.decision_id, stable_id("dec", _decision_identity(snapshot)), "decision")
+    decision_payload = _model_payload(snapshot)
+    decision_sha = payload_sha256(_without(decision_payload, "created_at"))
+    if snapshot.holding_version != version.holding_version or snapshot.fund_code != version.fund_code:
+        raise ValueError("holding and decision pair references must match")
+    with db.transaction(immediate=True) as conn:
+        stored_holding = _save_holding_in_transaction(conn, version, scope=scope)
+        stored_decision = _save_decision_in_transaction(conn, snapshot, scope=scope)
+        return stored_holding, stored_decision
+
+
+def get_decision(decision_id: str, *, scope=scopes.PRODUCTION) -> DecisionSnapshot | None:
     conn = db.get_conn()
     try:
-        return _existing_model(conn, "decision_snapshots", "decision_id", decision_id, DecisionSnapshot)
+        return _existing_model(conn, "decision_snapshots", "decision_id", decision_id, DecisionSnapshot, scope=scope)
     finally:
         conn.close()
 
@@ -461,7 +605,7 @@ def latest_decision(
             clauses.append("created_at<=?")
             params.append(at.isoformat())
         row = conn.execute(
-            f"""SELECT payload_json FROM decision_snapshots
+            f"""SELECT payload_json FROM production_decision_snapshots
                 WHERE {' AND '.join(clauses)}
                 ORDER BY created_at DESC,rowid DESC LIMIT 1""",
             params,
@@ -475,7 +619,7 @@ def decision_history(fund_code: str, limit: int = 50) -> list[DecisionSnapshot]:
     conn = db.get_conn()
     try:
         rows = conn.execute(
-            """SELECT payload_json FROM decision_snapshots WHERE fund_code=?
+            """SELECT payload_json FROM production_decision_snapshots WHERE fund_code=?
                ORDER BY created_at DESC, rowid DESC LIMIT ?""",
             (fund_code, max(1, min(200, int(limit)))),
         ).fetchall()
@@ -491,13 +635,13 @@ def diff_for_decision(decision: DecisionSnapshot) -> DecisionDiff:
     conn = db.get_conn()
     try:
         current = conn.execute(
-            "SELECT rowid,created_at FROM decision_snapshots WHERE decision_id=?",
+            "SELECT rowid,created_at FROM production_decision_snapshots WHERE decision_id=?",
             (decision.decision_id,),
         ).fetchone()
         if current is None:
             raise LookupError("decision is not persisted")
         row = conn.execute(
-            """SELECT payload_json FROM decision_snapshots
+            """SELECT payload_json FROM production_decision_snapshots
                WHERE fund_code=? AND decision_id<>?
                  AND (created_at<? OR (created_at=? AND rowid<?))
                ORDER BY created_at DESC,rowid DESC LIMIT 1""",
@@ -648,6 +792,7 @@ def build_portfolio_decision_snapshot(
 def save_portfolio_decision(
     snapshot: PortfolioDecisionSnapshot,
 ) -> PortfolioDecisionSnapshot:
+    _acceptance_preflight(snapshot)
     identity = _portfolio_decision_identity(snapshot)
     _assert_id(
         snapshot.portfolio_decision_id,
@@ -657,7 +802,8 @@ def save_portfolio_decision(
     payload = _model_payload(snapshot)
     semantic_sha = payload_sha256(identity)
     with db.transaction(immediate=True) as conn:
-        policy = _existing_model(
+        _acceptance_guard(conn, "portfolio_decision", snapshot)
+        policy = _write_reference(
             conn,
             "portfolio_policy_versions",
             "policy_version",
@@ -666,15 +812,13 @@ def save_portfolio_decision(
         )
         if policy is None:
             raise LookupError("portfolio decision policy does not exist")
+        lineages = _decision_lineages(conn, [item.decision_id for item in snapshot.components])
+        _acceptance_guard(conn, "portfolio_decision", snapshot, policy,
+                          *(record for lineage in lineages.values() for record in lineage))
         component_decision_dates: list[date] = []
         for component in snapshot.components:
-            decision = _existing_model(
-                conn,
-                "decision_snapshots",
-                "decision_id",
-                component.decision_id,
-                DecisionSnapshot,
-            )
+            lineage = lineages.get(component.decision_id)
+            decision = lineage[0] if lineage else None
             if decision is None:
                 raise LookupError(f"portfolio component decision does not exist: {component.fund_code}")
             if (
@@ -696,13 +840,7 @@ def save_portfolio_decision(
                 or not _close(component.target_weight, guidance.target_weight)
             ):
                 raise ValueError("portfolio target weight does not match decision guidance")
-            holding = _existing_model(
-                conn,
-                "holding_versions",
-                "holding_version",
-                component.holding_version,
-                HoldingVersion,
-            )
+            holding = lineage[2] if lineage else None
             if holding is None:
                 raise LookupError("portfolio component holding version does not exist")
             expected_current = 0.0 if holding.user_state == "unheld" else holding.current_weight
@@ -721,12 +859,8 @@ def save_portfolio_decision(
             if payload_sha256(_portfolio_decision_identity(existing)) != semantic_sha:
                 raise SnapshotConflictError("stored portfolio decision id has different content")
             return existing
-        conn.execute(
-            """INSERT INTO portfolio_decision_snapshots(
-               portfolio_decision_id,decision_date,policy_version,strategy_version,
-               component_count,current_cash_weight,target_cash_weight,portfolio_value,
-               components_json,source,created_at,payload_json,payload_sha256
-             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        conn.execute(*prepare_v8_insert(
+            conn, "portfolio_decision_snapshots",
             (
                 snapshot.portfolio_decision_id,
                 snapshot.decision_date.isoformat(),
@@ -742,7 +876,7 @@ def save_portfolio_decision(
                 _json(payload),
                 semantic_sha,
             ),
-        )
+        ))
     return snapshot
 
 
@@ -766,7 +900,7 @@ def portfolio_decision_snapshots(limit: int = 100) -> list[PortfolioDecisionSnap
     conn = db.get_conn()
     try:
         rows = conn.execute(
-            """SELECT payload_json FROM portfolio_decision_snapshots
+            """SELECT payload_json FROM production_portfolio_decision_snapshots
                ORDER BY julianday(created_at) DESC,rowid DESC LIMIT ?""",
             (max(1, min(10_000, int(limit))),),
         ).fetchall()
@@ -847,13 +981,10 @@ def claim_idempotency(
                 return {"state": "in_progress"}
             reclaimed = True
         else:
-            conn.execute(
-                """INSERT INTO idempotency_responses(
-                   request_id,endpoint,request_sha256,state,response_json,
-                   owner_token,lease_expires_at,created_at,completed_at
-                 ) VALUES (?,?,?,'in_progress',NULL,?,?,?,NULL)""",
+            conn.execute(*prepare_v8_insert(
+                conn, "idempotency_responses",
                 (request_id, endpoint, request_sha, owner_token, lease_expires_at, now),
-            )
+            ))
     _remember_idempotency_owner(request_id, endpoint, owner_token)
     return {
         "state": "claimed",
@@ -932,7 +1063,7 @@ def _peer_benchmark(
 ) -> tuple[float | None, int]:
     rows = conn.execute(
         """SELECT d.payload_json AS decision_json,e.payload_json AS evidence_json
-           FROM decision_snapshots d JOIN evidence_snapshots e ON e.evidence_id=d.evidence_id
+           FROM production_decision_snapshots d JOIN production_evidence_snapshots e ON e.evidence_id=d.evidence_id
            WHERE d.decision_id<>? AND d.fund_code<>? AND e.fund_type=?
              AND julianday(d.created_at)<=julianday(?)
              AND julianday(e.created_at)<=julianday(?)
@@ -992,6 +1123,7 @@ def _max_drawdown(base_nav: float, path: Iterable[float]) -> float:
 
 
 def save_outcome(outcome: OutcomeEvaluation) -> OutcomeEvaluation:
+    _acceptance_preflight(outcome)
     identity = {
         "decision_id": outcome.decision_id,
         "evaluation_kind": outcome.evaluation_kind,
@@ -1003,14 +1135,12 @@ def save_outcome(outcome: OutcomeEvaluation) -> OutcomeEvaluation:
     semantic = _without(payload, "created_at")
     semantic_sha = payload_sha256(semantic)
     with db.transaction(immediate=True) as conn:
-        decision = _existing_model(
-            conn, "decision_snapshots", "decision_id", outcome.decision_id, DecisionSnapshot,
-        )
-        if decision is None:
+        _acceptance_guard(conn, "outcome", outcome)
+        lineage = _decision_lineages(conn, [outcome.decision_id]).get(outcome.decision_id)
+        if lineage is None:
             raise LookupError("outcome decision does not exist")
-        evidence = _existing_model(
-            conn, "evidence_snapshots", "evidence_id", decision.evidence_id, EvidenceSnapshot,
-        )
+        _acceptance_guard(conn, "outcome", outcome, *lineage)
+        decision, evidence, _holding, _policy = lineage
         if evidence is None or evidence.official_nav is None or evidence.official_nav_date is None:
             raise LookupError("outcome decision has no persisted official NAV evidence")
         if outcome.created_at < decision.created_at:
@@ -1121,7 +1251,7 @@ def save_outcome(outcome: OutcomeEvaluation) -> OutcomeEvaluation:
                 raise SnapshotConflictError("stored outcome id has different content")
             return existing
         collision = conn.execute(
-            """SELECT payload_json FROM outcome_evaluations
+            """SELECT payload_json FROM production_outcome_evaluations
                WHERE decision_id=? AND evaluation_kind=? AND horizon=?""",
             (outcome.decision_id, outcome.evaluation_kind, outcome.horizon),
         ).fetchone()
@@ -1130,13 +1260,8 @@ def save_outcome(outcome: OutcomeEvaluation) -> OutcomeEvaluation:
             if existing.outcome_id != outcome.outcome_id:
                 raise SnapshotConflictError("decision horizon is already settled differently")
             return existing
-        conn.execute(
-            """INSERT INTO outcome_evaluations(
-               outcome_id,decision_id,evaluation_kind,horizon,base_nav_date,
-               evaluation_date,target_nav_date,base_nav,evaluated_nav,absolute_return,
-               benchmark_return,peer_excess,max_drawdown,hit,benchmark_samples,
-               predicted_change,prediction_error,created_at,payload_json,payload_sha256
-             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        conn.execute(*prepare_v8_insert(
+            conn, "outcome_evaluations",
             (
                 outcome.outcome_id, outcome.decision_id, outcome.evaluation_kind, outcome.horizon,
                 outcome.base_nav_date.isoformat(), outcome.evaluation_date.isoformat(),
@@ -1146,7 +1271,7 @@ def save_outcome(outcome: OutcomeEvaluation) -> OutcomeEvaluation:
                 int(outcome.hit), outcome.benchmark_samples, outcome.predicted_change,
                 outcome.prediction_error, outcome.created_at.isoformat(), _json(payload), semantic_sha,
             ),
-        )
+        ))
     return outcome
 
 
@@ -1221,7 +1346,7 @@ def settle_outcomes(decision_id: str, horizons: Iterable[int] = HORIZONS) -> lis
             if horizon not in HORIZONS:
                 raise ValueError("unsupported outcome horizon")
             existing = conn.execute(
-                """SELECT 1 FROM outcome_evaluations
+                """SELECT 1 FROM production_outcome_evaluations
                    WHERE decision_id=? AND evaluation_kind='horizon' AND horizon=?""",
                 (decision_id, horizon),
             ).fetchone()
@@ -1265,7 +1390,7 @@ def settle_outcomes(decision_id: str, horizons: Iterable[int] = HORIZONS) -> lis
             and evidence.estimate is not None
         ):
             existing = conn.execute(
-                """SELECT 1 FROM outcome_evaluations
+                """SELECT 1 FROM production_outcome_evaluations
                    WHERE decision_id=? AND evaluation_kind='qdii_target' AND horizon=0""",
                 (decision_id,),
             ).fetchone()
@@ -1300,7 +1425,7 @@ def outcome_rows(decision_id: str) -> list[OutcomeEvaluation]:
     conn = db.get_conn()
     try:
         rows = conn.execute(
-            """SELECT payload_json FROM outcome_evaluations WHERE decision_id=?
+            """SELECT payload_json FROM production_outcome_evaluations WHERE decision_id=?
                ORDER BY evaluation_kind,horizon""",
             (decision_id,),
         ).fetchall()
@@ -1332,8 +1457,8 @@ def historical_outcome_summary(
     try:
         rows = conn.execute(
             """SELECT o.payload_json
-               FROM outcome_evaluations o
-               JOIN decision_snapshots d ON d.decision_id=o.decision_id
+               FROM production_outcome_evaluations o
+               JOIN production_decision_snapshots d ON d.decision_id=o.decision_id
                WHERE d.fund_code=? AND d.strategy_version=?
                  AND o.evaluation_kind='horizon' AND o.horizon=?
                  AND o.evaluation_date<?
@@ -1465,6 +1590,7 @@ def _calculate_portfolio_outcome(
 def save_portfolio_outcome(
     outcome: PortfolioOutcomeEvaluation,
 ) -> PortfolioOutcomeEvaluation:
+    _acceptance_preflight(outcome)
     identity = {
         "portfolio_decision_id": outcome.portfolio_decision_id,
         "horizon": outcome.horizon,
@@ -1475,7 +1601,8 @@ def save_portfolio_outcome(
     semantic = _without(payload, "created_at")
     semantic_sha = payload_sha256(semantic)
     with db.transaction(immediate=True) as conn:
-        snapshot = _existing_model(
+        _acceptance_guard(conn, "portfolio_outcome", outcome)
+        snapshot = _write_reference(
             conn,
             "portfolio_decision_snapshots",
             "portfolio_decision_id",
@@ -1484,6 +1611,9 @@ def save_portfolio_outcome(
         )
         if snapshot is None:
             raise LookupError("portfolio outcome decision does not exist")
+        lineages = _decision_lineages(conn, [item.decision_id for item in snapshot.components])
+        _acceptance_guard(conn, "portfolio_outcome", outcome, snapshot,
+                          *(record for lineage in lineages.values() for record in lineage))
         if outcome.created_at < snapshot.created_at:
             raise ValueError("portfolio outcome cannot predate its decision")
         expected = _calculate_portfolio_outcome(
@@ -1508,7 +1638,7 @@ def save_portfolio_outcome(
                 raise SnapshotConflictError("stored portfolio outcome id has different content")
             return existing
         collision = conn.execute(
-            """SELECT payload_json FROM portfolio_outcome_evaluations
+            """SELECT payload_json FROM production_portfolio_outcome_evaluations
                WHERE portfolio_decision_id=? AND horizon=?""",
             (outcome.portfolio_decision_id, outcome.horizon),
         ).fetchone()
@@ -1517,12 +1647,8 @@ def save_portfolio_outcome(
             if stored.outcome_id != outcome.outcome_id:
                 raise SnapshotConflictError("portfolio horizon is already settled differently")
             return stored
-        conn.execute(
-            """INSERT INTO portfolio_outcome_evaluations(
-               outcome_id,portfolio_decision_id,horizon,base_nav_date,evaluation_date,
-               absolute_return,max_drawdown,current_cash_weight,cash_return,
-               cash_contribution,components_json,method,created_at,payload_json,payload_sha256
-             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        conn.execute(*prepare_v8_insert(
+            conn, "portfolio_outcome_evaluations",
             (
                 outcome.outcome_id,
                 outcome.portfolio_decision_id,
@@ -1540,7 +1666,7 @@ def save_portfolio_outcome(
                 _json(payload),
                 semantic_sha,
             ),
-        )
+        ))
     return outcome
 
 
@@ -1550,7 +1676,7 @@ def portfolio_outcome_rows(
     conn = db.get_conn()
     try:
         rows = conn.execute(
-            """SELECT payload_json FROM portfolio_outcome_evaluations
+            """SELECT payload_json FROM production_portfolio_outcome_evaluations
                WHERE portfolio_decision_id=? ORDER BY horizon""",
             (portfolio_decision_id,),
         ).fetchall()
@@ -1575,7 +1701,7 @@ def settle_portfolio_outcomes(
         existing = {
             int(row["horizon"])
             for row in conn.execute(
-                """SELECT horizon FROM portfolio_outcome_evaluations
+                """SELECT horizon FROM production_portfolio_outcome_evaluations
                    WHERE portfolio_decision_id=?""",
                 (portfolio_decision_id,),
             ).fetchall()
@@ -1635,9 +1761,9 @@ def settle_all_portfolio_outcomes(limit: int = 100) -> dict:
     try:
         rows = conn.execute(
             """SELECT p.portfolio_decision_id
-               FROM portfolio_decision_snapshots p
+               FROM production_portfolio_decision_snapshots p
                WHERE (
-                 SELECT COUNT(*) FROM portfolio_outcome_evaluations o
+                 SELECT COUNT(*) FROM production_portfolio_outcome_evaluations o
                  WHERE o.portfolio_decision_id=p.portfolio_decision_id
                    AND o.horizon IN (5,20,60)
                ) < 3
@@ -1717,13 +1843,13 @@ def outcome_settlement_status(
         if requested:
             placeholders = ",".join("?" for _ in requested)
             rows = conn.execute(
-                f"""SELECT decision_id,payload_json FROM decision_snapshots
+                f"""SELECT decision_id,payload_json FROM production_decision_snapshots
                     WHERE decision_id IN ({placeholders})""",
                 requested,
             ).fetchall()
         else:
             rows = conn.execute(
-                """SELECT decision_id,payload_json FROM decision_snapshots
+                """SELECT decision_id,payload_json FROM production_decision_snapshots
                    ORDER BY julianday(created_at) DESC,rowid DESC LIMIT ?""",
                 (bounded_limit,),
             ).fetchall()
@@ -1748,7 +1874,7 @@ def outcome_settlement_status(
             existing = {
                 (item["evaluation_kind"], int(item["horizon"]))
                 for item in conn.execute(
-                    """SELECT evaluation_kind,horizon FROM outcome_evaluations
+                    """SELECT evaluation_kind,horizon FROM production_outcome_evaluations
                        WHERE decision_id=?""",
                     (decision.decision_id,),
                 ).fetchall()
@@ -1799,8 +1925,8 @@ def settle_all_outcomes(limit: int = 1000) -> dict:
     try:
         ids = [row[0] for row in conn.execute(
             """SELECT d.decision_id
-               FROM decision_snapshots d
-               JOIN evidence_snapshots e ON e.evidence_id=d.evidence_id
+               FROM production_decision_snapshots d
+               JOIN production_evidence_snapshots e ON e.evidence_id=d.evidence_id
                WHERE (
                  (
                    EXISTS (
@@ -1810,7 +1936,7 @@ def settle_all_outcomes(limit: int = 1000) -> dict:
                    )
                    AND (
                      (NOT EXISTS (
-                        SELECT 1 FROM outcome_evaluations o
+                        SELECT 1 FROM production_outcome_evaluations o
                         WHERE o.decision_id=d.decision_id
                           AND o.evaluation_kind='horizon' AND o.horizon=5
                       ) AND 5 <= (
@@ -1820,7 +1946,7 @@ def settle_all_outcomes(limit: int = 1000) -> dict:
                       ))
                      OR
                      (NOT EXISTS (
-                        SELECT 1 FROM outcome_evaluations o
+                        SELECT 1 FROM production_outcome_evaluations o
                         WHERE o.decision_id=d.decision_id
                           AND o.evaluation_kind='horizon' AND o.horizon=20
                       ) AND 20 <= (
@@ -1830,7 +1956,7 @@ def settle_all_outcomes(limit: int = 1000) -> dict:
                       ))
                      OR
                      (NOT EXISTS (
-                        SELECT 1 FROM outcome_evaluations o
+                        SELECT 1 FROM production_outcome_evaluations o
                         WHERE o.decision_id=d.decision_id
                           AND o.evaluation_kind='horizon' AND o.horizon=60
                       ) AND 60 <= (
@@ -1848,7 +1974,7 @@ def settle_all_outcomes(limit: int = 1000) -> dict:
                      WHERE target.code=d.fund_code AND target.date=e.target_nav_date
                    )
                    AND NOT EXISTS (
-                     SELECT 1 FROM outcome_evaluations o
+                     SELECT 1 FROM production_outcome_evaluations o
                      WHERE o.decision_id=d.decision_id
                        AND o.evaluation_kind='qdii_target' AND o.horizon=0
                    )
@@ -1887,8 +2013,8 @@ def strategy_performance(strategy_version: str) -> dict:
     try:
         rows = conn.execute(
             """SELECT o.payload_json,d.decision_id,e.fund_type
-               FROM outcome_evaluations o JOIN decision_snapshots d ON d.decision_id=o.decision_id
-               JOIN evidence_snapshots e ON e.evidence_id=d.evidence_id
+               FROM production_outcome_evaluations o JOIN production_decision_snapshots d ON d.decision_id=o.decision_id
+               JOIN production_evidence_snapshots e ON e.evidence_id=d.evidence_id
                WHERE d.strategy_version=? AND o.evaluation_kind='horizon'
                ORDER BY o.horizon,o.evaluation_date""",
             (strategy_version,),
@@ -1989,6 +2115,114 @@ def _notification_semantics(event: NotificationEvent) -> dict:
     return _without(event.model_dump(mode="python"), "occurred_at")
 
 
+def _notification_machine_binding_guard(conn, identifiers, events, binding) -> None:
+    """Keep actual machine-task decisions out of the legacy sending entry.
+
+    Membership is a same-database task/component relation, never a decision
+    prefix, caller detail, deployment flag or a second transport lock. The
+    machine caller has already verified source/Policy in this transaction;
+    this boundary binds the complete batch and every prior transport phase.
+    """
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='owner_machine_journal'").fetchone() is None:
+        if binding is not None:
+            raise SnapshotConflictError("machine notification task is unavailable")
+        return
+    placeholders = ",".join("?" for _ in identifiers)
+    matches = conn.execute(
+        "SELECT DISTINCT CASE WHEN typeof(j.record_id)='text' AND length(CAST(j.record_id AS BLOB))<=128 "
+        "THEN j.record_id ELSE NULL END,"
+        "CASE WHEN typeof(j.payload_hash)='text' AND length(CAST(j.payload_hash AS BLOB))=64 "
+        "AND j.payload_hash NOT GLOB '*[^0-9a-f]*' THEN j.payload_hash ELSE NULL END,"
+        "CASE WHEN typeof(j.analysis_request_id)='text' AND length(CAST(j.analysis_request_id AS BLOB))<=128 "
+        "THEN j.analysis_request_id ELSE NULL END FROM owner_machine_journal j "
+        "JOIN owner_analysis_components c ON c.request_id=j.analysis_request_id "
+        f"WHERE j.kind='task' AND c.decision_id IN ({placeholders}) LIMIT 101", identifiers,
+    ).fetchall()
+    if not matches and binding is None:
+        return  # Unrelated legacy decisions retain the original contract.
+    if binding is None:
+        raise SnapshotConflictError("machine-managed notifications require the machine task entry")
+    if (type(binding) is not tuple or len(binding) != 2 or any(type(item) is not str for item in binding)
+            or len(matches) != 1 or tuple(matches[0][:2]) != binding):
+        raise SnapshotConflictError("machine notification task binding mismatch")
+    # Import only for an actual machine-bound call. Old core/Owner/remote
+    # inventories are neither broadened nor automatically provisioned here.
+    from database.owner_machine_schema import verify_owner_machine_schema
+    from service import owner_machine_repo as machine
+    verify_owner_machine_schema(conn)
+    occurrence, task_hash = binding
+    loaded = machine._load(conn, "task", occurrence)
+    task = loaded[0] if loaded is not None else None
+    complete = [row[0] for row in conn.execute(
+        "SELECT CASE WHEN typeof(decision_id)='text' AND length(CAST(decision_id AS BLOB))=68 "
+        "THEN decision_id ELSE NULL END FROM owner_analysis_components WHERE request_id=? ORDER BY fund_code LIMIT 101",
+        (matches[0][2],),
+    ).fetchall()]
+    if (loaded is None or loaded[1] != task_hash or task.get("schema") != "owner-machine-task-1"
+            or task.get("analysis_request_id") != matches[0][2] or task.get("decision_ids") != complete
+            or not 1 <= len(complete) <= 100 or any(value is None for value in complete) or identifiers != complete
+            or events[0].scheduled_window not in {occurrence + "T14:30+08:00", occurrence + "T14:40+08:00"}
+            or events[0].detail != {"machine_task_hash": task_hash, "occurrence_id": occurrence}):
+        raise SnapshotConflictError("machine notification requires its complete original task batch")
+
+    # Existing V8 phases can predate creation of the task row. Neither a
+    # different natural/manual axis nor a forged task-only detail turns those
+    # legacy claims into a new safe delivery. Every prior send-related row
+    # must have an exact original immutable journal mapping.
+    allowed: dict[str, NotificationEvent] = {}
+    for slot in ("14:30", "14:40"):
+        entry = machine._load(conn, "attempt", occurrence + ":" + slot)
+        terminal = machine._load(conn, "result", occurrence + ":" + slot)
+        if entry is None:
+            if terminal is not None:
+                raise SnapshotConflictError("machine notification result has no original attempt")
+            continue
+        attempt, attempt_hash = entry
+        if (attempt.get("schema") != "owner-machine-attempt-1" or attempt.get("task_hash") != task_hash
+                or attempt.get("analysis_request_id") != matches[0][2] or attempt.get("decision_ids") != complete
+                or attempt.get("slot") != slot or attempt.get("scheduled_window") != occurrence + "T" + slot + "+08:00"
+                or type(attempt.get("attempt_no")) is not int or attempt["attempt_no"] not in {1, 2}
+                or type(attempt.get("natural_schedule")) is not bool):
+            raise SnapshotConflictError("machine notification attempt binding mismatch")
+        phases = [("attempted", datetime.fromisoformat(attempt["created_at"]), None)]
+        if terminal is not None:
+            value = terminal[0]
+            outcome = value.get("outcome")
+            if (value.get("schema") != "owner-machine-result-1" or value.get("attempt_hash") != attempt_hash
+                    or value.get("analysis_request_id") != matches[0][2]
+                    or outcome not in {"sent", "delivery_rejected", "pre_delivery_failed", "delivery_ambiguous"}):
+                raise SnapshotConflictError("machine notification result binding mismatch")
+            phases.append(("sent" if outcome == "sent" else "failed",
+                           datetime.fromisoformat(value["created_at"]), None if outcome == "sent" else outcome))
+        detail = {"machine_task_hash": task_hash, "occurrence_id": occurrence}
+        for status, stamp, error in phases:
+            for identifier in complete:
+                expected = _notification_event(decision_id=identifier, scheduled_window=attempt["scheduled_window"],
+                    status=status, attempt_no=attempt["attempt_no"], natural_schedule=attempt["natural_schedule"],
+                    occurred_at=stamp, error_class=error, detail=detail)
+                allowed[expected.event_log_id] = expected
+    prior = conn.execute(
+        "SELECT event_log_id,notification_event_id,decision_id,scheduled_window,status,attempt_no,natural_schedule,"
+        "occurred_at,error_class,CASE WHEN typeof(detail_json)='text' AND length(CAST(detail_json AS BLOB))<=16384 "
+        "THEN detail_json ELSE NULL END FROM production_notification_events "
+        f"WHERE decision_id IN ({placeholders}) AND substr(scheduled_window,1,10)=? "
+        "AND status IN ('attempted','sent','failed','compensated') LIMIT 401",
+        [*identifiers, occurrence],
+    ).fetchall()
+    if len(prior) > 400:
+        raise SnapshotConflictError("machine notification history exceeds its fixed task phases")
+    for row in prior:
+        expected = allowed.get(row[0])
+        if expected is None:
+            raise SnapshotConflictError("machine notification has an unbound earlier transport claim")
+        model = NotificationEvent.model_validate_json(row[9])
+        values = (expected.event_log_id, expected.notification_event_id, expected.decision_id,
+                  expected.scheduled_window, expected.status, expected.attempt_no, int(expected.natural_schedule),
+                  expected.occurred_at.isoformat(), expected.error_class)
+        if tuple(row[:9]) != values or model.model_dump(mode="python") != expected.model_dump(mode="python"):
+            raise SnapshotConflictError("machine notification history binding mismatch")
+
+
 def record_notification_events_batch(
     *,
     decision_ids: Iterable[str],
@@ -2012,6 +2246,51 @@ def record_notification_events_batch(
         raise ValueError("notification decision_ids must be non-empty and unique")
     stamp = occurred_at or _now()
     event_detail = detail or {}
+    # Preserve the public entry point's original no-connection validation.
+    # The independently callable kernel repeats model validation after checking
+    # transaction ownership rather than accepting caller-supplied event models.
+    for identifier in identifiers:
+        _notification_event(
+            decision_id=identifier, scheduled_window=scheduled_window,
+            status=status, attempt_no=attempt_no, natural_schedule=natural_schedule,
+            occurred_at=stamp, error_class=error_class, detail=event_detail,
+        )
+    with db.transaction(immediate=True) as conn:
+        return _record_notification_events_in_transaction(
+            conn, decision_ids=identifiers, scheduled_window=scheduled_window,
+            status=status, attempt_no=attempt_no, natural_schedule=natural_schedule,
+            occurred_at=stamp, error_class=error_class, detail=event_detail,
+        )
+
+
+def _record_notification_events_in_transaction(
+    conn,
+    *,
+    decision_ids: Iterable[str],
+    scheduled_window: str,
+    status: str,
+    attempt_no: int,
+    natural_schedule: bool,
+    occurred_at: datetime | None = None,
+    error_class: str | None = None,
+    detail: dict[str, Any] | None = None,
+    _machine_binding: tuple[str, str] | None = None,
+) -> list[NotificationRecordResult]:
+    """Use the existing batch claim in the caller's active transaction.
+
+    This internal primitive never opens a business connection or owns its
+    commit, rollback or close. Fixed schema verification may compile a trusted
+    in-memory reference on a cold verifier cache, not a second business DB.
+    The caller can atomically bind source/task checks to exactly
+    the same production lineage and notification claim used by the public API.
+    """
+    if getattr(conn, "in_transaction", False) is not True:
+        raise ValueError("active_transaction_required")
+    identifiers = list(decision_ids)
+    if not identifiers or len(identifiers) != len(set(identifiers)):
+        raise ValueError("notification decision_ids must be non-empty and unique")
+    stamp = occurred_at or _now()
+    event_detail = detail or {}
     events = [
         _notification_event(
             decision_id=identifier,
@@ -2025,145 +2304,139 @@ def record_notification_events_batch(
         )
         for identifier in identifiers
     ]
-    with db.transaction(immediate=True) as conn:
-        placeholders = ",".join("?" for _ in identifiers)
-        found = {
-            row["decision_id"]
-            for row in conn.execute(
-                f"SELECT decision_id FROM decision_snapshots WHERE decision_id IN ({placeholders})",
-                identifiers,
-            ).fetchall()
-        }
-        missing = [identifier for identifier in identifiers if identifier not in found]
-        if missing:
-            raise LookupError(f"notification decision not found: {','.join(missing)}")
+    _acceptance_guard(conn, "notification", events[0])
+    placeholders = ",".join("?" for _ in identifiers)
+    lineages = _decision_lineages(conn, identifiers)
+    missing = [identifier for identifier in identifiers if identifier not in lineages]
+    if missing:
+        raise LookupError(f"notification decision not found: {','.join(missing)}")
+    _acceptance_guard(conn, "notification", events[0],
+                      *(record for lineage in lineages.values() for record in lineage))
+    _notification_machine_binding_guard(conn, identifiers, events, _machine_binding)
 
-        if status == "attempted":
-            event_ids = [event.notification_event_id for event in events]
-            event_placeholders = ",".join("?" for _ in event_ids)
-            claimed_rows = conn.execute(
-                f"""SELECT event_log_id,detail_json FROM notification_events
-                    WHERE notification_event_id IN ({event_placeholders})
-                      AND status='attempted' AND natural_schedule=?""",
-                [*event_ids, int(natural_schedule)],
-            ).fetchall()
-            if claimed_rows:
-                exact = {
-                    row["event_log_id"]: NotificationEvent.model_validate_json(row["detail_json"])
-                    for row in claimed_rows
-                }
-                results = []
-                for event in events:
-                    existing = exact.get(event.event_log_id)
-                    if existing is not None and _notification_semantics(existing) != _notification_semantics(event):
-                        raise SnapshotConflictError("notification claim replay changed immutable content")
-                    results.append(NotificationRecordResult(
-                        event=existing or event,
-                        claimed=False,
-                        duplicate=True,
-                    ))
-                return results
-            if not natural_schedule:
-                natural_terminal = conn.execute(
-                    f"""SELECT 1 FROM notification_events
-                        WHERE decision_id IN ({placeholders})
-                          AND natural_schedule=1
-                          AND substr(scheduled_window,1,10)=?
-                          AND status IN ('sent','compensated') LIMIT 1""",
-                    [*identifiers, scheduled_window[:10]],
-                ).fetchone()
-                if natural_terminal:
-                    return [
-                        NotificationRecordResult(event=event, claimed=False, duplicate=True)
-                        for event in events
-                    ]
-            if natural_schedule:
-                prior_rows = conn.execute(
-                    f"""SELECT decision_id,notification_event_id,status,attempt_no,error_class
-                        FROM notification_events
-                        WHERE decision_id IN ({placeholders})
-                          AND natural_schedule=1
-                          AND substr(scheduled_window,1,10)=?
-                          AND notification_event_id NOT IN ({event_placeholders})""",
-                    [*identifiers, scheduled_window[:10], *event_ids],
-                ).fetchall()
-                phases: dict[tuple[str, str, int], dict[str, set[str]]] = {}
-                for row in prior_rows:
-                    phase = phases.setdefault(
-                        (row["decision_id"], row["notification_event_id"], int(row["attempt_no"])),
-                        {"states": set(), "errors": set()},
-                    )
-                    phase["states"].add(row["status"])
-                    if row["error_class"]:
-                        phase["errors"].add(row["error_class"])
-                prior_claim_is_terminal_or_ambiguous = any(
-                    "sent" in phase["states"]
-                    or "compensated" in phase["states"]
-                    or "delivery_ambiguous" in phase["errors"]
-                    or ("attempted" in phase["states"] and "failed" not in phase["states"])
-                    for phase in phases.values()
-                )
-                if prior_claim_is_terminal_or_ambiguous:
-                    return [
-                        NotificationRecordResult(event=event, claimed=False, duplicate=True)
-                        for event in events
-                    ]
+    if status == "attempted":
+        event_ids = [event.notification_event_id for event in events]
+        event_placeholders = ",".join("?" for _ in event_ids)
+        claimed_rows = conn.execute(
+            f"""SELECT event_log_id,detail_json FROM production_notification_events
+                WHERE notification_event_id IN ({event_placeholders})
+                  AND status='attempted' AND natural_schedule=?""",
+            [*event_ids, int(natural_schedule)],
+        ).fetchall()
+        if claimed_rows:
+            exact = {
+                row["event_log_id"]: NotificationEvent.model_validate_json(row["detail_json"])
+                for row in claimed_rows
+            }
+            results = []
             for event in events:
-                scheduled = conn.execute(
-                    """SELECT 1 FROM notification_events
-                       WHERE notification_event_id=? AND status='scheduled'
-                         AND attempt_no=0 AND natural_schedule=? LIMIT 1""",
-                    (event.notification_event_id, int(natural_schedule)),
-                ).fetchone()
-                if not scheduled:
-                    raise SnapshotConflictError("notification attempt has no scheduled event")
-
-        results: list[NotificationRecordResult] = []
-        for event in events:
-            existing_row = conn.execute(
-                "SELECT detail_json FROM notification_events WHERE event_log_id=?",
-                (event.event_log_id,),
-            ).fetchone()
-            if existing_row:
-                existing = NotificationEvent.model_validate_json(existing_row["detail_json"])
-                if _notification_semantics(existing) != _notification_semantics(event):
-                    raise SnapshotConflictError("notification event replay changed immutable content")
+                existing = exact.get(event.event_log_id)
+                if existing is not None and _notification_semantics(existing) != _notification_semantics(event):
+                    raise SnapshotConflictError("notification claim replay changed immutable content")
                 results.append(NotificationRecordResult(
-                    event=existing,
+                    event=existing or event,
                     claimed=False,
                     duplicate=True,
                 ))
-                continue
-
-            if status in {"sent", "failed", "compensated"}:
-                attempted = conn.execute(
-                    """SELECT 1 FROM notification_events
-                       WHERE notification_event_id=? AND status='attempted'
-                         AND attempt_no=? AND natural_schedule=? LIMIT 1""",
-                    (event.notification_event_id, attempt_no, int(natural_schedule)),
-                ).fetchone()
-                if not attempted:
-                    raise SnapshotConflictError("notification completion has no matching attempted claim")
-
-            payload = event.model_dump(mode="python")
-            conn.execute(
-                """INSERT INTO notification_events(
-                   event_log_id,notification_event_id,decision_id,scheduled_window,status,
-                   attempt_no,natural_schedule,occurred_at,error_class,detail_json
-                 ) VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                (
-                    event.event_log_id, event.notification_event_id, event.decision_id,
-                    event.scheduled_window, event.status, event.attempt_no,
-                    int(event.natural_schedule), event.occurred_at.isoformat(), event.error_class,
-                    _json(payload),
-                ),
+            return results
+        if not natural_schedule:
+            natural_terminal = conn.execute(
+                f"""SELECT 1 FROM production_notification_events
+                    WHERE decision_id IN ({placeholders})
+                      AND natural_schedule=1
+                      AND substr(scheduled_window,1,10)=?
+                      AND status IN ('sent','compensated') LIMIT 1""",
+                [*identifiers, scheduled_window[:10]],
+            ).fetchone()
+            if natural_terminal:
+                return [
+                    NotificationRecordResult(event=event, claimed=False, duplicate=True)
+                    for event in events
+                ]
+        if natural_schedule:
+            prior_rows = conn.execute(
+                f"""SELECT decision_id,notification_event_id,status,attempt_no,error_class
+                    FROM production_notification_events
+                    WHERE decision_id IN ({placeholders})
+                      AND natural_schedule=1
+                      AND substr(scheduled_window,1,10)=?
+                      AND notification_event_id NOT IN ({event_placeholders})""",
+                [*identifiers, scheduled_window[:10], *event_ids],
+            ).fetchall()
+            phases: dict[tuple[str, str, int], dict[str, set[str]]] = {}
+            for row in prior_rows:
+                phase = phases.setdefault(
+                    (row["decision_id"], row["notification_event_id"], int(row["attempt_no"])),
+                    {"states": set(), "errors": set()},
+                )
+                phase["states"].add(row["status"])
+                if row["error_class"]:
+                    phase["errors"].add(row["error_class"])
+            prior_claim_is_terminal_or_ambiguous = any(
+                "sent" in phase["states"]
+                or "compensated" in phase["states"]
+                or "delivery_ambiguous" in phase["errors"]
+                or ("attempted" in phase["states"] and "failed" not in phase["states"])
+                for phase in phases.values()
             )
+            if prior_claim_is_terminal_or_ambiguous:
+                return [
+                    NotificationRecordResult(event=event, claimed=False, duplicate=True)
+                    for event in events
+                ]
+        for event in events:
+            scheduled = conn.execute(
+                """SELECT 1 FROM production_notification_events
+                   WHERE notification_event_id=? AND status='scheduled'
+                     AND attempt_no=0 AND natural_schedule=? LIMIT 1""",
+                (event.notification_event_id, int(natural_schedule)),
+            ).fetchone()
+            if not scheduled:
+                raise SnapshotConflictError("notification attempt has no scheduled event")
+
+    results: list[NotificationRecordResult] = []
+    for event in events:
+        existing_row = conn.execute(
+            "SELECT detail_json FROM production_notification_events WHERE event_log_id=?",
+            (event.event_log_id,),
+        ).fetchone()
+        if existing_row:
+            existing = NotificationEvent.model_validate_json(existing_row["detail_json"])
+            if _notification_semantics(existing) != _notification_semantics(event):
+                raise SnapshotConflictError("notification event replay changed immutable content")
             results.append(NotificationRecordResult(
-                event=event,
-                claimed=status == "attempted",
-                duplicate=False,
+                event=existing,
+                claimed=False,
+                duplicate=True,
             ))
-        return results
+            continue
+
+        if status in {"sent", "failed", "compensated"}:
+            attempted = conn.execute(
+                """SELECT 1 FROM production_notification_events
+                   WHERE notification_event_id=? AND status='attempted'
+                     AND attempt_no=? AND natural_schedule=? LIMIT 1""",
+                (event.notification_event_id, attempt_no, int(natural_schedule)),
+            ).fetchone()
+            if not attempted:
+                raise SnapshotConflictError("notification completion has no matching attempted claim")
+
+        payload = event.model_dump(mode="python")
+        conn.execute(*prepare_v8_insert(
+            conn, "notification_events",
+            (
+                event.event_log_id, event.notification_event_id, event.decision_id,
+                event.scheduled_window, event.status, event.attempt_no,
+                int(event.natural_schedule), event.occurred_at.isoformat(), event.error_class,
+                _json(payload),
+            ),
+        ))
+        results.append(NotificationRecordResult(
+            event=event,
+            claimed=status == "attempted",
+            duplicate=False,
+        ))
+    return results
 
 
 def record_notification_event(
@@ -2193,7 +2466,7 @@ def notification_events(decision_id: str) -> list[NotificationEvent]:
     conn = db.get_conn()
     try:
         rows = conn.execute(
-            """SELECT detail_json FROM notification_events WHERE decision_id=?
+            """SELECT detail_json FROM production_notification_events WHERE decision_id=?
                ORDER BY occurred_at,event_log_id""",
             (decision_id,),
         ).fetchall()
@@ -2206,7 +2479,7 @@ def notification_was_sent(decision_id: str) -> bool:
     conn = db.get_conn()
     try:
         return bool(conn.execute(
-            """SELECT 1 FROM notification_events
+            """SELECT 1 FROM production_notification_events
                WHERE decision_id=? AND status IN ('sent','compensated') LIMIT 1""",
             (decision_id,),
         ).fetchone())

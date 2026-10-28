@@ -1,0 +1,196 @@
+# v9 合同冻结记录 · I18-02
+
+日期：2026-09-30。版本号仍为 8.0.0；合同版本独立于发布版本。
+
+## Owner 权限与会话
+
+`contracts/owner-session-v1.json` 定义浏览器登录响应。单所有者、无公共注册；服务端通过 `OWNER_PASSWORD_HASH` 校验密码，原始密码不落盘。浏览器只能持有短期随机 Bearer，不保存到 localStorage/sessionStorage/URL/Service Worker。现有 Gist PAT 不得作为新会话凭据。
+
+| 身份 | 可访问 | 禁止 |
+| --- | --- | --- |
+| 匿名 | 现有公开行情、公共摘要 | 私人 DTO、持仓与运维写入 |
+| Owner/read_private | `/api/private/*`、`/api/v2/private/*` | schema、active 策略、基础设施、通知发送 |
+| Owner/write_holdings | 后续专用同步接口 | 既有 Admin/Worker 写接口 |
+| Owner/run_personal_analysis | 后续受限个人分析入口 | 以 Admin 身份运行或改变全局策略 |
+| Private Read | 现有机器私人读取兼容 | Owner 登录、任何写权限 |
+| Worker/Admin | 既有受限运维接口 | 自动成为浏览器 Owner 会话 |
+
+首版会话最长 30 分钟、最多 8 个活跃会话，服务端只保存 Token 摘要。为保持零新增服务，首版会话及登录限频限定单 API 进程；重启、到期、退出或密码校验材料变更都要求重新登录。多进程部署前须先实现共享会话/限频，不能直接增加 workers。
+
+初始化密码至少 15 个 Unicode 字符、最多 512 UTF-8 字节，不强制字符类别、不修剪或截断。服务端使用随机盐和 PBKDF2-HMAC-SHA256，工作因子至少 600,000 次；参数上限、验证并发与登录速率均有界。依据：[OWASP Authentication](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html)、[OWASP Password Storage](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)。此为标准库与当前轻量依赖下的明确选择，不宣称为 OWASP 首选的 Argon2id。
+
+登录错误不回显密码、请求 body 或校验材料。私人/会话响应包括失败响应设置 `Cache-Control: no-store`；生产只允许已有 Pages HTTPS 来源，本地开发来源保持显式允许。退出取消在途请求、清理页面私人数据，并用 session generation 拒绝迟到结果。
+
+## 同步与聚合
+
+`contracts/owner-sync-v1.json` 是后续 I19-02 的写合同，不代表接口已上线。当前合同冻结 revision、request_id、409 冲突和 tombstone 等不变量；各字段 allowlist/上限在实现模型中进一步封闭校验，不能直接将任意 `changes` 写入数据库。
+
+账户 trim 后使用 `code::account` 稳定身份；同基金跨账户份额/目标相加。首版基金行动采用 `fund_only` 分母，现金和手动资产另列；缺份额、净值或成本时明确不完整，未知不补零。成本仅在完整时按份额加权，组合实验仍要求完整目标合计 100%，不得替缺值自动均分。
+
+本地待同步修改不是已确认 holding_version。只有云端 revision 确认后才生成追加式 Holding/Policy/Decision；旧证据不就地更新。真实持仓上传和迁移等待存储阶段出口及用户明确启用云同步。
+
+I19-04 的下一受限生成入口必须从服务端完整已提交组合重建 `fund_only` 分母和跨账户聚合，不接受浏览器自报金额/权重/估值上下文；同步 revision 不是时间或业务版本。Holding/Decision 同连接内核与应用原子 pair 是连接这一链的基础：调用者控制事务，原 ID/hash、引用/scope、时间和幂等守卫不变，不能从内核本身推导 Owner 授权。现有应用的 Evidence 仍先独立保存，只有 Holding/Decision 及两条 scope 原子；不是整条 Evidence/Policy/同步链已原子发布，也未接入 Owner 生成任务。现 Policy 为每 scope 单链 tip，Owner 不得借分析入口推进 Admin 护栏或 active 策略；目标超护栏、主题/定价/份额不完整须显式拒绝或降级，不静默裁剪/均分/补零。新版本、任务回执与完整来源绑定的受限任务仍待后续实现。
+
+## 机器任务与迁移
+
+机器消费者只读已确认 revision，经受限接口形成 `revision → holding_version → decision → notification` 链。浏览器内存中的未同步状态不成为推送输入。
+
+Worker 的自选、推送槽位、歧义送达状态、自然调度记录及 health；人工应急的同类状态；旧通知的信号前值，必须一并迁移或明确停用对应入口。人工/自然发送复用同一稳定任务键和 notification claim，不允许切换期双路真实发送。没有全部解除 Gist 读/写依赖与自然验证，不删除旧 Gist。
+
+任务摘要区分执行与产物：`execution_status` 是 queued/running/succeeded/failed/skipped/blocked；`artifact_status` 是 fresh/stale/partial/unavailable。两者绑定 occurrence、源码/产物摘要、计划/实际时间、有效数量和原因；手工运行不覆盖自然任务证据。
+
+## 持久化验收边界
+
+物理存储类型、局部数据库探针、隔离本地应用链、真实宿主业务写入重启读回、独立远端恢复是五种不同证据。只能按真实 scope 报告，不能将前者升级为后者。
+
+正式证据必须来自受保护执行流程，绑定部署/写路径代码/schema/资源/凭据配置版本，保存前后启动身份、应用写入与读回摘要及独立恢复报告。换资源、写路径/schema/配置变化或证据到期重新核验；任意 `verified=true` 文件不得放行。
+
+`contracts/storage-release-evidence-v1.json` 冻结正式证据结构与跨字段核验要求。`tools/storage_release_evidence.py` 已实现严格验签与独立当前元数据绑定；受保护的真实操作执行器及正式 workflow 接入仍待 I18-06 完成。HMAC 证明的是受控流程来源，不替代真实操作；schema 合法或存在签名字段不等于放行。现有正式 gate/smoke 保持不变，本轮本地仓储 receipt 不签名、scope 不符，不能用于正式发布。
+
+验签要求 32–4096 字节的独立 HMAC key，固定 key_id，32 KiB/8 层输入限制；拒绝额外字段、重复 JSON key、布尔整数、非有限数字、错误或非 UTC 日期。必须绑定 target SHA、写路径摘要、schema、资源、凭据配置 revision、受控生成器 run 和当前 read boot。时间顺序为 `write_started ≤ written < read_started ≤ read ≤ restored ≤ issued ≤ now < expires`；issued 与真实 written 起算都不得超过 7 天。旧 boot/config/run/错资源、恢复同库、摘要不一致和 unsigned/local receipt 均拒绝。
+
+`contracts/storage-verification-context-v1.json` 定义独立当前元数据，不得从待验记录抄字段。CLI `python tools/verify_storage_evidence.py --evidence <受控签名文件> --context <受保护的当前元数据文件>` 仅做读取验签预检。专用 key/key_id 通过 `FUND_STORAGE_EVIDENCE_KEY_B64`（无 padding 的 base64url）及 `FUND_STORAGE_EVIDENCE_KEY_ID` 在受保护执行环境配置；无命令行 key、签名功能、Admin/provider key fallback。已知凭据复用被拒绝，但完整独立性仍需配置流程保证。CLI 成功明确输出 `formal_release_verified=false`，不是正式门禁通过。
+
+生产验收记录在远端隔离与迁移未实证通过前不得写入普通 V8 表，避免被 latest/outcomes/训练/通知读取。本地旁路恢复是开发测试，不是 Turso PITR 或生产恢复演练。
+
+2026-10-01 本地防误写子项：仓储在同一 `BEGIN IMMEDIATE` 内、任何幂等返回/写入前检查保留 provenance（`local-persistence:`、`synthetic:`、已知 Evidence 包装和 `local-acceptance-v1`）。普通库/远端拒绝这些记录及引用；独占本地库只允许当前源码、精确 namespace、schema/trigger/population/现有链与实际连接资源全部一致的原定四类 fixture。组合、Outcome、通知拒绝验收链，混合通知批次整批拒绝；决策 JSON 与关联列必须一致。普通远端 guard 不新增 marker 查询。此处不是完整生产 scope、普通读取隔离、原始 SQL/legacy 保护或虚构数据识别；不放行生产验收，也不自动删除/修复旧 fixture。源指纹变化使旧本地 receipt 失效，须保留原文件、显式创建新的隔离测试库，不得改 marker 绕过。
+
+## AI 条件提案与静态请求 · I21-02
+
+`contracts/nl-filter-spec-v1.json` 定义条件提案，不是模型生成的基金数据或买卖动作。解析只接受单一 JSON 根对象，拒绝外围说明、重复键（包含 Unicode 转义同名键）、未知字段、嵌套数值、字符串/布尔数字和非有限值。类型限定六类基金，排序限定七个实际收益/费率字段。收益下限允许 -100–100000、费率上限允许 0–100，单位为百分数；这些是输入执行保护，不是收益预测、市场数据上限或投资推荐，超出范围直接拒绝，不截断或偷换。输出最多 4096 UTF-16 单元，unsupported 最多 20 项、每项最多 100 UTF-16 单元且不得全空白。
+
+UI 先取得非空且未过期的真实排行，再启动用户明确请求的 BYOK 解析。提案绑定原始需求、当前请求 generation 和当次已校验数据集，展示全部生效条件（含默认近一年排序）及数据日期；只有用户确认后才执行本地筛选。任何 unsupported 整次阻断，不按支持部分返回结果；修改需求、取消、切模式、卸载使提案和旧回调失效。确认前重新核对北京日历新鲜度。合同校验无法证明模型完整理解自然语言，人工审核仍是必要边界。
+
+AI POST 使用共享 deadline，fetch、流式 body 与解析总计 30 秒，流式正文最多 64 KiB，结果文本最多 16384 UTF-16 单元。HTTPS、无 userinfo/query/hash、禁止 redirect、omit 浏览器 ambient credentials。错误只显示固定状态消息，不读取失败 body 或回显上游错误/需求/Key；取消、超时和重复发送均不自动重试。取消终止本地等待，不保证提供方取消计费。既有 BYOK 配置仍属用户本机配置，不能作为 Owner Token 或新机器凭据；本轮测试没有真实模型调用。
+
+自由文本 `llmInterpret` / `generateStorySummary` 暂停，直接调用也固定拒绝且不访问网络。详情和故事页明确不可用，不恢复/显示/写入旧 `sinan_ai_text`，也不删除旧数据或其他配置；不以未核验的规则 fallback 冒充模型输出。规则解读只在评分 eligible、有限 coverage≥70%、数据非 stale，且存在信号时其 coverage 也为有限 70%–100%，才给出当前判断。缺超额不补零，真实零超额仅表示本次历史持平，历史回测不外推未来。
+
+共享网络核心保留既有 API no-store / 204 兼容。Screener/Managers 每次集合加载有独立 12 秒总 deadline（清单、分片、body、hash），分片同时工作最多 6 个并保持清单顺序；失败/取消停止该次队列和活动兄弟请求，不影响另一消费者。只有 manifest 404 可回旧文件，503/超时/校验错误不得静默换代。Enrich 的 fetch+body 限 6 秒；精度报告限 12 秒，失败 null 不永久缓存，单用户取消与强制更新代次隔离。Screener 命中内存仍重新计算日期，Enrich 命中仍检查披露年龄，保留 source/updated/金融 null。
+
+本节不等于全 Screen 请求卸载管理、全局并发/去重、完整精度元数据合同、第三方当前 CORS 或真实设备体验。经理日期 UI 与 Story 的后续本地改动见下节；legacy 独立评分/信号卡片的统一门禁仍待 I19/I20，不能称全页金融数据已可信。
+
+## 2026-10-02 本地合同增量
+
+- **仓储 scope / 物理 schema 9：**四类不可变 root 带显式 scope，同事务注册不可变旁表；默认 V8 读取先通过 production 视图再排序/limit，循环或孤立 Policy、跨 scope 祖先/派生/通知被拒绝或隐藏。旧 SQLite schema 8 迁移先验证模型、身份/摘要、投影、引用链及派生 population，并保留备份；异常整批回滚。已有 schema 9 缺少 scope 记录要求显式修复，不自动改为 production。应用仍 8.0.0；Turso 旧 schema 8 不自动迁移，远端 acceptance 写仍关闭。这不是任意 SQL/legacy 路径或虚构业务数据的全局识别系统。
+- **经理采集日期：**`loadManagerDataset` 区分采集日/可得采集时间与指标日期，`valueDate=null` 不从请求时钟补造。Screen 显示历史索引年龄、来源及指标基准日未知；缺失/非法/未来日期降级，跨北京午夜在本地更新年龄，不轮询源。经理模式取消/卸载拒绝迟到回调，兼容 `loadManagers`。
+- **Story 数值发布：**缺净值/成本/日变动保留 null，真实零保留；完整覆盖才发布总估值/成本/盈亏，部分定价小计明确披露。日变动聚合/排行须来源日期一致、非未来且新鲜度明确；信号/评分须独立 evidence、详情新鲜、coverage≥70%、合法来源日期，评分还须 eligible。报告生成时间不冒充金融日期，陈旧净值只作历史估值，跨账户同基金请求去重。自由文本 AI 继续暂停。
+- **私人周校准：**只读 GET 最多三次，总预算 150 秒，单次上限 45 秒；网络/408/425/429/5xx 可有限重试，其他错误、错误 JSON/合同及鉴权失败不重试。正文最多 8 MiB，逐 `read1` 收紧 socket 超时，重定向/不支持 transport 固定拒绝。没有受保护私人 sink 时 workflow 明确 BLOCKED，不上传公开 artifact 或 commit 私人报告，不自动改变 active 策略。
+
+以上是本地实现范围，不授予 I18/I19/I20 整体出口或正式发布资格。真实云写入、Owner 初始化、凭据轮换、远端恢复、自然任务和用户旅程仍须独立验收。
+
+### I19 本地工作副本与隐私保护
+
+`position_kind` 明确区分 `watch / holding`；真实 0 份可记录，但不是正持仓。份额、成本、目标的未知保留 null；目标单账户范围 0–100。同基金账户身份仍是 trim 后 `code::account`，更名保留旧身份 tombstone，碰撞与过期草稿拒绝，取消不写。本机成功保存产生 `local_pending`；它不是云端 revision、holding_version 或同步凭证，旧 Gist 成功不能清除。任何组合输入变更可能改变 fund_only 分母，三处当前行动按全局待确认状态隐藏，原历史快照不修改。
+
+旧版 Gist 同意独立于 PAT，默认关闭；保存/更换 Token 关闭同意。外部撤销事件只取消本标签请求/队列，不回写新 revision，避免多标签事件回声。请求绑定同意 generation、Token 与本地输入基线，迟到结果不能覆盖更新后的本机草稿。手工下载按稳定 ID 与合法时间做保守非删除合并；同一时间不同内容拒绝，空云不能清空非空本地，云缺项不是删除确认。已观察到的跨标签旧副本写入被拒绝；原生 localStorage 的 get/set 不是跨标签原子事务，不替代服务端 revision 冲突合同。
+
+公开 legacy Detail 请求只含基金身份，不发送本地账户/份额/成本/目标。浏览器旧 Admin 组合 POST 固定拒绝且不发网络；本机实验草稿保留，待受限 Owner 分析接口及明确输入确认后启用。非法账户、显式持仓未知份额、损坏手工存储以及有限输入乘积/合计溢出保留未知，不能静默删除后生成完整总额、权重、排行或快照；真实零与纯关注不被当作未知。
+
+这些是本地输入和隐私保护，不代表 I19-02 多设备同步、I19-03 迁移、I19-04 新版本生成或 I19-05 全引用链门禁已完成。
+
+### I19-02 本地候选同步底座
+
+严格同步入口只接受原始 JSON 文本/字节，最多 128 KiB、8 层、200 项操作，整数限制在 JavaScript 安全范围。账户采用相同的 trim 与 UTF-16 长度规则；稳定 key、字段 allowlist、kind、null/零与有限金额分别校验，不接受解析后模型或任意 dict 绕过。幂等摘要保留原始数值 token（`1` 与 `1.0` 不同请求），业务字段比较则允许有限 `1` 与 `1.0` 相等，避免浏览器 JSON 往返误冲突；布尔、null 与零不混同。
+
+独立 `owner-sync-schema-1` 五张扩展表只允许显式本地 SQLite 候选初始化，不加入应用自动启动，也不接入 Turso。验证固定核心 schema 9、扩展 DDL、内部索引和 sequence；正常启动已有的 `universe_import_state`、`sqlite_stat1` 只按逐表固定 DDL 兼容，不读取其数据、不自动创建、不禁用 optimize，`sqlite_stat4`、相似名称及其他额外对象/附加库/temp 对象仍拒绝。schema 对象最多 128 个、单项 DDL 最多 16 KiB，超限在 SQL 传输前拒绝。它不是生产初始化或远端迁移证据。
+
+当前状态、字段 revision、生命周期、追加 changes 与幂等 receipt 在同一事务中提交。不同字段可合并，A→B→A 仍依据字段 revision 拒绝旧基线；旧设备不能复活 tombstone。账户更名的旧 key 删除与新 key 创建可同批原子提交，目标碰撞拒绝整批。无变化不递增 revision；确定的 409 与成功响应均精确重放。提交异常视为结果未知，不自动重试或补偿删除，只读查询匹配 receipt；absent/unavailable 不证明回滚。
+
+changes 以固定 upper revision 和 `(revision,key)` 游标读取同一事务快照，分页最多 200 项；并发新写不会混进旧分页。当前记录与最新 change 快照/头部进行完整性核验，但不宣称防止任意直接 SQL 篡改。
+
+HTTP router 已接入 `main.py` 代码，配置工厂只允许普通路径下已有、核心9及Owner扩展完整的本地SQLite；不存在、不兼容或Turso固定拒绝，不自动创建文件/补表。所有file: URI一律在解析前拒绝，不能丢弃mode=ro/immutable等语义后强开rw；内存/UNC亦拒绝，不宣称识别所有网络文件系统。原远端schema8启动拒绝与应用lifespan未变。前端显式HTTP adapter已接入自选页的候选面板；页面可达不表示当前线上Turso可写，实际部署另行验收。
+
+写入需 Owner/write_holdings 和独立 `X-Owner-Sync-Consent: owner-sync-v1`，读取需 Owner/read_private，机器凭据不能替代；请求体最长 5 秒，鉴权和限频在读 body 前，body 后、事务前、commit 前及私有响应前重新核验摘要会话。撤销阻止尚未提交的写入和迟到私人响应，不能撤销已接受的提交。所有候选响应固定脱敏且 no-store，不保存原始 Bearer。可选核心_schema_version必须先匹配固定DDL，再以SQL类型/值闭集投影读取最多两行；不传任意TEXT/BLOB到Python，不替代完整core/extension校验，也不是SQLite引擎I/O时限。
+
+receipt 核对必须同时提供原始 request_id 和单一 `X-Owner-Sync-Request-Hash`（严格 64 位小写十六进制）。缺失、重复、混合或非规范 header 在打开仓储前拒绝；仅 ID 匹配不返回确认结果。匹配返回 `{state:matched,status:200|409,result:原响应}`；不存在或不可核对返回 unknown，均不能推断未提交。CORS请求header显式允许Authorization、Content-Type及上述两个Owner同步header（另保留浏览器标准safelisted headers），只认既有Pages/本机开发来源，不启用ambient credentials；CORS预检不连接存储，也不代替请求鉴权。不以本地router通过冒充线上可用。
+
+客户端候选模块仅显式构造，默认关闭，没有全局 IndexedDB、fetch、Gist、自选或凭据读取。纯 DTO 核对原文/hash 和封闭响应；注入式 IndexedDB outbox 使用严格 durability 的真实事务 CAS，原请求发出前先保存 attempted，只在事务 complete 后确认本地保存。严格 durability 不支持或降级时拒绝，不回退 localStorage。close/timeout 即使抛错也不证明本地未提交，重开后必须读回真实槽位。
+
+控制器保留原 request_id/raw/hash，unknown 不重发或清空；仅核对原回执、导出或关闭，回执不存在也不证明可重放。授权/会话 generation 在实际网络调用前及响应消费前重核验，忽略 AbortSignal 的迟到 transport 也不能发布私人结果。成功/匹配 receipt 必须逐项核对 key/kind/deleted 和所请求字段的实际值，错误值保持 unknown。POST 观察到的 head 不是已完成 pull checkpoint；只有固定 upper 的全部分页完成才更新基线，已有草稿不自动 rebase。显式HTTP adapter已接Owner内存会话，构造仅计算API端点指纹，不请求或开库；fake IndexedDB测试不是物理浏览器落盘、旧PWA或跨设备验收。
+
+自选页的“私人自选同步”默认折叠并关闭；登录或打开面板都不构造adapter、打开IndexedDB或联网。Owner相应scope、本轮同意和显式启用后，用户手动完整拉取、逐账户预览、准备原包，再另行确认单次发送。预览/实际发送两处核对本机raw存储、内存副本与generation；它不是跨标签原子锁。更名/删除tombstone保留，云端独有记录不删除，云端已删项不从旧本机副本复活；非法记录阻断整批。撤销、退出、卸载清除私人视图并中止本地等待，保留已准备/attempted/unknown原包。只有匹配回执或确定冲突且用户显式结束，才清已决槽位并重新拉取；重开后没有原预览的prepared包不能直接发送。
+
+准备、显式观察与响应结果绑定原包hash；另一标签页替换槽位后，旧控制器不得将新prepared包标记attempted、发送或取消，也不得用旧的同kind成功/冲突结果清掉新包。重载已决槽位须当前generation的匹配回执才可结束。结束已决请求清空基线及完整拉取checkpoint，下次从0重拉；仍保留已观察head下限，拒绝服务端回退。取消从未发送的原包不自动重发，保留其已有基线，页面仍显式重新拉取和预览。
+
+本切片不包含手工资产或云端到本机合并，不清除local_pending、不生成Holding/Policy/Decision版本。原包导出保留实际raw/hash/端点指纹/状态；本机导出包含所有账户及tombstone的固定字段，不含Owner Token、Gist PAT、任意未知属性或手工资产。端点指纹不是数据库身份或耐久证明，不能据此开放当前云端迁移/正式发布。
+
+`service/owner_sync_turso.py` 新增显式URL/Token的真实HTTP候选仓储，构造不联网，不读取环境凭据；main仍不导入或启用。只验证已有core `_schema_version` 表为9及完整Owner扩展，不写PRAGMA版本、不初始化或迁移。一次固定DEFERRED快照读后关闭连接，在锁外复用原Python业务规则；唯一IMMEDIATE写batch在锁内核schema、head/history、完整选中MAX/absence读集及实际容量，原包回执与业务写同事务。严格单调head竞争保存原ID/hash的固定409/expected_revision，供显式核对后结束并重拉；相同ID/hash回放，不同hash只返回固定idempotency_conflict，不泄露旧正文。没有第二写补回执或自动replan/retry。
+
+固定stream-local TEMP仅含两个布尔分支标记，INSERT receipt后紧邻一次changes()捕获决定是否新槽位；业务DML仅在新槽位且实际status200时执行，核实际后像/最新change与原生affected rows，提交前删除TEMP并在同batch读实际回执。结构损坏、容量失败不伪造业务409；提交、后像、关闭或协议矛盾保持unknown，不自动核对或重放。选中结构/JSON-envelope一致性不是任意原始SQL的全库防篡改证明；真实Owner授权和响应前重核仍由未来HTTP调用层负责，远端批次前回调不冒充事务中跨网络授权锁。
+
+操作协作总预算30秒、单次请求/响应16MiB、1024条应用语句、每语句900参数；opt-in HTTP限制拒绝重复JSON键、非法原生typed值、超量正文与矛盾批次确认，legacy默认行为不变。该本地故障模型与loopback实测不证明真实Turso的JSON1/TEMP能力、TLS、云耐久或恢复。真实云同步启用、受控迁移、远端独立恢复、多设备UI、Holding/Policy/Decision新版本链及正式证据仍未完成，不关闭整个I19-02或存储发布出口。
+
+### I19-02 显式 v4 受控协调与三方 ACK（未注册应用）
+
+新增 `createOwnerWorkspaceSync` 只接受显式 workspace、transport、session getter 与真实 authority guard；构造不读取业务存储、不联网，默认关闭。它不代替真实 UI/会话接线，也不开放 main Turso 工厂。当前 app 已接的本机权威编辑仍整体待云确认。
+
+共同基线 B 是已经应用的完整云像，不随新的观察 D 改写。准备原包只推导 B→L 意图；本机原包与 preparation envelope 先同库保存，再由受控 delivery 在 strict 事务推进 prepared→attempted。只有该提交成功、再次核同一前像/原 hash 与当前 guard 后才能发一次 POST；unknown 没有重发、换包或清包入口，重载只手动核原 id/hash 回执。已决槽位亦须当前 generation 的原始 write/receipt 响应核对，不从状态字符串推断成功。
+
+delivery 只推进 slot.version，不改 B、sync epoch、metadata、snapshot、preparedOutboxVersion 或任何原包字节。它不能用旧通用 outbox CAS 代替；v4 旧 CAS 仍全部拒绝。prepared 取消是独立显式操作，已 attempted/unknown/confirmed/conflict 均不能当取消处理。
+
+ACK 还须完整 since=0、固定 upper 的全部分页 D，不能把 POST 的部分 records 拼接旧 B 当 D。成功响应必须核原操作与实际值，409 的 key_digest 由原 key 的实际 SHA256 前16位核定；非本包/global 冲突摘要固定拒绝作为可自动消化的 ACK。三方预览明确区分200意图已消费与409仍保留 B→L 意图，核字段与生命周期 revision/ABA，真正冲突逐项显式选择本机或云端。账户 rename 为整组选择，不可一半删除一半创建；选择云端取消未上传 rename 仍保留新键本机 tombstone，不能因本次未上传而遗忘身份。缺 B 基金行或缺 D 已有行不推断为删除；manual_asset 完整保留 D，但不伪称已导入手工资产 UI。
+
+已解决 ACK 请求同时绑定输入与派生预览，重建时核原包 SHA、封闭原始回执、完整 D、head 下限及原请求 hash；它不是身份认证。最终同一 strict 事务核完整前像、推进独立 localVersion/slot.version/sync epoch，写 snapshot/metadata/完整 D、清原包并保存本机 ACK 回执。旧 adoption、原文/复导档案、原显示时间、0/null/负零与 tombstone 保留；新云键时间只能 null，不造现在时钟，不丢档案换容量成功。所有条目仍 local_pending，ACK revision 不授予 Holding/Policy/Decision 版本或当前行动资格。
+
+严格合法分页 upper 即使后续分页或本机 exact 检查失败，亦属于本会话已观察 head；经原包语义核验的成功200即使本机确认 CAS 失败亦先保留其 head。普通失败清私有预览而不洗掉该下限，低 head 的完整 D 拒绝；非法200（错 key/kind/deleted/值或缺 live 记录）不能抬高该下限。只有完整拉取及同一前像/当前 generation/guard 均通过才有 D，观察 head 不能冒充 D。
+
+一次受控操作原12秒总预算涵盖本机读取、懒加载/摘要、网络和最终写；撤销/会话变化使旧预览与迟到回调失效。link/prepare/cancel/ACK 的本机成功后若 hydrate/reset 丢响应，仍保存原本机 id/hash，只手动核本机回执，不重放；缺失仍 unknown。调用者确认请求在 canonical 前先拒 getter/隐藏/symbol/特殊 prototype/循环，不能先执行其属性再交下层校验。协调器释放不关闭共享应用 handle，Token 仍仅在已有 Owner 会话内存。
+
+v3 核心与云命令/完整 v4 codec 分离，相关 codec 先于事务加载；事务内只做已加载同步校验，懒加载失败/超时/撤销固定失败关闭。不把代码分块等同安装字节减少，PWA仍预缓存懒块。新增 ack receipt 不被旧 v4 codec 接纳；旧代码读到它会失败关闭，不是可直接降级的本机格式。真实 UI 启用前仍须保存升级前备份并验旧PWA/离线与同格式恢复，不得把源码回退冒充数据回滚。合成 fake-IDB/注入 transport 验证这些合同，不是 Chrome 落盘、旧 PWA 离线、多设备、实际云 schema/权限/耐久/独立恢复或 v9 发布证据。
+
+### 历史捕获的私有 raw schema 合同
+
+捕获结果的 `_schema_inventory` 为可缺省的私有 keyword-only 字段，不增加公开 metadata。成功捕获才构造 frozen/slots/repr=False DTO：完整原始四列 tuple、SQL NULL、精确 UTF-8 字节与顺序、版本化 typed 摘要，以及同次 resource/image/rows 内部绑定。格式等价只用于支持合同准入，raw 摘要仍区分任何拼写/空白变化；不得执行输入 DDL、从重建参考库反推原始 DDL、或用泛用 `asdict` 公开私有内容。
+
+构造 DTO 本身不认证来源；未来 compiler 须重验全部绑定及闭集并在真实锁内断言完整前像。旧结果 None 必须拒绝作为 apply 输入，不通过修改旧 artifact/helper pin 补造能力。此合同仅保存历史一致性证据，不开放 apply、生产验收写入或完整耐久资格。
+
+## 本轮验收
+
+- 会话合同与真实路由响应匹配，机器写权限未扩张。
+- 匿名拒绝、退出/撤销/到期和迟到响应测试通过。
+- 存储工具报告准确 scope，正式 smoke 保持失败关闭。
+- 后续同步/机器任务按上述不变量开发，未实现部分保持待办。
+
+## I19-04 本地服务端来源 → Holding/Decision（2026-10-23）
+
+`POST /api/v2/owner/analysis` 仅接受原始 JSON：`request_id`、`expected_revision`、`policy_version`、`evidence:[{code,evidence_id}]`。正文16KiB、最多100个唯一六位基金代码，拒绝多余/重复字段、BOM、坏Unicode、布尔/不安全revision；不接受浏览器传入份额、成本或价格。需真实 Owner 的 `run_personal_analysis` 与独立单一 `X-Owner-Analysis-Consent: owner-analysis-v1`；`write_holdings`、Admin、Worker和私人只读机器凭据不能替代。正文5秒预算，鉴权/限频先于正文，正文后、线程入口、事务核验/提交前后、连接关闭及响应序列化后重核会话。回应 no-store/nosniff，固定错误不回显私人输入、驱动异常或路径。
+
+仅在显式 provision 的本地核心9+Owner+`owner-analysis-schema-1`完整固定profile中执行；正常启动不创建扩展，旧 Owner-only与远端迁移合同不变。分析表3张、六个不可变UPDATE/DELETE触发器和精确隐式索引封闭校验；工厂的已有普通路径、外键已开启和schema约束均保留。不开放 Turso、schema8、内存/URI/UNC/缺失文件。显式本地旧Owner provision仅新增兼容正常 `db.init_db` 已存在的精确 sqlite_stat1 DDL，不创建辅助表；未扩展core自带universe_import_state的原拒绝保持。已扩展profile的正常只读验证仍兼容原有两张精确运维表，不接受相似对象。
+
+同一 `BEGIN IMMEDIATE` 内读取完整 Owner 当前记录，核head/history/每行最新change、字段及生命周期revision；来源包含全部账户、manual、tombstone，保存完整原始数值表示和SHA，不只取请求选中的账户。请求Evidence代码必须正好覆盖所有live基金；只认已存在且production scope、确定性ID/摘要与引用链一致的Evidence和显式Policy，不自动创建或promote策略，也不在事务中联网取行情。
+
+基金视角 `fund_only` 排除manual与墓碑，但它们仍参加完整来源绑定。同基金聚合份额、按份额加权成本、账户目标；关注记录不贡献金额。真实0份仍held，未知份额/成本/目标保留null。任一正持仓不能以7日内官方净值完整定价或份额未知，则所有基金current_weight未知，不将已知小计归一；动作hold/watch、低证据强度、无调仓指导。陈旧/不可用估值也降级；未来行情/来源时间拒绝。持仓更新时间未知不以生成时钟补造。真实Holding/Decision及scope、完整source、run和component映射、原请求回执同批提交；任一写失败整批回滚，历史不覆写。
+
+成功响应为 `{run,source_current}`。run含原id/hash、独立run_id、完整来源revision/SHA/count/fund_only、原Policy、strategy_version、生成时间、pricing_complete/unavailable_codes及每基金实际Holding/Evidence/Decision和账户数。它不是PortfolioDecision或手工资产迁移。`source_current`只是当前读快照与原完整来源相同，不代表行情仍新鲜、Policy/策略仍active或允许当前强动作；后续前端统一门禁必须独立核对。原Owner同步revision不是Holding/Policy/Decision版本，客户端local_pending尚不因此解除。
+
+回执读取 `GET /api/v2/owner/analysis/requests/{request_id}` 需 `read_private` 与单一原 `X-Owner-Analysis-Request-Hash`。精确匹配返回 `{state:matched,status:200,result:{run,source_current}}`；缺失404或不可核对503均unknown。历史读取核原始source/请求/响应hash、当时strategy/run_id、实际不可变模型和component映射，不执行今天的策略；策略升级不改旧输出。同id不同hash拒绝；同id/hash只读原结果，无新Holding/Decision；完整来源改变只令source_current=false，新id/旧expected_revision拒绝。
+
+业务源/回执各2MiB、最多100k runs/components，容量满不清历史；30秒总协作预算覆盖校验、授权回调及提交前后，不能硬中断SQLite/任意驱动。commit成功后超时或丢响应、close异常仍可已提交，只保留原id/hash手动核回执；absent不证明回滚、超时不授权重发。后端切片当时未接前端分析任务，后续接线见下节；新Policy编辑、实际云profile迁移、受保护恢复或跨Render重启证据仍缺，I19-04和v9正式出口继续未通过。
+
+### I19-04 前端原任务与同源三页消费（2026-10-23）
+
+实际自选页新增折叠的“持仓分析”面板。登录/普通页面加载不打开分析任务库或构造网络请求；有 read_private/run_personal_analysis、本轮明确同意及实际 v4 工作区才可启用。enable 只读真实本机前像并打开独立任务库；手动预览才取完整 D、既有 Policy 和 Evidence，分别确认保存原包、单次发送。所有请求走 Owner 内存会话闭合 transport；原同步三操作/12秒合同不扩张，分析四操作/30秒总预算包括导入、摘要、HTTP、流读及严格解析，响应上限2MiB+4096。请求仍仅16KiB引用，不上传浏览器构造的份额/成本。
+
+来源桥由真实 watchlist 持有，绑定原 target、端点原字符串、active locator、已采用 handle、lifetime/generation/epoch、当前内存及完整 IDB state；拒绝本机写/格式变更中、同步 busy、非空 outbox/pending、缺 B 和未同步 B→L 意图。verify 重新读取实际 locator/state，并核完整前像；不接受 UI 传恒真 guard。从 since=0、limit200、固定 upper 的历史 changes 重建 D，按严格 revision/key 次序折叠每键最新记录；跨页历史同 key 合法，重复 cursor 点、倒序或 upper 漂移拒绝。全变更100k/501页/4MiB和30秒预算仍生效；严格解析的已观察高 head 在后续失败前保留，同会话 invalidate 不清下限，不将旧 B 回退当恢复。
+
+任务保存至独立 `fund-compass-owner-analysis-1:<target>`，固定物理1/单槽、无 credential/结果快照，仅原 rawBody/requestHash、完整本机上下文摘要与状态。strict durability 真实 CAS 核全部原槽/计数/schema、完成后确认；不支持或坏结构拒绝，不回退 LS/重建已有库。prepared→attempted 必须提交后才能唯一 POST；丢本机提交确认可能留下 attempted但HTTP0，仍不能回prepared、取消或重发。attempted只允许原回执 matched后推进；404/503保持unknown。取消仅尚未发送原包，结束 matched 还需本 generation 真实匹配证明。刷新/重开只hydrate，不自动 quote/receipt/send；导出原任务不含凭据但属于私人资料。任务文件独立于完整工作区备份，目前没有通用导入/灾难恢复资格。
+
+返回 run 先核原请求与完整引用链。当前显示资格另核 source_current、完整 D/B、原任务contextHash、实际本机前像、源记录数及当前 Policy/Evidence IDs；不在JS重新猜测Python的业务ID/hash数值表示。满足后最多60秒使用，恰到期、坏/回退时钟、真实编辑、会话/URL变化、focus/visibility恢复均暂停或失效；这是最近已核对快照，不认证其他设备在窗口内没有新写入。关闭/退出隐藏私人结果，迟到响应不能恢复；旧 enable 的取消 continuation 只能清自己的操作，不能关闭后来新 enable。
+
+首页、自选、详情通过同一 app-owned store 使用实际 component 的 Holding/Evidence/Decision/Policy；diff=null明确“未提供同来源历史比较”，不猜首次或动作未变。保留工作区 local_pending，只给本轮已核对分析的独立消费资格；过期即恢复旧行动阻断。共用金融门禁核真实模型链/代码/0-null语义、坏/未来日期、七日行情与净值、评分70%及模型覆盖70%、缺失状态和既有动作/Policy较高置信度；不凭本轮生成时间给陈旧源续期，不把合法下一净值目标当已实现收益。未来/坏QDII结算轴仅保留历史条目，不展示已实现收益/命中。
+
+本地验证使用实际 Vue SFC、Pinia、watchlist locator/adopt/v4/link、fake-IDB strict事务与真实后端合成 wire fixture；HTTP/登录仍为合成，不能认证 Chrome下载/落盘、整页reload、旧PWA、跨设备、实际市场数据、云schema/权限/耐久/独立恢复或v9发布。
+
+### I19-04 策略当前/待生效/历史只读流程（2026-10-23）
+
+Owner 不得推进 Admin 全局护栏。新增 `GET /api/v2/private/portfolio/policy-state` 仅需独立 Owner/read_private；Admin、Worker、私人机器凭据均不能替代，不收 query。仍复用关闭的普通本地配置工厂，不创建连接目标、默认 Policy 或 DDL，不开放 Turso/schema8/URI。构造零 IO；会话在 factory/读取/关闭/序列化各出口重核，独立限频，所有响应 no-store/Pragma/nosniff，驱动伪造的 HTTPException 不穿过存储边界。
+
+`owner-policy-state-1` 仅五字段：schema_version、observed_at、current（可 null）、next_effective_at（可 null）、history。一次本机读事务验证固定 Policy/scope DDL、完整单链、原 canonical payload/ID/SHA/全部冗余列和 production 来源；future effective_at 合法，created_at 不得晚于本次观察。current 为实际 UTC 微秒不晚于 observed 的最新版本；next 为最早未来版本；history 为完整逆序单链，根/前驱/分支/环/漏注册/孤儿均拒绝，不拿被 view 隐藏的损坏链当空历史。最多1000版、2MiB完整输出（含 current 重复字段），超过拒绝，不分页截断冒称完整。读取12秒/HTTP30秒仍为协作预算，不硬中断 SQLite。旧 read_policy/history 的历史 at 语义保留，只将合法非UTC直接模型投影改为实际UTC排序；正常 HTTP builder 已输出UTC，不声称发现线上时间错误。
+
+前端原始 JSON parser 保留 lexical number，严格闭集/唯一键/Unicode/数值和微秒时间；沿用原 Policy 模型校验，不在JS重算Python ID/SHA。新 state 必须完整链、current/next精确相符；旧 analysis 四操作之外只新增固定GET policy_state，Owner同步三操作不扩张。此快照不是持仓、Evidence 或业务回执，不凭读取新策略解除 local_pending。
+
+实际面板显示读时当前/待生效/历史、已知下一生效时刻和与直接前驱的完整业务字段差异；null与0保留不同语义。每页10个版本，完整规则仅显式展开渲染。过期仍可看历史但不宣称当前；微秒状态用已验证链的次序，不在展示时降为毫秒比较。只读 review 不拉D/Evidence、不写任务或调用分析POST，也不续原分析资格。
+
+原 state 具有内存单调proof，墙钟与performance均检查；已知next或observed+60秒取最早边界，保守毫秒截断只会提早过期。Evidence/本机摘要/IDB耗时消耗同一个窗口，最终资格不重新起算该proof。预览最终发布、prepare验证及CAS前后、send验证及attempted CAS后POST前重核原state；CAS已提交却跨期时保留原attempted，不发送也不取消/回退。Store响应tick独立递增，墙钟停滞不能让已缓存的三页结果永久保鲜。坏/已观察回退时钟失败粘住，恢复时钟不自动续资格。统一withRequestDeadline另拒绝非有限起点/预算/进度、非正预算及中途回退；原计时器、取消优先级和超时上限未放宽。
+
+这是本机候选策略读取与显示子链，不是 Owner 策略编辑、云端迁移、多设备/Chrome/PWA、远端持久化或完整 I19/v9 发布验收。

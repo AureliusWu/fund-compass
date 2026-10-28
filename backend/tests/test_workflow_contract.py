@@ -1,13 +1,14 @@
+import ast
 import re
 from pathlib import Path
 
+import pytest
 import yaml
 
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = ROOT / ".github" / "workflows"
 AUTO_COMMIT_WORKFLOWS = (
-    "calibrate-strategy.yml",
     "enrich-holdings.yml",
     "enrich-managers.yml",
     "fund-universe.yml",
@@ -17,6 +18,206 @@ AUTO_COMMIT_WORKFLOWS = (
 
 def workflow(name: str) -> str:
     return (WORKFLOWS / name).read_text(encoding="utf-8")
+
+
+def _ci_job_condition(condition: str, *, enabled: str, event: str, ref: str, formal: bool) -> bool:
+    """Evaluate only the fixed boolean/string subset used by these job guards."""
+    assert condition.startswith("${{ ") and condition.endswith(" }}")
+    context = {
+        "vars.AUTO_DEPLOY_ENABLED": enabled,
+        "github.event_name": event,
+        "github.ref": ref,
+        "inputs.formal_release": formal,
+    }
+    expression = condition[4:-3]
+    expression = re.sub(
+        r"\b(?:vars\.AUTO_DEPLOY_ENABLED|github\.event_name|github\.ref|inputs\.formal_release)\b",
+        # GitHub string equality is case-insensitive; variables are strings,
+        # and a missing repository variable is the empty string.
+        lambda match: repr(context[match[0]].casefold())
+        if isinstance(context[match[0]], str) else repr(context[match[0]]),
+        expression,
+    )
+    expression = re.sub(r"!(?!=)", "not ", expression.replace("&&", " and ").replace("||", " or "))
+    tree = ast.parse(expression.strip(), mode="eval")
+
+    def evaluate(node: ast.AST) -> bool | str:
+        if isinstance(node, ast.Constant) and type(node.value) in (bool, str):
+            return node.value
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+            return not evaluate(node.operand)
+        if isinstance(node, ast.BoolOp):
+            values = [bool(evaluate(value)) for value in node.values]
+            if isinstance(node.op, ast.And):
+                return all(values)
+            if isinstance(node.op, ast.Or):
+                return any(values)
+        if isinstance(node, ast.Compare) and len(node.ops) == len(node.comparators) == 1:
+            left, right = evaluate(node.left), evaluate(node.comparators[0])
+            if isinstance(node.ops[0], ast.Eq):
+                return left == right
+            if isinstance(node.ops[0], ast.NotEq):
+                return left != right
+        raise AssertionError(f"unsupported CI guard expression: {ast.dump(node)}")
+
+    result = evaluate(tree.body)
+    assert type(result) is bool
+    return result
+
+
+def _function(tree: ast.AST, name: str) -> ast.FunctionDef:
+    matches = [node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == name]
+    assert len(matches) == 1, name
+    return matches[0]
+
+
+def _assignment(tree: ast.AST, name: str) -> ast.expr:
+    matches = [node.value for node in tree.body if isinstance(node, ast.Assign)
+               and any(isinstance(target, ast.Name) and target.id == name for target in node.targets)]
+    assert len(matches) == 1, name
+    return matches[0]
+
+
+def _calls(tree: ast.AST, name: str) -> list[ast.Call]:
+    return sorted((node for node in ast.walk(tree) if isinstance(node, ast.Call)
+                   and ast.unparse(node.func) == name), key=lambda node: (node.lineno, node.col_offset))
+
+
+def _expression(node: ast.AST, expected: str) -> None:
+    assert ast.dump(node, include_attributes=False) == ast.dump(
+        ast.parse(expected, mode="eval").body, include_attributes=False
+    )
+
+
+def _git_commands(tree: ast.AST, command: str) -> list[ast.Call]:
+    matches = []
+    for node in _calls(tree, "_command"):
+        if not node.args or not isinstance(node.args[0], ast.Constant) or node.args[0].value != "git":
+            continue
+        offset = 1
+        while (offset < len(node.args) and isinstance(node.args[offset], ast.Constant)
+               and node.args[offset].value == "-c"):
+            offset += 2
+        if offset < len(node.args) and isinstance(node.args[offset], ast.Constant) and node.args[offset].value == command:
+            matches.append(node)
+    return matches
+
+
+def _overseas_runner() -> ast.Module:
+    """Inspect the real entrypoint without importing providers or running Git."""
+    return ast.parse((ROOT / "tools" / "record_overseas_ops.py").read_text(encoding="utf-8"))
+
+
+def _overseas_job() -> dict:
+    parsed = yaml.safe_load(workflow("overseas-accuracy.yml"))
+    assert parsed["permissions"] == {"contents": "write", "actions": "write"}
+    job = parsed["jobs"]["ledger"]
+    run_steps = [step for step in job["steps"] if "run" in step]
+    assert len(run_steps) == 1
+    runner = run_steps[0]
+    assert runner["shell"] == "bash"
+    assert "continue-on-error" not in runner and "if" not in runner
+    assert [line.strip() for line in runner["run"].splitlines() if line.strip()] == [
+        'git config user.name "github-actions[bot]"',
+        'git config user.email "github-actions[bot]@users.noreply.github.com"',
+        "python tools/record_overseas_ops.py",
+    ]
+    return job
+
+
+def _assert_overseas_publication_contract() -> None:
+    _overseas_job()
+    tree = _overseas_runner()
+    financial = _function(tree, "_publish_financial")
+    operations = _function(tree, "_publish_ops")
+    push_once = _function(tree, "_push_once")
+    dispatch = _function(tree, "_dispatch")
+    run = _function(tree, "run")
+    assert ast.literal_eval(_assignment(tree, "FINANCIAL")) == {
+        "ledger_sha256": "frontend/public/data/overseas-accuracy.json",
+        "audit_sha256": "frontend/public/data/overseas-audit.json",
+        "models_sha256": "frontend/src/data/overseas-models.json",
+        "evidence_sha256": "backend/data/overseas-evidence.json",
+    }
+    assert ast.literal_eval(_assignment(tree, "OPS_REF")) == "refs/heads/ops/overseas-run-journal"
+    assert ast.literal_eval(_assignment(tree, "OPS_PATH")) == "docs/operations/overseas-run-journal.json"
+
+    # Financial publication must bind the exact confirmed main commit and all
+    # four bytes, not dispatch an unqualified branch tip or a later ops commit.
+    _expression(financial.body[0].test, "_head() != source or _remote_head() != source")
+    staging = _calls(financial, "_stage_only")
+    assert len(staging) == 1
+    _expression(staging[0], "_stage_only(tuple(FINANCIAL.values()))")
+    commits = _git_commands(financial, "commit")
+    pushes = _calls(financial, "_push_once")
+    assert len(commits) == len(pushes) == 1
+    _expression(pushes[0], '_push_once("refs/heads/main", source, commit)')
+    assert commits[0].lineno < pushes[0].lineno
+    digest_calls = _calls(financial, "_digests_in_tree")
+    assert len(digest_calls) == 2
+    _expression(digest_calls[0], "_digests_in_tree(commit)")
+    _expression(digest_calls[1], "_digests_in_tree(source)")
+    assert commits[0].lineno < digest_calls[0].lineno < pushes[0].lineno
+    post_push = [node for node in financial.body if isinstance(node, ast.If)
+                 and node.lineno > pushes[0].lineno]
+    assert len(post_push) == 1
+    _expression(post_push[0].test, "_remote_head() != commit")
+    _expression(financial.body[-1].value, '{"commit_sha": commit, **digests}')
+    dispatches = _calls(dispatch, "_command")
+    assert len(dispatches) == 1
+    _expression(dispatches[0], '_command("gh", "workflow", "run", "ci.yml", "--ref", '
+                '"main", "-f", f"target_sha={commit}")')
+    assert len(_calls(tree, "_dispatch")) == 1
+    _expression(_calls(run, "_publish_financial")[0], '_publish_financial(identity["source_sha"])')
+    _expression(_calls(run, "_dispatch")[0], '_dispatch(published["commit_sha"])')
+    dispatch_guards = [node for node in ast.walk(run) if isinstance(node, ast.If)
+                       and any(child is _calls(run, "_dispatch")[0] for child in ast.walk(node))]
+    assert any(ast.dump(node.test) == ast.dump(ast.parse("published is not None", mode="eval").body)
+               for node in dispatch_guards)
+
+    # The journal writes an independent, code-free tree to its own fixed ref,
+    # not HEAD/index/main, and cannot dispatch CI for a later ops commit.
+    ops_commands = _calls(operations, "_command")
+    assert [node.args[1].value for node in ops_commands] == [
+        "hash-object", "mktree", "mktree", "mktree", "commit-tree",
+    ]
+    _expression(ops_commands[0], '_command("git", "hash-object", "-w", "--stdin", stdin=raw)')
+    _expression(_assignment(operations, "parents"), '("-p", prior_tip) if prior_tip is not None else ()')
+    assert len(_calls(operations, "_push_once")) == 1
+    _expression(_calls(operations, "_push_once")[0], "_push_once(OPS_REF, prior_tip, commit)")
+    tree_stdin = [next(keyword.value for keyword in command.keywords if keyword.arg == "stdin")
+                  for command in _git_commands(operations, "mktree")]
+    for actual, expected in zip(tree_stdin, (
+        '(f"100644 blob {blob}\\toverseas-run-journal.json\\n").encode("ascii")',
+        '(f"040000 tree {operations}\\toperations\\n").encode("ascii")',
+        '(f"040000 tree {docs}\\tdocs\\n").encode("ascii")',
+    )):
+        _expression(actual, expected)
+    assert len(_calls(tree, "_push_once")) == 2
+    assert len(_git_commands(tree, "push")) == len(_calls(push_once, "_command")) == 1
+    _expression(_git_commands(push_once, "push")[0],
+                '_command("git", "-c", "core.hooksPath=" + str(ROOT / "tools" / "overseas-hooks"), '
+                '"push", "origin", f"{commit}:{ref}", env=env)')
+    env_updates = _calls(push_once, "env.update")
+    assert len(env_updates) == 1
+    _expression(env_updates[0], 'env.update({"OVERSEAS_PUSH_REF": ref, '
+                '"OVERSEAS_PUSH_OLD": expected_old or "0" * 40, "OVERSEAS_PUSH_NEW": commit})')
+    operation_checks = [ast.dump(node.test) for node in operations.body if isinstance(node, ast.If)]
+    for expected in (
+        "_head() != base or _remote_head() != base",
+        "_remote_ops_head() != prior_tip",
+        "_head() != base or _remote_head() != base or _remote_ops_head() != prior_tip",
+        "_remote_ops_head() != commit or _head() != base or _remote_head() != base",
+    ):
+        assert ast.dump(ast.parse(expected, mode="eval").body) in operation_checks
+    for publisher in (financial, operations, push_once):
+        assert not any(_git_commands(node, "push") or _calls(node, "_push_once") for node in ast.walk(publisher)
+                       if isinstance(node, (ast.For, ast.AsyncFor, ast.While)))
+        assert not any(_git_commands(publisher, forbidden)
+                       for forbidden in ("reset", "rebase", "checkout", "switch"))
+    _expression(_assignment(run, "base"), 'published["commit_sha"] if published else identity["source_sha"]')
+    _expression(_calls(run, "_publish_ops")[0], "_publish_ops(base, prior_ops_tip, raw)")
+    assert _calls(run, "_dispatch")[0].lineno < _calls(run, "_publish_ops")[0].lineno
 
 
 def test_ci_is_the_only_release_orchestrator() -> None:
@@ -73,6 +274,70 @@ def test_ci_validates_and_checks_out_one_exact_sha() -> None:
     assert "target_sha: ${{ needs.resolve.outputs.target_sha }}" in ci
 
 
+def test_auto_deployment_hold_is_persistent_and_does_not_skip_quality_or_formal_gates() -> None:
+    jobs = yaml.safe_load(workflow("ci.yml"))["jobs"]
+    candidate_condition = (
+        "${{ vars.AUTO_DEPLOY_ENABLED == 'true' && github.event_name != 'pull_request' "
+        "&& github.ref == 'refs/heads/main' "
+        "&& !(github.event_name == 'workflow_dispatch' && inputs.formal_release) }}"
+    )
+    for name in ("deploy", "candidate_smoke"):
+        assert jobs[name]["if"] == candidate_condition, name
+        assert jobs[name].get("continue-on-error", False) is False, name
+    assert jobs["deploy"]["needs"] == ["resolve", "backend", "frontend", "worker"]
+    assert jobs["candidate_smoke"]["needs"] == ["resolve", "deploy"]
+    assert jobs["candidate_smoke"]["with"]["enforce_persistence"] is False
+    for name in ("resolve", "backend", "frontend", "worker"):
+        assert jobs[name].get("if") is None, name
+        assert jobs[name].get("continue-on-error", False) is False, name
+    assert jobs["formal_smoke"]["if"] == (
+        "${{ github.event_name == 'workflow_dispatch' "
+        "&& github.ref == 'refs/heads/main' && inputs.formal_release }}"
+    )
+    assert jobs["formal_smoke"]["needs"] == ["resolve", "backend", "frontend", "worker"]
+    assert jobs["formal_smoke"]["with"]["enforce_persistence"] is True
+
+
+@pytest.mark.parametrize("job_name", ("deploy", "candidate_smoke"))
+@pytest.mark.parametrize("enabled,opted_in", (
+    ("", False), ("false", False), ("False", False), ("0", False), ("1", False),
+    ("yes", False), ("null", False), (" true", False), ("true ", False),
+    ("true\n", False), ("true", True), ("TRUE", True), ("True", True),
+))
+@pytest.mark.parametrize("event,ref,formal,candidate", (
+    ("push", "refs/heads/main", False, True),
+    ("push", "refs/heads/main", True, True),  # Dispatch-only input cannot select formal on push.
+    ("workflow_dispatch", "refs/heads/main", False, True),  # Includes generated-data dispatches.
+    ("workflow_dispatch", "refs/heads/main", True, False),
+    ("pull_request", "refs/heads/main", False, False),
+    ("pull_request", "refs/pull/4/merge", False, False),
+    ("push", "refs/heads/feature", False, False),
+    ("workflow_dispatch", "refs/heads/feature", False, False),
+))
+def test_auto_deployment_requires_explicit_opt_in_on_every_main_run(
+    job_name: str, enabled: str, opted_in: bool, event: str, ref: str, formal: bool, candidate: bool,
+) -> None:
+    condition = yaml.safe_load(workflow("ci.yml"))["jobs"][job_name]["if"]
+    assert _ci_job_condition(condition, enabled=enabled, event=event, ref=ref, formal=formal) is (
+        opted_in and candidate
+    )
+
+
+@pytest.mark.parametrize("enabled", ("", "false", "true"))
+@pytest.mark.parametrize("event,ref,formal,expected", (
+    ("workflow_dispatch", "refs/heads/main", True, True),
+    ("workflow_dispatch", "refs/heads/main", False, False),
+    ("workflow_dispatch", "refs/heads/feature", True, False),
+    ("push", "refs/heads/main", True, False),
+    ("pull_request", "refs/heads/main", True, False),
+))
+def test_formal_persistence_audit_is_independent_of_auto_deployment_hold(
+    enabled: str, event: str, ref: str, formal: bool, expected: bool,
+) -> None:
+    condition = yaml.safe_load(workflow("ci.yml"))["jobs"]["formal_smoke"]["if"]
+    assert _ci_job_condition(condition, enabled=enabled, event=event, ref=ref, formal=formal) is expected
+
+
 def test_ci_runs_dependency_and_runtime_contract_gates() -> None:
     ci = workflow("ci.yml")
 
@@ -83,6 +348,33 @@ def test_ci_runs_dependency_and_runtime_contract_gates() -> None:
     assert "npm run build" in ci
     assert "npm run check" in ci
     assert "npx wrangler deploy --dry-run" in ci
+
+
+def test_ci_audits_the_complete_toolchain_and_blocks_release_on_failure() -> None:
+    jobs = yaml.safe_load(workflow("ci.yml"))["jobs"]
+    for name, final_check in (("frontend", "npm run build"), ("worker", "npx wrangler deploy --dry-run")):
+        job = jobs[name]
+        assert job.get("continue-on-error", False) is False, name
+        assert job.get("if") is None, name
+        audits = [(index, step) for index, step in enumerate(job["steps"])
+                  if step.get("name") == "Audit dependency advisories"]
+        assert len(audits) == 1, name
+        index, audit = audits[0]
+        assert audit.get("if") is None, name
+        assert audit.get("continue-on-error", False) is False, name
+        assert audit["timeout-minutes"] == 2, name
+        # A standalone command must propagate npm's advisory/network exit code.
+        # Explicit dev inclusion keeps Vite/Vitest/Wrangler in the audited tree.
+        assert audit["run"] == (
+            "npm audit --json --include=dev --audit-level=moderate "
+            "--registry=https://registry.npmjs.org --fetch-retries=0 --fetch-timeout=20000"
+        ), name
+        for prerequisite in ("npm ci --include=dev", final_check):
+            checks = [position for position, step in enumerate(job["steps"]) if step.get("run") == prerequisite]
+            assert len(checks) == 1 and checks[0] < index, (name, prerequisite)
+    # Both regular deployment and formal validation depend on these jobs.
+    for release in ("deploy", "formal_smoke"):
+        assert {"frontend", "worker"} <= set(jobs[release]["needs"]), release
 
 
 def test_frontend_deploy_requires_an_explicit_public_api_endpoint() -> None:
@@ -107,6 +399,10 @@ def test_generated_data_writers_are_serial_and_dispatch_ci_once() -> None:
         assert "group: scheduled-data-main" in source, name
         assert "queue: max" in source, name
         assert "cancel-in-progress: true" not in source, name
+        assert "actions: write" in source, name
+        if name == "overseas-accuracy.yml":
+            _assert_overseas_publication_contract()
+            continue
         assert source.count("gh workflow run ci.yml") == 1, name
         assert "if gh workflow run ci.yml" in source, name
         assert '-f target_sha="$commit_sha"' in source, name
@@ -139,6 +435,31 @@ def test_calibration_workflows_are_candidate_only() -> None:
         source = (ROOT / "tools" / name).read_text(encoding="utf-8")
         assert "AUTO_PROMOTE" not in source
         assert "explicit_admin_only" in source
+
+
+def test_private_calibration_is_bounded_and_never_published() -> None:
+    source = workflow("calibrate-strategy.yml")
+
+    assert "contents: read" in source
+    assert "contents: write" not in source
+    assert "actions: write" not in source
+    assert "id: calibration" in source
+    assert "CALIBRATION_OUTCOME_ATTEMPTS: '3'" in source
+    assert "CALIBRATION_OUTCOME_TIMEOUT_SECONDS: '45'" in source
+    assert "CALIBRATION_OUTCOME_TOTAL_BUDGET_SECONDS: '150'" in source
+    assert "CALIBRATION_OUTCOME_RETRY_AFTER_MAX_SECONDS: '15'" in source
+    assert "CALIBRATION_OUTCOME_MAX_RESPONSE_BYTES: '8388608'" in source
+    assert "CALIBRATION_ALLOW_INSECURE_LOOPBACK" not in source
+    assert "if: always()" in source
+    assert "BLOCKED_PRIVATE_SINK_REQUIRED" in source
+    assert "private_output_published: false" in source
+    assert "actions/upload-artifact" not in source
+    assert "git add" not in source
+    assert "git commit" not in source
+    assert "git push" not in source
+    assert "gh workflow run" not in source
+    assert "frontend/public/data/strategy-calibration.json" not in source
+    assert "backend/data/strategy-params.json" not in source
 
 
 def test_enrichment_branches_preserve_good_artifacts_then_report_any_failure() -> None:
@@ -178,6 +499,7 @@ def test_backend_consumers_never_fall_back_to_the_old_free_api() -> None:
     overseas = workflow("overseas-accuracy.yml")
     overseas_tool = (ROOT / "tools" / "overseas_accuracy.py").read_text(encoding="utf-8")
     notification_tool = (ROOT / "tools" / "notify.py").read_text(encoding="utf-8")
+    runner_tool = (ROOT / "tools" / "record_overseas_ops.py").read_text(encoding="utf-8")
 
     assert "FUND_API_BASE: ${{ secrets.FUND_API_BASE }}" in calibration
     assert "secrets.FUND_API_BASE ||" not in calibration
@@ -185,10 +507,24 @@ def test_backend_consumers_never_fall_back_to_the_old_free_api() -> None:
     assert "vars.VITE_API_BASE ||" not in notification
     assert 'test -n "$API_BASE"' in notification
     assert "FUND_API_BASE: ${{ secrets.FUND_API_BASE }}" in overseas
-    assert 'test -n "${FUND_API_BASE:-}"' in overseas
     assert "secrets.FUND_API_BASE ||" not in overseas
     assert "fund-compass-api.onrender.com" not in overseas_tool
     assert "fund-compass-api.onrender.com" not in notification_tool
+    assert "fund-compass-api.onrender.com" not in runner_tool
+    job = _overseas_job()
+    assert job["env"]["FUND_API_BASE"] == "${{ secrets.FUND_API_BASE }}"
+    produce = _function(_function(_overseas_runner(), "run"), "produce")
+    assert len(produce.body) == 2 and isinstance(produce.body[0], ast.If)
+    required_api = produce.body[0]
+    _expression(required_api.test, 'not os.environ.get("FUND_API_BASE", "").strip()')
+    assert len(required_api.body) == 1 and isinstance(required_api.body[0], ast.Raise)
+    assert not required_api.orelse
+    _expression(required_api.body[0].exc, 'OpsError("producer_failed")')
+    assert isinstance(produce.body[1], ast.Return)
+    _expression(produce.body[1].value, 'producer.run_pipeline(now=start, run_mode=identity["mode"])')
+    producer_tree = ast.parse(overseas_tool)
+    _expression(_assignment(producer_tree, "FUND_API_BASE"),
+                'normalize_api_base(os.environ.get("FUND_API_BASE"))')
 
 
 def test_post_deploy_smoke_verifies_exact_api_and_complete_static_data() -> None:
@@ -357,16 +693,50 @@ def test_fund_universe_workflow_verifies_real_generated_artifact() -> None:
 
 
 def test_overseas_workflow_exports_the_audited_backend_evidence_artifact() -> None:
-    source = workflow("overseas-accuracy.yml")
-
-    assert "python tools/export_v8_overseas_evidence.py" in source
-    assert "backend/data/overseas-evidence.json" in source
-    assert source.index("python tools/audit_overseas_accuracy.py") < source.index(
-        "python tools/export_v8_overseas_evidence.py"
-    )
-    assert source.index("python tools/export_v8_overseas_evidence.py") < source.index(
-        "git status --porcelain"
-    )
+    job = _overseas_job()
+    uploads = [step for step in job["steps"] if step.get("uses") == "actions/upload-artifact@v7"]
+    assert len(uploads) == 1 and uploads[0]["if"] == "always()"
+    runner_step = next(step for step in job["steps"] if "run" in step)
+    assert job["steps"].index(runner_step) < job["steps"].index(uploads[0])
+    assert uploads[0]["with"]["path"].splitlines() == [
+        "frontend/public/data/overseas-accuracy.json", "frontend/public/data/overseas-audit.json",
+        "frontend/src/data/overseas-models.json", "backend/data/overseas-evidence.json",
+    ]
+    tree = _overseas_runner()
+    run = _function(tree, "run")
+    stage_calls = _calls(run, "stage")
+    expected_stages = ("producer", "calibration", "audit", "evidence", "publication", "ci_dispatch")
+    assert ast.literal_eval(_assignment(tree, "STAGES")) == expected_stages
+    assert tuple(node.args[0].value for node in stage_calls) == expected_stages
+    for actual, expected in zip(stage_calls[:4], (
+        'stage("producer", produce)', 'stage("calibration", calibrator.main)',
+        'stage("audit", independent_audit)', 'stage("evidence", export)',
+    )):
+        _expression(actual, expected)
+    audit = _function(run, "independent_audit")
+    assert len(_calls(audit, "auditor.audit")) == 1
+    _expression(_calls(audit, "auditor.audit")[0], "auditor.audit(ledger, registry, now=_now())")
+    _expression(_calls(audit, "producer.write_json_atomic")[0],
+                "producer.write_json_atomic(auditor.REPORT, report)")
+    _expression(audit.body[-1].value, "_audit_receipt(report, context)")
+    evidence_guards = [node for node in ast.walk(run) if isinstance(node, ast.If)
+                       and any(child is stage_calls[3] for child in ast.walk(node))]
+    assert any(ast.dump(node.test) == ast.dump(ast.parse(
+        'stages["calibration"] == stages["audit"] == "succeeded"', mode="eval").body)
+               for node in evidence_guards)
+    export = _function(run, "export")
+    _expression(_calls(export, "exporter.build_export")[0], "exporter.build_export(ledger)")
+    _expression(_calls(export, "producer.write_json_atomic")[0],
+                "producer.write_json_atomic(exporter.DEFAULT_OUTPUT, payload)")
+    exporter = ast.parse((ROOT / "tools" / "export_v8_overseas_evidence.py").read_text(encoding="utf-8"))
+    _expression(_assignment(exporter, "DEFAULT_OUTPUT"),
+                'ROOT / "backend" / "data" / "overseas-evidence.json"')
+    publication_guards = [node for node in ast.walk(run) if isinstance(node, ast.If)
+                          and any(child is stage_calls[4] for child in ast.walk(node))]
+    assert any(ast.dump(node.test) == ast.dump(ast.parse(
+        'all(stages[key] == "succeeded" for key in STAGES[:4])', mode="eval").body)
+               for node in publication_guards)
+    assert stage_calls[2].lineno < stage_calls[3].lineno < stage_calls[4].lineno < stage_calls[5].lineno
 
 
 def test_all_workflow_files_parse_as_yaml() -> None:

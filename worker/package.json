@@ -12,7 +12,12 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260708.1",
     "typescript": "~5.6.3",
-    "vitest": "^4.1.9",
-    "wrangler": "^4.0.0"
+    "vitest": "^4.1.12",
+    "wrangler": "^4.149.0"
+  },
+  "overrides": {
+    "miniflare@5.20261006.1-alpha": {
+      "undici": "7.30.1"
+    }
   }
 }

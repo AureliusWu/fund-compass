@@ -2,6 +2,8 @@
 
 工作日北京时间 14:30 读取 Gist 云同步自选，获取盘中估值与司南决策摘要，通过 Server酱推送。GitHub 的 secret Gist 只是“不公开列出”，并不具备真正的私有访问控制；不要把 Gist ID 提交到公开仓库。
 
+> 当前 Wrangler 工具链存在未关闭的内嵌依赖安全风险，详见下方安全门禁。在已修可信制品通过审查前，暂停执行本页 `secret put` 等带认证的 Wrangler 网络操作示例。发布入口的阻断不等于封锁所有直接 CLI 命令，更不是漏洞已经修复。
+
 ## 变量
 
 `wrangler.toml` 只包含非敏感的 `FUND_API_BASE`。`GIST_ID` 会定位自选、持仓和运行状态，因此也按 Secret 管理。以下必须使用 Cloudflare Secret：
@@ -28,8 +30,14 @@ Server酱请求超时、网络中断、响应无法完整解析或响应缺少�
 
 ## 部署
 
+### 当前安全门禁：BLOCKED（2026-10-22）
+
+Vitest 已更新至 4.1.12；Miniflare 的外部 Undici 通过限定父版本的 npm override 更新为 7.30.1，并有真实本机 workerd 请求/响应兼容测试。该 override 不影响 Wrangler 自己打包的 Undici 7.29.1：其 Cloudflare API/更新检查仍使用内嵌副本，存在已公开的[内容编码 DoS](https://github.com/nodejs/undici/security/advisories/GHSA-xjj6-f33q-929c)和[TLS 选项丢失](https://github.com/nodejs/undici/security/advisories/GHSA-2m5v-pch6-74hx)风险。官方 npm audit 返回 0 不代表这份内嵌代码已修复。
+
+`npm run deploy` 因此在启动 Git/Wrangler 前明确拒绝，无环境变量或参数绕过。关闭门禁需要经审查的已修复上游制品、锁文件及实际兼容验证，再正常修改源码；不能通过文本替换 bundle、盲升 Wrangler 或跳过入口解除。功能测试、类型检查和 `npx --no-install wrangler deploy --dry-run` 仍可运行，但不授予发布资格。当前线上 Worker 未被修改；上述是本地/CI/部署工具链风险，不是已部署 Worker 使用 npm Undici 的证据。
+
 ```bash
-npm install
+npm ci --include=dev
 npm run check
 npm test
 npm run deploy

@@ -49,8 +49,13 @@ def expected_objects() -> dict[tuple[str, str], str]:
 
 
 def _verify_objects(actual: dict, expected: dict) -> None:
-    if any(key not in actual or _normalize_ddl(actual[key]) != _normalize_ddl(sql)
-           for key, sql in expected.items()):
+    incompatible = [key for key, sql in expected.items()
+                    if key not in actual or _normalize_ddl(actual[key]) != _normalize_ddl(sql)]
+    if incompatible and all(name.startswith(("production_", "v8_repository_scopes", "v8_record_scopes", "immutable_v8_"))
+           or name in {"scoped_record_requires_root", "idx_v8_record_scope"}
+           for _, name in incompatible):
+        raise sqlite3.DatabaseError("Turso repository scope contract incompatible; explicit migration required")
+    if incompatible:
         raise sqlite3.DatabaseError("Turso schema differs from the supported V8 contract")
     # Additional triggers on ledger tables could change write semantics. Extra
     # operational tables are allowed; application schema changes require review.

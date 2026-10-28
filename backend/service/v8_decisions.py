@@ -207,7 +207,7 @@ def create_decision(
 ) -> dict:
     stamp = (created_at or _now()).astimezone(timezone.utc)
     evidence = create_evidence(detail, estimate_context=estimate_context, created_at=stamp)
-    holding = v8_repo.save_holding(_holding_from_item(item, stamp))
+    holding = _holding_from_item(item, stamp)
     decision = build_decision_snapshot(
         evidence,
         holding,
@@ -215,7 +215,7 @@ def create_decision(
         strategy_version=STRATEGY_VERSION,
         created_at=stamp,
     )
-    decision = v8_repo.save_decision(decision)
+    holding, decision = v8_repo.save_holding_and_decision(holding, decision)
     diff = v8_repo.diff_for_decision(decision)
     return {
         "code": evidence.fund_code,

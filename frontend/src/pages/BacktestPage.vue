@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useWatchlistStore } from '@/stores/watchlist'
 import { useFundsStore } from '@/stores/funds'
 import { colorOf } from '@/utils/format'
@@ -20,9 +20,23 @@ const err = ref('')
 const detail = ref<FundDetail | null>(null)
 const calibration = ref<CalibrationResp | null>(null)
 const dcaAmount = ref(1000)
+const localListLoading = ref(true)
+const localListFailed = ref(false)
+const localAuthorityReady = computed(() => ['legacy', 'idb'].includes(watchStore.authorityState) && !watchStore.localStorageError)
+const localListUnavailable = computed(() => localListFailed.value || !localListLoading.value && !localAuthorityReady.value)
+let mounted = true
+onBeforeUnmount(() => { mounted = false })
+onMounted(async () => {
+  try { await watchStore.load() }
+  catch { if (mounted) localListFailed.value = true }
+  finally { if (mounted) localListLoading.value = false }
+})
 
 // 基金列表（有持仓的优先）
 const fundOpts = computed(() => {
+  // Direct page entry must wait for the application locator, never fall back to
+  // archived LS or publish a retained view after an authority read failure.
+  if (localListLoading.value || localListFailed.value || !localAuthorityReady.value) return []
   const seen = new Set<string>()
   const out: { code: string; name: string }[] = []
   for (const e of watchStore.entries) {
@@ -146,6 +160,8 @@ const fp = (n: number | null | undefined, d = 2) => n != null ? (n >= 0 ? '+' : 
       <van-cell-group inset>
         <van-field v-model="picked" label="选择基金" placeholder="输入代码" />
       </van-cell-group>
+      <p v-if="localListLoading" class="local-list-state" role="status">正在核对本机基金列表；公开回测仍可按代码查询。</p>
+      <p v-else-if="localListUnavailable" class="local-list-state local-list-error" role="alert">本机基金列表无法安全读取，不代表没有记录。未回退旧存储；请到自选页检查本机工作区，或手工输入代码进行公开回测。</p>
       <div class="chip-row" v-if="fundOpts.length">
         <span class="chip" v-for="f in fundOpts.slice(0, 12)" :key="f.code"
           :class="{ on: picked === f.code }" @click="picked = f.code; run()">
@@ -298,6 +314,7 @@ const fp = (n: number | null | undefined, d = 2) => n != null ? (n >= 0 ? '+' : 
 .chip { padding: 4px 10px; border-radius: 12px; background: var(--chip-bg, #F2F3EF); color: var(--text-secondary, #5A6A60); font-size: 12px; cursor: pointer; }
 .chip.on { background: #4C7E67; color: #fff; }
 .btn-row { padding: 8px 16px; }
+.local-list-state { padding: 0 16px; color: var(--text-secondary); font-size: 12px; line-height: 1.7; }.local-list-error { color: var(--danger); }
 
 .sec { font-size: 13px; color: var(--text-muted, #5A6A60); margin: 18px 4px 8px; }
 .card { background: var(--card-bg, #fff); border-radius: 10px; padding: 14px; margin-bottom: 4px; }

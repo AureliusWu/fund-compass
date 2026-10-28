@@ -1,0 +1,285 @@
+{
+  "schema": "fc-owner-full-portfolio-sync-performance-1",
+  "baselineCommit": "519848fbf8d9f3ff433f8fded8aa68202d65f678",
+  "applicationVersion": "8.0.0",
+  "physicalWorkspaceVersion": 6,
+  "sourceIdentity": {
+    "kind": "fixed-build-input-sha256",
+    "baseline": "26147707184efefdcf9187ceff25ab170ea8052e7ef2b62a53f8050622253fa5",
+    "current": "858d4795f72072ae54b04bc284d1455dc519c4c42682348308edcb8963549217",
+    "baselineCommit": "519848fbf8d9f3ff433f8fded8aa68202d65f678",
+    "archiveSha256": "20c983326fe6843beeaab77ec8841314a03aae519a7f9e7ffce509515d1c583e"
+  },
+  "localVerification": {
+    "frontend": {
+      "passed": 3127,
+      "files": 116,
+      "seconds": 25.1,
+      "typeCheck": "EXIT0",
+      "node": "24.14.0",
+      "npm": "11.9.0"
+    },
+    "backend": {
+      "passed": 4088,
+      "warnings": 1211,
+      "seconds": 668.45,
+      "python": "3.14.4",
+      "pipCheck": "EXIT0",
+      "warningBreakdown": {
+        "pathlibIsReservedDeprecation": 1209,
+        "starletteHttpxDeprecation": 1,
+        "pydanticInfFaultFixture": 1
+      }
+    },
+    "worker": {
+      "passed": 148,
+      "files": 4,
+      "seconds": 4.78,
+      "typeCheck": "EXIT0",
+      "dryRunKiB": 114.28,
+      "dryRunGzipKiB": 26.58
+    },
+    "officialAudit": {
+      "frontend": 0,
+      "worker": 0,
+      "includeDev": true,
+      "registry": "https://registry.npmjs.org",
+      "auditLevel": "moderate",
+      "fetchRetries": 0
+    },
+    "independentReviews": "No unresolved P0/P1 found in reviewed local core, transport orchestration, facade/UI, or equivalent lazy extraction. Not remote source authentication."
+  },
+  "method": "Exact 519848f frontend Git archive and frozen current fixed src/public/tools/config/package inputs. Identical package/lock (EOL-normalized comparison), same actual installed node_modules junction. Three fresh builds each, A/B/B/A/A/B, all PWA7/7; every side has an identical full artifact inventory. AST static import/export JS closures exclude dynamic loading and CSS preload maps; JS+CSS and complete precache/support unions count CSS separately. Actual Workbox URL inventory and non-null MD5 revisions verified. Source paths/EOL/host cache not controlled for runtime or build-latency claims.",
+  "samples": [
+    {
+      "side": "baseline",
+      "sample": 1,
+      "built": "7.17",
+      "pwa": "7/7"
+    },
+    {
+      "side": "current",
+      "sample": 1,
+      "built": "7.36",
+      "pwa": "7/7"
+    },
+    {
+      "side": "current",
+      "sample": 2,
+      "built": "7.41",
+      "pwa": "7/7"
+    },
+    {
+      "side": "baseline",
+      "sample": 2,
+      "built": "7.24",
+      "pwa": "7/7"
+    },
+    {
+      "side": "baseline",
+      "sample": 3,
+      "built": "7.42",
+      "pwa": "7/7"
+    },
+    {
+      "side": "current",
+      "sample": 3,
+      "built": "7.43",
+      "pwa": "7/7"
+    }
+  ],
+  "gzip9Bytes": {
+    "jsCss": {
+      "baseline": 619148,
+      "current": 667554,
+      "deltaPercent": 7.82
+    },
+    "workspace": {
+      "baseline": 10893,
+      "current": 13341,
+      "deltaPercent": 22.47,
+      "thresholdPercent": 20,
+      "verdict": "FAIL"
+    },
+    "workspaceJsStaticClosure": {
+      "baseline": 132086,
+      "current": 135942,
+      "deltaPercent": 2.92
+    },
+    "watchlistJsStaticClosure": {
+      "baseline": 157673,
+      "current": 159236,
+      "deltaPercent": 0.99
+    },
+    "assets": {
+      "baseline": 17769,
+      "current": 18061,
+      "deltaPercent": 1.64
+    },
+    "assetsJsStaticClosure": {
+      "baseline": 325513,
+      "current": 327206,
+      "deltaPercent": 0.52
+    },
+    "precache": {
+      "baseline": 495225,
+      "current": 543447,
+      "deltaPercent": 9.74
+    },
+    "installationUnion": {
+      "baseline": 505153,
+      "current": 553558,
+      "deltaPercent": 9.58
+    }
+  },
+  "fileCounts": {
+    "jsCss": [
+      95,
+      110
+    ],
+    "precache": [
+      98,
+      113
+    ],
+    "installationUnion": [
+      100,
+      115
+    ]
+  },
+  "newChunksGzip9": {
+    "OwnerFullSyncPanel-": {
+      "file": 7066,
+      "jsStaticClosure": 126616
+    },
+    "OwnerFullSyncPacketPanel-": {
+      "file": 5444,
+      "jsStaticClosure": 114275
+    },
+    "ownerPortfolioWorkspaceSync-": {
+      "file": 4587,
+      "jsStaticClosure": 143439
+    },
+    "owner-workspace-full-sync-managed-": {
+      "file": 3822,
+      "jsStaticClosure": 151170
+    },
+    "owner-workspace-full-sync-commands-": {
+      "file": 2647,
+      "jsStaticClosure": 138589
+    },
+    "owner-workspace-full-sync-ack-": {
+      "file": 5506,
+      "jsStaticClosure": 153846
+    },
+    "owner-workspace-full-sync-": {
+      "file": 1241,
+      "jsStaticClosure": 148340
+    },
+    "owner-portfolio-merge-": {
+      "file": 3483,
+      "jsStaticClosure": 22207
+    },
+    "owner-full-sync-recovery-": {
+      "file": 1854,
+      "jsStaticClosure": 146368
+    }
+  },
+  "supersededMeasurements": [
+    {
+      "stage": "unfrozen initial diagnostic",
+      "workspaceGzip9": 14829,
+      "deltaPercent": 36.13,
+      "verdict": "FAIL",
+      "usedForFinal": false,
+      "evidence": "../excluded-initial-diagnostic.json"
+    },
+    {
+      "stage": "first fixed command extraction; three stable pairs",
+      "workspaceGzip9": 13609,
+      "deltaPercent": 24.93,
+      "verdict": "FAIL",
+      "usedForFinal": false,
+      "evidence": "../summary.json"
+    },
+    {
+      "stage": "fixed synchronous transition helper; three stable pairs",
+      "workspaceGzip9": 13314,
+      "deltaPercent": 22.23,
+      "verdict": "FAIL",
+      "usedForFinal": false,
+      "evidence": "../final/summary.json"
+    },
+    {
+      "stage": "pre-final whitespace cleanup; three stable pairs",
+      "workspaceGzip9": 13341,
+      "deltaPercent": 22.47,
+      "verdict": "FAIL",
+      "usedForFinal": false,
+      "evidence": "../final-v3/summary.json",
+      "artifactInventoryIdenticalToFinal": true
+    }
+  ],
+  "historicalBudgetDebt": {
+    "workspaceFromA519": {
+      "baseline": 7787,
+      "current": 13341,
+      "deltaPercent": 71.32,
+      "verdict": "FAIL",
+      "historicalBaselineRebuilt": false
+    },
+    "assetsFromF010": {
+      "baseline": 14605,
+      "current": 18061,
+      "deltaPercent": 23.66,
+      "verdict": "FAIL",
+      "thresholdPercent": 20,
+      "historicalBaselineRebuilt": false
+    },
+    "precacheFromA519": {
+      "baseline": 400938,
+      "current": 543447,
+      "deltaPercent": 35.54,
+      "verdict": "WARN",
+      "historicalBaselineRebuilt": false
+    },
+    "installationFromA519": {
+      "baseline": 410446,
+      "current": 553558,
+      "deltaPercent": 34.87,
+      "verdict": "WARN",
+      "historicalBaselineRebuilt": false
+    },
+    "priorPolicyPanelDebt": "Still open in the prior execution log; not washed away by rebasing this comparison."
+  },
+  "rawEvidence": {
+    "localTempDirectory": "fc-full-sync-perf-20261025-519848f/final-v4",
+    "sha256": {
+      "measure.mjs": "6ef3e2fc0957a60b30e65eee91ee9cd278d4911a6a16e4f4ece026f169959475",
+      "freeze-qualified.json": "0e573d67c7e0db2b13547f6ccbaab2c8635b2a3148ab7801435d7a7f29ba2583",
+      "summary.json": "1e626a4fc7c756cec34b2fb603539f1aa0e98f190ac781db2adf45a37b701b6c",
+      "superseded/summary.json": "47d92e3855711abd4a80a09d9e75721ed2816e04a632cf32199098c79621934e",
+      "superseded/final\\summary.json": "cc69608d4cf6279215bb40c53e9aeb6357665590a48900f9081bbd91482ad208",
+      "superseded/final-v3\\summary.json": "1e626a4fc7c756cec34b2fb603539f1aa0e98f190ac781db2adf45a37b701b6c",
+      "superseded/excluded-initial-diagnostic.json": "94589f25a96881947d1fbe6fdb537a56b12dc4f6a3d957c6f9c4e0e9c3257cda"
+    },
+    "independentlyArchived": false
+  },
+  "qualification": {
+    "functionalLocal": true,
+    "resourceBudget": false,
+    "realBrowser": false,
+    "pwaUpgrade": false,
+    "multiDevice": false,
+    "cloudMigration": false,
+    "remoteDurability": false,
+    "independentRemoteRestore": false,
+    "formalRelease": false
+  },
+  "limitations": [
+    "The original 20 percent workspace budget remains FAIL after reductions. No waiver or higher budget is assumed; only the existing feature branch may be pushed.",
+    "Lazy code remains in the complete Workbox precache; no PWA installation-network optimization is claimed.",
+    "Three builds measure artifacts, not the plan's at-least-five warm/cold runtime samples. Real API/render, large-history/device and PWA behavior remain unverified.",
+    "Local Python3.14 warnings differ from Python3.12 CI; the local 1211 warnings are preserved, not suppressed or converted to CI results.",
+    "The active full write/receipt/ACK journey is implemented, but cloud-only remote refresh without a local pending packet, v6 analysis qualification, machine consumers and remaining v9 gates still require separate work."
+  ]
+}

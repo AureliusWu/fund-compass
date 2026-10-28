@@ -1,0 +1,55 @@
+{
+  "schema": "fc-owner-policy-artifact-comparison-1",
+  "baselineCommit": "008dc195703dab3bdcd3a9706db3ac68c17f99ce",
+  "baselineArchiveSha256": "3df0b8fb80d513b3ea5aac3d705030889ce449465d0ddc7f259203db8041c64c",
+  "frontendTreePins": {
+    "baseline": "0765560dd15a8bb02ea28c2a3de21ed937257497a77be4e945e58931e1c7f244",
+    "current": "1bbfbd5e9d7a8c16b8c11cefbccfe4ac3d5184779d75230b7ded86bbf304b8ce"
+  },
+  "method": "Three artifact samples per side in A/B/B/A/A/B order, each a direct npm build plus PWA7/7. Same installed node_modules junction; dependency manifests LF-equivalent. Freeze covers all frontend inputs except node_modules/dist after diagnostic declaration generation. Actual emitted static import/export AST closure and every precache URL/non-null MD5 checked. gzip9 sums are not browser transferred bytes. Builds overlapped the local backend suite; compiler times are observations, not a latency benchmark.",
+  "samplesPerSide": 3,
+  "artifactStable": true,
+  "viteBuildSeconds": {
+    "baseline": [9.02, 8.45, 7.98],
+    "current": [9.01, 8.29, 7.40],
+    "baselineMedian": 8.45,
+    "baselineWorst": 9.02,
+    "currentMedian": 8.29,
+    "currentWorst": 9.01,
+    "latencyVerdict": "NOT_EVALUATED_CONCURRENT_WORK"
+  },
+  "gzip9Bytes": {
+    "jsCss": { "baseline": 591937, "current": 596631, "deltaPercent": 0.79, "verdict": "PASS" },
+    "workspaceChunk": { "baseline": 9654, "current": 9653, "deltaPercent": -0.01, "verdict": "PASS" },
+    "workspaceStaticClosure": { "baseline": 129514, "current": 129678, "deltaPercent": 0.13, "verdict": "PASS" },
+    "watchlistStaticClosure": { "baseline": 156227, "current": 156390, "deltaPercent": 0.10, "verdict": "PASS" },
+    "analysisManagerChunk": { "baseline": 3593, "current": 4293, "deltaPercent": 19.48, "verdict": "WARN" },
+    "analysisManagerStaticClosure": { "baseline": 127886, "current": 130289, "deltaPercent": 1.88, "verdict": "PASS" },
+    "analysisPanelChunk": { "baseline": 4071, "current": 6075, "deltaPercent": 49.23, "verdict": "FAIL", "thresholdPercent": 20 },
+    "analysisPanelStaticClosure": { "baseline": 110191, "current": 112360, "deltaPercent": 1.97, "verdict": "PASS" },
+    "precache": { "baseline": 468138, "current": 472817, "deltaPercent": 1.00, "verdict": "PASS" },
+    "precacheAndWorkerSupportUnion": { "baseline": 477942, "current": 482635, "deltaPercent": 0.98, "verdict": "PASS" },
+    "newPolicyStateChunk": { "baseline": null, "current": 1418, "verdict": "NEW_FEATURE_NO_BASELINE" }
+  },
+  "precacheUrlCount": { "baseline": 90, "current": 91 },
+  "historicalBudgetDebt": {
+    "reference": "a51940d separately measured prior baseline, not rebuilt in this comparison",
+    "workspaceChunkGzip9": { "baseline": 7787, "current": 9653, "deltaPercent": 23.96, "thresholdPercent": 20, "verdict": "FAIL" },
+    "precacheGzip9": { "baseline": 400938, "current": 472817, "deltaPercent": 17.93, "thresholdPercent": 10, "verdict": "WARN" },
+    "installationUnionGzip9": { "baseline": 410446, "current": 482635, "deltaPercent": 17.59, "thresholdPercent": 10, "verdict": "WARN" }
+  },
+  "rawEvidence": {
+    "localTempDirectory": "fc-policy-perf-b79c955c57d34046ad3c6906ae834f63",
+    "helperSha256": "58090a347106e5a84c96f8a32914ff2feb87ee0fc97205918b412fea6423dd68",
+    "summarySha256": "d85f8e60729fa3d4a6b65de13d4b9cef52b1cd381f23b2f34cf7ba0c5f6bc0f2",
+    "independentlyArchived": false
+  },
+  "limitations": [
+    "First archive command had a PowerShell native-argument construction error and emitted no archive. The explicit-path command succeeded before all diagnostic builds and freeze; this is not a hidden failed build.",
+    "Initial current11.06s and baseline9.63s diagnostic builds are excluded. The current diagnostic build overlapped the final request helper edit and is not source-bound verification; all six measured builds followed freeze.",
+    "The new read-only Policy UI/diff adds 2004 gzip bytes to the panel chunk (local FAIL); strict freshness proof adds 700 bytes to the manager (WARN), and the new parser adds 1418 bytes. Small overall/closure growth does not erase those local flags.",
+    "Full rules render only after explicit expansion; no real-browser heavy-policy interaction, layout, warm/cold, installed-PWA, offline, API or device performance proof exists.",
+    "One rebuilt baseline differs by a few gzip bytes from the prior turn's measured current artifact. Do not merge independent source pins or claim artifact byte equivalence from commit identity alone.",
+    "No budget was raised, no dependency changed, and historical FAIL/WARN remain open. Formal release and I21 performance qualification remain false."
+  ]
+}

@@ -1,5 +1,10 @@
 import { readFileSync } from 'node:fs'
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createRenderer, h, nextTick, ref } from 'vue'
+import { createPinia, disposePinia, type Pinia } from 'pinia'
+import FundDetailV8Panel from './FundDetailV8Panel.vue'
+import { clearOwnerSession, loginOwnerSession } from '@/stores/ownerSession'
+const SYNTHETIC_TOKEN = 'own_' + 'a'.repeat(43)
 import type {
   V8DecisionResult,
   V8EvidenceSnapshot,
@@ -60,30 +65,190 @@ function evidence(overrides: Partial<V8EvidenceSnapshot> = {}): V8EvidenceSnapsh
 }
 
 function decisionResult(overrides: Record<string, unknown> = {}): V8DecisionResult {
-  return {
+  const action = (overrides.action ?? 'reduce') as V8DecisionResult['action']
+  const held = ['add', 'hold', 'reduce', 'sell'].includes(action)
+  const confidence = (overrides.confidence ?? 82) as number
+  const strength = (overrides.strength ?? 78) as number
+  const summary = (overrides.summary ?? '当前仓位超出政策目标') as string
+  const base = {
     code: '018147',
     name: '海外科技 QDII',
     type: 'QDII-普通股票',
-    action: 'reduce',
+    action,
     action_label: '减仓',
-    strength: 78,
-    confidence: 82,
-    summary: '当前仓位超出政策目标',
+    strength,
+    confidence,
+    summary,
     evidence: evidence(),
     holding: {
-      user_state: 'held', current_weight: 28, target_weight: 12,
+      schema_version: 'v8-holding-1', holding_version: `hold_${'3'.repeat(64)}`, fund_code: '018147',
+      user_state: held ? 'held' : 'unheld', shares: held ? 10 : 0, market_value: held ? 12.345 : 0,
+      cost: null, current_weight: held ? 28 : 0, target_weight: 12, account: null, updated_at: null,
+      created_at: '2026-08-28T14:30:00+08:00', source: 'fixture',
     },
+    policy: { schema_version: 'v8-policy-1', policy_version: `pol_${'4'.repeat(64)}`, name: '合成策略',
+      target_allocations: {}, target_ranges: {}, max_single_fund_weight: 40, max_theme_weight: 60,
+      rebalance_band: 2, dca_rules: {}, reduce_rules: {}, sell_rules: {}, source: 'fixture',
+      effective_at: '2026-08-28T14:30:00+08:00', created_at: '2026-08-28T14:30:00+08:00', supersedes: null },
     decision: {
-      action: 'reduce', strength: 78, confidence: 82,
+      schema_version: 'v8-decision-1', decision_id: `dec_${'2'.repeat(64)}`, evidence_id: `ev_${'1'.repeat(64)}`,
+      holding_version: `hold_${'3'.repeat(64)}`, policy_version: `pol_${'4'.repeat(64)}`, fund_code: '018147',
+      strategy_version: 'decision-v2', user_state: held ? 'held' : 'unheld', action, strength, confidence, summary,
+      reason_codes: [`ACTION_${action.toUpperCase()}`], reasons: ['原快照理由'], risks: [],
+      invalidation_codes: ['DATA_STALE'], invalidation_conditions: ['数据过期重新评估'], evidence_nodes: [],
+      created_at: '2026-08-28T14:30:00+08:00',
       position_guidance: {
         current_weight: 28, target_weight: 12, target_range: [10, 14],
         suggested_change: -16, suggested_range: [14, 18], amount: 16000,
         method: '超配回归目标区间', precise: true,
       },
     },
-    ...overrides,
-  } as unknown as V8DecisionResult
+    diff: null,
+  }
+  return { ...base, ...overrides,
+    type: overrides.evidence && typeof overrides.evidence === 'object' && 'fund_type' in overrides.evidence
+      ? overrides.evidence.fund_type : base.type,
+    decision: { ...base.decision,
+    ...(overrides.decision && typeof overrides.decision === 'object' ? overrides.decision : {}) } } as unknown as V8DecisionResult
 }
+
+interface HostNode { type: string; text: string; children: HostNode[]; parent: HostNode | null }
+function hostNode(type = 'root', text = ''): HostNode { return { type, text, children: [], parent: null } }
+const renderer = createRenderer<HostNode, HostNode>({
+  createElement: type => hostNode(type),
+  createText: text => hostNode('text', text),
+  createComment: text => hostNode('comment', text),
+  setText: (node, text) => { node.text = text },
+  setElementText: (node, text) => { node.text = text; node.children = [] },
+  patchProp: () => {},
+  insert(node, parent, anchor = null) {
+    if (node.parent) {
+      const previous = node.parent.children.indexOf(node)
+      if (previous >= 0) node.parent.children.splice(previous, 1)
+    }
+    node.parent = parent
+    const before = anchor ? parent.children.indexOf(anchor) : -1
+    if (before < 0) parent.children.push(node)
+    else parent.children.splice(before, 0, node)
+  },
+  remove(node) {
+    if (node.parent) node.parent.children.splice(node.parent.children.indexOf(node), 1)
+    node.parent = null
+  },
+  parentNode: node => node.parent,
+  nextSibling: node => node.parent?.children[node.parent.children.indexOf(node) + 1] ?? null,
+})
+function renderedText(node: HostNode): string {
+  return (node.type === 'comment' ? '' : node.text) + node.children.map(renderedText).join(' ')
+}
+async function settleVueRequests() {
+  for (let index = 0; index < 20; index++) await Promise.resolve()
+  await nextTick()
+}
+function mountedPrivateFixture(): V8DecisionResult {
+  const value = decisionResult({ summary: '合成私人快照，退出后必须隐藏' })
+  value.diff = {
+    previous_decision_id: null, current_decision_id: value.decision.decision_id,
+    previous_action: null, current_action: 'reduce', changed: false,
+    drivers: [], driver_codes: [], unchanged: [],
+  }
+  return value
+}
+
+let testPinia: Pinia
+beforeEach(() => {
+  vi.useFakeTimers().setSystemTime('2026-08-28T06:30:00Z')
+  testPinia = createPinia()
+})
+afterEach(() => {
+  clearOwnerSession()
+  disposePinia(testPinia)
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+  vi.useRealTimers()
+})
+
+describe('mounted detail private-session consumer', () => {
+  it('hides already-loaded current actions when local holdings change without rewriting the snapshot', async () => {
+    const fixture = mountedPrivateFixture()
+    const original = JSON.stringify(fixture)
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => Promise.resolve({
+      ok: true, status: 200,
+      json: async () => url.endsWith('/owner/session') ? {
+        access_token: SYNTHETIC_TOKEN, token_type: 'Bearer', owner_id: 'owner',
+        expires_at: new Date(Date.now() + 30 * 60_000).toISOString(),
+        scopes: ['read_private', 'write_holdings', 'run_personal_analysis'],
+      } : url.endsWith('/outcomes') ? { fund_code: '018147', total: 0, items: [] } : fixture,
+    })))
+    await loginOwnerSession('synthetic-password')
+    const pending = ref(false)
+    const root = hostNode()
+    const app = renderer.createApp({ render: () => h(FundDetailV8Panel, { code: '018147', localHoldingPending: pending.value }) })
+    app.use(testPinia)
+    app.component('RouterLink', { render: () => h('a', '查看历史复盘') })
+    app.mount(root)
+    await settleVueRequests()
+    expect(renderedText(root)).toContain(fixture.summary)
+    pending.value = true
+    await nextTick()
+    expect(renderedText(root)).toContain('当前行动已暂停')
+    expect(renderedText(root)).toContain('旧 Gist 上传也不等于新版确认')
+    expect(renderedText(root)).not.toContain(fixture.summary)
+    expect(renderedText(root)).not.toContain('当前动作')
+    expect(JSON.stringify(fixture)).toBe(original)
+    app.unmount()
+  })
+  it('removes already-rendered private snapshots immediately after session clearing', async () => {
+    const fixture = mountedPrivateFixture()
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => Promise.resolve({
+      ok: true, status: 200,
+      json: async () => url.endsWith('/owner/session') ? {
+        access_token: SYNTHETIC_TOKEN, token_type: 'Bearer', owner_id: 'owner',
+        expires_at: new Date(Date.now() + 30 * 60_000).toISOString(),
+        scopes: ['read_private', 'write_holdings', 'run_personal_analysis'],
+      } : url.endsWith('/outcomes') ? { fund_code: '018147', total: 0, items: [] } : fixture,
+    })))
+    await loginOwnerSession('synthetic-password')
+    const root = hostNode()
+    const app = renderer.createApp({ render: () => h(FundDetailV8Panel, { code: '018147' }) })
+    app.use(testPinia)
+    app.mount(root)
+    await settleVueRequests()
+    expect(renderedText(root)).toContain(fixture.summary)
+    clearOwnerSession()
+    await nextTick()
+    expect(renderedText(root)).not.toContain(fixture.summary)
+    expect(renderedText(root)).toContain('私人决策快照不对匿名请求公开')
+    app.unmount()
+  })
+
+  it('never renders late private replies after the session was cleared', async () => {
+    const lateReplies: Array<() => void> = []
+    const fixture = mountedPrivateFixture()
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => {
+      if (url.endsWith('/owner/session')) return Promise.resolve({ ok: true, status: 200, json: async () => ({
+        access_token: SYNTHETIC_TOKEN, token_type: 'Bearer', owner_id: 'owner',
+        expires_at: new Date(Date.now() + 30 * 60_000).toISOString(),
+        scopes: ['read_private', 'write_holdings', 'run_personal_analysis'],
+      }) })
+      return new Promise(resolve => { lateReplies.push(() => resolve({
+        ok: true, status: 200,
+        json: async () => url.endsWith('/outcomes') ? { fund_code: '018147', total: 0, items: [] } : fixture,
+      })) })
+    }))
+    await loginOwnerSession('synthetic-password')
+    const root = hostNode()
+    const app = renderer.createApp({ render: () => h(FundDetailV8Panel, { code: '018147' }) })
+    app.use(testPinia)
+    app.mount(root)
+    clearOwnerSession()
+    lateReplies.forEach(finish => finish())
+    await settleVueRequests()
+    expect(renderedText(root)).not.toContain(fixture.summary)
+    expect(renderedText(root)).toContain('私人决策快照不对匿名请求公开')
+    app.unmount()
+  })
+})
 
 describe('FundDetail V8 presenter', () => {
   it('keeps null distinct from a real zero', () => {
@@ -209,8 +374,8 @@ describe('FundDetail V8 presenter', () => {
       rawActionCode: 'reduce',
       positionExecutionAllowed: false,
     })
-    expect(display.gateReason).toContain('过期字段：market_time')
-    expect(display.gateReason).toContain('estimate:model 不可用')
+    expect(display.gateReason).toContain('数据过期：market_time')
+    expect(display.gateReason).toContain('estimate:model 已过期或不可用')
     expect(raw.holding.user_state).toBe('held')
     expect(raw.decision.position_guidance?.current_weight).toBe(28)
     expect(raw.decision.position_guidance?.target_weight).toBe(12)
@@ -218,7 +383,7 @@ describe('FundDetail V8 presenter', () => {
     expect(JSON.stringify(raw)).toBe(before)
   })
 
-  it('turns a low-confidence strong action into observation at the shared 55 gate', () => {
+  it('pauses low-confidence buy snapshots at their actual 65 gate while preserving reduction at 55', () => {
     const low = decisionResult({
       action: 'buy', action_label: '买入', confidence: V8_STRONG_ACTION_CONFIDENCE_GATE - 1,
       decision: { action: 'buy', confidence: V8_STRONG_ACTION_CONFIDENCE_GATE - 1 },
@@ -227,8 +392,8 @@ describe('FundDetail V8 presenter', () => {
     expect(buildV8DetailDecisionDisplay(low)).toMatchObject({
       gated: true,
       gateKind: 'low_confidence',
-      displayActionLabel: '观察',
-      displayActionCode: 'watch',
+      displayActionLabel: '暂停动作',
+      displayActionCode: 'paused',
       rawActionLabel: '买入',
       rawActionCode: 'buy',
       positionExecutionAllowed: false,

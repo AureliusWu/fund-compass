@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { V8Action, V8DecisionResult } from '@/api/client'
 import {
   formatNullableNumber,
@@ -17,40 +17,69 @@ function makeDecision(options: {
   strength?: number
   stale?: boolean
 }): V8DecisionResult {
+  const held = ['add', 'hold', 'reduce', 'sell'].includes(options.action)
+  const suffix = options.code.padStart(64, '0')
+  const confidence = options.confidence ?? 80
+  const strength = options.strength ?? 70
+  const at = '2026-08-28T06:30:00Z'
   return {
     code: options.code,
     name: `基金 ${options.code}`,
     type: '混合型',
     action: options.action,
     action_label: options.actionLabel ?? options.action,
-    confidence: options.confidence ?? 80,
-    strength: options.strength ?? 70,
+    confidence,
+    strength,
     summary: '测试摘要',
     decision: {
-      decision_id: `decision-${options.code}`,
+      schema_version: 'v8-decision-1', decision_id: `dec_${suffix}`, evidence_id: `ev_${suffix}`,
+      fund_code: options.code, holding_version: `hold_${suffix}`, policy_version: `pol_${suffix}`,
+      strategy_version: 'decision-v2', user_state: held ? 'held' : 'unheld', action: options.action,
+      strength, confidence, summary: '测试摘要', reason_codes: [`ACTION_${options.action.toUpperCase()}`],
       reasons: ['结构化原因'],
+      risks: [], invalidation_codes: ['DATA_STALE'], position_guidance: null, evidence_nodes: [],
       invalidation_conditions: ['数据过期时重新评估'],
       created_at: '2026-08-28T06:30:00Z',
     },
     evidence: {
+      schema_version: 'v8-evidence-1', evidence_id: `ev_${suffix}`, fund_code: options.code,
+      fund_name: `基金 ${options.code}`, fund_type: '混合型', benchmark_id: null,
+      valuation_percentile: 20, trend_state: '上升趋势', momentum_state: null,
+      drawdown: null, volatility: null, market_temperature: null, score: 80, score_version: 'score-v1',
+      score_coverage: 0.8, timing_coverage: 0.8, timing_signal: '买入', estimate: 0,
+      estimate_status: 'fresh', estimate_coverage: null, estimate_model_version: null,
+      estimate_error_p80: null, estimate_sample_count: null, estimate_mae: null, estimate_direction_accuracy: null,
+      evidence_nodes: [], missing_fields: [], risk_flags: [],
       evidence_strength: 75,
       stale_fields: options.stale ? ['official_nav'] : [],
-      source_states: options.stale ? [{ stale: true, state: 'stale' }] : [],
+      source_states: [{ source_id: 'fixture', stale: !!options.stale, state: options.stale ? 'stale' : 'healthy',
+        last_success: at, last_failure: null, latency_ms: 0, data_age_seconds: 0, error_class: null }],
       created_at: '2026-08-28T06:30:00Z',
       market_time: '2026-08-28T06:30:00Z',
-      official_nav: null,
-      official_nav_date: null,
+      official_nav: 1,
+      official_nav_date: '2026-08-27',
       target_nav_date: null,
     },
+    holding: { schema_version: 'v8-holding-1', holding_version: `hold_${suffix}`, fund_code: options.code,
+      user_state: held ? 'held' : 'unheld', shares: held ? 1 : 0, market_value: held ? 1 : 0,
+      cost: null, current_weight: held ? 10 : 0, target_weight: null, account: null,
+      source: 'fixture', updated_at: null, created_at: at },
+    policy: { schema_version: 'v8-policy-1', policy_version: `pol_${suffix}`, name: '合成策略',
+      target_allocations: {}, target_ranges: {}, max_single_fund_weight: 40, max_theme_weight: 60,
+      rebalance_band: 2, dca_rules: {}, reduce_rules: {}, sell_rules: {}, source: 'fixture',
+      effective_at: at, created_at: at, supersedes: null },
     diff: {
       previous_decision_id: null,
+      current_decision_id: `dec_${suffix}`, current_action: options.action, previous_action: null,
       changed: false,
-      drivers: [],
+      drivers: [], driver_codes: [], unchanged: [],
     },
   } as unknown as V8DecisionResult
 }
 
 describe('HomeActionCenter decision semantics', () => {
+  beforeEach(() => { vi.useFakeTimers().setSystemTime('2026-08-28T06:30:00Z') })
+  afterEach(() => { vi.useRealTimers() })
   it('keeps stale and low-confidence strong snapshots out of the actionable count', () => {
     const decisions = [
       makeDecision({ code: '000001', action: 'buy' }),
@@ -73,7 +102,7 @@ describe('HomeActionCenter decision semantics', () => {
       failed: 1,
       redacted: 0,
     })
-    expect(homeDisplayAction(decisions[3])).toBe('观察')
+    expect(homeDisplayAction(decisions[3])).toBe('暂停动作')
     expect(homeDisplayAction(decisions[4])).toBe('暂停动作')
     expect(summarizeHomeActions([
       makeDecision({ code: '000008', action: 'hold', confidence: 40 }),
@@ -92,7 +121,8 @@ describe('HomeActionCenter decision semantics', () => {
       makeDecision({ code: '000004', action: 'reduce', confidence: 50 }),
     ])
 
-    expect(ordered.map((item) => item.code)).toEqual(['000001', '000002', '000004', '000003'])
+    // A sell snapshot at 60 is below its actual 75 confidence gate.
+    expect(ordered.map((item) => item.code)).toEqual(['000002', '000001', '000004', '000003'])
   })
 
   it('does not count redacted private snapshots as missing records or failed requests', () => {

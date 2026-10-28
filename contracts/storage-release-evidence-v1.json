@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:fund-compass:storage-release-evidence:v1",
+  "title": "Formal storage evidence v1 (validator implemented; protected executor and release integration pending)",
+  "type": "object", "additionalProperties": false,
+  "required": ["payload", "attestation"],
+  "properties": {
+    "payload": {
+      "type": "object", "additionalProperties": false,
+      "required": ["contract_version", "scope", "target_sha", "write_source_sha256", "engine", "authority", "resource_fingerprint", "credential_configuration_revision", "database_schema_version", "application_record_id", "write_sha256", "read_sha256", "write_boot", "read_boot", "written_at", "read_at", "recovery", "ci_run_id", "issued_at", "expires_at"],
+      "properties": {
+        "contract_version": { "const": 1 },
+        "scope": { "const": "production_application_chain" },
+        "target_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "write_source_sha256": { "$ref": "#/$defs/digest" },
+        "engine": { "enum": ["sqlite", "libsql"] },
+        "authority": { "enum": ["persistent_disk", "turso_cloud"] },
+        "resource_fingerprint": { "$ref": "#/$defs/digest" },
+        "credential_configuration_revision": { "$ref": "#/$defs/identifier" },
+        "database_schema_version": { "type": "integer", "minimum": 8 },
+        "application_record_id": { "$ref": "#/$defs/identifier" },
+        "write_sha256": { "$ref": "#/$defs/digest" },
+        "read_sha256": { "$ref": "#/$defs/digest" },
+        "write_boot": { "$ref": "#/$defs/boot" },
+        "read_boot": { "$ref": "#/$defs/boot" },
+        "written_at": { "type": "string", "format": "date-time" },
+        "read_at": { "type": "string", "format": "date-time" },
+        "recovery": {
+          "type": "object", "additionalProperties": false,
+          "required": ["scope", "restored_resource_fingerprint", "application_read_sha256", "schema_verified", "constraints_verified", "completed_at", "rpo_seconds", "rto_seconds"],
+          "properties": {
+            "scope": { "enum": ["independent_provider_restore", "independent_persistent_disk_restore"] },
+            "restored_resource_fingerprint": { "$ref": "#/$defs/digest" },
+            "application_read_sha256": { "$ref": "#/$defs/digest" },
+            "schema_verified": { "const": true },
+            "constraints_verified": { "const": true },
+            "completed_at": { "type": "string", "format": "date-time" },
+            "rpo_seconds": { "type": "number", "minimum": 0 },
+            "rto_seconds": { "type": "number", "minimum": 0 }
+          }
+        },
+        "ci_run_id": { "type": "integer", "minimum": 1 },
+        "issued_at": { "type": "string", "format": "date-time" },
+        "expires_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "attestation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["algorithm", "key_id", "signature"],
+      "properties": {
+        "algorithm": { "const": "HMAC-SHA256" },
+        "key_id": { "$ref": "#/$defs/identifier" },
+        "signature": { "$ref": "#/$defs/digest" }
+      }
+    }
+  },
+  "$defs": {
+    "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "identifier": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$" },
+    "boot": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "started_at", "deployment_sha"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "started_at": { "type": "string", "format": "date-time" },
+        "deployment_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+      }
+    }
+  },
+  "x-validator-limits": {
+    "max_evidence_bytes": 32768,
+    "max_json_depth": 8,
+    "key_bytes_min": 32,
+    "key_bytes_max": 4096,
+    "max_lifetime_seconds_from_issuance_and_write": 604800,
+    "future_issuance_grace_seconds": 0,
+    "timestamp_rule": "UTC RFC3339 Z or +00:00, at most 6 fractional digits",
+    "canonical_payload": "UTF-8 Python JSON semantics, sorted keys, ensure_ascii=false, separators comma/colon, allow_nan=false"
+  },
+  "x-verification-required": [
+    "Protected executor actually performs the write, restart and application read; shape validation alone never grants eligibility",
+    "Attestation key is independent from Admin, Worker and Owner credentials; canonical payload signature is verified, not trusted from caller input",
+    "Target/source/schema/resource/configuration revision match current trusted deployment metadata",
+    "write_sha256 equals read_sha256 and recovery.application_read_sha256",
+    "Read boot differs from write boot; times prove a real restart after write and before application read",
+    "Restored resource differs from original, and restored application chain is independently readable",
+    "Evidence is current and expired, wrong-scope, local-only or unsigned receipts fail closed",
+    "No credential values, database URLs, real holdings or unredacted provider errors in evidence"
+  ]
+}
