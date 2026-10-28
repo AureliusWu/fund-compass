@@ -2,6 +2,8 @@
 
 > 2026-10-28 用户选择 PR #4 仅合并代码、先暂停部署。Pages 自动发布必须显式设置仓库变量 `AUTO_DEPLOY_ENABLED=true` 才允许执行；未设或 false 均不发布，测试/构建/审计和数据任务继续运行。两个 Render 服务的 Auto-Deploy 已由用户关闭并经连接器读回 Off。下文的正常发布流程仅在另行授权恢复部署、完成相应门禁后适用；操作与状态边界见 [CODE-ONLY-MERGE-HOLD.md](CODE-ONLY-MERGE-HOLD.md)。
 
+> 合并后纠正：服务 Off 之外还必须关闭关联 **Blueprint Settings → Auto Sync=No**。PR4 的配置差异实际触发一次 blueprint_sync（update_failed，旧部署仍live），故不得总结为未触发部署。后续 main 配置更新在 Blueprint 暂停确认前停止；源码 autoDeployTrigger 字符串off仅是另一道服务设置约束，不代替 Auto Sync。
+
 前端只通过 `CI` 的可复用 Pages 作业部署。CI 锁定 `origin/main` 的精确提交，后端、前端和 Worker 门禁全部通过后才部署并执行生产 smoke。由 GitHub Actions 生成并提交的持仓、经理、基金全集、海外精度或校准数据，会在提交成功后带精确 SHA 重试派发一次 `CI`；这样既能让 Pages 跟进静态数据，又不会依赖 `GITHUB_TOKEN` push 自动触发新工作流，也不会形成提交循环。要让线上拿到真实数据，还需把**后端部署到公网**并让前端指向它。
 
 ## 一、部署后端（任选其一）
