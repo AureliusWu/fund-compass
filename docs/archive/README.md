@@ -25,8 +25,9 @@
 ## 验证及删除边界
 
 - Windows 的 `core.autocrlf=true` 可能改变已签定原始源码的字节。
-  原生 SHA 校验失败不能改 pin 放行；使用固定提交的 `git archive` 导出 LF 原文后，
-  按原测试、原 fixture 和原校验值验证，并分别保留两次结果。
+  原生 SHA 校验失败不能改 pin 放行；使用固定提交及显式
+  `git -c core.autocrlf=false archive` 导出源码，先核原始字节确为 LF，再按原测试、
+  原 fixture 和原校验值验证。普通 archive 也可能受 autocrlf 影响；各次结果分别保留。
 - 仅在补充测试与档案进入 main、相关回归通过后，才将两条旧分支导出为自包含 Git bundle。
   备份保存在本机 Git 元数据之外的独立目录或 Git 元数据内的专用归档目录，不上传公开仓库。
 - 删除前须 `git bundle verify`，再从 bundle 独立恢复两条 refs，核原 head 与对象完整性。
