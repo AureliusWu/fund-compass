@@ -1596,3 +1596,42 @@ Admin旧POST本身仍无独立持久原请求槽/回执，真实网络或提交�
 候选服务08:36:40Z实际再次读回no/off，原服务仍Off。独立修复分支 `fix/code-only-blueprint-hold-20261028` 基于db5ac32，新增显式字符串off及缺失/commit/checksPass/YAML布尔/旧字段混用等拒绝合同，原真实文件测试先RED；最终相关persistence+workflow测试263项通过，未删原进程恢复/权限/免费/单worker/Secret约束。源码验证不是平台暂停或恢复验收，Blueprint Auto Sync仍须单独确认后才更新main。
 
 其后用户确认关停，Chrome实际DOM读取关联Blueprint exs-d8v0sgjtqb8s73f29ok0 Settings，标题Sync paused、autoSync=No、main/render.yaml；没有点击手动同步或显示/复制私有Sync Hook。连接器再次读回两个服务no/off，部署列表保留原update_failed及旧80d01717 live；Pages AUTO_DEPLOY_ENABLED=false。PR4合并后的main CI40657553598实际completed/success，resolve/backend/frontend/worker成功、deploy/candidate_smoke/formal_smoke实际skipped。暂停控制补齐不等于生产验收，PR5最终新head仍走完整CI再普通合并，不部署、不恢复开关、不删分支/旧Gist、不升版本。
+
+## 2026-10-29：云同步HTTP与完整机器消费者的本地候选接线
+
+用户要求按照下一步推进，先做云端接入/Worker闭环，不扩产品功能。基于main `a6750d5b6e9c34ff540976e95752f9e73510bd6c`，使用本地分支`feat/v9-cloud-worker-candidate-20261029`；未推送、未合main、未恢复平台自动部署、未读数据库凭据/实际云schema、未云写或真实发送。应用仍8.0.0，正式发布BLOCKED；代码提交身份以Git记录为准。
+
+### 本轮实现与真实边界
+
+- 原main Owner同步仍用已有本地工厂，改为明确三操作repository seam；另有显式URL/Token的实际Owner-only ASGI候选，真实session/sync路由共享鉴权、同意、有界请求、unknown与响应隐私。构造/startup零IO，无main Turso切换、自动迁移、analysis/machine或伪耐久health。Turso仓储仍仅认core schema-table9+Owner五表，完整machine云profile仍未实现。
+- 新受保护`POST /worker/portfolio/evidence`绑定完整服务端source revision/typed SHA/Policy与最多100条完整行情观察，只读同库已有有效public详情缓存，复用原金融规则/固定V8 INSERT，同一事务保存Evidence/health/scope及原批次不可变回执。原UTF-8正文SHA严格含空白和数字词法；只读原回执可核历史，但不授予重发/当前分析或通知资格。新Evidence128KiB，原任务正文16KiB、30秒预算、2MiB返回及对象/journal容量不放宽。
+- Worker实际run/runScheduled/受保护test已接默认关闭的candidate模式，source→全部行情→Evidence→prepare→claim→发送前source/Policy/真实窗口复核→一次物理POST→原attempt finish。unknown不重试/自动对账，不回退Gist；原task/attempt/body SHA保留。API15秒与发送10秒各自覆盖headers、完整正文和JSON校验，60秒全链/34次外部行情预算不增加。公开候选health明确unknown，私有status只读。
+- 独立复审实际发现两项跨层问题：外部行情解析**不会**预热后端缓存；旧serializer的uncertainty被新canonical DTO拒绝。前者保留明确的完整有效缓存准备门禁与fail-closed，不暗加100次请求；后者以实际machine专用serializer展开准确度字段修复，0/null及QDII日期轴不变。另修新入口intraday值日期错位/过旧NAV守卫、共享绝对deadline及claim计数语义。没有把冷缓存前置标成已完成。
+
+实现合同见[行情入库](OWNER-MACHINE-EVIDENCE-CANDIDATE.md)、[Worker候选](OWNER-MACHINE-WORKER-CANDIDATE.md)、[Owner同步ASGI](OWNER-SYNC-ASGI-CANDIDATE.md)。
+
+### 原生验证记录与未升级的资格
+
+| 范围 | 实际结果 | 不能替代 |
+| --- | --- | --- |
+| Owner同步相关7文件 | 185 passed，73.74s，1条既有弃用警告 | 实际Turso能力、云写、迁移/恢复 |
+| 新Evidence/跨语言/真实loopback | 最终43 passed，22.03s，1条既有弃用警告 | 真实行情来源、TLS、Cloudflare、ServerChan送达 |
+| 后端标准LF分组全套 | 1899+1330+1471=4700 passed，0错误/失败/跳过；267.96/346.63/332.45s | Linux/Python3.12的实际远端CI |
+| 最新CI合同与既有workflow回归 | 249 passed，4.31s（新增合同1项） | GitHub实际执行 |
+| Worker类型/全量 | tsc通过，5文件182 passed，1.11s | Wrangler安全资格、真实部署 |
+| 与CI同入口的双runtime专项 | 5 passed，2.89s，0skip；pip check无依赖损坏 | 真实生产或设备验收 |
+
+原native Windows全量在3411 passed后，5项旧迁移pin因CRLF≠固定LF而setup失败（582.35s）；没有改pin或迁移守卫。独立LF副本中`turso_scope_packet.py` SHA恢复原固定`5d37c2df98a73ec4fdda654adffb876b14bedd1e67a800cad4a95d886fa73fae`。分组首次一组因隔离collection缺tools导入路径而未执行，补显式测试PYTHONPATH后再完整通过；不记首次PASS。测试副本保留于本机Temp `fc-v9-candidate-lf-9d408ff2bca9451cbd7b87ffb1219fa3`，三份JUnit报告；最终全部已测Python/TS与工作区逐文件规范LF比对0漂移。新增CI合同在副本测试启动后加入，已在实际最终文件上单独及248项原合同一起重跑。
+
+本机Python3.14.4/SQLite3.50.4，不冒充CI的Python3.12。全套三进程含重复Starlette警告、Pydantic故意坏模型告警，以及原路径`is_reserved`在3.14的1209次弃用警告；保留告警，未为消除它们改动受pin迁移文件。新增跨层测试在纯backend缺Node/esbuild环境会明确skip；本轮本机均实际运行。CI现已在已有Worker依赖安装的job增加Python与这两文件，显式验证esbuild、至少5项用例且JUnit无skip，缺工具或跳过即失败；部署暂停条件/审计/精确SHA门禁均保留。该CI修改尚未推送或远端运行。
+
+真实loopback使用内存打包的实际Worker、实际HTTP ASGI、鉴权/原报文/金融规则/SQLite/回执；只有外部行情与送达模拟。第一次合成sent、第二次skip、物理sender计数1。测试并非外部已送达证明，也不解决真实Gist旧状态迁移。
+
+100基金完整入库三次0.2441/0.1964/0.1949s，中位0.1964s、最慢0.2441s，低于原30秒协作预算；新接口无可比旧baseline。完整本地ESM gzip26090→33537B，增加7447B，记录体积增长WARN，不将其误作前端传输或生产冷启动结果。测量方法/原样本/源SHA见[本地性能记录](OWNER-MACHINE-CANDIDATE-PERFORMANCE-20261029.json)。既有核心性能债务不因此关闭。
+
+### 下一项顺序
+
+1. 明确且受控的完整public详情缓存准备与完整machine云profile：当前迁移包仅Owner-only，正常Turso verifier仍拒analysis/machine新增immutable triggers，不能靠替换connection factory或放宽SQLite-only守卫解决。
+2. 独立停写/保全与原schema来源、容量/provider能力、fresh backup后，才谈受控迁移、真实业务写入跨重启及独立数据库恢复。需保留未知与权限停止边界。
+3. 旧Gist发送槽/前值/歧义状态完整迁入或旧脚本明确退役，不能双消费者发送或从空状态重新通知。
+4. 真实Chrome/旧PWA/多设备、5个应运行交易窗口及2次周级周期、正式持久证据链与核心性能门禁分别验收后，再升9.0.0、恢复部署或删除旧Gist。

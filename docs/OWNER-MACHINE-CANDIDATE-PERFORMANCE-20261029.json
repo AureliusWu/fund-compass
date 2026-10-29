@@ -1,0 +1,55 @@
+{
+  "schema": "owner-machine-candidate-local-performance-1",
+  "observed_date": "2026-10-29",
+  "timezone": "Asia/Shanghai",
+  "baseline_commit": "a6750d5b6e9c34ff540976e95752f9e73510bd6c",
+  "candidate_branch": "feat/v9-cloud-worker-candidate-20261029",
+  "candidate_identity": "uncommitted worktree source bytes below, before local commit",
+  "runtime": {"python": "3.14.4", "sqlite": "3.50.4", "platform": "Windows 11"},
+  "evidence_100": {
+    "method": "real TestClient HTTP and existing complete synthetic local SQLite, full 100-code batch, three distinct original invocation IDs",
+    "samples_seconds": [0.24407860008068383, 0.1964122001081705, 0.19485280010849237],
+    "median_seconds": 0.1964122001081705,
+    "worst_seconds": 0.24407860008068383,
+    "baseline": null,
+    "comparison_note": "new endpoint; no before/after improvement or statistically established p95",
+    "project_total_budget_seconds": 30,
+    "verdict": "WITHIN_LOCAL_OPERATION_BUDGET_ONLY",
+    "concurrent_load": "three canonical-LF backend pytest groups active; imported modules and filesystem caches are warm"
+  },
+  "worker_bundle": {
+    "method": "esbuild complete emitted ESM, bundle=true, target=es2022, minify=false, same build SHA, gzip",
+    "baseline_bytes": 111637,
+    "baseline_gzip_bytes": 26090,
+    "candidate_bytes": 140152,
+    "candidate_gzip_bytes": 33537,
+    "raw_growth_bytes": 28515,
+    "gzip_growth_bytes": 7447,
+    "candidate_sha256": "650bc9f845bb5dae0c5d502413279314c7b173cdbdf72966e4afd7ee633bf0aa",
+    "verdict": "WARN_ARTIFACT_GROWTH_COLD_START_UNMEASURED",
+    "scope": "local full output, not Wrangler verified/deployed output, not frontend transferred JS"
+  },
+  "measured_native_source_sha256": {
+    "backend/models/owner_machine.py": "09b530eddba598ae4812f911be67233c4604619e889f7b745669148d8867490a",
+    "backend/service/owner_machine_evidence.py": "84c7c8d237b9a2b6d3a090819925207186eb1913beea3117655ec746cd550c7c",
+    "backend/service/owner_machine.py": "8e42676b818e0e4e98b9dc2362d26b68a27a81208f3d8b1139e5fac055e72512",
+    "backend/service/owner_machine_repo.py": "6acafa1852990c930833f5a692123924cd924c496987362d8ad652e123b7a081",
+    "backend/service/v8_repo.py": "79d8b9551f75356e8ccd834fb0238df74827ebd2e6d56726b9700d151cfecba6",
+    "backend/service/v8_decisions.py": "ebb6cfd6eb150cebbc4cb265294159a4511867fc975705fa3a21629c288d1988",
+    "backend/service/overseas_evidence.py": "fb0e324dc8145677110f8ca566c27581fa51f6badccec120589653aecfeb1ce6",
+    "backend/service/owner_sync.py": "e80333fb6016ba624c8466bbb217109aa65114671f50a40eac27f1aca8aee389",
+    "backend/service/owner_sync_candidate_app.py": "d931b61c0cc54cce5bcb88efd7e029e516c8544af87cf90e42eed1a3d8e5c92d",
+    "worker/src/index.ts": "832e0656743730feb04f57cee400012b1ba7171c2d29aad049621bcf7a861b1a",
+    "worker/src/owner-machine.ts": "edb147ed16be63c0b4ecb2685abbd115c92a7668ffbc3825d21a14f573fd68a7"
+  },
+  "qualification": {
+    "real_turso": false,
+    "real_cloudflare_cron": false,
+    "real_delivery": false,
+    "frontend_or_device_performance": false,
+    "production_cold_start": false,
+    "durability_and_restore": false,
+    "formal_release": false,
+    "overall": "LOCAL_CANDIDATE_ONLY_WITH_ARTIFACT_GROWTH_WARNING"
+  }
+}

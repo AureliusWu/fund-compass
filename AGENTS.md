@@ -117,6 +117,12 @@ uvicorn main:app --reload --port 8000
 - watchlist 自有 managed facade 按操作核真实 locator/端点原字符串/会话 generation/两槽来源/当前内存/完整本机状态及 handle；不能由 UI 传恒真 guard。关闭面板或退出只撤销并隐藏私人响应，保留当前 store 内原未知本机 id/hash；整次 writer、后置 hydrate 与 Pinia 同步发布完成之前不能丢该标识。手动原回执匹配才释放，不重放；跨刷新未知标识仍需独立导出，不声称内存标识永久持久。
 - 已采用 IDB 后旧 candidate/CAS UI 必须退出，不同时保留另一写路径。实际 managed UI 默认关闭，link/制包/发送/取消/三方 ACK 分别预览确认；字段或更名整组选项变化失效旧 ACK 请求，unknown 仅回执/导出/关闭。数据 0/null/负零、删除与未知时间仍不同；实际 Chrome、旧 PWA、多设备和部署验收不由合成 SFC/IDB 测试代替。
 
+## 2026-10-29 候选接线补充
+
+- Owner 同步已用明确三操作 repository seam 接回原 main 本地入口；`owner_sync_candidate_app.create_turso_owner_sync_candidate_app` 另以显式 URL/Token 挂真实会话与同步 HTTP，构造/startup 零 IO，不读取数据库环境凭据、不挂 health/analysis/machine，不开放 CORS。main 仍只用原本地工厂；Turso 候选仍只认 core schema-table9 + Owner-only 五表，不能借此放行完整 machine 云 profile 或宣称迁移/耐久。
+- `/worker/portfolio/evidence` 只认 Worker/Admin，完整排序至多100条行情观察必须核原完整 source revision/SHA/当前Policy。只读同一完整本地 machine 库的已有有效详情缓存；外部行情解析不会预热后端缓存，冷/过旧/未来或不一致缓存整批拒绝。不网络抓取、不另开业务连接、不接受 Holding/score/客户端 Evidence。专属正文128KiB，原 prepare/claim/finish仍16KiB；所有Evidence/health/scope及原字节SHA的批次回执同事务追加。既有不可变journal仅增加显式receipt文档合同，不改DDL/对象预算；它不算自然任务成功。原回执可手动只读核对，缺失、401、commit/close/HTTP未知均不能授予重发。新packet只收canonical字段，intraday值日期必须当日；QDII目标轴、0/null和原已存Evidence时间保留，历史summary全批次10000行/8MiB超限拒绝不截断。
+- Worker 的 `OWNER_MACHINE_MODE` 缺省/空/off 仍为legacy生产路径，只有显式candidate接完整source→行情→Evidence→prepare→claim→单次发送→finish，任何失败不回退Gist。未启用平台开关、未部署或迁移旧发送状态，不能双路真实发送。原POST字节SHA/原task/attempt须保留，unknown只手核；claimed=false或读回attempt不授予发送。发送前复核source/Policy/真实窗口；60秒总预算、API15秒及发送10秒各自覆盖完整正文/验证，34次行情预算不增加。候选health明确unknown，私有status只读，不能以模拟sent代替真实送达或自然周期证据。
+
 ## 项目边界
 
 - `FundVal`（蜉蝣基金）和 `pan`（盘中宝）是纯前端盘中估值工具。

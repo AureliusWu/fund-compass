@@ -69,10 +69,15 @@ def load_artifact() -> dict:
 
 
 def resolve_for_detail(detail: dict, now: datetime | None = None) -> dict | None:
+    return _resolve_for_detail(detail, now, load_artifact())
+
+
+def _resolve_for_detail(detail: dict, now: datetime | None, artifact: dict) -> dict | None:
+    """Resolve one fund from an already bounded public-artifact snapshot."""
     code = str(detail.get("code") or "")
     if not re.fullmatch(r"\d{6}", code):
         return None
-    row = (load_artifact().get("models") or {}).get(code)
+    row = (artifact.get("models") or {}).get(code)
     if not isinstance(row, dict):
         return None
     required_dates = {

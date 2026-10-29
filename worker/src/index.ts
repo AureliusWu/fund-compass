@@ -1,4 +1,5 @@
 import { ExternalDataError, externalGet, readBoundedText, readJson } from './external'
+import { machineMode, readOwnerMachineStatus, runOwnerMachine } from './owner-machine'
 import {
   beijingDate,
   canonicalWireTime,
@@ -36,6 +37,8 @@ function currentBuildSha(): string | null {
 }
 
 export interface Env {
+  /** Unset/off retains legacy. Candidate is explicit and never falls back to Gist. */
+  OWNER_MACHINE_MODE?: string
   GIST_ID: string
   FUND_API_BASE: string
   GIST_TOKEN: string
@@ -646,6 +649,17 @@ export function estimateContext(estimate?: Estimate): DecisionEstimateContext {
   }
 }
 
+/** New machine packets use only canonical fields; keep legacy wire aliases local. */
+export function machineEstimateContext(estimate?: Estimate): Record<string, unknown> {
+  const { uncertainty, ...context } = estimateContext(estimate)
+  return {
+    ...context,
+    mae: uncertainty?.mae ?? null,
+    error_p80: uncertainty?.error_p80 ?? null,
+    direction_accuracy: uncertainty?.direction_accuracy ?? null,
+  }
+}
+
 function safeDecisionEstimate(estimate: Estimate | undefined): Estimate | undefined {
   if (estimate?.kind === 'qdii_next_nav_estimate') {
     try { publicValuationItem(estimate) }
@@ -1219,6 +1233,7 @@ export async function run(
   valuationOptions: { requestBudget?: number } = {},
   requestedSlot?: NaturalSlot,
 ) {
+  if (machineMode(env)) return runOwnerMachine(env, force, clock, currentBuildSha(), machineEstimateContext, requestedSlot)
   if (!env.GIST_ID || !env.GIST_TOKEN || !env.WECHAT_SENDKEY) throw new Error('Worker 密钥配置不完整')
   const now = beijingNow(clock)
   const slot = force ? `${now.hour}:${now.minute}` : naturalSlot(now, requestedSlot)
@@ -1434,6 +1449,8 @@ export async function runScheduled(
   requestedSlot?: NaturalSlot,
   scheduledClock?: Date,
 ) {
+  // Candidate observations are the backend's original machine journal, not Gist.
+  if (machineMode(env)) return runOwnerMachine(env, false, clock, currentBuildSha(), machineEstimateContext, requestedSlot)
   const now = beijingNow(clock)
   const scheduledAt = scheduledClock && Number.isFinite(scheduledClock.getTime())
     ? beijingNow(scheduledClock).iso
@@ -1485,6 +1502,22 @@ export default {
   },
   async fetch(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
     const url = new URL(request.url)
+    let candidate = false
+    try { candidate = machineMode(env) }
+    catch { return Response.json({ error: 'machine_mode_invalid' }, { status: 503, headers: { 'Cache-Control': 'no-store' } }) }
+    if (url.pathname === '/machine-status') {
+      const privateHeaders = { 'Cache-Control': 'no-store', Pragma: 'no-cache', 'X-Content-Type-Options': 'nosniff' }
+      if (!candidate) return Response.json({ error: 'machine_candidate_disabled' }, { status: 404, headers: privateHeaders })
+      if (request.method !== 'GET') return Response.json({ error: 'method_not_allowed' }, { status: 405, headers: { ...privateHeaders, Allow: 'GET' } })
+      const authorization = request.headers.get('Authorization')
+      if (!(env.WORKER_TOKEN && authorization === `Bearer ${env.WORKER_TOKEN}`)
+        && !(env.ADMIN_TOKEN && authorization === `Bearer ${env.ADMIN_TOKEN}`)) {
+        return Response.json({ error: 'unauthorized' }, { status: 401, headers: privateHeaders })
+      }
+      if ([...url.searchParams.keys()].length !== 1 || !url.searchParams.has('date')) return Response.json({ error: 'invalid_machine_query' }, { status: 422, headers: privateHeaders })
+      try { return Response.json(await readOwnerMachineStatus(env, url.searchParams.get('date')!, currentBuildSha()), { headers: privateHeaders }) }
+      catch { return Response.json({ error: 'machine_status_unavailable' }, { status: 503, headers: privateHeaders }) }
+    }
     if (request.method === 'OPTIONS' && (url.pathname === '/estimates' || url.pathname === '/quotes' || url.pathname === '/holdings' || url.pathname === '/health')) {
       return new Response(null, {
         status: 204,
@@ -1506,12 +1539,14 @@ export default {
           status: 405, headers: { ...healthHeaders(request), Allow: 'GET, HEAD, OPTIONS' },
         })
       }
-      const runtime = await cachedHealthRuntime(env)
+      const runtime = candidate
+        ? { source: 'owner-machine-candidate', status: 'unknown', reason: 'authenticated_status_required' }
+        : await cachedHealthRuntime(env)
       const payload = {
         status: 'ok', service: 'sinan-estimate-push', version: '8.0.0', build_sha: currentBuildSha(), runtime, configured: {
         gist_id: Boolean(env.GIST_ID), fund_api: Boolean(env.FUND_API_BASE),
         gist_token: Boolean(env.GIST_TOKEN), serverchan: Boolean(env.WECHAT_SENDKEY), admin: Boolean(env.ADMIN_TOKEN),
-        worker: Boolean(env.WORKER_TOKEN),
+        worker: Boolean(env.WORKER_TOKEN), owner_machine_candidate: candidate,
       } }
       if (request.method === 'HEAD') return new Response(null, { headers: healthHeaders(request) })
       return Response.json(payload, { headers: healthHeaders(request) })

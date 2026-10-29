@@ -11,6 +11,7 @@ from dataclasses import dataclass
 import hmac
 import json
 import os
+import re
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
@@ -18,9 +19,11 @@ from starlette.concurrency import run_in_threadpool
 from starlette.requests import ClientDisconnect
 
 from models.owner_machine import (
-    MAX_BODY_BYTES, MachineClaim, MachineFinish, MachineInput, MachinePrepare, parse_machine_input,
+    MAX_BODY_BYTES, MAX_EVIDENCE_BODY_BYTES, MachineClaim, MachineEvidence, MachineFinish, MachineInput,
+    MachinePrepare, parse_machine_input,
 )
 from service import owner_analysis_repo as analysis, owner_machine_repo as repo, security
+from service import owner_machine_evidence as evidence_repo
 
 PRIVATE_HEADERS = {"Cache-Control": "no-store", "Pragma": "no-cache", "X-Content-Type-Options": "nosniff"}
 
@@ -58,7 +61,7 @@ def _revalidate(authority):
                                     headers={**(error.headers or {}), **PRIVATE_HEADERS}) from None
 
 
-async def _body(request):
+async def _body(request, *, max_bytes=MAX_BODY_BYTES):
     if request.query_params:
         raise _error(422, "invalid_machine_query")
     types = request.headers.getlist("content-type")
@@ -68,13 +71,13 @@ async def _body(request):
     if len(lengths) > 1 or lengths and (not lengths[0].isascii() or not lengths[0].isdigit() or len(lengths[0]) > 10):
         raise _error(400, "invalid_machine_content_length")
     declared = int(lengths[0]) if lengths else None
-    if declared is not None and declared > MAX_BODY_BYTES:
+    if declared is not None and declared > max_bytes:
         raise _error(413, "machine_body_too_large")
     data = bytearray()
     try:
         async with asyncio.timeout(5.0):
             async for chunk in request.stream():
-                if len(data) + len(chunk) > MAX_BODY_BYTES:
+                if len(data) + len(chunk) > max_bytes:
                     raise _error(413, "machine_body_too_large")
                 data.extend(chunk)
     except TimeoutError:
@@ -122,11 +125,32 @@ def build_owner_machine_router(connection_factory):
             raise _error(422, "invalid_machine_query")
         return await execute(authority, lambda conn, _check: repo.read_source_local(conn))
 
-    def parsed(raw, model):
+    def parsed(raw, model, *, max_bytes=MAX_BODY_BYTES):
         try:
-            return parse_machine_input(raw, model)
+            return parse_machine_input(raw, model, max_body_bytes=max_bytes)
         except Exception:
             raise _error(422, "invalid_machine_request") from None
+
+    @router.post("/evidence")
+    async def evidence(request: Request, authority=Depends(_authorize)):
+        value = parsed(await _body(request, max_bytes=MAX_EVIDENCE_BODY_BYTES), MachineEvidence,
+                       max_bytes=MAX_EVIDENCE_BODY_BYTES)
+        return await execute(authority, lambda conn, check: evidence_repo.ingest_evidence_local(
+            conn, value, before_commit=check), writing=True)
+
+    @router.get("/evidence/{request_id}")
+    async def evidence_receipt(request_id: str, request: Request, authority=Depends(_authorize)):
+        values = request.query_params
+        if (set(values) != {"occurrence_date", "request_hash"} or len(values.multi_items()) != 2
+                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{7,127}", request_id)
+                or not re.fullmatch(r"[0-9a-f]{64}", values.get("request_hash", ""))):
+            raise _error(422, "invalid_machine_query")
+        try:
+            day = MachineInput(occurrence_date=values["occurrence_date"]).occurrence_date
+        except Exception:
+            raise _error(422, "invalid_machine_occurrence") from None
+        return await execute(authority, lambda conn, check: evidence_repo.read_evidence_receipt_local(
+            conn, day, request_id, values["request_hash"], before_read=check))
 
     @router.post("/tasks/prepare")
     async def prepare(request: Request, authority=Depends(_authorize)):
