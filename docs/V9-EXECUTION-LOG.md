@@ -1671,3 +1671,31 @@ Admin旧POST本身仍无独立持久原请求槽/回执，真实网络或提交�
 本轮只检查用户此前明确提到的两个临时Turso凭据路径是否存在，均不存在；未读取Token、枚举其它凭据或连接实际云schema，不能断言云库今天仍是什么版本。所有actual-Turso/remote-apply/restore/formal资格false，默认Worker、main工厂、Wrangler安全阻断和部署暂停保持原合同。
 
 下一步先接**完整机器业务的显式云仓储/启动候选**（当前analysis/machine/evidence/cache业务仍仅nativeSQLite，不能剥类型守卫冒称云接通）。随后只用正常配置的候选凭据做只读身份/能力/容量核对，独立停写排空和fresh受保护备份后，才可计划实际8→9 Owner与本次machine扩展的受控应用。新profile/演练不授权先把仍不兼容的线上库改掉。旧Gist发送状态保全、自然周期、跨重启业务写入及独立恢复仍需逐项验收后，才谈9.0.0、恢复部署或删除旧Gist。
+
+## 2026-10-30：业务云仓储接线与真实候选只读核验
+
+从候选 `1b35489` 完成声明的 Owner sync/analysis、Policy read 与 Worker cache/evidence/task 的真实云仓储能力；[显式候选 app](OWNER-BUSINESS-CLOUD-CANDIDATE.md) 消费真实 engine，而不是把远端连接伪装为 nativeSQLite。main 工厂/旧 verifier/默认 Worker/版本8.0.0/部署暂停不改；没有公共基金/旧 Admin/settlement/health，因此不称全站切换。
+
+### 实际实现与独立复审修复
+
+[业务 engine](TURSO-BUSINESS-ENGINE-BOUNDARY.md) 在同一远端只读事务中固定分页捕获完整 private/legacy 与完整 Owner-key public code 域；每页保留前核 typed/cell/JSON 与跨表100k行/64MiB，拒绝公共 PK 空值/重复。owned native mirror 只执行仓库固定 DDL，复用原金融 core；封闭 delta 在一个远端原子批次核完整前像、精确 REAL、affected、完整后像/FK。NAV 用 changed code 的精确整集合替换，不借子集 rowid。每个响应 guard 必须恰原生整数1；HTTP/close/撤权/monotonic回退/依赖源码漂移保留 unknown，不返回本地推演成功，不重放。
+
+独立复审发现并修复：写结果未核合同、public nullable复合PK折叠、monotonic回退、金融依赖pin漏项、80kNAV单响应JSON节点超限，以及改分页后跨页/跨表字节预算累计过晚。全部通过新增负向核验；不改旧driver/既有迁移pins或提高预算。
+
+### 本地质量门禁
+
+- 既有后端全量三组1841+1419+1610=4870 passed，0失败/错误/跳过，JUnit453.576/334.150/265.728s。分组1初次因工具PYTHONPATH收集失败，补显式owned-export路径后重跑通过，未改产品代码凑通过。
+- 最新engine18与实际ASGI→driver→owned HTTP候选12分别passed，JUnit19.315/18.889s，均0skip。覆盖coldcache、Evidence/分析、task原ID、claim一次、lostresponse/close后只读原receipt、撤权以及跨页总预算；没有把合成sender当真实送达。
+- 原main本地router218项复跑passed105.996s；双runtime6项复跑passed5.428s，不能重复加进4870的唯一计数。
+- Worker182项/5文件passed5.25s，仓库`npm run check`的tsc通过。一次误调用不存在的`type-check`保留为命令错误，不算产品失败或跳过门禁。
+- Python3.14.4/SQLite3.50.4，本机规范LF副本与工作区653个Python/TS文件0漂移；final engine SHA `55be595bdb3fb6e35970649e7822a3e43a2bbcbb2a08f68a96a75c6736217771`。既有弃用告警保留，不冒充远端Python3.12 CI。前端未改，不虚构前端/PWA/生产性能验收。
+
+原生样本、JUnit定位及分范围资格见 [BUSINESS-CLOUD-VALIDATION-20261030.json](BUSINESS-CLOUD-VALIDATION-20261030.json)。
+
+### 真云结果与当前实际阻断
+
+先前指定文件缺失、旧Token返回401、Chrome导出超时/安全停止均保留为历史失败。用户更新原Temp文件后，新Token真实inspect成功，随后单DEFERRED固定metadata batch核：schema-table8/header0，20张应用表、28169只基金、raw86，固定schema8+known operational完全匹配，FK1/main单库/temp空。两张optional确有probe+universe，完整machine需129>128：这是fresh事实，不再只是历史推测。
+
+只尝试一次fixed-read一致逻辑源捕获，返回`capture_transport_failed`，没有获得有效镜像或重试。私有备份目录ACL先SID解析失败，修正尝试又因SeSecurityPrivilege被拒后停止；不提权/绕过、未把该目录计为备份，需保留空目录访问问题。未写云DDL/DML、停写/备份/迁移/独立恢复均未通过；读取成功不认证写能力或全业务完整性。
+
+实际迁移继续BLOCKED，不先迁成半完成Owner9。优先保留原库，另核零成本额度及新干净候选的来源/目标绑定逻辑导入方案；原地probe格式转换则需全新profile/rowid映射/原子receipt及捕获恢复合同，不能删旧表、隐藏autoindex或抬128凑通过。详见 [实际迁移记录](CLOUD-BUSINESS-ACTUAL-MIGRATION-20261030.md)。没有创建新云资源、恢复部署、真实通知、删Gist或升9.0.0。提交仅本地保全，未推送。

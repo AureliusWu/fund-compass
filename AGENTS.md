@@ -129,6 +129,13 @@ uvicorn main:app --reload --port 8000
 - `turso_machine_upgrade` 只接受显式idle、query_only/FK开启的nativeSQLite原快照与外部source/resource身份，独立编Owner-only9→完整machine增量条件包。原页界与serialize同一自有只读snapshot，原caller事务不动；全部旧表typed值/rowid/原header/旧迁移回执不变，只有仓库固定新DDL可执行。新迁移receipt复用已有immutable journal，保留非业务日期occurrence，不加对象/发通知；原四SHA重建与末尾源码/预算复核不能去掉。包含私有原像，禁止日志/CI上传；本地演练/固定只读计划不等于真实云应用、来源认证、恢复或重发许可。没有sender、凭据发现、startup迁移或自动修旧8。
 - 独立Worker/Admin `POST /worker/portfolio/cache/prepare` 是显式100次预算的准备操作，不是Worker34次行情预算扩张；不收客户端code/持仓/缓存，只核完整source/Policy与原缓存前像。最多4并发、每code一次固定HTTPS匿名primary、4MiB正文、原30秒总预算，网络必须在事务外；401/403/429停止新请求，不换身份/源/重试。原同连接IMMEDIATE重核后，全部cache及原字节SHA immutable receipt一起提交；fresh复用不续updated_at，失败不覆盖旧cache，unknown只手核原id/hash。成功仅对fetched code精确替换本次已验证公共NAV日期集合，不能union混入旧独有日期，不动其它codes/不可变业务链。独立cache receipt不算自然Cron成功，历史可读不续当前资格。真实云准备、实际停写/迁移/恢复与发送状态仍未执行；默认Worker和部署暂停不变。
 
+## 2026-10-30 完整业务云候选接线补充
+
+- `service/turso_business_engine.py` 为显式 URL/Token 的独立完整 machine profile 候选，不是 SQLite 协议伪装器。一个自有远端一致读事务内固定分页，完整 private/legacy、Owner/Policy/journal/引用均保留；只有 public funds/detail/NAV 按完整 Owner-key code 域截取。每页保留前就逐 typed/cell/JSON 校验并跨表累计原100k行/64MiB，超限即停读/rollback/close，不允许先聚齐再核。只执行仓库固定 DDL 建 owned native mirror，原业务 core 不放宽 native 守卫；public 比对用固定非空唯一 PK，不借子集 rowid。
+- 固定操作闭集编 delta，同一原子远端 batch 核原 raw schema/header/FK/完整前像、精确 REAL、affected count、完整后像/FK；响应也必须逐 guard 恰单行原生1及原生 affected。响应/close/撤权/时间或源码漂移均不得返回本地推演成功，unknown 不重放；cache 网络仍在 native 事务外。原900参数/16k steps/16MiB写包/30秒预算保持。
+- 新 `owner_business_candidate_app` 仅显式接 Owner sync/analysis、Policy read 与 Worker cache/evidence/task，构造/startup 零 IO；固定会话/CORS/consent/Worker隔离保留。本地 router seam 仍由原 factory/close 拥有，不改 main/default Worker/旧 profile。此 app 没有公共基金、旧 Admin/结算或 `/api/health`，不得直接替换原 Render 启动或全站 API_BASE 冒充消费者全迁移。
+- 真实候选最新只读确认 schema8/header0、raw86、probe+universe 两 optional 均在、完整 machine 保留原 inventory 后需129>128；新Token认证成功不解决迁移容量。不得删表、忽略隐式索引、放宽128或 initialize凑通过。一次一致源捕获失败，停写/受保护备份/实际迁移/独立恢复仍未完成；完整记录见 `docs/CLOUD-BUSINESS-ACTUAL-MIGRATION-20261030.md`。实际云库保持不变，应用仍8.0.0、部署继续暂停。
+
 ## 项目边界
 
 - `FundVal`（蜉蝣基金）和 `pan`（盘中宝）是纯前端盘中估值工具。
