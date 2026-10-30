@@ -554,6 +554,12 @@ def read_status_local(conn, occurrence):
             if found is None:
                 raise MachineFault("machine_integrity_unavailable")
             value, digest = found
+            if value.get("schema") == "owner-machine-cache-receipt-1":
+                # Preparation is not a successful natural task. Validate its
+                # independent immutable receipt without deriving a send right.
+                from service.owner_machine_cache import _checked_receipt
+                _checked_receipt(conn, value, row[0], check)
+                continue
             if value.get("schema") == "owner-machine-evidence-receipt-1":
                 # Market-ingestion receipts are not Cron execution success.
                 # Verify their independent closed contract before excluding

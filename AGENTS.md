@@ -123,6 +123,12 @@ uvicorn main:app --reload --port 8000
 - `/worker/portfolio/evidence` 只认 Worker/Admin，完整排序至多100条行情观察必须核原完整 source revision/SHA/当前Policy。只读同一完整本地 machine 库的已有有效详情缓存；外部行情解析不会预热后端缓存，冷/过旧/未来或不一致缓存整批拒绝。不网络抓取、不另开业务连接、不接受 Holding/score/客户端 Evidence。专属正文128KiB，原 prepare/claim/finish仍16KiB；所有Evidence/health/scope及原字节SHA的批次回执同事务追加。既有不可变journal仅增加显式receipt文档合同，不改DDL/对象预算；它不算自然任务成功。原回执可手动只读核对，缺失、401、commit/close/HTTP未知均不能授予重发。新packet只收canonical字段，intraday值日期必须当日；QDII目标轴、0/null和原已存Evidence时间保留，历史summary全批次10000行/8MiB超限拒绝不截断。
 - Worker 的 `OWNER_MACHINE_MODE` 缺省/空/off 仍为legacy生产路径，只有显式candidate接完整source→行情→Evidence→prepare→claim→单次发送→finish，任何失败不回退Gist。未启用平台开关、未部署或迁移旧发送状态，不能双路真实发送。原POST字节SHA/原task/attempt须保留，unknown只手核；claimed=false或读回attempt不授予发送。发送前复核source/Policy/真实窗口；60秒总预算、API15秒及发送10秒各自覆盖完整正文/验证，34次行情预算不增加。候选health明确unknown，私有status只读，不能以模拟sent代替真实送达或自然周期证据。
 
+## 2026-10-30 完整云 schema 与缓存准备补充
+
+- `turso_machine_profile` 是独立、显式的完整云schema只读合同：实际有界Turso driver一次DEFERRED batch核metadata，固定raw基线126、上限128（probe连autoindex占2），core `_schema_version=9`与原header0/8/9分轴；production-only、全部固定对象/marker/FK/temp/attach闭集。它不是main启动开关或完整业务全账本认证，旧core/Owner-only verifier与本地factory不放宽；全部云耐久/恢复/正式资格仍false。
+- `turso_machine_upgrade` 只接受显式idle、query_only/FK开启的nativeSQLite原快照与外部source/resource身份，独立编Owner-only9→完整machine增量条件包。原页界与serialize同一自有只读snapshot，原caller事务不动；全部旧表typed值/rowid/原header/旧迁移回执不变，只有仓库固定新DDL可执行。新迁移receipt复用已有immutable journal，保留非业务日期occurrence，不加对象/发通知；原四SHA重建与末尾源码/预算复核不能去掉。包含私有原像，禁止日志/CI上传；本地演练/固定只读计划不等于真实云应用、来源认证、恢复或重发许可。没有sender、凭据发现、startup迁移或自动修旧8。
+- 独立Worker/Admin `POST /worker/portfolio/cache/prepare` 是显式100次预算的准备操作，不是Worker34次行情预算扩张；不收客户端code/持仓/缓存，只核完整source/Policy与原缓存前像。最多4并发、每code一次固定HTTPS匿名primary、4MiB正文、原30秒总预算，网络必须在事务外；401/403/429停止新请求，不换身份/源/重试。原同连接IMMEDIATE重核后，全部cache及原字节SHA immutable receipt一起提交；fresh复用不续updated_at，失败不覆盖旧cache，unknown只手核原id/hash。成功仅对fetched code精确替换本次已验证公共NAV日期集合，不能union混入旧独有日期，不动其它codes/不可变业务链。独立cache receipt不算自然Cron成功，历史可读不续当前资格。真实云准备、实际停写/迁移/恢复与发送状态仍未执行；默认Worker和部署暂停不变。
+
 ## 项目边界
 
 - `FundVal`（蜉蝣基金）和 `pan`（盘中宝）是纯前端盘中估值工具。

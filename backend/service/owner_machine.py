@@ -24,6 +24,8 @@ from models.owner_machine import (
 )
 from service import owner_analysis_repo as analysis, owner_machine_repo as repo, security
 from service import owner_machine_evidence as evidence_repo
+from models.owner_machine_cache import parse_cache_prepare
+from service import owner_machine_cache as cache_repo
 
 PRIVATE_HEADERS = {"Cache-Control": "no-store", "Pragma": "no-cache", "X-Content-Type-Options": "nosniff"}
 
@@ -130,6 +132,31 @@ def build_owner_machine_router(connection_factory):
             return parse_machine_input(raw, model, max_body_bytes=max_bytes)
         except Exception:
             raise _error(422, "invalid_machine_request") from None
+
+    @router.post("/cache/prepare")
+    async def prepare_cache(request: Request, authority=Depends(_authorize)):
+        try:
+            value = parse_cache_prepare(await _body(request))
+        except (ValueError, UnicodeError, OverflowError, RecursionError):
+            raise _error(422, "invalid_machine_cache_request") from None
+        # Explicit operational preparation only: never startup, /source,
+        # an automatic Worker fallback, or a network call inside a DB txn.
+        return await execute(authority, lambda conn, check: cache_repo.prepare_cache_local(
+            conn, value, before_commit=check), writing=True)
+
+    @router.get("/cache/requests/{request_id}")
+    async def cache_receipt(request_id: str, request: Request, authority=Depends(_authorize)):
+        values = request.query_params
+        if (set(values) != {"occurrence_date", "request_hash"} or len(values.multi_items()) != 2
+                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{7,127}", request_id)
+                or not re.fullmatch(r"[0-9a-f]{64}", values.get("request_hash", ""))):
+            raise _error(422, "invalid_machine_query")
+        try:
+            day = MachineInput(occurrence_date=values["occurrence_date"]).occurrence_date
+        except Exception:
+            raise _error(422, "invalid_machine_occurrence") from None
+        return await execute(authority, lambda conn, check: cache_repo.read_cache_receipt_local(
+            conn, day, request_id, values["request_hash"], before_read=check))
 
     @router.post("/evidence")
     async def evidence(request: Request, authority=Depends(_authorize)):

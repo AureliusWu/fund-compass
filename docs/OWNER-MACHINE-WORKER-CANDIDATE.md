@@ -14,7 +14,7 @@
 
 Evidence 构建另有硬前置：后端同一个候选数据库中，完整 codes 的 `fund_detail` / `nav_history` 缓存须已经具备且满足后端新鲜度校验。外部 `resolveValuations` 只取得盘中观察，**不会**预热这些后端缓存；缺任一只时后端整批拒绝。本消费者不隐式追加 100 次详情请求、不提高行情预算，也不宣称完成缓存预热。实际候选准备必须另行提供和核验这些数据；目前 mock `/evidence` 成功的 Worker 测试不是这个前置的真实联通证明。
 
-冷缓存的真实接口会以 `machine_detail_unavailable` 拒绝 `/evidence`；Worker 对非成功 POST 保守报告 `machine_write_unknown` 并保留原请求 ID/body SHA，不因此补请求或改走旧路径。这个候选不是可直接打开的生产开关资格。
+冷缓存的真实接口会以 `machine_detail_unavailable` 拒绝 `/evidence`；Worker 对非成功 POST 保守报告 `machine_write_unknown` 并保留原请求 ID/body SHA，不因此补请求或改走旧路径。可在运行Worker之前，独立显式调用[缓存准备接口](OWNER-MACHINE-CACHE-PREPARATION.md)；本轮新增真实打包Worker→实际HTTP/SQLite的冷缓存准备联调，外部行情/送达仍为模拟。这个候选不是可直接打开的生产开关资格。
 
 候选要求明确的 HTTPS `FUND_API_BASE` 根 origin、`WORKER_TOKEN`、`WECHAT_SENDKEY` 和构建时完整 40 位 `WORKER_BUILD_SHA`。不发现凭据，不接受重定向或另一 origin。原 `/test` 仍仅 Admin；手工测试不再越过候选机器链的交易日、原 occurrence 或 14:50 截止限制。
 

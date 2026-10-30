@@ -1635,3 +1635,39 @@ Admin旧POST本身仍无独立持久原请求槽/回执，真实网络或提交�
 2. 独立停写/保全与原schema来源、容量/provider能力、fresh backup后，才谈受控迁移、真实业务写入跨重启及独立数据库恢复。需保留未知与权限停止边界。
 3. 旧Gist发送槽/前值/歧义状态完整迁入或旧脚本明确退役，不能双消费者发送或从空状态重新通知。
 4. 真实Chrome/旧PWA/多设备、5个应运行交易窗口及2次周级周期、正式持久证据链与核心性能门禁分别验收后，再升9.0.0、恢复部署或删除旧Gist。
+
+## 2026-10-30：完整云 schema、独立扩展包与显式缓存准备
+
+用户明确继续“完整云数据库profile、缓存准备”。本轮基于本地候选`babba5b2082f83efa1a791a2d56423b2238c5bdd`继续，不合main、不推送、不恢复部署、不升版本、不云写或真实发送。应用仍8.0.0，v9正式发布BLOCKED；本地提交身份见Git。
+
+### 交付的三块实际能力
+
+1. [完整云schema profile](TURSO-MACHINE-PROFILE-CANDIDATE.md)：固定manifest、固定有界读取计划及实际Turso driver的一次DEFERRED metadata batch。raw126基线/128上限含隐式索引；probe单独占2，不删未知对象或扩大上限。core-table9与header0/8/9分轴，唯一production metadata、全部固定对象/marker/FK/temp/attach闭合。旧core/Owner-only verifier与main本地工厂不改；schema匹配不是全业务认证或耐久。
+2. [独立Owner-only9→完整machine扩展包](TURSO-MACHINE-UPGRADE-CANDIDATE.md)：原生idle query_only/FK source及外部source/resource/plan/packet四SHA绑定，原页界与serialize同一个自有只读snapshot，保留caller原txn。原schema/typed旧行/rowid/header/旧8→9回执全像守卫；只有固定新DDL可执行，新immutable receipt复用journal，不加对象。末尾源码/预算漂移不发布matched/rehearsed。只有owned-memory演练和固定只读计划，没有sender、自动迁移或重试。
+3. [受保护缓存准备](OWNER-MACHINE-CACHE-PREPARATION.md)：实际main挂Worker/Admin POST `/api/v2/worker/portfolio/cache/prepare`与原回执GET。完整source/Policy及原缓存全像CAS，事务外每code一次固定primary GET、最多100/4并发、原30秒总预算/单请求8秒含解析检查点；同连接原子写全部cache+原body SHA receipt。fresh复用不续updated_at，0/null/日期与代码集合不放宽，准备不计自然Cron成功、不自动进入Worker或扩张其34次行情预算。
+
+独立复审实际发现并闭合缓存P1：旧upsert/prune会留下本次主源已撤回的旧中间日期，可能把混合历史打上新updated_at。现在仅对本次fetched code、在完整前像CAS和候选校验后同事务精确替换validated日期集；保留其它code/不可变业务链，DELETE后故障完整恢复旧cache且无新receipt。另闭合funds.type超长/BLOB不能折叠成null绕CAS、跨日/Policy生效、解析后原8秒截止、source serialize页界race及末尾code/time漂移；没有通过放宽断言关闭问题。
+
+### 验证与证据边界
+
+| 范围 | 原生结果 | 明确不代表 |
+| --- | --- | --- |
+| 缓存核心与固定reader | 最终47 passed，13.14s；HTTP接线另17 passed | 上游100基金配额或云写 |
+| 完整profile | 新61项；连旧相关回归170 passed，23.32s | 实际Turso库已升级 |
+| 扩展编译/演练 | 43 passed，6.85s | 真实传输、远端恢复、重发资格 |
+| 最终六文件专项整合 | 174 passed，47.05s，1条既有弃用警告 | 远端CI或生产验收 |
+| 标准LF全量后端 | 1841+1419+1610=4870 passed，0失败/错误/跳过；452.14/288.23/238.30s | Linux/Python3.12远端CI |
+| Worker | tsc通过，5文件182 passed，5.20s | 真实Cloudflare运行 |
+| CI同入口双runtime | 6 passed，4.35s，0skip；pip check通过 | 真实发送/Turso耐久 |
+
+标准LF副本及三份JUnit保留于本机Temp `fc-v9-profile-cache-lf-a2374573cc88423b8568875707d8c1fb`。全体Python/TS与工作区规范LF逐文件比对0漂移。未改既有迁移pin；Windows/Python3.14.4下保留Starlette、故意坏模型Pydantic告警和原`is_reserved`弃用1209次，不把本机当作CI的Python3.12。前端与Worker生产源/锁/版本未改，未重复声称前端性能或真实PWA已验。
+
+实际冷链联调用默认collector（仅逻辑HTTPS映射到拥有的本地HTTP）、实际原报文/鉴权/SQL/金融规则/不可变回执完成：冷cache→独立prepare→真实打包Worker→Evidence/prepare/claim→模拟单次sender→finish，第二次执行skip、sender计数1。warm路径同时保留；所有发送都模拟，不能拿finish(sent)当外部送达。
+
+另有公开只读样本：真实默认primary reader对510300取到800条保留历史、latest_nav_date=2026-10-29；2026-10-30以同供应商独立正式净值API对照同日同值，无DB写入。这是转换/日期轴的单样本功能证据，不是独立机构、100基金源稳定性、配额或性能认证。100基金本地冷准备三次0.1446/0.1658/0.1604s（中位0.1604），全部复用0.1265/0.1230/0.1296s（中位0.1265）；collector为合成数据，绝不外推公网吞吐或冷启动。方法、原样本与源SHA见[MACHINE-PROFILE-CACHE-VALIDATION-20261030.json](MACHINE-PROFILE-CACHE-VALIDATION-20261030.json)。数据结论CONDITIONALLY TRUSTED，仅限上述范围。
+
+### 仍未执行的实际云门禁
+
+本轮只检查用户此前明确提到的两个临时Turso凭据路径是否存在，均不存在；未读取Token、枚举其它凭据或连接实际云schema，不能断言云库今天仍是什么版本。所有actual-Turso/remote-apply/restore/formal资格false，默认Worker、main工厂、Wrangler安全阻断和部署暂停保持原合同。
+
+下一步先接**完整机器业务的显式云仓储/启动候选**（当前analysis/machine/evidence/cache业务仍仅nativeSQLite，不能剥类型守卫冒称云接通）。随后只用正常配置的候选凭据做只读身份/能力/容量核对，独立停写排空和fresh受保护备份后，才可计划实际8→9 Owner与本次machine扩展的受控应用。新profile/演练不授权先把仍不兼容的线上库改掉。旧Gist发送状态保全、自然周期、跨重启业务写入及独立恢复仍需逐项验收后，才谈9.0.0、恢复部署或删除旧Gist。

@@ -19,7 +19,7 @@ Evidence专属原正文上限128KiB；原prepare/claim/finish的16KiB不变。�
 
 ## 数据前置与时间轴
 
-`resolveValuations`访问外部行情源，**不会**预热后端详情缓存。候选准备必须另行提供同库完整codes的`fund_detail/nav_history`。本轮不暗加100次详情请求。缓存缺失、采集时间无时区/在未来/超7天、最新NAV日期在未来/超7天、同日NAV投影冲突或未来历史整批拒绝。历史NAV最多原800条，允许合法的多年历史；7天不是所有历史记录的筛选窗口。
+`resolveValuations`访问外部行情源，**不会**预热后端详情缓存。候选准备必须另行提供同库完整codes的`fund_detail/nav_history`，可显式使用[受保护的缓存准备](OWNER-MACHINE-CACHE-PREPARATION.md)；它不是Worker自动附带的100次请求。缓存缺失、采集时间无时区/在未来/超7天、最新NAV日期在未来/超7天、同日NAV投影冲突或未来历史整批拒绝。历史NAV最多原800条，允许合法的多年历史；7天不是所有历史记录的筛选窗口。
 
 行情报文继续保留真实0与null、正式净值与下一净值区别。新canonical入口不接受旧字段/kind别名，不接受客户端分数或持仓。intraday的value_date不是当日则降为unavailable，源时间、base匹配与未来偏差继续复用原服务校验。合法不可用报价保留该基金的中立Evidence，不缩小完整集合。官方、stale、modeled或QDII目标估算不计入当前intraday fresh数量。
 
@@ -29,4 +29,4 @@ Evidence专属原正文上限128KiB；原prepare/claim/finish的16KiB不变。�
 
 真实本地HTTP/SQLite覆盖完整批次、原回执、错误投影、丢响应、权限撤销与三次100基金计时。跨语言测试用实际Worker serializer进入Python parser；loopback测试用真实打包Worker调用本地后端，模拟公开行情/外部送达，验证第二次执行没有重复发送。不是实际TLS、Turso、Cloudflare Cron或ServerChan送达证据。
 
-下一项是受控完整缓存准备、full-machine云profile/迁移与能力验证、旧发送状态保全/接入、真实自然周期、跨重启与独立恢复。正常main/Turso守卫、部署暂停、Wrangler安全阻断与版本均未放宽。参见[Worker候选](OWNER-MACHINE-WORKER-CANDIDATE.md)及[Owner同步ASGI候选](OWNER-SYNC-ASGI-CANDIDATE.md)。
+已新增独立[云profile](TURSO-MACHINE-PROFILE-CANDIDATE.md)、[增量包本地演练](TURSO-MACHINE-UPGRADE-CANDIDATE.md)及显式缓存准备；并未执行云迁移或开放main远端仓储。实际provider能力/停写备份、旧发送状态保全/接入、真实自然周期、跨重启与独立恢复仍待验收。正常main/Turso守卫、部署暂停、Wrangler安全阻断与版本均未放宽。参见[Worker候选](OWNER-MACHINE-WORKER-CANDIDATE.md)及[Owner同步ASGI候选](OWNER-SYNC-ASGI-CANDIDATE.md)。
