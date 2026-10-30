@@ -136,6 +136,14 @@ uvicorn main:app --reload --port 8000
 - 新 `owner_business_candidate_app` 仅显式接 Owner sync/analysis、Policy read 与 Worker cache/evidence/task，构造/startup 零 IO；固定会话/CORS/consent/Worker隔离保留。本地 router seam 仍由原 factory/close 拥有，不改 main/default Worker/旧 profile。此 app 没有公共基金、旧 Admin/结算或 `/api/health`，不得直接替换原 Render 启动或全站 API_BASE 冒充消费者全迁移。
 - 真实候选最新只读确认 schema8/header0、raw86、probe+universe 两 optional 均在、完整 machine 保留原 inventory 后需129>128；新Token认证成功不解决迁移容量。不得删表、忽略隐式索引、放宽128或 initialize凑通过。一次一致源捕获失败，停写/受保护备份/实际迁移/独立恢复仍未完成；完整记录见 `docs/CLOUD-BUSINESS-ACTUAL-MIGRATION-20261030.md`。实际云库保持不变，应用仍8.0.0、部署继续暂停。
 
+## 2026-10-30 干净云候选历史快照验收补充
+
+- `turso_clean_target` 是独立显式的 schema8 历史一致 image→不同空候选的固定逻辑导入 profile2；原快照全部 raw/typed/rowid/sequence 留档，原 probe/import-state 仅在新目标省略；本轮不动旧库及运维表，捕获时的原3行完整留档，不推断其它writer此后没变化。新目标126对象、core9/header0、production-only，Owner revision0/空同步工作区不表示浏览器/Gist持仓迁入。不能改旧 in-place profile/pins/128预算或用 initialize 改旧库。
+- 私有原归档和原包不得进日志/Git/CI；外部 source/resource/archive/repair/plan/packet SHA 保留。plain whole-chunk 只限 native I64/text无NUL/null且256KiB内；REAL/BLOB/NUL/超限整块原exact fallback。原16MiB/900参数/100k行/10M VM/30秒不提高或reset；fresh source完整重导后只删同图冗余SQL扫描，保留严格归档JSON/base64往返、全部native frame/pipeline/control、外部身份和输入原六成员比对、独立native完整后像。外部packet public getter仍完整重导，不能shape-only放行外部输入。
+- `turso_clean_target_transport` 单次显式POST、无重试；新CTE INSERT按canonical闭集label仍核原生affected count和紧随changes guard。只读容量probe仅固定JSON1/Unicode/I64/null能力guard与自生0参数SELECT，标准UTF8、同完整步数、实际body在写包大小至+1KiB且≤16MiB；不接受私有包或任意SQL，不证明写入/SQL复杂度/事务时长或发布。
+- 本轮以原始34928行快照为输入完成一次新候选导入，原写 `transport_failed/http=null/COMMIT_ACK_UNKNOWN` 不改写；仅随后独立全126对象/35063行typed后像与原receipt精确匹配，记录 `actual_applied_reconciled`（读回时点存在），未重发。读事务ACK/rollback不迁给原写。独立新进程完整profile与真实Policy只读通过；没有fake Owner/tasks/sent、真实业务变更、生产切换、旧源停写/最终增量或provider独立恢复。详细七身份、加密归档恢复边界与旧失败见 `docs/CLEAN-CANDIDATE-ACCEPTANCE-20261030.md`。
+- 应用仍8.0.0，main/默认Worker/旧Gist/Render/Blueprint门禁不变。不得以本轮历史复制、当前Windows用户DPAPI恢复、本地演练或真实只读成功关闭跨重启业务写入、独立恢复、Chrome/PWA、自然Cron及正式v9发布门禁。
+
 ## 项目边界
 
 - `FundVal`（蜉蝣基金）和 `pan`（盘中宝）是纯前端盘中估值工具。

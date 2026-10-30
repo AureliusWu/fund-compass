@@ -2,6 +2,8 @@
 
 本轮请求：完成业务云仓储接线，再做实际迁移验收。应用版本仍为 **8.0.0**，物理 schema 仍独立为 9；本文不授予云写、恢复、真实发送或正式发布资格。
 
+> 历史记录边界：本文记录原地升级与初次捕获阶段，下面的阻断/“尚未创建”陈述不改写。后续用户另行授权并创建干净候选，历史一致快照已一次导入，原写 ACK UNKNOWN 后通过原包全后像及 receipt 独立核对；旧库不改。最新范围、原始失败、331 项相关验证及仍开放的发布门禁见 [`CLEAN-CANDIDATE-ACCEPTANCE-20261030.md`](CLEAN-CANDIDATE-ACCEPTANCE-20261030.md)。不能用后续结果声称本文早期检查已通过。
+
 ## 已核实的运行状态
 
 通过已选定的 Render `My Workspace` 只读接口，两个服务均返回 `autoDeploy=no`、`autoDeployTrigger=off`、`plan=free`：
