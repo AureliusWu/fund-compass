@@ -1,1 +1,2 @@
 tools/overseas-hooks/pre-push text eol=lf
+docs/archive/overseas-run-journal-20261031.json -text
