@@ -143,6 +143,23 @@ jobs:
       - run: npm run check
       - run: npm test
       - run: npx wrangler deploy --dry-run
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+      - name: Install cross-runtime test dependencies
+        run: |
+          python -m pip install -r ../backend/requirements.txt -r ../backend/requirements-dev.txt
+          python -m pip check
+      - name: Verify real machine cross-runtime contract
+        timeout-minutes: 2
+        run: |
+          node --input-type=module -e "await import('esbuild')"
+          python -m pytest ../backend/tests/test_owner_machine_worker_contract.py ../backend/tests/test_owner_machine_worker_loopback.py --junitxml=machine-cross-runtime.xml
+          python -c "import xml.etree.ElementTree as E; r=E.parse('machine-cross-runtime.xml'); assert len(r.findall('.//testcase')) >= 5; assert not r.findall('.//skipped')"
       - name: Audit dependency advisories
         timeout-minutes: 2
         run: npm audit --json --include=dev --audit-level=moderate --registry=https://registry.npmjs.org --fetch-retries=0 --fetch-timeout=20000

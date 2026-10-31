@@ -1,0 +1,66 @@
+{
+  "schema": "business-cloud-candidate-validation-1",
+  "observed_date": "2026-10-30",
+  "timezone": "Asia/Shanghai",
+  "baseline_commit": "1b3548921eb2bec4c93138c72761d5c48fd4c17e",
+  "application_version": "8.0.0",
+  "runtime": {"python": "3.14.4", "sqlite": "3.50.4", "platform": "Windows"},
+  "engine_sha256": "55be595bdb3fb6e35970649e7822a3e43a2bbcbb2a08f68a96a75c6736217771",
+  "source_comparison": {"normalization": "UTF-8 CRLF to LF", "python_typescript_files": 653, "drift": 0},
+  "quality_gates": {
+    "existing_backend": {
+      "scope": "all existing backend files, excluding the two new business candidate test files",
+      "groups": [
+        {"tests": 1841, "failures": 0, "errors": 0, "skipped": 0, "seconds": 453.576},
+        {"tests": 1419, "failures": 0, "errors": 0, "skipped": 0, "seconds": 334.150},
+        {"tests": 1610, "failures": 0, "errors": 0, "skipped": 0, "seconds": 265.728}
+      ],
+      "total_tests": 4870,
+      "initial_harness_failure": "group1 collection could not import tools/index_valuation_source; rerun with explicit owned-export tools/backend PYTHONPATH passed; no production code changed for this failure"
+    },
+    "final_new_engine": {"tests": 18, "failures": 0, "errors": 0, "skipped": 0, "seconds": 19.315},
+    "final_candidate_http": {"tests": 12, "failures": 0, "errors": 0, "skipped": 0, "seconds": 18.889},
+    "cross_runtime_repeat": {"tests": 6, "failures": 0, "errors": 0, "skipped": 0, "seconds": 5.428},
+    "local_router_subset_repeat": {"tests": 218, "failures": 0, "errors": 0, "skipped": 0, "seconds": 105.996},
+    "worker": {"tests": 182, "test_files": 5, "seconds": 5.25, "tsc": "PASS", "initial_command_error": "type-check script does not exist; repository npm run check subsequently passed"},
+    "warning_scope": "Python3.14 local Starlette/Pydantic/is_reserved deprecations retained; not remote Python3.12 CI",
+    "artifact_root": "C:\\Users\\84046\\AppData\\Local\\Temp\\fc-v9-business-lf-aeefe0574c5341de95d888eb758a3948",
+    "final_junit": ["backend/business-engine-final.xml", "backend/business-candidate-http-final.xml", "worker/machine-cross-runtime-latest.xml"],
+    "duplicates_not_added_to_unique_backend_total": ["cross_runtime_repeat", "local_router_subset_repeat"]
+  },
+  "real_cloud_readonly": {
+    "authentication": "PASS_WITH_USER_UPDATED_TOKEN",
+    "previous_authentication": "401_WITH_OLD_TOKEN_RETAINED_AS_FAILURE",
+    "schema_version": 8,
+    "version_source": "schema_table",
+    "header_user_version": 0,
+    "application_table_count": 20,
+    "fund_count": 28169,
+    "raw_objects": 86,
+    "schema8_known_operational_exact_match": true,
+    "optional_tables": ["turso_candidate_probe_v1", "universe_import_state"],
+    "foreign_keys": 1,
+    "database_names": ["main"],
+    "temp_empty": true,
+    "projected_machine_raw_objects": 129,
+    "machine_raw_limit": 128,
+    "machine_fits_unchanged_inventory": false,
+    "evidence_scope": "real_cloud_readonly_schema8_inventory_not_full_business_integrity",
+    "consistent_capture": {"attempts": 1, "result": "capture_transport_failed", "verified_image_obtained": false, "retry_performed": false},
+    "private_artifact_directory": {"verified_backup": false, "acl_setup": "FAILED_SID_TRANSLATION_THEN_SESECURITYPRIVILEGE_STOP", "existing_data_deleted": false},
+    "remote_ddl_dml": false
+  },
+  "qualification": {
+    "data_verdict": "CONDITIONALLY_TRUSTED_LOCAL_BUSINESS_AND_REAL_SCHEMA_METADATA_ONLY",
+    "performance_verdict": "NO_REAL_CLOUD_BUSINESS_PERFORMANCE_QUALIFICATION",
+    "actual_full_machine_profile_verified": false,
+    "writer_quiescence_verified": false,
+    "protected_backup_verified": false,
+    "cloud_migration_applied": false,
+    "independent_cloud_restore_verified": false,
+    "real_delivery": false,
+    "natural_cron_verified": false,
+    "formal_release_qualified": false,
+    "release_status": "BLOCKED"
+  }
+}

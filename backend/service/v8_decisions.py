@@ -167,6 +167,22 @@ def create_evidence(
     created_at: datetime | None = None,
 ):
     stamp = (created_at or _now()).astimezone(timezone.utc)
+    outcome_summary = v8_repo.historical_outcome_summary(
+        str(detail.get("code") or ""),
+        STRATEGY_VERSION,
+        at=stamp,
+        horizon=HISTORICAL_OUTCOME_HORIZON,
+    )
+    return v8_repo.save_evidence(_build_evidence(
+        detail, estimate_context=estimate_context, created_at=stamp,
+        historical_outcome_summary=outcome_summary,
+    ))
+
+
+def _build_evidence(detail: dict, *, estimate_context: dict | None, created_at: datetime,
+                    historical_outcome_summary: dict, overseas_resolver=None):
+    """Share the financial rules without selecting a persistence connection."""
+    stamp = created_at.astimezone(timezone.utc)
     context = _validated_estimate_context(
         detail,
         estimate_context if estimate_context is not None else detail.get("decision_context"),
@@ -175,26 +191,19 @@ def create_evidence(
     decision_detail = {**detail, "decision_context": context}
     fund_text = f"{detail.get('type') or ''} {detail.get('name') or ''}".upper()
     if any(marker in fund_text for marker in ("QDII", "海外", "全球", "纳斯达克", "标普")):
-        model_evidence = overseas_evidence.resolve_for_detail(detail, stamp)
+        model_evidence = (overseas_resolver or overseas_evidence.resolve_for_detail)(detail, stamp)
         if model_evidence is not None:
             decision_detail["overseas_evidence"] = model_evidence
     score = score_fund(decision_detail)
     signal = timing_signal(decision_detail)
-    outcome_summary = v8_repo.historical_outcome_summary(
-        str(detail.get("code") or ""),
-        STRATEGY_VERSION,
-        at=stamp,
-        horizon=HISTORICAL_OUTCOME_HORIZON,
-    )
-    candidate = build_evidence_snapshot(
+    return build_evidence_snapshot(
         decision_detail,
         score,
         signal,
         {},
-        historical_outcome_summary=outcome_summary,
+        historical_outcome_summary=historical_outcome_summary,
         created_at=stamp,
     )
-    return v8_repo.save_evidence(candidate)
 
 
 def create_decision(

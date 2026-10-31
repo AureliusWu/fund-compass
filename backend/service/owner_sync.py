@@ -1,7 +1,8 @@
-"""Owner-only HTTP sync with explicit local SQLite connections.
+"""Owner-only HTTP sync with an explicit repository boundary.
 
 The configured factory only opens an existing, fully extended local database.
-No automatic provisioning, startup migration or remote adapter is used here.
+The main-compatible connection entry stays local-only. A separately composed
+candidate may supply the bounded Turso repository; neither builder provisions.
 """
 from __future__ import annotations
 
@@ -11,6 +12,7 @@ import json
 import re
 import sqlite3
 from collections.abc import Callable
+from typing import Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, Security
 from fastapi.responses import JSONResponse
@@ -33,6 +35,18 @@ PRIVATE_HEADERS = {
 _REQUEST_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{7,127}\Z", re.ASCII)
 _REQUEST_HASH = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
 _INTEGER = re.compile(r"(?:0|[1-9][0-9]{0,15})\Z", re.ASCII)
+
+
+class _AuthorizationFailure(HTTPException):
+    """Only genuine revalidation may cross a repository/driver boundary."""
+
+
+class _LocalWriteFailure(Exception):
+    """The local adapter alone knows whether acquisition was completed."""
+
+    def __init__(self, *, attempted: bool):
+        self.attempted = attempted
+        super().__init__("Local Owner storage operation failed")
 
 
 def _error(status: int, code: str, headers: dict | None = None) -> HTTPException:
@@ -59,7 +73,8 @@ def _revalidate(context, scope):
     try:
         return owners.revalidate_owner_authorization(context, required_scope=scope)
     except HTTPException as error:
-        raise _error(error.status_code, error.detail, error.headers) from None
+        raise _AuthorizationFailure(status_code=error.status_code, detail=error.detail,
+                                    headers={**(error.headers or {}), **PRIVATE_HEADERS}) from None
 
 
 async def _read_body(request: Request) -> bytes:
@@ -148,8 +163,59 @@ def configured_local_sync_connection() -> sqlite3.Connection:
         raise sqlite3.DatabaseError("Owner sync local storage is unavailable") from None
 
 
+class OwnerSyncRepository(Protocol):
+    """The three closed operations, not a generic SQL/connection interface."""
+
+    def apply(self, raw_request: bytes, *, before_commit: Callable) -> repo.SyncResult: ...
+
+    def read_changes(self, *, since_revision=0, upper_revision=None, cursor=None, limit=100) -> dict: ...
+
+    def reconcile(self, request_id: str, request_hash: str) -> repo.SyncReconciliation: ...
+
+
+class LocalOwnerSyncRepository:
+    """Own one explicit local connection per operation, including its close.
+
+    The factory's existing local/schema guard remains authoritative. Retaining
+    the attempted boundary here prevents an acquisition failure from being
+    confused with a lost commit, and never releases a result after close fails.
+    """
+
+    def __init__(self, connection_factory: Callable):
+        self._connection_factory = connection_factory
+
+    def apply(self, raw_request: bytes, *, before_commit: Callable) -> repo.SyncResult:
+        attempted = False
+        try:
+            with closing(self._connection_factory()) as conn:
+                attempted = True
+                return repo.apply_sync_local(conn, raw_request, before_commit=before_commit)
+        except _AuthorizationFailure:
+            raise
+        except Exception:
+            raise _LocalWriteFailure(attempted=attempted) from None
+
+    def read_changes(self, **parameters) -> dict:
+        with closing(self._connection_factory()) as conn:
+            return repo.read_sync_changes(conn, **parameters)
+
+    def reconcile(self, request_id: str, request_hash: str) -> repo.SyncReconciliation:
+        with closing(self._connection_factory()) as conn:
+            return repo.reconcile_sync_local(conn, request_id, request_hash)
+
+
 def build_owner_sync_router(connection_factory: Callable) -> APIRouter:
-    """Build an explicit-connection router; constructing it opens no database."""
+    """Main-compatible local entry; construction opens no database."""
+    return build_owner_sync_repository_router(LocalOwnerSyncRepository(connection_factory))
+
+
+def build_owner_sync_repository_router(repository: OwnerSyncRepository) -> APIRouter:
+    """Mount the same Owner contract over an explicitly selected repository.
+
+    No backend selection, credential discovery, schema creation or fallback is
+    performed. Authentication and consent remain at this HTTP boundary; the
+    repository must invoke before_commit at its original acceptance boundary.
+    """
     router = APIRouter(prefix="/api/v2/owner/sync", tags=["owner-sync-candidate"])
 
     @router.post("")
@@ -163,18 +229,16 @@ def build_owner_sync_router(connection_factory: Callable) -> APIRouter:
 
         def write():
             _revalidate(context, "write_holdings")
-            attempted = False
             try:
-                with closing(connection_factory()) as conn:
-                    attempted = True
-                    return repo.apply_sync_local(conn, raw, before_commit=lambda: _revalidate(context, "write_holdings"))
-            except HTTPException:
+                return repository.apply(raw, before_commit=lambda: _revalidate(context, "write_holdings"))
+            except _AuthorizationFailure:
                 raise
+            except _LocalWriteFailure as error:
+                raise _error(503, "sync_result_unknown" if error.attempted else "sync_storage_unavailable") from None
             except Exception:
-                # Never expose a factory/driver error, path, SQL or input.
-                # A factory failure occurs before any write. Once accepted,
-                # even a close/driver failure cannot prove a rollback.
-                raise _error(503, "sync_result_unknown" if attempted else "sync_storage_unavailable") from None
+                # An adapter exception cannot establish whether its write was
+                # accepted. Only the local adapter knows acquisition failed.
+                raise _error(503, "sync_result_unknown") from None
 
         result = await run_in_threadpool(write)
         # Logout cannot cancel an accepted commit, but must prevent a private
@@ -193,9 +257,8 @@ def build_owner_sync_router(connection_factory: Callable) -> APIRouter:
         def read():
             _revalidate(context, "read_private")
             try:
-                with closing(connection_factory()) as conn:
-                    return repo.read_sync_changes(conn, **parameters)
-            except HTTPException:
+                return repository.read_changes(**parameters)
+            except _AuthorizationFailure:
                 raise
             except repo.SyncReadError as error:
                 raise _error(422 if error.status == 422 else 503,
@@ -219,8 +282,7 @@ def build_owner_sync_router(connection_factory: Callable) -> APIRouter:
         def read():
             _revalidate(context, "read_private")
             try:
-                with closing(connection_factory()) as conn:
-                    return repo.reconcile_sync_local(conn, request_id, request_hash)
+                return repository.reconcile(request_id, request_hash)
             except Exception:
                 # A driver/factory/close failure cannot establish whether an
                 # accepted write committed. Never echo the supplied hash or

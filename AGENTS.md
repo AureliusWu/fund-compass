@@ -117,6 +117,33 @@ uvicorn main:app --reload --port 8000
 - watchlist 自有 managed facade 按操作核真实 locator/端点原字符串/会话 generation/两槽来源/当前内存/完整本机状态及 handle；不能由 UI 传恒真 guard。关闭面板或退出只撤销并隐藏私人响应，保留当前 store 内原未知本机 id/hash；整次 writer、后置 hydrate 与 Pinia 同步发布完成之前不能丢该标识。手动原回执匹配才释放，不重放；跨刷新未知标识仍需独立导出，不声称内存标识永久持久。
 - 已采用 IDB 后旧 candidate/CAS UI 必须退出，不同时保留另一写路径。实际 managed UI 默认关闭，link/制包/发送/取消/三方 ACK 分别预览确认；字段或更名整组选项变化失效旧 ACK 请求，unknown 仅回执/导出/关闭。数据 0/null/负零、删除与未知时间仍不同；实际 Chrome、旧 PWA、多设备和部署验收不由合成 SFC/IDB 测试代替。
 
+## 2026-10-29 候选接线补充
+
+- Owner 同步已用明确三操作 repository seam 接回原 main 本地入口；`owner_sync_candidate_app.create_turso_owner_sync_candidate_app` 另以显式 URL/Token 挂真实会话与同步 HTTP，构造/startup 零 IO，不读取数据库环境凭据、不挂 health/analysis/machine，不开放 CORS。main 仍只用原本地工厂；Turso 候选仍只认 core schema-table9 + Owner-only 五表，不能借此放行完整 machine 云 profile 或宣称迁移/耐久。
+- `/worker/portfolio/evidence` 只认 Worker/Admin，完整排序至多100条行情观察必须核原完整 source revision/SHA/当前Policy。只读同一完整本地 machine 库的已有有效详情缓存；外部行情解析不会预热后端缓存，冷/过旧/未来或不一致缓存整批拒绝。不网络抓取、不另开业务连接、不接受 Holding/score/客户端 Evidence。专属正文128KiB，原 prepare/claim/finish仍16KiB；所有Evidence/health/scope及原字节SHA的批次回执同事务追加。既有不可变journal仅增加显式receipt文档合同，不改DDL/对象预算；它不算自然任务成功。原回执可手动只读核对，缺失、401、commit/close/HTTP未知均不能授予重发。新packet只收canonical字段，intraday值日期必须当日；QDII目标轴、0/null和原已存Evidence时间保留，历史summary全批次10000行/8MiB超限拒绝不截断。
+- Worker 的 `OWNER_MACHINE_MODE` 缺省/空/off 仍为legacy生产路径，只有显式candidate接完整source→行情→Evidence→prepare→claim→单次发送→finish，任何失败不回退Gist。未启用平台开关、未部署或迁移旧发送状态，不能双路真实发送。原POST字节SHA/原task/attempt须保留，unknown只手核；claimed=false或读回attempt不授予发送。发送前复核source/Policy/真实窗口；60秒总预算、API15秒及发送10秒各自覆盖完整正文/验证，34次行情预算不增加。候选health明确unknown，私有status只读，不能以模拟sent代替真实送达或自然周期证据。
+
+## 2026-10-30 完整云 schema 与缓存准备补充
+
+- `turso_machine_profile` 是独立、显式的完整云schema只读合同：实际有界Turso driver一次DEFERRED batch核metadata，固定raw基线126、上限128（probe连autoindex占2），core `_schema_version=9`与原header0/8/9分轴；production-only、全部固定对象/marker/FK/temp/attach闭集。它不是main启动开关或完整业务全账本认证，旧core/Owner-only verifier与本地factory不放宽；全部云耐久/恢复/正式资格仍false。
+- `turso_machine_upgrade` 只接受显式idle、query_only/FK开启的nativeSQLite原快照与外部source/resource身份，独立编Owner-only9→完整machine增量条件包。原页界与serialize同一自有只读snapshot，原caller事务不动；全部旧表typed值/rowid/原header/旧迁移回执不变，只有仓库固定新DDL可执行。新迁移receipt复用已有immutable journal，保留非业务日期occurrence，不加对象/发通知；原四SHA重建与末尾源码/预算复核不能去掉。包含私有原像，禁止日志/CI上传；本地演练/固定只读计划不等于真实云应用、来源认证、恢复或重发许可。没有sender、凭据发现、startup迁移或自动修旧8。
+- 独立Worker/Admin `POST /worker/portfolio/cache/prepare` 是显式100次预算的准备操作，不是Worker34次行情预算扩张；不收客户端code/持仓/缓存，只核完整source/Policy与原缓存前像。最多4并发、每code一次固定HTTPS匿名primary、4MiB正文、原30秒总预算，网络必须在事务外；401/403/429停止新请求，不换身份/源/重试。原同连接IMMEDIATE重核后，全部cache及原字节SHA immutable receipt一起提交；fresh复用不续updated_at，失败不覆盖旧cache，unknown只手核原id/hash。成功仅对fetched code精确替换本次已验证公共NAV日期集合，不能union混入旧独有日期，不动其它codes/不可变业务链。独立cache receipt不算自然Cron成功，历史可读不续当前资格。真实云准备、实际停写/迁移/恢复与发送状态仍未执行；默认Worker和部署暂停不变。
+
+## 2026-10-30 完整业务云候选接线补充
+
+- `service/turso_business_engine.py` 为显式 URL/Token 的独立完整 machine profile 候选，不是 SQLite 协议伪装器。一个自有远端一致读事务内固定分页，完整 private/legacy、Owner/Policy/journal/引用均保留；只有 public funds/detail/NAV 按完整 Owner-key code 域截取。每页保留前就逐 typed/cell/JSON 校验并跨表累计原100k行/64MiB，超限即停读/rollback/close，不允许先聚齐再核。只执行仓库固定 DDL 建 owned native mirror，原业务 core 不放宽 native 守卫；public 比对用固定非空唯一 PK，不借子集 rowid。
+- 固定操作闭集编 delta，同一原子远端 batch 核原 raw schema/header/FK/完整前像、精确 REAL、affected count、完整后像/FK；响应也必须逐 guard 恰单行原生1及原生 affected。响应/close/撤权/时间或源码漂移均不得返回本地推演成功，unknown 不重放；cache 网络仍在 native 事务外。原900参数/16k steps/16MiB写包/30秒预算保持。
+- 新 `owner_business_candidate_app` 仅显式接 Owner sync/analysis、Policy read 与 Worker cache/evidence/task，构造/startup 零 IO；固定会话/CORS/consent/Worker隔离保留。本地 router seam 仍由原 factory/close 拥有，不改 main/default Worker/旧 profile。此 app 没有公共基金、旧 Admin/结算或 `/api/health`，不得直接替换原 Render 启动或全站 API_BASE 冒充消费者全迁移。
+- 真实候选最新只读确认 schema8/header0、raw86、probe+universe 两 optional 均在、完整 machine 保留原 inventory 后需129>128；新Token认证成功不解决迁移容量。不得删表、忽略隐式索引、放宽128或 initialize凑通过。一次一致源捕获失败，停写/受保护备份/实际迁移/独立恢复仍未完成；完整记录见 `docs/CLOUD-BUSINESS-ACTUAL-MIGRATION-20261030.md`。实际云库保持不变，应用仍8.0.0、部署继续暂停。
+
+## 2026-10-30 干净云候选历史快照验收补充
+
+- `turso_clean_target` 是独立显式的 schema8 历史一致 image→不同空候选的固定逻辑导入 profile2；原快照全部 raw/typed/rowid/sequence 留档，原 probe/import-state 仅在新目标省略；本轮不动旧库及运维表，捕获时的原3行完整留档，不推断其它writer此后没变化。新目标126对象、core9/header0、production-only，Owner revision0/空同步工作区不表示浏览器/Gist持仓迁入。不能改旧 in-place profile/pins/128预算或用 initialize 改旧库。
+- 私有原归档和原包不得进日志/Git/CI；外部 source/resource/archive/repair/plan/packet SHA 保留。plain whole-chunk 只限 native I64/text无NUL/null且256KiB内；REAL/BLOB/NUL/超限整块原exact fallback。原16MiB/900参数/100k行/10M VM/30秒不提高或reset；fresh source完整重导后只删同图冗余SQL扫描，保留严格归档JSON/base64往返、全部native frame/pipeline/control、外部身份和输入原六成员比对、独立native完整后像。外部packet public getter仍完整重导，不能shape-only放行外部输入。
+- `turso_clean_target_transport` 单次显式POST、无重试；新CTE INSERT按canonical闭集label仍核原生affected count和紧随changes guard。只读容量probe仅固定JSON1/Unicode/I64/null能力guard与自生0参数SELECT，标准UTF8、同完整步数、实际body在写包大小至+1KiB且≤16MiB；不接受私有包或任意SQL，不证明写入/SQL复杂度/事务时长或发布。
+- 本轮以原始34928行快照为输入完成一次新候选导入，原写 `transport_failed/http=null/COMMIT_ACK_UNKNOWN` 不改写；仅随后独立全126对象/35063行typed后像与原receipt精确匹配，记录 `actual_applied_reconciled`（读回时点存在），未重发。读事务ACK/rollback不迁给原写。独立新进程完整profile与真实Policy只读通过；没有fake Owner/tasks/sent、真实业务变更、生产切换、旧源停写/最终增量或provider独立恢复。详细七身份、加密归档恢复边界与旧失败见 `docs/CLEAN-CANDIDATE-ACCEPTANCE-20261030.md`。
+- 应用仍8.0.0，main/默认Worker/旧Gist/Render/Blueprint门禁不变。不得以本轮历史复制、当前Windows用户DPAPI恢复、本地演练或真实只读成功关闭跨重启业务写入、独立恢复、Chrome/PWA、自然Cron及正式v9发布门禁。
+
 ## 项目边界
 
 - `FundVal`（蜉蝣基金）和 `pan`（盘中宝）是纯前端盘中估值工具。

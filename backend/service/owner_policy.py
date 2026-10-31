@@ -6,6 +6,7 @@ from contextlib import closing
 import json
 import math
 import time
+from typing import Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, Security
 from fastapi.security import HTTPAuthorizationCredentials
@@ -13,6 +14,7 @@ from starlette.concurrency import run_in_threadpool
 
 from service import owner_sessions as owners, security
 from service.owner_policy_state import read_owner_policy_state
+from models.v8 import OwnerPolicyState
 
 PRIVATE_HEADERS = {"Cache-Control": "no-store", "Pragma": "no-cache", "X-Content-Type-Options": "nosniff"}
 READ_SECONDS = 30.0
@@ -50,8 +52,33 @@ def _authorize(request: Request, credentials: HTTPAuthorizationCredentials | Non
         raise _error(error.status_code, error.detail, error.headers) from None
 
 
+class OwnerPolicyRepository(Protocol):
+    """Only the fixed read-only Policy timeline is exposed to the router."""
+
+    def read_state(self, *, before_return: Callable) -> OwnerPolicyState: ...
+
+
+class LocalOwnerPolicyRepository:
+    def __init__(self, connection_factory: Callable):
+        self._connection_factory = connection_factory
+
+    def read_state(self, *, before_return: Callable) -> OwnerPolicyState:
+        before_return()
+        with closing(self._connection_factory()) as conn:
+            before_return()
+            value = read_owner_policy_state(conn, before_return=before_return)
+            before_return()
+        before_return()
+        return value
+
+
 def build_owner_policy_router(connection_factory: Callable) -> APIRouter:
-    """Construction is zero IO; uses the existing closed local factory."""
+    """Keep main's existing closed local factory; construction is zero I/O."""
+    return build_owner_policy_repository_router(LocalOwnerPolicyRepository(connection_factory))
+
+
+def build_owner_policy_repository_router(repository: OwnerPolicyRepository) -> APIRouter:
+    """Bind the read-only capability without changing auth or read budgets."""
     router = APIRouter(prefix="/api/v2/private/portfolio", tags=["owner-policy-state-candidate"])
 
     @router.get("/policy-state")
@@ -71,10 +98,7 @@ def build_owner_policy_router(connection_factory: Callable) -> APIRouter:
         def read():
             check()
             try:
-                with closing(connection_factory()) as conn:
-                    check()
-                    value = read_owner_policy_state(conn, before_return=check)
-                    check()
+                value = repository.read_state(before_return=check)
                 check()
                 return value
             except _AuthorizationFailure:

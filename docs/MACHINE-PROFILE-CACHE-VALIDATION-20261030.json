@@ -1,0 +1,57 @@
+{
+  "schema": "machine-profile-cache-local-validation-1",
+  "observed_date": "2026-10-30",
+  "timezone": "Asia/Shanghai",
+  "baseline_commit": "babba5b2082f83efa1a791a2d56423b2238c5bdd",
+  "runtime": {"python": "3.14.4", "sqlite": "3.50.4", "platform": "Windows 11"},
+  "cache_100_local": {
+    "method": "actual protected TestClient HTTP, complete synthetic SQLite, 100 codes; fixed collector data, not provider latency",
+    "business_clock": "2026-10-26T06:31:00+00:00",
+    "cold_samples_seconds": [0.14457820000006905, 0.1658167999999023, 0.16035479999982272],
+    "cold_median_seconds": 0.16035479999982272,
+    "cold_worst_seconds": 0.1658167999999023,
+    "reused_samples_seconds": [0.12650669999993625, 0.12302460000000792, 0.12955909999982396],
+    "reused_median_seconds": 0.12650669999993625,
+    "reused_worst_seconds": 0.12955909999982396,
+    "state_control": "each cold sample resets only owned synthetic public caches; each reuse sample reuses all 100 without fetch; immutable receipts/business rows retained",
+    "baseline_latency": null,
+    "comparison_note": "new operation; no before-after speedup, provider throughput, hard termination or p95 qualification",
+    "project_cooperative_budget_seconds": 30,
+    "concurrent_load": "three standard-LF backend pytest groups and Worker checks active",
+    "verdict": "WITHIN_LOCAL_OPERATION_BUDGET_ONLY"
+  },
+  "live_public_sample": {
+    "code": "510300",
+    "primary": "https://fund.eastmoney.com/pingzhongdata/510300.js",
+    "official_endpoint": "https://api.fund.eastmoney.com/f10/lsjz",
+    "primary_latest_nav_date": "2026-10-29",
+    "official_latest_nav_date": "2026-10-29",
+    "same_date": true,
+    "nav_matches": true,
+    "retained_history_rows": 800,
+    "first_reader_observed_at": "2026-10-30T04:13:48.339007+00:00",
+    "first_reader_seconds": 0.644,
+    "database_written": false,
+    "scope": "same provider, independent primary and official endpoint paths; not an independent institution or 100-code quota test",
+    "performance_qualified": false
+  },
+  "measured_native_source_sha256": {
+    "backend/database/turso_machine_profile.py": "e6c6b5a1e68114de5b3697824145456d72df30ad70fb48f6c6ecc758a86b26f9",
+    "backend/database/turso_machine_upgrade.py": "fd64ce0fa1976b84b35a9aaa5816e2b66182474063d53ba14518ea9afd0caa8c",
+    "backend/models/owner_machine_cache.py": "4a848bd430700320832de0dc61f338ebbbf58de97ae24e39e48dc861c68da8ed",
+    "backend/service/owner_machine_cache.py": "6ce5d55a4978face3330fb228148a05a2fb9e0d540c25e0d0c23dd45fe4e811f",
+    "backend/service/owner_machine.py": "4b7c44cd2e821dec66ef998361757d31c5466fd3defdea9e1fd40c6afc139dce",
+    "backend/service/owner_machine_repo.py": "ebf84870cce08861e4c3a7750baadd39bd4656984c2059cbf6b0ebcdb5f583f8",
+    "backend/tests/test_owner_machine_worker_loopback.py": "30151bc8c0e701cc18998fbb0a44795c2d4ee9aa5b8680a54a1f60832f017a9b"
+  },
+  "qualification": {
+    "data_verdict": "CONDITIONALLY_TRUSTED_LOCAL_AND_ONE_PUBLIC_SAMPLE",
+    "actual_turso_profile_verified": false,
+    "cloud_migration_applied": false,
+    "cloud_cache_prepared": false,
+    "real_delivery": false,
+    "natural_cron_verified": false,
+    "durability_restore_verified": false,
+    "formal_release_qualified": false
+  }
+}

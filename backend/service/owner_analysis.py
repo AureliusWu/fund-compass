@@ -11,6 +11,7 @@ from collections.abc import Callable
 from contextlib import closing
 import json
 import re
+from typing import Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, Security
 from fastapi.responses import JSONResponse
@@ -99,8 +100,49 @@ async def _read_body(request: Request) -> bytes:
     return bytes(body)
 
 
+class OwnerAnalysisRepository(Protocol):
+    """Two closed analysis operations; never an HTTP-facing SQL executor."""
+
+    def create(self, raw_request: bytes, *, before_commit: Callable) -> repo.AnalysisResult: ...
+
+    def reconcile(self, request_id: str, request_hash: str) -> repo.AnalysisReconciliation: ...
+
+
+class _LocalWriteFailure(Exception):
+    def __init__(self, *, attempted: bool):
+        self.attempted = attempted
+        super().__init__("Owner analysis local operation failed")
+
+
+class LocalOwnerAnalysisRepository:
+    """Own the existing local factory and its close/uncertain-write boundary."""
+
+    def __init__(self, connection_factory: Callable):
+        self._connection_factory = connection_factory
+
+    def create(self, raw_request: bytes, *, before_commit: Callable) -> repo.AnalysisResult:
+        attempted = False
+        try:
+            with closing(self._connection_factory()) as conn:
+                attempted = True
+                return repo.create_analysis_local(conn, raw_request, before_commit=before_commit)
+        except _AuthorizationFailure:
+            raise
+        except Exception:
+            raise _LocalWriteFailure(attempted=attempted) from None
+
+    def reconcile(self, request_id: str, request_hash: str) -> repo.AnalysisReconciliation:
+        with closing(self._connection_factory()) as conn:
+            return repo.reconcile_analysis_local(conn, request_id, request_hash)
+
+
 def build_owner_analysis_router(connection_factory: Callable) -> APIRouter:
-    """Bind a factory without opening storage or extending its schema."""
+    """Keep main's existing local-only factory and zero-I/O construction."""
+    return build_owner_analysis_repository_router(LocalOwnerAnalysisRepository(connection_factory))
+
+
+def build_owner_analysis_repository_router(repository: OwnerAnalysisRepository) -> APIRouter:
+    """Bind only analysis and original-receipt reconciliation capabilities."""
     router = APIRouter(prefix="/api/v2/owner/analysis", tags=["owner-analysis-candidate"])
 
     @router.post("")
@@ -117,20 +159,17 @@ def build_owner_analysis_router(connection_factory: Callable) -> APIRouter:
 
         def write():
             _revalidate(context, "run_personal_analysis")
-            attempted = False
             try:
-                with closing(connection_factory()) as conn:
-                    attempted = True
-                    return repo.create_analysis_local(
-                        conn, raw,
-                        before_commit=lambda: _revalidate(context, "run_personal_analysis"),
-                    )
+                return repository.create(
+                    raw, before_commit=lambda: _revalidate(context, "run_personal_analysis"),
+                )
             except _AuthorizationFailure:
                 raise
+            except _LocalWriteFailure as error:
+                raise _error(503, "analysis_result_unknown" if error.attempted else "analysis_storage_unavailable") from None
             except Exception:
-                # Once a connection was accepted, a driver or close failure is
-                # not evidence that the transaction rolled back.
-                raise _error(503, "analysis_result_unknown" if attempted else "analysis_storage_unavailable") from None
+                # A remote call or a local close failure is not rollback proof.
+                raise _error(503, "analysis_result_unknown") from None
 
         result = await run_in_threadpool(write)
         _revalidate(context, "run_personal_analysis")
@@ -155,8 +194,7 @@ def build_owner_analysis_router(connection_factory: Callable) -> APIRouter:
         def read():
             _revalidate(context, "read_private")
             try:
-                with closing(connection_factory()) as conn:
-                    return repo.reconcile_analysis_local(conn, request_id, request_hash)
+                return repository.reconcile(request_id, request_hash)
             except _AuthorizationFailure:
                 raise
             except Exception:

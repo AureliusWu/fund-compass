@@ -204,18 +204,30 @@ def save_evidence(snapshot: EvidenceSnapshot, *, scope=scopes.PRODUCTION) -> Evi
     _acceptance_preflight(snapshot, scope)
     identity = _evidence_identity(snapshot)
     _assert_id(snapshot.evidence_id, stable_id("ev", identity), "evidence")
+    _model_payload(snapshot)
+    payload_sha256(identity)
+    with db.transaction(immediate=True) as conn:
+        return _save_evidence_in_transaction(conn, snapshot, scope=scope)
+
+
+def _save_evidence_in_transaction(conn, snapshot: EvidenceSnapshot, *, scope=scopes.PRODUCTION) -> EvidenceSnapshot:
+    """Append on the caller's transaction; never open/commit/close a database."""
+    if getattr(conn, "in_transaction", False) is not True:
+        raise RuntimeError("evidence append requires an active transaction")
+    _acceptance_preflight(snapshot, scope)
+    identity = _evidence_identity(snapshot)
+    _assert_id(snapshot.evidence_id, stable_id("ev", identity), "evidence")
     payload = _model_payload(snapshot)
     semantic_sha = payload_sha256(identity)
-    with db.transaction(immediate=True) as conn:
-        _acceptance_guard(conn, "evidence", snapshot, scope=scope)
-        existing = _existing_model(conn, "evidence_snapshots", "evidence_id", snapshot.evidence_id, EvidenceSnapshot, scope=scope)
-        if existing is not None:
-            if payload_sha256(_evidence_identity(existing)) != semantic_sha:
-                raise SnapshotConflictError("stored evidence id has different content")
-            return existing
-        # Precompile the whole append before its first INSERT. In particular,
-        # a bad remote health REAL must not leave a partially written Evidence.
-        inserts = [prepare_v8_insert(
+    _acceptance_guard(conn, "evidence", snapshot, scope=scope)
+    existing = _existing_model(conn, "evidence_snapshots", "evidence_id", snapshot.evidence_id, EvidenceSnapshot, scope=scope)
+    if existing is not None:
+        if payload_sha256(_evidence_identity(existing)) != semantic_sha:
+            raise SnapshotConflictError("stored evidence id has different content")
+        return existing
+    # Precompile the whole append before its first INSERT. In particular,
+    # a bad remote health REAL must not leave a partially written Evidence.
+    inserts = [prepare_v8_insert(
             conn, "evidence_snapshots",
             (
                 snapshot.evidence_id, snapshot.fund_code, snapshot.fund_name, snapshot.fund_type,
@@ -233,15 +245,15 @@ def save_evidence(snapshot: EvidenceSnapshot, *, scope=scopes.PRODUCTION) -> Evi
                 _json(snapshot.missing_fields), _json(snapshot.stale_fields), _json(snapshot.risk_flags),
                 _json(payload), semantic_sha,
             ),
-        )]
-        for state in snapshot.source_states:
-            state_payload = state.model_dump(mode="python")
-            event_identity = {
-                "evidence_id": snapshot.evidence_id,
-                "source_id": state.source_id,
-                "state": state_payload,
-            }
-            inserts.append(prepare_v8_insert(
+    )]
+    for state in snapshot.source_states:
+        state_payload = state.model_dump(mode="python")
+        event_identity = {
+            "evidence_id": snapshot.evidence_id,
+            "source_id": state.source_id,
+            "state": state_payload,
+        }
+        inserts.append(prepare_v8_insert(
                 conn, "source_health_events",
                 (
                     stable_id("src", event_identity), snapshot.evidence_id, state.source_id, state.state,
@@ -250,10 +262,10 @@ def save_evidence(snapshot: EvidenceSnapshot, *, scope=scopes.PRODUCTION) -> Evi
                     state.latency_ms, state.data_age_seconds, int(state.stale), state.error_class,
                     snapshot.created_at.isoformat(), _json(state_payload),
                 ),
-            ))
-        for statement in inserts:
-            conn.execute(*statement)
-        scopes.register_record(conn, "evidence", snapshot.evidence_id, scope)
+        ))
+    for statement in inserts:
+        conn.execute(*statement)
+    scopes.register_record(conn, "evidence", snapshot.evidence_id, scope)
     return snapshot
 
 
@@ -1452,10 +1464,21 @@ def historical_outcome_summary(
         raise ValueError("outcome summary time must include a timezone")
     if horizon not in HORIZONS:
         raise ValueError("unsupported outcome summary horizon")
-    cutoff_date = _market_date(at)
     conn = db.get_conn()
     try:
-        rows = conn.execute(
+        return _historical_outcome_summary(conn, fund_code, strategy_version, at=at, horizon=horizon)
+    finally:
+        conn.close()
+
+
+def _historical_outcome_summary(conn, fund_code: str, strategy_version: str, *, at: datetime, horizon: int = 20):
+    """Same production-only, prior-date summary on a caller-owned connection."""
+    if at.tzinfo is None:
+        raise ValueError("outcome summary time must include a timezone")
+    if horizon not in HORIZONS:
+        raise ValueError("unsupported outcome summary horizon")
+    cutoff_date = _market_date(at)
+    rows = conn.execute(
             """SELECT o.payload_json
                FROM production_outcome_evaluations o
                JOIN production_decision_snapshots d ON d.decision_id=o.decision_id
@@ -1473,9 +1496,7 @@ def historical_outcome_summary(
                 at.isoformat(),
                 at.isoformat(),
             ),
-        ).fetchall()
-    finally:
-        conn.close()
+    ).fetchall()
     outcomes = [
         OutcomeEvaluation.model_validate_json(row["payload_json"])
         for row in rows

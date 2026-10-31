@@ -11,6 +11,8 @@
 | 端点（前缀 `/api/v2/worker/portfolio`） | 行为 |
 | --- | --- |
 | `GET /source` | 同一快照读取完整已确认 Owner 来源，返回 revision、原 typed SHA、完整基金代码、当前有效 Policy；不接受客户端持仓 |
+| `POST /evidence` | 新canonical行情观察与完整来源绑定，在同一候选连接保存全部Evidence及原批次回执；详情缓存须预先完整有效 |
+| `GET /evidence/{request_id}` | 用occurrence_date与原正文SHA手动只读核原批次，不授予重试 |
 | `POST /tasks/prepare` | 核完整来源、Policy 和逐基金已有 Evidence，真实 Holding/Decision/原 analysis 回执与不可变 day task 同一事务保存 |
 | `POST /tasks/claim` | 重核原来源、当前 Policy/策略和盘中行情，调用原通知整批 claim 的同连接内核，与原 attempt 映射一起提交 |
 | `POST /tasks/finish` | 只关闭原 attempt；真实 source/Policy 后来变化也不能阻止记录原送达结果 |
@@ -32,7 +34,7 @@
 
 ## 未完成，不能据此合并发布
 
-1. 现有生产 Worker 仍用 Gist；新的完整行情入库、严格 Worker HTTP 消费、单次 Server酱发送、私有持久 health/旧状态导入尚未接通。旧路径另造不同 Decision IDs 不受上述“同一管理集合”边界替代，不能双路真实发送。
+1. 现有默认生产 Worker 仍用Gist；2026-10-29已新增默认关闭的完整行情入库/严格Worker消费/单次发送候选，见[行情入库](OWNER-MACHINE-EVIDENCE-CANDIDATE.md)和[Worker候选](OWNER-MACHINE-WORKER-CANDIDATE.md)。它要求同库完整有效详情缓存，未完成冷缓存准备、云profile、旧发送状态导入或真实启用。旧路径另造不同Decision IDs不受同一管理集合边界替代，不能双路真实发送。
 2. 应急脚本要接同一原任务入口，或明确退役其 workflow；旧槽位、信号前值和歧义状态先完整受控保全，不能从空状态重新通知。
 3. main Owner 工厂仍拒 Turso；远端8→9迁移本身也不会自动开启 analysis/machine。真实停写、fresh backup、provider能力/配额、业务写入跨重启和独立恢复须各自证明，不能移除 SQLite-only/旧schema守卫换通过。
 4. 真实 Chrome、旧PWA、多设备、连续自然窗口/周级任务、原性能债务和正式证据门禁仍未通过。所有测试使用隔离合成数据，不修改真实持仓，不发送真实通知。
