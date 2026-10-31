@@ -1,5 +1,9 @@
 # 司南基金 (fund-compass)
 
+<!-- project-badges:start -->
+[![Version](https://img.shields.io/github/v/tag/AureliusWu/fund-compass?sort=semver&style=flat-square&label=version)](https://github.com/AureliusWu/fund-compass/tags) [![Build](https://github.com/AureliusWu/fund-compass/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/AureliusWu/fund-compass/actions/workflows/ci.yml) [![Last commit](https://img.shields.io/github/last-commit/AureliusWu/fund-compass?style=flat-square)](https://github.com/AureliusWu/fund-compass/commits/main)
+<!-- project-badges:end -->
+
 当前版本：`8.0.0`。
 
 v9 候选升级仍在独立分支验收，未正式发布。实施进展见 [执行日志](docs/V9-EXECUTION-LOG.md)；本机物理 v6 的完整基金/手工资产同步、三方云刷新、独立完整来源分析与保护文件说明见 [操作边界](docs/OWNER-PORTFOLIO-FULL-SYNC.md)。物理格式升级不等于应用发布或云端耐久通过。
