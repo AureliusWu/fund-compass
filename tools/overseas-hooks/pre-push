@@ -10,7 +10,7 @@ def accepts(args, env, raw):
         return False
     ref, old, new = (env.get(key, "") for key in
                      ("OVERSEAS_PUSH_REF", "OVERSEAS_PUSH_OLD", "OVERSEAS_PUSH_NEW"))
-    if ref not in ("refs/heads/main", "refs/heads/ops/overseas-run-journal"):
+    if ref != "refs/heads/main":
         return False
     if any(type(value) is not str or re.fullmatch(r"[0-9a-f]{40}", value) is None
            for value in (old, new)) or new == "0" * 40:

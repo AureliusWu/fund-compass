@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""One controlled runner: native receipts, public journal, separate Git writes.
+"""One controlled runner: native receipts, public journal, one financial Git ref.
 
 This is not a generic receipt authorizer, cloud migration or release gate.
 Only the four existing public overseas files may be staged on main. The one
-nonfinancial journal is written to a fixed, code-free operations branch using
-Git plumbing, never checkout/index/HEAD. Unknown publication is not retried.
+nonfinancial journal is checkpointed for an immutable Actions artifact, never
+checkout/index/HEAD or an operations branch. Unknown publication is not retried.
 """
 import contextlib
 import datetime as dt
@@ -21,16 +21,16 @@ try:
     from tools import calibrate_overseas as calibrator
     from tools import export_v8_overseas_evidence as exporter
     from tools import overseas_run_journal as journal
+    from tools import overseas_journal_artifact as artifact_store
 except ModuleNotFoundError:
     import overseas_accuracy as producer
     import audit_overseas_accuracy as auditor
     import calibrate_overseas as calibrator
     import export_v8_overseas_evidence as exporter
     import overseas_run_journal as journal
+    import overseas_journal_artifact as artifact_store
 
 ROOT = Path(__file__).resolve().parents[1]
-OPS_PATH = "docs/operations/overseas-run-journal.json"
-OPS_REF = "refs/heads/ops/overseas-run-journal"
 FINANCIAL = {
     "ledger_sha256": "frontend/public/data/overseas-accuracy.json",
     "audit_sha256": "frontend/public/data/overseas-audit.json",
@@ -102,38 +102,8 @@ def _remote_head():
     return match[1].decode("ascii")
 
 
-def _remote_ops_head():
-    # An empty successful exact-ref query is a known absent branch, not an
-    # unknown network/authentication error. Nonzero commands still stop.
-    raw = _command("git", "ls-remote", "origin", OPS_REF)
-    if not raw:
-        return None
-    match = re.fullmatch(rb"([0-9a-f]{40})\t" + OPS_REF.encode("ascii") + rb"\n", raw)
-    if match is None:
-        raise OpsError("publication_failed")
-    return match[1].decode("ascii")
-
-
-def _read_ops_history():
-    tip = _remote_ops_head()
-    if tip is None:
-        return None, None
-    _command("git", "fetch", "--no-tags", "--no-recurse-submodules", "--depth=1", "origin", OPS_REF)
-    if _sha40(_command("git", "rev-parse", "FETCH_HEAD")) != tip:
-        raise OpsError("publication_failed")
-    # Never checkout/import branch code. Reject any extra path, executable or
-    # symlink: this branch contains exactly one regular nonfinancial JSON blob.
-    tree = _command("git", "ls-tree", "-r", "-z", "--full-tree", tip)
-    if re.fullmatch(rb"100644 blob [0-9a-f]{40}\t" + OPS_PATH.encode("ascii") + rb"\x00", tree) is None:
-        raise OpsError("publication_failed")
-    size = _command("git", "cat-file", "-s", f"{tip}:{OPS_PATH}")
-    if re.fullmatch(rb"[0-9]+\n", size) is None or not 0 < int(size) <= journal.MAX_BYTES:
-        raise OpsError("publication_failed")
-    raw = _command("git", "show", f"{tip}:{OPS_PATH}")
-    if len(raw) != int(size):
-        raise OpsError("publication_failed")
-    journal.decode(raw, observed_at=_clock(_now()))
-    return tip, raw
+def _read_ops_history(identity):
+    return artifact_store.restore(ROOT, identity, observed_at=_clock(_now()))
 
 
 def _identity():
@@ -244,9 +214,9 @@ def _push_once(ref, expected_old, commit):
     A preflight ls-remote is not CAS: deletion/rollback before push would still
     permit a normal push. Our fixed pre-push hook rejects that advertisement;
     receive-pack then checks the advertised old OID during the update. This is
-    only a single-ref guard, not an atomic transaction across main and ops.
+    only a single-ref guard, not an artifact publication or cross-system ACK.
     """
-    if ref not in ("refs/heads/main", OPS_REF) or (
+    if ref != "refs/heads/main" or (
         expected_old is not None and (
             type(expected_old) is not str or re.fullmatch(r"[0-9a-f]{40}", expected_old) is None
         )
@@ -339,40 +309,31 @@ def _append_ops(raw, event, binding, now, calendar_sha):
     return raw, summary
 
 
-def _publish_ops(base, prior_tip, raw):
-    if re.fullmatch(r"[0-9a-f]{40}", base) is None or (
-        prior_tip is not None and re.fullmatch(r"[0-9a-f]{40}", prior_tip) is None
-    ) or type(raw) is not bytes or not 0 < len(raw) <= journal.MAX_BYTES:
+def _publish_ops(base, context, raw, *, checkpoint="terminal"):
+    if re.fullmatch(r"[0-9a-f]{40}", base) is None or type(raw) is not bytes or not 0 < len(raw) <= journal.MAX_BYTES:
         raise OpsError("publication_failed")
     if _head() != base or _remote_head() != base:
         raise OpsError("publication_failed")
-    if _remote_ops_head() != prior_tip:
+    result = artifact_store.publish(context, raw, checkpoint=checkpoint, observed_at=_clock(_now()))
+    if _head() != base or _remote_head() != base:
         raise OpsError("publication_failed")
-    journal.decode(raw, observed_at=_clock(_now()))
-    blob = _sha40(_command("git", "hash-object", "-w", "--stdin", stdin=raw))
-    operations = _sha40(_command("git", "mktree", stdin=(
-        f"100644 blob {blob}\toverseas-run-journal.json\n").encode("ascii")))
-    docs = _sha40(_command("git", "mktree", stdin=(
-        f"040000 tree {operations}\toperations\n").encode("ascii")))
-    tree = _sha40(_command("git", "mktree", stdin=(
-        f"040000 tree {docs}\tdocs\n").encode("ascii")))
-    parents = ("-p", prior_tip) if prior_tip is not None else ()
-    commit = _sha40(_command("git", "commit-tree", tree, *parents, "-m",
-                            "chore: record overseas public run occurrence"))
-    # This branch never inherits a financial/source tree. Recheck both exact
-    # refs before the sole guarded normal push; do not retry unknown writes.
-    if _head() != base or _remote_head() != base or _remote_ops_head() != prior_tip:
-        raise OpsError("publication_failed")
-    _push_once(OPS_REF, prior_tip, commit)
-    if _remote_ops_head() != commit or _head() != base or _remote_head() != base:
-        raise OpsError("publication_failed")
-    return commit
+    return result
 
 
 def run():
     identity = _identity()
+    check_only = os.environ.get("OVERSEAS_JOURNAL_CHECK_ONLY", "false")
+    if check_only not in ("true", "false") or (check_only == "true" and identity["mode"] != "manual"):
+        raise OpsError()
+    context_store, history = _read_ops_history(identity)
+    # Preserve only the available original state before any producer/provider
+    # work. This checkpoint does not claim a terminal event for this run.
+    restored = _publish_ops(identity["source_sha"], context_store, history, checkpoint="restored")
+    if check_only == "true":
+        result = _publish_ops(identity["source_sha"], context_store, history, checkpoint="check_only")
+        print(json.dumps({"status": "journal_check_only", **result}, sort_keys=True, allow_nan=False))
+        return 0
     calendar_sha = _calendar()
-    prior_ops_tip, history = _read_ops_history()
     start = _now()
     context = producer.build_run_context(start, run_mode=identity["mode"], schedule_time="14:35",
                                          early_minutes=5, late_minutes=45)
@@ -452,7 +413,7 @@ def run():
                       native["effective_predictions_for_observation"] if native else None,
                       "audit_effective_count": audited, "outcome": event["outcome"],
                       "reason": event["reason"], "summary": summary}, sort_keys=True, allow_nan=False))
-    _publish_ops(base, prior_ops_tip, raw)
+    _publish_ops(base, context_store, raw)
     return 1 if event["workflow_status"] == "failed" else 0
 
 
@@ -464,6 +425,9 @@ def main():
         return 1
     except journal.JournalError:
         print(json.dumps({"status": "failed", "reason": "missing_receipt"}), flush=True)
+        return 1
+    except artifact_store.ArtifactError as error:
+        print(json.dumps({"status": "failed", "reason": error.reason}), flush=True)
         return 1
     except Exception:
         print(json.dumps({"status": "failed", "reason": "missing_receipt"}), flush=True)

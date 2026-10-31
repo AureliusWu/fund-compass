@@ -165,173 +165,86 @@ def fresh_ops_raw():
     return ops._append_ops(None, value, binding, END, ops._calendar())[0]
 
 
-def plumb_ops_mock(monkeypatch, *, prior=None, remote_tips=None, push_error=False):
+def checkpoint_mock(monkeypatch, *, remote=None, changed_after=False, error=False):
     calls = []
-    commit = "d" * 40
-    tips = iter(remote_tips if remote_tips is not None else (prior, prior, commit))
-    tree_ids = iter(("2" * 40, "3" * 40, "4" * 40))
+    context = object()
+    tips = iter((IDENTITY["source_sha"], "f" * 40)) if changed_after else None
     monkeypatch.setattr(ops, "_head", lambda: IDENTITY["source_sha"])
-    monkeypatch.setattr(ops, "_remote_head", lambda: IDENTITY["source_sha"])
-    monkeypatch.setattr(ops, "_remote_ops_head", lambda: next(tips))
+    monkeypatch.setattr(ops, "_remote_head", lambda: next(tips) if tips else remote or IDENTITY["source_sha"])
     monkeypatch.setattr(ops, "_now", lambda: END)
-    def command(*args, stdin=None, env=None):
-        calls.append((args, stdin))
-        if args[1] == "hash-object":
-            return ("1" * 40 + "\n").encode()
-        if args[1] == "mktree":
-            return (next(tree_ids) + "\n").encode()
-        if args[1] == "commit-tree":
-            return (commit + "\n").encode()
-        if "push" in args:
-            assert env["OVERSEAS_PUSH_REF"] == ops.OPS_REF
-            assert env["OVERSEAS_PUSH_OLD"] == (prior or "0" * 40)
-            assert env["OVERSEAS_PUSH_NEW"] == commit
-            if push_error:
-                raise ops.OpsError("publication_failed")
-            return b""
-        raise AssertionError("unexpected synthetic Git command")
-    monkeypatch.setattr(ops, "_command", command)
-    return calls, commit
+    monkeypatch.setattr(ops, "_command", lambda *args, **kwargs: pytest.fail("journal must not mutate any Git object or ref"))
+    def publish(actual, raw, **kwargs):
+        assert actual is context
+        calls.append((raw, kwargs))
+        if error:
+            raise ops.artifact_store.ArtifactError("output_failed")
+        return {"checkpoint": kwargs["checkpoint"], "event_recorded": kwargs["checkpoint"] == "terminal"}
+    monkeypatch.setattr(ops.artifact_store, "publish", publish)
+    return calls, context
 
 
-@pytest.mark.parametrize("prior", [None, "e" * 40])
-def test_ops_branch_only_contains_fixed_blob_without_main_index_or_head_write(monkeypatch, prior):
+@pytest.mark.parametrize("checkpoint", ["restored", "terminal", "check_only"])
+def test_ops_checkpoint_has_no_git_index_head_object_or_branch_write(monkeypatch, checkpoint):
     raw = fresh_ops_raw()
-    calls, commit = plumb_ops_mock(monkeypatch, prior=prior)
-    assert ops._publish_ops(IDENTITY["source_sha"], prior, raw) == commit
-    assert ["push" if "push" in args else args[1] for args, _ in calls] == [
-        "hash-object", "mktree", "mktree", "mktree", "commit-tree", "push"]
-    assert calls[0][1] == raw
-    assert calls[1][1] == ("100644 blob " + "1" * 40 + "\toverseas-run-journal.json\n").encode()
-    assert calls[2][1] == ("040000 tree " + "2" * 40 + "\toperations\n").encode()
-    assert calls[3][1] == ("040000 tree " + "3" * 40 + "\tdocs\n").encode()
-    parent_args = ("-p", prior) if prior else ()
-    assert calls[4][0] == ("git", "commit-tree", "4" * 40, *parent_args, "-m",
-                          "chore: record overseas public run occurrence")
-    assert calls[5][0] == ("git", "-c", "core.hooksPath=" + str(ops.ROOT / "tools" / "overseas-hooks"),
-                           "push", "origin", commit + ":" + ops.OPS_REF)
-    assert not any(path in arg for args, _ in calls for arg in args for path in ops.FINANCIAL.values())
-    assert ops._head() == IDENTITY["source_sha"]
+    calls, context = checkpoint_mock(monkeypatch)
+    assert ops._publish_ops(IDENTITY["source_sha"], context, raw, checkpoint=checkpoint) == {
+        "checkpoint": checkpoint, "event_recorded": checkpoint == "terminal"}
+    assert calls == [(raw, {"checkpoint": checkpoint, "observed_at": ops._clock(END)})]
 
 
-def test_unknown_financial_effect_has_no_safe_ops_base(monkeypatch):
+def test_unknown_financial_effect_has_no_safe_terminal_checkpoint_base(monkeypatch):
     raw = fresh_ops_raw()
-    calls = []
+    calls, context = checkpoint_mock(monkeypatch)
     monkeypatch.setattr(ops, "_head", lambda: "d" * 40)
-    monkeypatch.setattr(ops, "_remote_head", lambda: IDENTITY["source_sha"])
-    monkeypatch.setattr(ops, "_command", lambda *args: calls.append(args))
     with pytest.raises(ops.OpsError, match="publication_failed"):
-        ops._publish_ops(IDENTITY["source_sha"], None, raw)
+        ops._publish_ops(IDENTITY["source_sha"], context, raw)
     assert calls == []
 
 
-def test_changed_ops_ref_stops_before_object_writes(monkeypatch):
+def test_remote_main_change_stops_before_checkpoint_write(monkeypatch):
     raw = fresh_ops_raw()
-    calls, _ = plumb_ops_mock(monkeypatch, remote_tips=("e" * 40,))
+    calls, context = checkpoint_mock(monkeypatch, remote="f" * 40)
     with pytest.raises(ops.OpsError, match="publication_failed"):
-        ops._publish_ops(IDENTITY["source_sha"], None, raw)
+        ops._publish_ops(IDENTITY["source_sha"], context, raw)
     assert calls == []
 
 
-def test_ops_ref_change_between_preflight_and_push_has_no_retry(monkeypatch):
+def test_changed_main_after_local_checkpoint_reports_failure_without_retry(monkeypatch):
     raw = fresh_ops_raw()
-    calls, _ = plumb_ops_mock(monkeypatch, remote_tips=(None, "e" * 40))
+    calls, context = checkpoint_mock(monkeypatch, changed_after=True)
     with pytest.raises(ops.OpsError, match="publication_failed"):
-        ops._publish_ops(IDENTITY["source_sha"], None, raw)
-    assert not any("push" in args for args, _ in calls)
+        ops._publish_ops(IDENTITY["source_sha"], context, raw)
+    assert len(calls) == 1
 
 
-def test_main_change_between_preflight_and_push_stops_before_push(monkeypatch):
+def test_failed_checkpoint_write_is_never_retried(monkeypatch):
     raw = fresh_ops_raw()
-    calls, _ = plumb_ops_mock(monkeypatch)
-    tips = iter((IDENTITY["source_sha"], "f" * 40))
-    monkeypatch.setattr(ops, "_remote_head", lambda: next(tips))
-    with pytest.raises(ops.OpsError, match="publication_failed"):
-        ops._publish_ops(IDENTITY["source_sha"], None, raw)
-    assert not any("push" in args for args, _ in calls)
+    calls, context = checkpoint_mock(monkeypatch, error=True)
+    with pytest.raises(ops.artifact_store.ArtifactError, match="output_failed"):
+        ops._publish_ops(IDENTITY["source_sha"], context, raw)
+    assert len(calls) == 1
 
 
-def test_unknown_ops_push_is_not_retried_or_reconciled_by_another_write(monkeypatch):
-    raw = fresh_ops_raw()
-    calls, _ = plumb_ops_mock(monkeypatch, push_error=True)
-    with pytest.raises(ops.OpsError, match="publication_failed"):
-        ops._publish_ops(IDENTITY["source_sha"], None, raw)
-    assert sum("push" in args for args, _ in calls) == 1
-    assert "push" in calls[-1][0]
-
-
-def test_unconfirmed_remote_ops_pointer_is_a_failed_single_push(monkeypatch):
-    raw = fresh_ops_raw()
-    calls, _ = plumb_ops_mock(monkeypatch, remote_tips=(None, None, "e" * 40))
-    with pytest.raises(ops.OpsError, match="publication_failed"):
-        ops._publish_ops(IDENTITY["source_sha"], None, raw)
-    assert sum("push" in args for args, _ in calls) == 1
-
-
-def history_mock(monkeypatch, *, tree=None, fetched=None):
-    raw = fresh_ops_raw()
-    tip = "e" * 40
+def test_history_restore_uses_only_fixed_artifact_store_and_no_git_ref(monkeypatch):
     calls = []
-    monkeypatch.setattr(ops, "_remote_ops_head", lambda: tip)
+    context, raw = object(), fresh_ops_raw()
     monkeypatch.setattr(ops, "_now", lambda: END)
-    def command(*args):
-        calls.append(args)
-        if args[1] == "fetch":
-            return b""
-        if args[1] == "rev-parse":
-            return ((fetched or tip) + "\n").encode()
-        if args[1] == "ls-tree":
-            return tree if tree is not None else (
-                "100644 blob " + "1" * 40 + "\t" + ops.OPS_PATH + "\0").encode()
-        if args[1] == "cat-file":
-            return (str(len(raw)) + "\n").encode()
-        if args[1] == "show":
-            return raw
-        raise AssertionError("unexpected synthetic history command")
-    monkeypatch.setattr(ops, "_command", command)
-    return tip, raw, calls
+    monkeypatch.setattr(ops, "_command", lambda *args, **kwargs: pytest.fail("no history Git command allowed"))
+    def restore(root, identity, **kwargs):
+        calls.append((root, identity, kwargs))
+        return context, raw
+    monkeypatch.setattr(ops.artifact_store, "restore", restore)
+    assert ops._read_ops_history(IDENTITY) == (context, raw)
+    assert calls == [(ops.ROOT, IDENTITY, {"observed_at": ops._clock(END)})]
 
 
-def test_history_reads_only_fixed_ref_and_one_regular_public_file(monkeypatch):
-    tip, raw, calls = history_mock(monkeypatch)
-    assert ops._read_ops_history() == (tip, raw)
-    assert calls[0] == ("git", "fetch", "--no-tags", "--no-recurse-submodules", "--depth=1", "origin", ops.OPS_REF)
-    assert calls[-1] == ("git", "show", tip + ":" + ops.OPS_PATH)
-    assert not any(args[1] in ("checkout", "switch", "add", "commit", "push") for args in calls)
-
-
-@pytest.mark.parametrize("tree", [
-    ("100755 blob " + "1" * 40 + "\t" + ops.OPS_PATH + "\0").encode(),
-    ("120000 blob " + "1" * 40 + "\t" + ops.OPS_PATH + "\0").encode(),
-    ("100644 blob " + "1" * 40 + "\t" + ops.OPS_PATH + "\0" +
-     "100644 blob " + "2" * 40 + "\ttools/foreign.py\0").encode(),
-])
-def test_ops_history_rejects_any_branch_code_executable_or_symlink(monkeypatch, tree):
-    _, _, calls = history_mock(monkeypatch, tree=tree)
-    with pytest.raises(ops.OpsError, match="publication_failed"):
-        ops._read_ops_history()
-    assert calls[-1][1] == "ls-tree"
-
-
-def test_changed_fetch_head_stops_before_reading_branch_file(monkeypatch):
-    _, _, calls = history_mock(monkeypatch, fetched="f" * 40)
-    with pytest.raises(ops.OpsError, match="publication_failed"):
-        ops._read_ops_history()
-    assert calls[-1][1] == "rev-parse"
-
-
-def test_known_absent_ops_ref_does_not_fetch_or_read_a_main_file(monkeypatch):
-    monkeypatch.setattr(ops, "_remote_ops_head", lambda: None)
-    monkeypatch.setattr(ops, "_command", lambda *args: pytest.fail("no history command expected"))
-    assert ops._read_ops_history() == (None, None)
-
-
-def test_failed_remote_ops_query_is_not_treated_as_absent(monkeypatch):
-    def command(*args):
-        raise ops.OpsError("publication_failed")
-    monkeypatch.setattr(ops, "_command", command)
-    with pytest.raises(ops.OpsError, match="publication_failed"):
-        ops._remote_ops_head()
+def test_failed_history_query_is_not_treated_as_absent(monkeypatch):
+    monkeypatch.setattr(ops, "_now", lambda: END)
+    def restore(*args, **kwargs):
+        raise ops.artifact_store.ArtifactError("history_missing")
+    monkeypatch.setattr(ops.artifact_store, "restore", restore)
+    with pytest.raises(ops.artifact_store.ArtifactError, match="history_missing"):
+        ops._read_ops_history(IDENTITY)
 
 
 def test_commit_tree_mismatch_is_not_qualification(monkeypatch, tmp_path):
@@ -395,8 +308,7 @@ def test_unknown_financial_push_is_a_single_attempt(monkeypatch):
     assert ["push" if "push" in args else args[1] for args in calls] == ["commit", "push"]
 
 
-@pytest.mark.parametrize("ref,old", [("refs/heads/main", "a" * 40),
-                                    (ops.OPS_REF, None), (ops.OPS_REF, "e" * 40)])
+@pytest.mark.parametrize("ref,old", [("refs/heads/main", "a" * 40), ("refs/heads/main", "e" * 40)])
 def test_single_push_uses_fixed_hook_and_overrides_ambient_expectations(monkeypatch, ref, old):
     calls = []
     monkeypatch.setenv("OVERSEAS_PUSH_REF", "refs/heads/foreign")
@@ -415,26 +327,27 @@ def test_single_push_uses_fixed_hook_and_overrides_ambient_expectations(monkeypa
 
 
 @pytest.mark.parametrize("ref,old,new", [("refs/heads/foreign", "a" * 40, "d" * 40),
-    ("refs/heads/main", None, "d" * 40), (ops.OPS_REF, False, "d" * 40),
-    (ops.OPS_REF, "short", "d" * 40), (ops.OPS_REF, None, "0" * 40)])
+    ("refs/heads/main", None, "d" * 40), ("refs/heads/main", False, "d" * 40),
+    ("refs/heads/main", "short", "d" * 40), ("refs/heads/main", None, "0" * 40),
+    ("refs/heads/ops/overseas-run-journal", "a" * 40, "d" * 40)])
 def test_invalid_push_binding_has_zero_git_calls(monkeypatch, ref, old, new):
     monkeypatch.setattr(ops, "_command", lambda *args, **kwargs: pytest.fail("no Git command allowed"))
     with pytest.raises(ops.OpsError, match="publication_failed"):
         ops._push_once(ref, old, new)
 
 
-@pytest.mark.parametrize("old", ["0" * 40, "e" * 40])
+@pytest.mark.parametrize("old", ["a" * 40, "e" * 40])
 def test_fixed_hook_accepts_only_exact_single_ref_advertisement(old):
     loader = SourceFileLoader("overseas_push_hook", str(ROOT / "tools" / "overseas-hooks" / "pre-push"))
     spec = importlib.util.spec_from_loader(loader.name, loader)
     hook = importlib.util.module_from_spec(spec)
     loader.exec_module(hook)
-    ref, new = ops.OPS_REF, "d" * 40
+    ref, new = "refs/heads/main", "d" * 40
     env = {"OVERSEAS_PUSH_REF": ref, "OVERSEAS_PUSH_OLD": old, "OVERSEAS_PUSH_NEW": new}
     raw = f"{new} {new} {ref} {old}\n".encode()
     assert hook.accepts(["origin", "synthetic-file-origin"], env, raw) is True
     for bad in (b"", raw + raw, raw + b"\n", raw.replace(old.encode(), b"f" * 40),
-                raw.replace(ref.encode(), b"refs/heads/main"), raw.replace(new.encode(), b"c" * 40),
+                raw.replace(ref.encode(), b"refs/heads/ops/overseas-run-journal"), raw.replace(new.encode(), b"c" * 40),
                 raw.replace((new + " ").encode(), b"HEAD ", 1), b"x" * 4097):
         assert hook.accepts(["origin", "synthetic-file-origin"], env, bad) is False
     assert hook.accepts(["other", "synthetic-file-origin"], env, raw) is False
@@ -497,6 +410,49 @@ def test_midnight_does_not_mark_the_not_yet_due_new_trading_day_missing(monkeypa
     assert expected == [("2026-10-08", "2026-10-09", "2026-10-12", "2026-10-13")]
 
 
+def test_journal_check_only_has_zero_producer_financial_calendar_or_event_calls(monkeypatch, capsys):
+    identity = {**IDENTITY, "mode": "manual"}
+    raw = ops.journal.encode(ops.journal.new_journal(), observed_at=ops._clock(END))
+    context, calls = object(), []
+    monkeypatch.setattr(ops, "_identity", lambda: identity.copy())
+    monkeypatch.setenv("OVERSEAS_JOURNAL_CHECK_ONLY", "true")
+    monkeypatch.setattr(ops, "_read_ops_history", lambda actual: (context, raw))
+    for name in ("_calendar", "_publish_financial", "_dispatch", "_event", "_append_ops"):
+        monkeypatch.setattr(ops, name, lambda *args, **kwargs: pytest.fail("check-only cannot run business/calendar/event code"))
+    monkeypatch.setattr(ops.producer, "run_pipeline", lambda **kwargs: pytest.fail("no provider"))
+    def checkpoint(base, actual, current, *, checkpoint):
+        assert base == identity["source_sha"] and actual is context and current is raw
+        calls.append(checkpoint)
+        return {"checkpoint": checkpoint, "event_recorded": False,
+                "journal_sha256": hashlib.sha256(raw).hexdigest(), "journal_bytes": len(raw), "event_count": 0}
+    monkeypatch.setattr(ops, "_publish_ops", checkpoint)
+    assert ops.run() == 0 and calls == ["restored", "check_only"]
+    output = json.loads(capsys.readouterr().out)
+    assert output["status"] == "journal_check_only" and output["event_recorded"] is False
+    assert output["journal_sha256"] == hashlib.sha256(raw).hexdigest()
+    assert "events" not in output and "qualified_data" not in output
+
+
+def test_scheduled_run_cannot_enable_manual_check_only(monkeypatch):
+    monkeypatch.setattr(ops, "_identity", lambda: IDENTITY.copy())
+    monkeypatch.setenv("OVERSEAS_JOURNAL_CHECK_ONLY", "true")
+    monkeypatch.setattr(ops, "_read_ops_history", lambda *args: pytest.fail("must reject before storage IO"))
+    with pytest.raises(ops.OpsError):
+        ops.run()
+
+
+def test_failure_after_restore_keeps_state_but_never_fabricates_terminal_event(monkeypatch):
+    calls = []
+    monkeypatch.setattr(ops, "_identity", lambda: IDENTITY.copy())
+    monkeypatch.setenv("OVERSEAS_JOURNAL_CHECK_ONLY", "false")
+    monkeypatch.setattr(ops, "_read_ops_history", lambda identity: (object(), b"synthetic-state"))
+    monkeypatch.setattr(ops, "_publish_ops", lambda *args, checkpoint: calls.append(checkpoint))
+    def calendar():
+        raise ops.OpsError("calendar_unsupported")
+    monkeypatch.setattr(ops, "_calendar", calendar)
+    assert ops.main() == 1 and calls == ["restored"]
+
+
 def runner_mock(monkeypatch, tmp_path, *, fail=None, effective=1, audited=1, audit_errors=False):
     calls, persisted = [], []
     context = ops.producer.build_run_context(START, run_mode="scheduled", schedule_time="14:35",
@@ -507,7 +463,8 @@ def runner_mock(monkeypatch, tmp_path, *, fail=None, effective=1, audited=1, aud
     monkeypatch.setattr(ops.auditor, "REPORT", tmp_path / "audit.json")
     monkeypatch.setattr(ops.exporter, "DEFAULT_OUTPUT", tmp_path / "evidence.json")
     monkeypatch.setattr(ops, "_identity", lambda: IDENTITY.copy())
-    monkeypatch.setattr(ops, "_read_ops_history", lambda: (None, None))
+    monkeypatch.setattr(ops, "_read_ops_history", lambda identity: (None, None))
+    monkeypatch.setenv("OVERSEAS_JOURNAL_CHECK_ONLY", "false")
     monkeypatch.setenv("FUND_API_BASE", "https://synthetic.invalid")
     # Deterministic real-occurrence-shaped fixture, not a live natural window.
     clocks = iter((START, END, END, END))
@@ -544,7 +501,9 @@ def runner_mock(monkeypatch, tmp_path, *, fail=None, effective=1, audited=1, aud
     def dispatch(commit):
         stage("ci_dispatch")
         assert commit == PUBLISHED["commit_sha"]
-    def publish_ops(base, prior, raw):
+    def publish_ops(base, prior, raw, *, checkpoint="terminal"):
+        if checkpoint == "restored":
+            return {"checkpoint": checkpoint, "event_recorded": False}
         calls.append("ops")
         assert prior is None
         persisted.append((base, ops.journal.decode(raw, observed_at=ops._clock(END))))
@@ -615,7 +574,7 @@ def test_missing_configured_api_is_recorded_without_provider_or_financial_write(
 
 @pytest.mark.parametrize("field,bad", [
     ("GITHUB_SHA", "short"), ("GITHUB_RUN_ID", "0"), ("GITHUB_RUN_ATTEMPT", "101"),
-    ("GITHUB_EVENT_NAME", "push"), ("GITHUB_REF", ops.OPS_REF),
+    ("GITHUB_EVENT_NAME", "push"), ("GITHUB_REF", "refs/heads/ops/overseas-run-journal"),
     ("GITHUB_REPOSITORY", "other/repo"),
 ])
 def test_identity_rejects_wrong_source_event_ref_or_repository_before_any_git_write(monkeypatch, field, bad):

@@ -1,0 +1,15 @@
+{
+  "profile": "overseas-ops-cutover-1",
+  "repository": "AureliusWu/fund-compass",
+  "workflow_id": 310460010,
+  "cutover_utc": "2026-10-31T05:38:49Z",
+  "legacy_tip": "1688994475d61c3f5df933012362a457ae9acde4",
+  "legacy_last_run_number": 84,
+  "seed_sha256": "fd107482608e951d310b8422df9e1a14c664cd6d362b70580a2823f351698040",
+  "protocol_blobs": {
+    "tools/overseas_journal_artifact.py": "815a2a1789ca37573eb111c32e9dc291478cca7a",
+    "tools/record_overseas_ops.py": "f14ce1163e20492a9bc3591ab7bd8061092bb887",
+    "tools/overseas_run_journal.py": "aeb86d318d8b809b7c1716c4ba36e834e6e84b03",
+    ".github/workflows/overseas-accuracy.yml": "f0d7a25e3f8d5f70152cf1756c267ad59106ca51"
+  }
+}
