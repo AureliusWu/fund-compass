@@ -28,6 +28,10 @@
     "vite": "^6.4.5",
     "vite-plugin-pwa": "^0.21.1",
     "vitest": "^4.1.12",
-    "vue-tsc": "^2.1.10"
+    "vue-tsc": "3.3.14"
+  },
+  "overrides": {
+    "glob": "14.0.2",
+    "minimatch": "11.0.1"
   }
 }
