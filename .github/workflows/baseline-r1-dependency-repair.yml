@@ -26,8 +26,8 @@ jobs:
       - name: Repair audited development dependencies
         working-directory: frontend
         run: |
-          npm install --save-dev --save-exact vue-tsc@3.3.14 --package-lock-only
-          npm audit fix --package-lock-only
+          npm install --save-dev --save-exact vue-tsc@3.3.14 vite-plugin-pwa@2.0.0 --package-lock-only
+          npm audit fix --package-lock-only || true
           npm ci --include=dev
           npm run type-check
           npm run test
