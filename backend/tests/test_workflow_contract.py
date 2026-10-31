@@ -122,6 +122,21 @@ def _overseas_job() -> dict:
         'git config user.email "github-actions[bot]@users.noreply.github.com"',
         "python tools/record_overseas_ops.py",
     ]
+    trigger = parsed.get("on", parsed.get(True))
+    assert trigger["workflow_dispatch"]["inputs"]["journal_check_only"] == {
+        "description": "Restore and republish the unchanged public journal only (no producer/financial event)",
+        "type": "boolean", "required": False, "default": False}
+    assert job["env"]["OVERSEAS_JOURNAL_CHECK_ONLY"] == (
+        "${{ github.event_name == 'workflow_dispatch' && inputs.journal_check_only && 'true' || 'false' }}")
+    uploads = [step for step in job["steps"] if step.get("uses") == "actions/upload-artifact@v7"]
+    assert len(uploads) == 2
+    checkpoint = uploads[0]
+    assert checkpoint["if"] == "always()"
+    assert checkpoint["with"] == {
+        "name": "overseas-public-journal-${{ github.run_id }}-${{ github.run_attempt }}",
+        "path": "${{ runner.temp }}/overseas-ops/overseas-run-journal.json",
+        "if-no-files-found": "error", "overwrite": False, "retention-days": 90}
+    assert uploads[1]["if"] == "${{ always() && !(github.event_name == 'workflow_dispatch' && inputs.journal_check_only) }}"
     return job
 
 
@@ -139,8 +154,7 @@ def _assert_overseas_publication_contract() -> None:
         "models_sha256": "frontend/src/data/overseas-models.json",
         "evidence_sha256": "backend/data/overseas-evidence.json",
     }
-    assert ast.literal_eval(_assignment(tree, "OPS_REF")) == "refs/heads/ops/overseas-run-journal"
-    assert ast.literal_eval(_assignment(tree, "OPS_PATH")) == "docs/operations/overseas-run-journal.json"
+    assert "refs/heads/ops/overseas-run-journal" not in ast.unparse(tree)
 
     # Financial publication must bind the exact confirmed main commit and all
     # four bytes, not dispatch an unqualified branch tip or a later ops commit.
@@ -175,25 +189,19 @@ def _assert_overseas_publication_contract() -> None:
     assert any(ast.dump(node.test) == ast.dump(ast.parse("published is not None", mode="eval").body)
                for node in dispatch_guards)
 
-    # The journal writes an independent, code-free tree to its own fixed ref,
-    # not HEAD/index/main, and cannot dispatch CI for a later ops commit.
-    ops_commands = _calls(operations, "_command")
-    assert [node.args[1].value for node in ops_commands] == [
-        "hash-object", "mktree", "mktree", "mktree", "commit-tree",
-    ]
-    _expression(ops_commands[0], '_command("git", "hash-object", "-w", "--stdin", stdin=raw)')
-    _expression(_assignment(operations, "parents"), '("-p", prior_tip) if prior_tip is not None else ()')
-    assert len(_calls(operations, "_push_once")) == 1
-    _expression(_calls(operations, "_push_once")[0], "_push_once(OPS_REF, prior_tip, commit)")
-    tree_stdin = [next(keyword.value for keyword in command.keywords if keyword.arg == "stdin")
-                  for command in _git_commands(operations, "mktree")]
-    for actual, expected in zip(tree_stdin, (
-        '(f"100644 blob {blob}\\toverseas-run-journal.json\\n").encode("ascii")',
-        '(f"040000 tree {operations}\\toperations\\n").encode("ascii")',
-        '(f"040000 tree {docs}\\tdocs\\n").encode("ascii")',
-    )):
-        _expression(actual, expected)
-    assert len(_calls(tree, "_push_once")) == 2
+    # The journal never mutates any Git object/ref/index/HEAD and cannot
+    # dispatch a second CI SHA. Only the financial publisher may push main.
+    assert not _calls(operations, "_command") and not _calls(operations, "_push_once")
+    assert not any(_git_commands(operations, command) for command in (
+        "hash-object", "mktree", "commit-tree", "add", "commit", "push", "fetch"))
+    assert len(_calls(operations, "artifact_store.publish")) == 1
+    _expression(_calls(operations, "artifact_store.publish")[0],
+                'artifact_store.publish(context, raw, checkpoint=checkpoint, observed_at=_clock(_now()))')
+    restore = _function(tree, "_read_ops_history")
+    assert len(_calls(restore, "artifact_store.restore")) == 1
+    _expression(_calls(restore, "artifact_store.restore")[0],
+                'artifact_store.restore(ROOT, identity, observed_at=_clock(_now()))')
+    assert len(_calls(tree, "_push_once")) == 1
     assert len(_git_commands(tree, "push")) == len(_calls(push_once, "_command")) == 1
     _expression(_git_commands(push_once, "push")[0],
                 '_command("git", "-c", "core.hooksPath=" + str(ROOT / "tools" / "overseas-hooks"), '
@@ -203,21 +211,28 @@ def _assert_overseas_publication_contract() -> None:
     _expression(env_updates[0], 'env.update({"OVERSEAS_PUSH_REF": ref, '
                 '"OVERSEAS_PUSH_OLD": expected_old or "0" * 40, "OVERSEAS_PUSH_NEW": commit})')
     operation_checks = [ast.dump(node.test) for node in operations.body if isinstance(node, ast.If)]
-    for expected in (
-        "_head() != base or _remote_head() != base",
-        "_remote_ops_head() != prior_tip",
-        "_head() != base or _remote_head() != base or _remote_ops_head() != prior_tip",
-        "_remote_ops_head() != commit or _head() != base or _remote_head() != base",
-    ):
-        assert ast.dump(ast.parse(expected, mode="eval").body) in operation_checks
+    expected = ast.dump(ast.parse("_head() != base or _remote_head() != base", mode="eval").body)
+    assert operation_checks.count(expected) == 2
+    assert isinstance(push_once.body[1], ast.If)
+    assert ast.dump(ast.parse('ref != "refs/heads/main"', mode="eval").body) in [
+        ast.dump(node) for node in ast.walk(push_once.body[1].test)]
     for publisher in (financial, operations, push_once):
         assert not any(_git_commands(node, "push") or _calls(node, "_push_once") for node in ast.walk(publisher)
                        if isinstance(node, (ast.For, ast.AsyncFor, ast.While)))
         assert not any(_git_commands(publisher, forbidden)
                        for forbidden in ("reset", "rebase", "checkout", "switch"))
     _expression(_assignment(run, "base"), 'published["commit_sha"] if published else identity["source_sha"]')
-    _expression(_calls(run, "_publish_ops")[0], "_publish_ops(base, prior_ops_tip, raw)")
-    assert _calls(run, "_dispatch")[0].lineno < _calls(run, "_publish_ops")[0].lineno
+    checkpoints = _calls(run, "_publish_ops")
+    assert len(checkpoints) == 3
+    _expression(checkpoints[0], '_publish_ops(identity["source_sha"], context_store, history, checkpoint="restored")')
+    _expression(checkpoints[1], '_publish_ops(identity["source_sha"], context_store, history, checkpoint="check_only")')
+    _expression(checkpoints[2], "_publish_ops(base, context_store, raw)")
+    assert checkpoints[0].lineno < _calls(run, "_calendar")[0].lineno
+    assert _calls(run, "_dispatch")[0].lineno < checkpoints[2].lineno
+    check_guard = next(node for node in run.body if isinstance(node, ast.If)
+                       and ast.dump(node.test) == ast.dump(ast.parse('check_only == "true"', mode="eval").body))
+    assert isinstance(check_guard.body[-1], ast.Return) and check_guard.body[-1].value.value == 0
+    assert check_guard.end_lineno < _calls(run, "_calendar")[0].lineno
 
 
 def test_ci_is_the_only_release_orchestrator() -> None:
@@ -695,10 +710,11 @@ def test_fund_universe_workflow_verifies_real_generated_artifact() -> None:
 def test_overseas_workflow_exports_the_audited_backend_evidence_artifact() -> None:
     job = _overseas_job()
     uploads = [step for step in job["steps"] if step.get("uses") == "actions/upload-artifact@v7"]
-    assert len(uploads) == 1 and uploads[0]["if"] == "always()"
+    assert len(uploads) == 2 and uploads[0]["if"] == "always()"
+    assert uploads[1]["if"] == "${{ always() && !(github.event_name == 'workflow_dispatch' && inputs.journal_check_only) }}"
     runner_step = next(step for step in job["steps"] if "run" in step)
-    assert job["steps"].index(runner_step) < job["steps"].index(uploads[0])
-    assert uploads[0]["with"]["path"].splitlines() == [
+    assert job["steps"].index(runner_step) < job["steps"].index(uploads[0]) < job["steps"].index(uploads[1])
+    assert uploads[1]["with"]["path"].splitlines() == [
         "frontend/public/data/overseas-accuracy.json", "frontend/public/data/overseas-audit.json",
         "frontend/src/data/overseas-models.json", "backend/data/overseas-evidence.json",
     ]

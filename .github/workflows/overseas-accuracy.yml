@@ -4,6 +4,12 @@ on:
   schedule:
     - cron: '35 6 * * 1-5'
   workflow_dispatch:
+    inputs:
+      journal_check_only:
+        description: Restore and republish the unchanged public journal only (no producer/financial event)
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: write
@@ -20,6 +26,7 @@ jobs:
     env:
       FUND_API_BASE: ${{ secrets.FUND_API_BASE }}
       GH_TOKEN: ${{ github.token }}
+      OVERSEAS_JOURNAL_CHECK_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.journal_check_only && 'true' || 'false' }}
       OVERSEAS_RUN_MODE: ${{ github.event_name == 'schedule' && 'scheduled' || 'manual' }}
       OVERSEAS_SCHEDULE_TIME: '14:35'
       OVERSEAS_PREDICTION_EARLY_MINUTES: '5'
@@ -42,8 +49,17 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           python tools/record_overseas_ops.py
-      - uses: actions/upload-artifact@v7
+      - name: Preserve cumulative public journal checkpoint
+        uses: actions/upload-artifact@v7
         if: always()
+        with:
+          name: overseas-public-journal-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/overseas-ops/overseas-run-journal.json
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 90
+      - uses: actions/upload-artifact@v7
+        if: ${{ always() && !(github.event_name == 'workflow_dispatch' && inputs.journal_check_only) }}
         with:
           name: overseas-accuracy-${{ github.run_number }}
           path: |
