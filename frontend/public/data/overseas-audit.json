@@ -5,8 +5,9 @@
     "539002 2026-10-19：超过 7 天未取得精确归属日净值",
     "018147 2026-10-19：超过 7 天未取得精确归属日净值",
     "已保留并排除 17 条历史日期轴错位样本",
-    "计划任务延迟至同日窗口，预测仅使用已证明归属目标日的行情",
-    "应产出预测但当日有效预测为 0（连续 1 次）"
+    "计划任务延迟至跨日；已跳过预测，仅持久化真实结算与审计证据",
+    "最后有效预测已过去 147.9 小时",
+    "最后有效结算已过去 123.0 小时"
   ],
   "stats": {
     "records": 92,
@@ -17,11 +18,11 @@
       "stale": 2
     },
     "prediction_due": true,
-    "prediction_expected": true,
+    "prediction_expected": false,
     "effective_predictions_for_observation": 0,
     "legacy_misaligned": 17,
-    "prediction_effective_age_hours": 24.9,
-    "settlement_effective_age_hours": 0.0
+    "prediction_effective_age_hours": 147.9,
+    "settlement_effective_age_hours": 123.0
   },
-  "updated_at": "2026-10-28T21:28:54+08:00"
+  "updated_at": "2026-11-03T00:30:40+08:00"
 }
