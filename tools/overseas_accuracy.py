@@ -8,6 +8,11 @@ import re
 import urllib.request
 from pathlib import Path
 
+try:
+    from tools import overseas_target_quotes
+except ModuleNotFoundError:
+    import overseas_target_quotes
+
 ROOT = Path(__file__).resolve().parents[1]
 REGISTRY = ROOT / "frontend" / "src" / "data" / "overseas-models.json"
 LEDGER = ROOT / "frontend" / "public" / "data" / "overseas-accuracy.json"
@@ -104,6 +109,12 @@ def fetch_quotes(codes: set[str]) -> dict[str, dict]:
                         "quote_time": market_time,
                         "source": "tencent_quote",
                     }
+                    # Only the provider's matching exchange-qualified identity
+                    # can authorize a dated US-history lookup. Never guess a suffix.
+                    if (code.startswith("us") and re.fullmatch(
+                        re.escape(code[2:]) + r"\.(?:OQ|N|P|A)", fields[2]
+                    )):
+                        output[code]["source_symbol"] = fields[2]
             except ValueError:
                 pass
     return output
@@ -256,6 +267,10 @@ def calculate_model(
                     "quote_date": evidence["quote_date"],
                     "quote_time": evidence.get("quote_time"),
                     "source": evidence.get("source"),
+                    **{key: evidence[key] for key in (
+                        "source_symbol", "time_precision", "previous_close_date",
+                        "previous_close", "close", "verification_source", "price_basis",
+                    ) if key in evidence},
                 }
                 for leg, change, _, evidence in available
             },
@@ -779,14 +794,36 @@ def run_pipeline(now: dt.datetime | None = None, *, run_mode: str | None = None)
     }
     quotes = {}
     quote_error = None
+    reason_counts = {}
     if run["prediction_allowed"]:
         try:
             quotes = fetch_quotes(quote_codes)
+            # A delayed same-day observation may see live US quotes already on
+            # the next session. Only models whose official base is STILL T-2
+            # may obtain exact T-1 closes; known target NAVs never authorize a
+            # retrospective forecast. This does not change any stored old row.
+            eligible_codes = set()
+            existing_keys = {
+                (row.get("code"), row.get("prediction_date"), row.get("model_version"))
+                for row in ledger.get("records", [])
+            }
+            for code, entry in registry["models"].items():
+                if (code, run["observation_date"], entry["active"]["version"]) in existing_keys:
+                    continue
+                if resolve_prediction_axis(details.get(code), run["observation_date"]) is None:
+                    continue
+                for model in (entry["active"], entry["active"].get("fallback")):
+                    if model:
+                        eligible_codes.update(leg["code"] for leg in model["legs"])
+            target_date = run["prediction_target_date"]
+            base_date = previous_trading_date(dt.date.fromisoformat(target_date)).isoformat()
+            quotes = overseas_target_quotes.supplement_target_quotes(
+                quotes, eligible_codes, target_date, base_date, now, diagnostics=reason_counts,
+            )
         except Exception as ex:
             quote_error = type(ex).__name__
             print(f"quote feed unavailable: {quote_error}")
     written = 0
-    reason_counts = {}
     if run["prediction_allowed"]:
         written = add_predictions(
             ledger,

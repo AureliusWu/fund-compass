@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """跨基金策略校准：只生成候选与审计建议，active 只能由管理员显式变更。"""
+import argparse
 import datetime as dt
 import http.client
 import json
@@ -21,6 +22,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 from service.eastmoney import fetch_detail  # noqa: E402
 from strategy.calibration import calibrate  # noqa: E402
+from strategy import registry as strategy_registry  # noqa: E402
 from strategy.registry import load_registry  # noqa: E402
 
 SCREENER = ROOT / "frontend" / "public" / "data" / "screener.json"
@@ -466,7 +468,123 @@ def review_policy(
     }
 
 
-def main() -> None:
+def _finite_number(value: object) -> bool:
+    if type(value) not in (int, float):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
+def _finite_evidence(value: object) -> bool:
+    if type(value) in (int, float):
+        return _finite_number(value)
+    if type(value) is dict:
+        return all(_finite_evidence(item) for item in value.values())
+    if type(value) in (list, tuple):
+        return all(_finite_evidence(item) for item in value)
+    return True
+
+
+def validate_evaluation_rows(rows: list[dict]) -> None:
+    """Incomplete/nonfinite calibration results are errors, never rejections."""
+    for row in rows:
+        if type(row.get("available")) is not bool:
+            raise RuntimeError("calibration evaluation returned an invalid availability")
+        if not row["available"]:
+            continue
+        if not _finite_evidence(row):
+            raise RuntimeError("calibration evaluation returned incomplete or nonfinite evidence")
+        weights = row.get("candidate_weights")
+        validation = row.get("validation")
+        if (
+            type(row.get("accepted")) is not bool
+            or type(weights) is not dict
+            or set(weights) != {"买入", "定投", "持有", "减仓"}
+            or not all(_finite_number(value) for value in weights.values())
+            or type(validation) is not dict
+        ):
+            raise RuntimeError("calibration evaluation returned incomplete or nonfinite evidence")
+        for name in ("baseline", "candidate"):
+            metrics = validation.get(name)
+            if type(metrics) is not dict or not all(
+                _finite_number(metrics.get(key)) for key in ("outperform", "max_drawdown")
+            ):
+                raise RuntimeError("calibration evaluation returned incomplete or nonfinite evidence")
+        if not _finite_number(
+            validation["candidate"]["outperform"] - validation["baseline"]["outperform"]
+        ):
+            raise RuntimeError("calibration evaluation returned nonfinite improvement")
+
+
+def evaluation_status(summary: dict, changed: bool, policy: dict) -> dict:
+    """Emit operational decisions only, with no weights or owner governance."""
+    passed = summary["passed"]
+    eligible = policy["candidate_eligible_for_admin_review"]
+    if type(passed) is not bool or type(changed) is not bool or type(eligible) is not bool:
+        raise RuntimeError("calibration evaluation returned an invalid decision")
+    if not passed:
+        candidate, reason = "rejected", "candidate_rejected"
+    elif not changed:
+        candidate, reason = "no_change", "same_parameters"
+    elif eligible:
+        candidate, reason = "eligible", "private_sink_required"
+    else:
+        raise RuntimeError("calibration evaluation returned inconsistent eligibility")
+    return {
+        "schema": 1,
+        "execution_status": "blocked" if eligible else "evaluation_completed",
+        "candidate_status": candidate,
+        "candidate_passed": passed,
+        "candidate_changed": changed,
+        "candidate_eligible_for_admin_review": eligible,
+        "reason": reason,
+        "publication_status": "BLOCKED_PRIVATE_SINK_REQUIRED" if eligible else "not_requested",
+        "artifact_status": "not_created",
+        "publish": False,
+        "publication_accepted": False,
+        "private_output_published": False,
+        "registry_unchanged": True,
+        "public_report_unchanged": True,
+    }
+
+
+def require_safe_status_output(status_output: Path) -> None:
+    """Keep the receipt and its atomic-write scratch file off business files."""
+    destinations = (
+        status_output,
+        status_output.with_suffix(status_output.suffix + ".tmp"),
+    )
+    # load_registry uses its module's configured path, which can differ from
+    # this tool's legacy publication destination. Protect both identities.
+    protected = (REGISTRY, PUBLIC_REPORT, Path(strategy_registry.REGISTRY_PATH))
+    try:
+        resolved = {path: path.resolve(strict=False) for path in (*destinations, *protected)}
+        present = {}
+        for path in (*destinations, *protected):
+            try:
+                path.stat()
+            except FileNotFoundError:
+                present[path] = False
+            else:
+                present[path] = True
+        for destination in destinations:
+            for business_file in protected:
+                if resolved[destination] == resolved[business_file] or (
+                    present[destination] and present[business_file]
+                    and destination.samefile(business_file)
+                ):
+                    raise RuntimeError("calibration status output overlaps a protected business file")
+    except OSError:
+        raise RuntimeError("calibration status output identity could not be verified") from None
+
+
+def main(*, evaluate_only: bool = False, status_output: Path | None = None) -> dict | None:
+    if status_output is not None and not evaluate_only:
+        raise RuntimeError("status output requires evaluation-only mode")
+    if status_output is not None:
+        require_safe_status_output(status_output)
     current = load_registry()
     outcomes = fetch_outcomes()
     require_public_calibration_inputs(outcomes, current)
@@ -477,10 +595,18 @@ def main() -> None:
             rows.append({"code": code, "type": fund_type, **result})
             print(f"[{index}] {code} {fund_type} accepted={result.get('accepted')}")
         except Exception as ex:
+            if evaluate_only:
+                # Unhandled algorithm errors must not become a rejected candidate.
+                # Expected unavailability is represented by calibrate(available=False).
+                raise RuntimeError("calibration evaluation failed") from None
             rows.append({"code": code, "type": fund_type, "available": False, "error": str(ex)})
             print(f"[{index}] {code} failed: {ex}")
 
+    if evaluate_only:
+        validate_evaluation_rows(rows)
     summary = aggregate(rows)
+    if evaluate_only and summary["valid"] < MIN_VALID:
+        raise RuntimeError("calibration evaluation incomplete: insufficient valid samples")
     now = dt.datetime.now(dt.timezone(dt.timedelta(hours=8))).isoformat(timespec="seconds")
     active_version = current["active"].get("version") or "unknown"
     degraded, outcome_evidence = active_is_degraded(outcomes, active_version)
@@ -496,6 +622,15 @@ def main() -> None:
         poor_cycles=poor_cycles,
         rollback_available=bool(current.get("history")),
     )
+    if evaluate_only:
+        status = evaluation_status(summary, changed, policy)
+        if status_output is not None:
+            # A source read or calibration must not replace a checked destination
+            # with a business-file alias before the receipt is written.
+            require_safe_status_output(status_output)
+            write_json_atomic(status_output, status)
+        print(json.dumps(status, ensure_ascii=False, allow_nan=False))
+        return status
     candidate = {
         "version": "candidate-" + now[:10].replace("-", ""),
         "created_at": now,
@@ -547,4 +682,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--evaluate-only", action="store_true")
+    parser.add_argument("--status-output", type=Path)
+    args = parser.parse_args()
+    main(evaluate_only=args.evaluate_only, status_output=args.status_output)
