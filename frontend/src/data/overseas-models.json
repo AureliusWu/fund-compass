@@ -5,7 +5,7 @@
     "applied_at": "2026-08-13T13:46:49+08:00",
     "legacy_records_excluded": 17
   },
-  "updated_at": "2026-10-28T21:28:54+08:00",
+  "updated_at": "2026-11-10T00:49:11+08:00",
   "models": {
     "539002": {
       "name": "建信新兴市场混合(QDII)A",
@@ -79,28 +79,28 @@
         }
       },
       "candidate": {
-        "version": "candidate-20261028",
-        "created_at": "2026-10-28T21:28:54+08:00",
-        "data_fingerprint": "217fd1911c3335f01d1dd56750d71cd238f4b8db244806e2c54fff97716bd95d",
-        "data_effective_at": "2026-10-28T21:28:09+08:00",
+        "version": "candidate-20261110",
+        "created_at": "2026-11-10T00:49:11+08:00",
+        "data_fingerprint": "e2f37de589d03c6b827e1a3cc10dae4a830fa36a617c1ef90c5cd00eb56ddb6c",
+        "data_effective_at": "2026-11-10T00:48:18+08:00",
         "status": "rejected",
-        "samples": 27,
-        "split_date": "2026-09-17",
-        "train_samples": 18,
+        "samples": 28,
+        "split_date": "2026-09-22",
+        "train_samples": 19,
         "validation_samples": 9,
         "baseline": {
           "samples": 9,
-          "mae": 0.8695,
-          "bias": 0.4181,
+          "mae": 0.8101,
+          "bias": 0.3587,
           "direction_accuracy": 100.0,
-          "extreme_mae": 0.8378
+          "extreme_mae": 0.7797
         },
         "candidate": {
           "samples": 9,
-          "mae": 1.1152,
-          "bias": 0.8557,
+          "mae": 0.999,
+          "bias": 0.7396,
           "direction_accuracy": 88.9,
-          "extreme_mae": 1.3097
+          "extreme_mae": 1.079
         },
         "parameters": {
           "scale": 1.0,
@@ -157,9 +157,9 @@
         "min_samples": 20,
         "poor_cycles": 0,
         "drift_evidence": {
-          "samples": 27,
-          "previous_mae": 0.565,
-          "recent_mae": 0.825,
+          "samples": 28,
+          "previous_mae": 0.566,
+          "recent_mae": 0.849,
           "recent_direction_accuracy": 100.0
         },
         "active_change_policy": "explicit_admin_only",
