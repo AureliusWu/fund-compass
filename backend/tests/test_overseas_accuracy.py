@@ -82,6 +82,43 @@ def test_add_predictions_skips_weekends():
     assert ledger["records"] == []
 
 
+@pytest.mark.parametrize("malformed_duplicate", [False, True])
+def test_known_target_nav_in_history_cannot_become_a_new_forecast(malformed_duplicate):
+    # Real failure mode: stale summary fields coexist with a newer history.
+    detail = {
+        "latest_nav": 5, "latest_nav_date": "2026-07-08",
+        "nav_history": [{"date": "2026-07-08", "nav": 5},
+                        {"date": "2026-07-09", "nav": 5.1}],
+    }
+    if malformed_duplicate:
+        detail["nav_history"].append({"date": "2026-07-09", "nav": None})
+    reasons = {}
+    assert accuracy.resolve_prediction_axis(
+        detail, "2026-07-10", reason_counts=reasons,
+    ) is None
+    assert reasons == {"axis_target_nav_already_known": 1}
+    assert accuracy.official_base(detail, "2026-07-09") is None
+    ledger = {"records": []}
+    quotes = {"usQQQ": {"change": 2, "quote_date": "2026-07-09"}}
+    assert accuracy.add_predictions(
+        ledger, registry_fixture(), quotes, {"012920": detail},
+        dt.datetime(2026, 7, 10, 22, 35, tzinfo=accuracy.CST),
+    ) == 0
+    assert ledger["records"] == []
+
+
+@pytest.mark.parametrize("date,reason", [
+    ("2026-07-07", "axis_base_stale"),
+    ("2026-07-09", "axis_base_ahead"),
+])
+def test_base_mismatch_diagnostics_distinguish_stale_source_from_late_observation(date, reason):
+    detail = {"latest_nav": 5, "latest_nav_date": date,
+              "nav_history": [{"date": date, "nav": 5}]}
+    reasons = {}
+    assert accuracy.resolve_prediction_axis(detail, "2026-07-10", reason_counts=reasons) is None
+    assert reasons == {reason: 1, "axis_base_date_mismatch": 1}
+
+
 def test_empty_api_secret_has_no_legacy_fallback():
     assert accuracy.normalize_api_base("") == ""
     assert accuracy.normalize_api_base(None) == ""

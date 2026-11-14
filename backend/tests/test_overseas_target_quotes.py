@@ -329,7 +329,9 @@ def test_known_target_nav_does_not_authorize_retrospective_forecast_or_history_f
     ledger = json.loads(path.read_text(encoding="utf-8"))
     assert result["predictions_written"] == 0
     assert ledger["records"] == [original]
-    assert ledger["pipeline"]["prediction_diagnostics"] == {"axis_base_date_mismatch": 1}
+    assert ledger["pipeline"]["prediction_diagnostics"] == {
+        "axis_base_date_mismatch": 1, "axis_base_ahead": 1,
+    }
 
 
 @pytest.mark.parametrize("mode,now", [("manual", NOW), ("scheduled", NOW.replace(day=5, hour=1))])

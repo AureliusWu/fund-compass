@@ -54,7 +54,10 @@ def test_axis_rejection_is_closed_and_does_not_expose_inputs(value, reason):
     counts = {}
     original = copy.deepcopy(value)
     assert accuracy.resolve_prediction_axis(value, "2026-07-10", reason_counts=counts) is None
-    assert counts == {"axis_" + reason: 1}
+    expected = {"axis_" + reason: 1}
+    if reason == "base_date_mismatch":
+        expected["axis_base_stale"] = 1
+    assert counts == expected
     assert value == original
 
 
