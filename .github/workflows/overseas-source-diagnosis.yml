@@ -1,0 +1,38 @@
+name: Read-only overseas source diagnosis
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, fix/overseas-source-diagnosis-20261114]
+    paths:
+      - .github/workflows/overseas-source-diagnosis.yml
+      - tools/diagnose_overseas_sources.py
+      - backend/tests/test_overseas_source_diagnosis.py
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: python -m pip install pytest
+      - name: Validate diagnosis contracts without network
+        run: python -m pytest backend/tests/test_overseas_source_diagnosis.py -q
+      - name: Compare configured API and public primary dates
+        env:
+          FUND_API_BASE: ${{ secrets.FUND_API_BASE }}
+        run: python tools/diagnose_overseas_sources.py > source-diagnosis.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: overseas-source-diagnosis-${{ github.run_id }}
+          path: source-diagnosis.json
+          retention-days: 14
+          if-no-files-found: error
