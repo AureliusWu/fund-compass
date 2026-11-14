@@ -298,6 +298,16 @@ def _history_nav(detail: dict, value_date: str) -> float | None:
     return matches[-1] if matches else None
 
 
+def _target_nav_known(detail: dict, target_date: str) -> bool:
+    """Any valid target outcome is known, even beside a malformed duplicate."""
+    history = detail.get("nav_history")
+    return isinstance(history, list) and any(
+        isinstance(point, dict) and point.get("date") == target_date
+        and _float(point.get("nav")) is not None
+        for point in history
+    )
+
+
 def _calendar_exclusions(non_trading_dates: set[str] | None = None) -> set[str]:
     return BUILTIN_NON_TRADING_DATES | (
         non_trading_dates if non_trading_dates is not None else NON_TRADING_DATES
@@ -351,11 +361,19 @@ def resolve_prediction_axis(
     if history_nav is None:
         return reject("history_nav_missing")
     if base != expected_base:
+        # Keep the existing aggregate reason, but distinguish an old API/cache
+        # from an observation that arrived after its target NAV was published.
+        # Neither case authorizes shifting the target or replaying a forecast.
+        _count_reason(reason_counts, "axis_base_stale" if base < expected_base else "axis_base_ahead")
         return reject("base_date_mismatch")
     if (target - base).days > max_age_days:
         return reject("base_interval_too_long")
     if not math.isclose(latest_nav, history_nav, rel_tol=1e-8, abs_tol=1e-8):
         return reject("nav_disagrees")
+    if _target_nav_known(detail, target.isoformat()):
+        # A stale top-level latest_nav_date must not conceal a known outcome
+        # already present in this very response's official NAV history.
+        return reject("target_nav_already_known")
     _count_reason(reason_counts, "axis_accepted")
     return target.isoformat(), latest_date, latest_nav
 
@@ -384,6 +402,7 @@ def official_base(
         or base != expected_base
         or (target - base).days > max_age_days
         or not math.isclose(latest_nav, history_nav, rel_tol=1e-8, abs_tol=1e-8)
+        or _target_nav_known(detail, target.isoformat())
     ):
         return None
     return latest_date, latest_nav
