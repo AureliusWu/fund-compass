@@ -27,6 +27,16 @@
 
 实际验收至少新建两次独立 check-only dispatch：第一轮核固定 seed，第二轮必须从第一轮实际 Artifact 恢复；两轮 journal SHA/字节数/事件数应完全相同。两轮成功只证明该真实存储载体/读取链，不证明自然定时或金融数据恢复。最后独立核远端仍只有 main，部署暂停，再恢复原自然 schedule。
 
+## 离线排查定时预测
+
+从同一个 Actions run 下载 `overseas-accuracy-<run_number>` 公开 Artifact，解压后将目录传给诊断命令。
+
+```bash
+python tools/diagnose_overseas_sources.py --artifact-dir /path/to/extracted-artifact
+```
+
+命令只读其中的 `overseas-accuracy.json` 和 `overseas-audit.json`，核对时间与预测计数，输出受限的时间、计数、审计状态和诊断码。`zero_effective_prediction` 表示当次应产出但没有有效预测，`scheduled_window_missed` 表示计划任务跨日、已跳过预测。后者的 Actions run 可成功结束，预测新鲜度仍由最近有效记录决定。退出码 0 表示诊断可读取，原运行及审计结论仍以各自证据为准。工件缺失、时间或计数不匹配时退出码 1。工件来源及 run ID 由下载方核对。
+
 ## 故障和保留期
 
 GitHub Artifact 不是永久灾备，过期或删除的 Artifact 可能完全不出现在 API 中。缺失前序或编号缺口必须停，不循环下载/上传、不改账号/源、不自动重置。保留原 run/Artifact/错误，按固定 archive/bundle 与可用累计 Artifact 另做显式、审查后的新 cutover；不能伪造事件。协议四文件改变同样需要审查存储迁移，不能随手改 manifest OID 洗掉不兼容历史。

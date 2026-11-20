@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""Read-only source/date diagnosis. Never produces forecasts or writes a ledger."""
+"""Read-only source/date diagnosis, including offline Actions artifact triage."""
+import argparse
 import contextlib
 import datetime as dt
 import io
 import json
+import math
 import os
 import re
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 try:
     from tools import overseas_accuracy as producer
@@ -15,6 +18,11 @@ except ModuleNotFoundError:
     import overseas_accuracy as producer
 
 MAX_BODY = 4 * 1024 * 1024
+ARTIFACT_PROFILE = "overseas-run-artifact-diagnosis-1"
+WINDOWS = {"open", "calendar_unsupported", "non_trading_day", "delayed_cross_day",
+           "too_early", "delayed_same_day"}
+AXIS_COUNTS = ("axis_base_ahead", "axis_base_stale", "axis_base_date_mismatch",
+               "axis_target_nav_already_known", "target_quotes_missing", "coverage_insufficient")
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -112,7 +120,97 @@ def run(now=None):
     return result
 
 
-def main():
+def read_artifact(path):
+    with path.open("rb") as stream:
+        raw = stream.read(MAX_BODY + 1)
+    if len(raw) > MAX_BODY:
+        raise ValueError("artifact_too_large")
+    value = json.loads(raw)
+    if type(value) is not dict:
+        raise ValueError("artifact_shape")
+    return value
+
+
+def diagnose_artifact(directory):
+    """Summarize the two public JSONs extracted from a single Actions artifact."""
+    ledger_path = directory / "frontend/public/data/overseas-accuracy.json"
+    if not ledger_path.is_file():
+        ledger_path = directory / "overseas-accuracy.json"
+    pipeline = read_artifact(ledger_path)["pipeline"]
+    audit = read_artifact(ledger_path.with_name("overseas-audit.json"))
+    stats = audit["stats"]
+    window = pipeline["prediction_window_status"]
+    audit_status = audit["status"]
+    if window not in WINDOWS or audit_status not in {"healthy", "warning", "failed"}:
+        raise ValueError("artifact_shape")
+
+    start = dt.datetime.fromisoformat(pipeline["last_run_at"])
+    audited_at = dt.datetime.fromisoformat(audit["updated_at"])
+    scheduled_for = dt.datetime.fromisoformat(pipeline["scheduled_for"])
+    target = pipeline["prediction_target_date"]
+    target_date = None if target is None else dt.date.fromisoformat(target).isoformat()
+    if any(value.utcoffset() is None for value in (start, audited_at, scheduled_for)):
+        raise ValueError("artifact_time")
+    if not dt.timedelta(0) <= audited_at - start <= dt.timedelta(minutes=12):
+        raise ValueError("artifact_time")
+
+    shared = {"prediction_due": bool, "prediction_expected": bool,
+              "effective_predictions_for_observation": int}
+    for key, kind in shared.items():
+        if type(pipeline[key]) is not kind or type(stats[key]) is not kind or pipeline[key] != stats[key]:
+            raise ValueError("artifact_mismatch")
+    count = pipeline["effective_predictions_for_observation"]
+    written = pipeline["predictions_written"]
+    delay = pipeline["delay_minutes"]
+    age = stats["prediction_effective_age_hours"]
+    if count < 0 or type(written) is not int or written < 0 or written > count:
+        raise ValueError("artifact_count")
+    if type(delay) not in (int, float) or not math.isfinite(delay):
+        raise ValueError("artifact_time")
+    if age is not None and (type(age) not in (int, float) or not math.isfinite(age) or age < 0):
+        raise ValueError("artifact_time")
+
+    source_counts = pipeline["prediction_diagnostics"]
+    if type(source_counts) is not dict:
+        raise ValueError("artifact_shape")
+    counts = {key: source_counts[key] for key in AXIS_COUNTS if key in source_counts}
+    if any(type(value) is not int or value < 0 for value in counts.values()):
+        raise ValueError("artifact_count")
+
+    if pipeline["prediction_expected"]:
+        status = "effective_predictions_present" if count else "zero_effective_prediction"
+    elif pipeline["prediction_due"] and window == "delayed_cross_day":
+        status = "scheduled_window_missed"
+    else:
+        status = "prediction_not_expected"
+    return {
+        "profile": ARTIFACT_PROFILE,
+        "status": status,
+        "audit_status": audit_status,
+        "window_status": window,
+        "scheduled_for": scheduled_for.isoformat(timespec="minutes"),
+        "observation_started_at": start.isoformat(timespec="seconds"),
+        "prediction_target_date": target_date,
+        "delay_minutes": delay,
+        "effective_predictions": count,
+        "predictions_written": written,
+        "last_effective_prediction_age_hours": age,
+        "prediction_diagnostics": counts,
+    }
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--artifact-dir", type=Path, help="diagnose two extracted public JSON files without network")
+    args = parser.parse_args(argv)
+    if args.artifact_dir is not None:
+        try:
+            result = diagnose_artifact(args.artifact_dir)
+        except (OSError, KeyError, TypeError, ValueError, OverflowError):
+            print(json.dumps({"profile": ARTIFACT_PROFILE, "status": "artifact_unavailable"}))
+            return 1
+        print(json.dumps(result, sort_keys=True, allow_nan=False))
+        return 0
     try:
         # No imported helper's raw provider error may reach the public log.
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
@@ -123,4 +221,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
