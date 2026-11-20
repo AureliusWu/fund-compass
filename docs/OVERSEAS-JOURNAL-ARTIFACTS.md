@@ -29,13 +29,16 @@
 
 ## 离线排查定时预测
 
-从同一个 Actions run 下载 `overseas-accuracy-<run_number>` 公开 Artifact，解压后将目录传给诊断命令。
+从同一个 Actions run 下载 `overseas-accuracy-<run_number>` 公开 Artifact 和首次 attempt 的 Jobs API 响应。用 API 对应的 run ID 选择 Artifact，避免拿别的运行或重试的手工副本。
 
 ```bash
-python tools/diagnose_overseas_sources.py --artifact-dir /path/to/extracted-artifact
+gh api 'repos/AureliusWu/fund-compass/actions/runs/<run_id>/attempts/1/jobs?per_page=100' > jobs.json
+python tools/diagnose_overseas_sources.py --artifact-dir /path/to/extracted-artifact --run-jobs jobs.json
 ```
 
-命令只读其中的 `overseas-accuracy.json` 和 `overseas-audit.json`，核对时间与预测计数，输出受限的时间、计数、审计状态和诊断码。`zero_effective_prediction` 表示当次应产出但没有有效预测，`scheduled_window_missed` 表示计划任务跨日、已跳过预测。后者的 Actions run 可成功结束，预测新鲜度仍由最近有效记录决定。退出码 0 表示诊断可读取，原运行及审计结论仍以各自证据为准。工件缺失、时间或计数不匹配时退出码 1。工件来源及 run ID 由下载方核对。
+命令核对 `overseas-accuracy.json` 与 `overseas-audit.json` 的写入时间均在对应的原生流水线步骤内，再交叉核对日期、预测计数、账本记录状态和有效预测年龄。这可以识别早期失败后仍被上传的旧跟踪文件，以及时间相近但内容冲突的工件。输出限定为 run ID、源码 SHA 和诊断相关字段。`zero_effective_prediction` 表示当次应产出但没有有效预测，`scheduled_window_missed` 表示计划任务跨日、已跳过预测。后者的 Actions run 可成功结束，预测新鲜度仍由最近有效记录决定。退出码 0 表示诊断可读取，工件缺失或核验不一致时退出码 1。下载方仍负责从 GitHub 读取同一 run 的官方输入，内容核验并非签名校验。
+
+`overseas-run-diagnostics.yml` 在匹配本仓 `overseas-accuracy` 固定 workflow ID 的 `main` / `schedule` 首次运行结束后执行相同核验。工件缺失或核验失败时，诊断任务失败。零预测或跨日会产生诊断注解，诊断报告与原运行结论分开保留。原调度、日记协议和数据发布规则继续由 `overseas-accuracy.yml` 管理。
 
 ## 故障和保留期
 
