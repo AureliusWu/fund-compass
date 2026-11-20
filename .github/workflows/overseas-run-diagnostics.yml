@@ -1,0 +1,90 @@
+name: Diagnose scheduled overseas run
+
+on:
+  workflow_run:
+    workflows: [overseas-accuracy]
+    branches: [main]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  diagnose:
+    if: >-
+      github.repository == 'AureliusWu/fund-compass' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.workflow_id == 310460010 &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.event == 'schedule' &&
+      github.event.workflow_run.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Read jobs from the scheduled first attempt
+        id: jobs
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          EVIDENCE_DIR="$RUNNER_TEMP/overseas-diagnosis"
+          mkdir -p "$EVIDENCE_DIR"
+          echo "EVIDENCE_DIR=$EVIDENCE_DIR" >> "$GITHUB_ENV"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID/attempts/1/jobs?per_page=100" > "$EVIDENCE_DIR/jobs.json"
+      - name: Download the named public evidence from the source run
+        id: evidence
+        uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ github.event.workflow_run.id }}
+          name: overseas-accuracy-${{ github.event.workflow_run.run_number }}
+          path: ${{ runner.temp }}/overseas-diagnosis/artifact
+          digest-mismatch: error
+      - name: Summarize forecast evidence without running the producer
+        if: ${{ !cancelled() }}
+        env:
+          JOBS_OUTCOME: ${{ steps.jobs.outcome }}
+          EVIDENCE_OUTCOME: ${{ steps.evidence.outcome }}
+        run: |
+          {
+            printf '### Scheduled overseas run [%s](https://github.com/%s/actions/runs/%s)\n\n' "$SOURCE_RUN_ID" "$GITHUB_REPOSITORY" "$SOURCE_RUN_ID"
+            printf 'This readback records forecast evidence separately from the original workflow result.\n\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$JOBS_OUTCOME" != success || "$EVIDENCE_OUTCOME" != success ]]; then
+            echo 'The run jobs or public artifact could not be read.' >> "$GITHUB_STEP_SUMMARY"
+            echo '::error title=Overseas run evidence unavailable::Could not read the source jobs or named public artifact.'
+            exit 1
+          fi
+          result="$EVIDENCE_DIR/diagnosis.json"
+          diagnosis_rc=0
+          python tools/diagnose_overseas_sources.py \
+            --artifact-dir "$EVIDENCE_DIR/artifact" --run-jobs "$EVIDENCE_DIR/jobs.json" > "$result" || diagnosis_rc=$?
+          {
+            printf '%s\n' '```json'
+            cat "$result"
+            printf '%s\n' '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if (( diagnosis_rc != 0 )); then
+            echo '::error title=Overseas run evidence unavailable::The downloaded evidence did not validate against the source jobs.'
+            exit "$diagnosis_rc"
+          fi
+          status=$(python -c 'import json, sys; print(json.load(sys.stdin)["status"])' < "$result")
+          case "$status" in
+            zero_effective_prediction|scheduled_window_missed)
+              echo '::warning title=No effective overseas forecasts::See the run summary for the observation window and audit result.'
+              ;;
+            effective_predictions_present|prediction_not_expected) ;;
+            *) echo '::error::Unexpected overseas diagnosis status.'; exit 1 ;;
+          esac
