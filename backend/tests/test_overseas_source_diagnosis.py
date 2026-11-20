@@ -59,6 +59,7 @@ def write_public_artifact(directory, *, late=False):
               "effective_predictions_for_observation": 0}
     pipeline = {
         **shared, "prediction_window_status": "delayed_cross_day" if late else "delayed_same_day",
+        "run_mode": "scheduled", "calendar_supported": True, "trading_day": True,
         "scheduled_for": "2026-11-19T14:35+08:00" if late else "2026-11-18T14:35+08:00",
         "last_run_at": start, "heartbeat_at": start, "observation_date": start[:10],
         "scheduled_observation_date": "2026-11-19" if late else "2026-11-18",
@@ -144,4 +145,14 @@ def test_artifact_rejects_conflicting_audit_contents_in_matching_time(tmp_path, 
     audit["stats"][field] = value
     audit_path.write_text(json.dumps(audit), encoding="utf-8")
     with pytest.raises(ValueError, match=error):
+        diagnosis.diagnose_artifact(tmp_path, jobs)
+
+
+def test_artifact_rejects_delayed_run_that_claims_regular_window(tmp_path):
+    jobs = write_public_artifact(tmp_path)
+    ledger_path = tmp_path / "overseas-accuracy.json"
+    ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+    ledger["pipeline"]["prediction_window_status"] = "open"
+    ledger_path.write_text(json.dumps(ledger), encoding="utf-8")
+    with pytest.raises(ValueError, match="artifact_window"):
         diagnosis.diagnose_artifact(tmp_path, jobs)

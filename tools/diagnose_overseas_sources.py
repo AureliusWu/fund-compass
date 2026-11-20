@@ -20,8 +20,6 @@ except ModuleNotFoundError:
 
 MAX_BODY = 4 * 1024 * 1024
 ARTIFACT_PROFILE = "overseas-run-artifact-diagnosis-1"
-WINDOWS = {"open", "calendar_unsupported", "non_trading_day", "delayed_cross_day",
-           "too_early", "delayed_same_day"}
 AXIS_COUNTS = ("axis_base_ahead", "axis_base_stale", "axis_base_date_mismatch",
                "axis_target_nav_already_known", "target_quotes_missing", "coverage_insufficient")
 RUN_API = "https://api.github.com/repos/AureliusWu/fund-compass/actions/runs/"
@@ -196,6 +194,36 @@ def compare_audit_records(ledger, audit, stats, start, audited_at):
     return age
 
 
+def validate_window(pipeline, observation_day, scheduled_day, delay):
+    mode = pipeline["run_mode"]
+    supported = pipeline["calendar_supported"]
+    trading = pipeline["trading_day"]
+    if mode not in {"scheduled", "manual"} or type(supported) is not bool or type(trading) is not bool:
+        raise ValueError("artifact_window")
+    cross_day = scheduled_day < observation_day
+    if scheduled_day > observation_day or (cross_day and mode != "scheduled") or (trading and not supported):
+        raise ValueError("artifact_window")
+    # The pinned runner uses a fixed 5-minute early allowance and 45-minute regular window.
+    if not supported:
+        window = "calendar_unsupported"
+    elif not trading:
+        window = "non_trading_day"
+    elif cross_day:
+        window = "delayed_cross_day"
+    elif delay < -5:
+        window = "too_early"
+    elif delay > 45:
+        window = "delayed_same_day"
+    else:
+        window = "open"
+    due = mode == "scheduled" and trading
+    expected = due and window in {"open", "delayed_same_day"}
+    if (window != pipeline["prediction_window_status"] or due != pipeline["prediction_due"]
+            or expected != pipeline["prediction_expected"]
+            or (not expected and pipeline["predictions_written"])):
+        raise ValueError("artifact_window")
+
+
 def diagnose_artifact(directory, jobs_path):
     """Summarize the extracted public JSONs against the selected native job step."""
     ledger_path = directory / "frontend/public/data/overseas-accuracy.json"
@@ -207,7 +235,7 @@ def diagnose_artifact(directory, jobs_path):
     stats = audit["stats"]
     window = pipeline["prediction_window_status"]
     audit_status = audit["status"]
-    if type(ledger["schema"]) is not int or ledger["schema"] != 2 or window not in WINDOWS:
+    if type(ledger["schema"]) is not int or ledger["schema"] != 2:
         raise ValueError("artifact_shape")
 
     run_id, source_sha, step_start, step_end = native_step(read_artifact(jobs_path))
@@ -240,11 +268,8 @@ def diagnose_artifact(directory, jobs_path):
     if (type(delay) not in (int, float) or not math.isfinite(delay)
             or delay != round((start - scheduled_for).total_seconds() / 60, 2)):
         raise ValueError("artifact_time")
-    if ((window == "delayed_cross_day" and (scheduled_day >= observation_day
-            or pipeline["prediction_expected"] or written))
-            or (pipeline["prediction_expected"] and (not pipeline["prediction_due"]
-                or scheduled_day != observation_day or target_date is None
-                or window not in {"open", "delayed_same_day"}))):
+    validate_window(pipeline, observation_day, scheduled_day, delay)
+    if pipeline["prediction_due"] and target_date is None:
         raise ValueError("artifact_window")
     age = compare_audit_records(ledger, audit, stats, start, audited_at)
 
