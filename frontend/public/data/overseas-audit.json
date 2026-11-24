@@ -6,8 +6,8 @@
     "018147 2026-10-19：超过 7 天未取得精确归属日净值",
     "已保留并排除 17 条历史日期轴错位样本",
     "计划任务延迟至跨日；已跳过预测，仅持久化真实结算与审计证据",
-    "最后有效预测已过去 412.2 小时",
-    "最后有效结算已过去 337.9 小时"
+    "最后有效预测已过去 435.7 小时",
+    "最后有效结算已过去 361.4 小时"
   ],
   "stats": {
     "records": 93,
@@ -21,8 +21,8 @@
     "prediction_expected": false,
     "effective_predictions_for_observation": 0,
     "legacy_misaligned": 17,
-    "prediction_effective_age_hours": 412.2,
-    "settlement_effective_age_hours": 337.9
+    "prediction_effective_age_hours": 435.7,
+    "settlement_effective_age_hours": 361.4
   },
-  "updated_at": "2026-11-24T02:42:40+08:00"
+  "updated_at": "2026-11-25T02:13:20+08:00"
 }
